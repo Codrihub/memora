@@ -17,9 +17,16 @@ single port, with all server state in one embedded SQLite database.
 
 ## Screenshots
 
-<!-- Add screenshots here, for example docs/images/brain.png, graph.png, agents.png. -->
+![Overview](docs/screenshots/overview.webp)
 
-_Screenshots of the brain view, graph, canvas and agent dashboard are coming soon._
+| | |
+|---|---|
+| ![Brain](docs/screenshots/brain.webp) **Brain**: every folder is a region, every note a node | ![Node card](docs/screenshots/brain-node.webp) **Node card**: links, backlinks and a preview |
+| ![Graph](docs/screenshots/graph.webp) **Graph**: force, radial or cluster layouts | ![Canvas](docs/screenshots/canvas.webp) **Canvas**: one frame per folder |
+| ![Reader](docs/screenshots/reader.webp) **Reader** with contents and reading settings | ![Activity](docs/screenshots/activity.webp) **Activity**: every agent call, live |
+| ![Agents](docs/screenshots/agents.webp) **Agents & API keys**: one key per agent, scoped | |
+
+Screenshots use a demo vault.
 
 ## Features
 
