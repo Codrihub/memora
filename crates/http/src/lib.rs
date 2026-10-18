@@ -1147,6 +1147,11 @@ fn page_csp(nonce: &str) -> String {
     )
 }
 
+/// CSP for the service worker script. A worker obeys the CSP of its own
+/// script, so it needs `connect-src 'self'` to fetch pages and assets.
+const SW_CSP: &str =
+    "default-src 'none'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+
 /// CSP for every other response (JSON, plain text, the small fallback pages):
 /// nothing may load except inline styles of the fallback pages.
 const DEFAULT_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; \
@@ -1489,6 +1494,8 @@ pub fn build_router(st: AppState) -> Router {
         .route("/settings", get(h_app_route))
         .route("/overview", get(h_app_route))
         .route("/welcome", get(h_app_route))
+        .route("/docs", get(h_app_route))
+        .route("/docs/{*section}", get(h_app_route))
         // Older page names the web app still understands.
         .route("/home", get(h_app_route))
         .route("/vault", get(h_app_route))
@@ -1572,12 +1579,19 @@ async fn h_asset_root(State(st): State<AppState>, req: Request) -> Response {
     } else {
         "no-cache"
     };
-    assets::serve(
+    let mut res = assets::serve(
         &std::path::Path::new(&st.assets).join(&name),
         ct,
         cc,
         req.headers(),
-    )
+    );
+    if name == "sw.js" {
+        res.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            header::HeaderValue::from_static(SW_CSP),
+        );
+    }
+    res
 }
 
 async fn h_favicon() -> Response {
@@ -1975,6 +1989,10 @@ mod tests {
         assert_eq!(
             login_return(&u("/brain?mode=graph")),
             "/login?r=/brain%3Fmode%3Dgraph"
+        );
+        assert_eq!(
+            login_return(&u("/docs/agent-instructions")),
+            "/login?r=/docs/agent-instructions"
         );
         assert_eq!(login_return(&u("/")), "/login");
         assert_eq!(login_return(&u("//evil.example/x")), "/login");

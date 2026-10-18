@@ -460,7 +460,7 @@ export const SHELL_CSS = `
 .guide-about .guide-motto{font-size:12px;font-weight:600;color:var(--accent)}
 .guide-about p{grid-column:1/-1}
 .guide-about .guide-name{font-size:12px;font-style:italic}
-.guide-about .guide-wl{grid-column:1/-1;justify-self:start}
+.guide-about .guide-btns{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
 .guide b{color:var(--fg);font-weight:650}
 .guide code{font-family:var(--mono);font-size:12px;padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--accent-3)}
 .guide-keys{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center;font-size:13px;color:var(--text-2);

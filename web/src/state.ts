@@ -15,7 +15,8 @@ export type Page =
   | 'keys'
   | 'tools'
   | 'access'
-  | 'settings';
+  | 'settings'
+  | 'docs';
 
 interface GraphState {
   nodes: GraphNode[];

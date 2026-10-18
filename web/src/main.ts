@@ -22,7 +22,7 @@ import { loadCore } from './core-data';
 import { hooks } from './hooks';
 import { PWA } from './pwa';
 import { RT, onAgents } from './realtime';
-import { PAGES, findNode, go, paintTitle, parseLocation, refreshPage, registerView, replaceHistory, type Route } from './router';
+import { PAGES, findNode, go, openDocs, paintTitle, parseLocation, refreshPage, registerView, replaceHistory, type Route } from './router';
 import { closeDrawer, initSidebar, isMobile, mountSidebarTree, renderTree, setLiveAgents, toggleCollapsed } from './sidebar';
 import { closePalette, openPalette, registerCommands, wireSearch } from './search';
 import { state } from './state';
@@ -39,6 +39,7 @@ import { brainView, renderBrain } from './views/brain';
 import { renderCanvas } from './views/canvas';
 import { renderAccess } from './views/access';
 import { renderSettings } from './views/settings';
+import { renderDocs } from './views/docs';
 import { applyTheme, cycleTheme, setThemePref } from './theme';
 import { fetchSettings, reloadVaultData, vaultSwitch } from './vault';
 import { showVaultOnboarding } from './views/onboarding';
@@ -119,6 +120,9 @@ function wireShell(): void {
     { id: 'reload', title: 'Reload data', hint: 'Re-read the vault from the server', icon: 'refresh', keywords: 'refresh sync', run: () => void reloadAll() },
     { id: 'install', title: 'Install app', hint: 'Add Memora to your device', icon: 'download', keywords: 'pwa home screen', run: () => void PWA.install() },
     { id: 'guide', title: 'Keyboard shortcuts and guide', icon: 'help', keywords: 'help keys', run: () => openGuide() },
+    { id: 'docs', title: 'Open documentation', hint: 'Guides, agent instructions and reference', icon: 'book', keywords: 'docs help manual guide reference api mcp install', run: () => openDocs() },
+    { id: 'docs-prompt', title: 'Agent instructions', hint: 'The recommended prompt for your agents', icon: 'book', keywords: 'docs prompt system instructions claude chatgpt cursor rules agents.md', run: () => openDocs('agent-instructions') },
+    { id: 'docs-tools', title: 'MCP tool reference', hint: 'Every tool agents can call', icon: 'book', keywords: 'docs tools catalog mcp reference', run: () => openDocs('tool-reference') },
     { id: 'welcome', title: 'Welcome to Memora', icon: 'sparkle', keywords: 'about intro tour what is memora', run: () => openWelcome() },
     { id: 'account', title: 'Account', hint: 'Session and appearance', icon: 'user', keywords: 'profile session', run: () => void openAccount() },
     { id: 'open-nodes', title: 'Open nodes', hint: 'Browse every node', icon: 'note', keywords: 'notes vault list', run: () => { state.note = null; go('vault'); } },
@@ -289,6 +293,7 @@ async function boot(): Promise<void> {
   registerView('tools', renderTools);
   registerView('access', renderAccess);
   registerView('settings', renderSettings);
+  registerView('docs', renderDocs);
 
   // Cross-module wiring through hooks keeps the import graph acyclic. The tree
   // hooks are only filled when the Vault package has not installed its own.

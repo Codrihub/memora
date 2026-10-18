@@ -148,14 +148,15 @@ export function openGuide(): void {
           <p>${BRAND_DESC}</p>
           <p>${BRAND_ONCE}</p>
           <p class="guide-name">${BRAND_NAME}</p>
-          <button type="button" class="btn sm guide-wl" id="guideWelcome">Read the full welcome</button>
+          <span class="guide-btns"><button type="button" class="btn sm guide-wl" id="guideWelcome">Read the full welcome</button>
+          <button type="button" class="btn sm guide-wl" id="guideDocs">${icon('book')}Open documentation</button></span>
         </section>
         <p><b>Brain</b> is home: every note is a point of light, and agent activity pulses through it live.</p>
         <div class="guide-keys">
           <span><kbd>${mod}</kbd><kbd>K</kbd></span><span>Search notes, jump to pages, run actions</span>
           <span><kbd>/</kbd></span><span>Open search from anywhere</span>
           <span><kbd>&gt;</kbd></span><span>In search: actions only (new note, theme ...)</span>
-          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>Brain, Overview, Vault, Graph, Canvas, Tags, Activity, Agents, Tools</span>
+          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>Overview, Brain, Nodes, Graph, Canvas, Tags, Activity, Agents, Tools</span>
           <span><kbd>[</kbd></span><span>Collapse or expand the sidebar</span>
         </div>
         <p><b>Live</b> in the top bar shows the realtime connection and how many agents are working right now. Click it for details.</p>
@@ -167,6 +168,10 @@ export function openGuide(): void {
   document.getElementById('guideWelcome')?.addEventListener('click', () => {
     Modal.close();
     openWelcome();
+  });
+  document.getElementById('guideDocs')?.addEventListener('click', () => {
+    Modal.close();
+    hooks.go('docs');
   });
 }
 
@@ -273,7 +278,8 @@ export function openProfileMenu(anchor: HTMLElement): void {
     ${group(
       'help',
       'Help',
-      `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">Help & shortcuts</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
+      item('docs', 'Documentation', 'book') +
+        `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">Help & shortcuts</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
       <button class="pm-item" role="menuitem" type="button" data-act="welcome">${icon('sparkle')}<span class="pm-label">Welcome to Memora</span></button>` +
         (canInstall()
           ? `<button class="pm-item" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">Install app</span></button>`

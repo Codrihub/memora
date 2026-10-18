@@ -1,7 +1,7 @@
 // View router with real URLs (History API):
 //
 //   /brain /brain?mode=graph /brain?mode=canvas /nodes /node/<path> /tags /overview
-//   /activity /agents /tools /access /settings
+//   /activity /agents /tools /access /settings /docs /docs/<section>
 //
 // `go()` swaps the visible view, updates the navigation (sidebar, tab bar),
 // the title and the URL. Back/forward and deep links work; the node path in
@@ -40,6 +40,7 @@ export const PAGE_META: Record<Page, PageMeta> = {
   tools: { label: 'Tools', title: 'MCP tools', hint: 'Turn MCP tools on or off', icon: 'tools', group: 'system', path: '/tools' },
   access: { label: 'Access rules', title: 'Access rules', hint: 'IP and domain access rules', icon: 'shield', group: 'system', path: '/access' },
   settings: { label: 'Settings', title: 'Settings', hint: 'Account, vault and preferences', icon: 'settings', group: 'system', path: '/settings' },
+  docs: { label: 'Documentation', title: 'Documentation', hint: 'Guides, agent instructions and reference', icon: 'book', group: 'system', path: '/docs' },
 };
 
 export const PAGES = Object.keys(PAGE_META) as Page[];
@@ -119,9 +120,12 @@ export function takeRouteAgent(): string | null {
 
 /** Parse the current location (also accepts the legacy #/page and #graph hashes). */
 export function parseLocation(loc: Location = location): Route {
-  const legacy = loc.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
-  if (legacy && isPage(legacy)) return { page: legacy };
   const path = loc.pathname.replace(/\/+$/, '') || '/';
+  // On /docs the hash names a heading, never a page.
+  const isDocs = path === '/docs' || path.startsWith('/docs/');
+  const legacy = loc.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
+  if (legacy && isPage(legacy) && !isDocs) return { page: legacy };
+  if (isDocs) return { page: 'docs' };
   if (path === '/' || path === '/index.html' || path === '/brain') return { page: brainMode(loc) };
   if (path.startsWith('/node/')) {
     const segs = path.slice(6).split('/');
@@ -158,7 +162,18 @@ export function findNode(path: string): string | null {
   return hit ? hit.path : null;
 }
 
+/** Where the next navigation to the docs lands (set by `openDocs`). */
+let docsTarget: string | null = null;
+
 function urlFor(page: Page): string {
+  if (page === 'docs') {
+    const t = docsTarget;
+    docsTarget = null;
+    if (t) return t;
+    // Already on a docs address (deep link, back/forward): keep it as it is.
+    const p = location.pathname;
+    return p === '/docs' || p.startsWith('/docs/') ? p + location.hash : '/docs';
+  }
   // An /activity/<id> address being opened keeps its agent (the page reads it).
   if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
   return page === 'vault' && state.note ? nodeUrl(state.note) : PAGE_META[page].path;
@@ -249,6 +264,12 @@ export function go(page: Page, keepEditing = false): void {
   }
   if (prev !== page) $('#views').scrollTop = 0;
   void renderers[page]?.();
+}
+
+/** Open the documentation, optionally at a section (`/docs/<slug>`) and heading. */
+export function openDocs(slug = '', hash = ''): void {
+  docsTarget = '/docs' + (slug ? '/' + encodeURIComponent(slug) : '') + (hash ? '#' + encodeURIComponent(hash) : '');
+  go('docs');
 }
 
 /** Redraw whichever view is visible. */

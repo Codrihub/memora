@@ -106,7 +106,7 @@ function jsonPost(path: string, body: unknown): Promise<Response> {
 
 /** App pages a sign-in may return to (never /api, /logout, files ...). */
 const RETURN_TO =
-  /^\/(?:$|node\/|(?:brain|nodes|graph|canvas|tags|activity|agents|tools|access|settings|overview|welcome|home|vault|logs|keys)(?:\/|$))/;
+  /^\/(?:$|node\/|(?:brain|nodes|graph|canvas|tags|activity|agents|tools|access|settings|overview|welcome|home|vault|logs|keys|docs)(?:\/|$))/;
 
 /**
  * A same-origin path for `n`, or null (no open redirect). The result must start

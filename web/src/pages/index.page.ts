@@ -228,6 +228,7 @@ ${CRITICAL_CSS}
       <section id="view-tools" class="view hidden" data-page="tools" aria-label="Tools"></section>
       <section id="view-access" class="view hidden" data-page="access" aria-label="Access"></section>
       <section id="view-settings" class="view hidden" data-page="settings" aria-label="Settings"></section>
+      <section id="view-docs" class="view hidden" data-page="docs" aria-label="Documentation"></section>
     </div>
   </main>
 

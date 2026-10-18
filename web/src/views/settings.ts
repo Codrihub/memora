@@ -571,6 +571,12 @@ export async function renderSettings(): Promise<void> {
         { ctl: 'end' },
       )}
       ${row(
+        'Documentation',
+        'Install, configuration, agent instructions, the MCP tool reference and the API.',
+        `<a class="btn" id="sDocs" href="/docs">Open documentation</a>`,
+        { ctl: 'end' },
+      )}
+      ${row(
         'How to update',
         'Native install: run <code class="st-code">sudo memora-cli</code> and type <code class="st-code">/update</code>. Docker: <code class="st-code">docker compose pull &amp;&amp; docker compose up -d</code>.',
         '',
@@ -601,6 +607,10 @@ export async function renderSettings(): Promise<void> {
   paintServer(null);
 
   // ── version ──────────────────────────────────────────────────────────
+  host.querySelector<HTMLElement>('#sDocs')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    hooks.go('docs');
+  });
   void updateInfo(version, cfg).then((u) => {
     const stateEl = host.querySelector<HTMLElement>('#sVerState');
     const hint = host.querySelector<HTMLElement>('#sVerHint');

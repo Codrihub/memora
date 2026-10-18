@@ -54,6 +54,11 @@ fn env(tag: &str) -> Env {
         "<!doctype html><title>SHELL</title><script>boot()</script>",
     )
     .unwrap();
+    std::fs::write(
+        assets.join("sw.js"),
+        "self.addEventListener('fetch', () => {});\n",
+    )
+    .unwrap();
     std::fs::write(vault.join("secret.txt"), "TOP-SECRET").unwrap();
     let store = Arc::new(Mutex::new(MemoryStore::new(&vault)));
     let st = AppState::new(
@@ -571,6 +576,8 @@ async fn deep_links_serve_the_app_shell() {
         "/vault",
         "/logs",
         "/keys",
+        "/docs",
+        "/docs/agent-instructions",
         "/node/Plan%2FIndex.md",
         "/node/Plan/Index.md",
         "/node/..%2F..%2Fsecret.txt",
@@ -601,6 +608,7 @@ async fn deep_links_serve_the_app_shell() {
         ("/canvas", "/login?r=/canvas"),
         ("/node/Plan%2FIndex.md", "/login?r=/node/Plan%252FIndex.md"),
         ("/settings", "/login?r=/settings"),
+        ("/docs/mcp", "/login?r=/docs/mcp"),
     ] {
         let (status, headers, _) = get_page(&mut e, p, None).await;
         assert_eq!(status, StatusCode::FOUND, "{p}");
@@ -846,4 +854,16 @@ async fn access_rules_and_key_scopes_refuse_ambiguous_input() {
     let empty = json!({"id": id, "scopes": []});
     let r = call(&mut e, Method::POST, "/api/keys/update", Some(empty), o()).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.body);
+}
+
+/// A service worker obeys its own script's CSP: it must be allowed to fetch
+/// same-origin pages, or every navigation falls back to the offline page.
+#[tokio::test]
+async fn service_worker_may_fetch_same_origin() {
+    let mut e = env("swcsp");
+    let (status, headers, _) = get_page(&mut e, "/sw.js", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+    assert!(csp.contains("connect-src 'self'"), "{csp}");
+    assert!(csp.contains("default-src 'none'"), "{csp}");
 }
