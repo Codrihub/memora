@@ -7,16 +7,16 @@ use dialoguer::Select;
 
 /// A console command: name, arguments, one-line summary for the list, and the
 /// longer explanation shown by `/help <command>`.
-struct Cmd {
-    name: &'static str,
-    args: &'static str,
-    group: &'static str,
-    short: &'static str,
-    long: &'static str,
+pub(super) struct Cmd {
+    pub name: &'static str,
+    pub args: &'static str,
+    pub group: &'static str,
+    pub short: &'static str,
+    pub long: &'static str,
 }
 
 #[rustfmt::skip]
-const COMMANDS: &[Cmd] = &[
+pub(super) const COMMANDS: &[Cmd] = &[
     Cmd { name: "/welcome", args: "", group: "Start here",
         short: "what Memora is and why: set up once, use everywhere",
         long: "Five short screens, the same as /welcome in the browser: what Memora is,\n\
@@ -28,6 +28,13 @@ const COMMANDS: &[Cmd] = &[
         short: "step-by-step walkthrough for this instance",
         long: "Reads the current state (not set up, set up or locked) and tells you\n\
                the next steps. When nothing is set up yet, it offers to start /setup." },
+    Cmd { name: "/docs", args: "[topic]", group: "Start here",
+        short: "documentation: setup, agents, prompts, keys, fixes",
+        long: "Opens a menu of topics (arrow keys, Enter to read, Esc to close):\n\
+               getting started, connecting agents, the recommended agent instructions,\n\
+               keys and permissions, commands, backups and updates, troubleshooting.\n\
+               /docs <topic> prints one directly, e.g. /docs prompt or /docs 7.\n\
+               The same pages: `memora-cli docs [topic|all]`. Full docs: <base>/docs." },
     Cmd { name: "/web", args: "", group: "Start here",
         short: "one-time code to set up or reset in the browser",
         long: "Opens a window (default 5 minutes, 1-60) and prints a one-time code.\n\
@@ -184,6 +191,7 @@ pub(super) fn help(topic: Option<&str>) {
     println!("{}", style("Examples").bold());
     for (ex, what) in [
         ("/guide", "what to do next on this instance"),
+        ("/docs prompt", "instructions to paste into your agent"),
         ("/web", "get a one-time code, finish in the browser"),
         ("/keys", "create an API key for an agent"),
         ("/logout all", "sign out every device"),

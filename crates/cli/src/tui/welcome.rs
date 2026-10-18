@@ -126,6 +126,7 @@ fn step(i: usize, owner: bool) {
                     "or finish setup in the browser with a one-time code",
                 );
             }
+            cmd("/docs", "guides, agent instructions and troubleshooting");
             cmd("/help", "every command, grouped by what it is for");
             println!();
             para(ONCE);

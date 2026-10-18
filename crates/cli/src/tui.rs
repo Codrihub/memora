@@ -5,6 +5,7 @@
 //! (echo, cursor) that the prompts may have changed.
 
 mod commands;
+pub(crate) mod docs;
 mod welcome;
 
 use crate::store::{self, Snapshot};
@@ -109,11 +110,12 @@ pub fn run(ctx: &Ctx) -> Result<()> {
         }
         if !cmd.starts_with('/') {
             println!(
-                "{} commands start with {}. Try {} or {}.",
+                "{} commands start with {}. Try {}, {} or {}.",
                 style("?").yellow().bold(),
                 style("/").cyan(),
                 style("/guide").cyan(),
-                style("/help").cyan()
+                style("/help").cyan(),
+                style("/docs").cyan()
             );
             continue;
         }
@@ -170,6 +172,7 @@ pub fn run(ctx: &Ctx) -> Result<()> {
             "/logout" => crate::manage::logout(ctx, &theme, arg.as_deref()),
             "/activity" => crate::manage::activity(ctx, arg.as_deref()),
             "/mcp" => crate::manage::mcp_guide(ctx),
+            "/docs" => docs::run(ctx, &theme, arg.as_deref()),
             "/quit" | "/exit" | "/q" => return Ok(()),
             other => {
                 println!(
@@ -225,15 +228,17 @@ fn intro(ctx: &Ctx) {
         )
     } else if snap.owner.is_none() {
         format!(
-            "Not set up yet. Type {} for a walkthrough, or {} to start right away.",
+            "Not set up yet. Type {} for a walkthrough, {} to start right away, {} to read.",
             style("/guide").cyan().bold(),
-            style("/setup").cyan().bold()
+            style("/setup").cyan().bold(),
+            style("/docs").cyan().bold()
         )
     } else {
         format!(
-            "Ready. Type {} for commands, {} for a walkthrough.",
+            "Ready. Type {} for commands, {} for a walkthrough, {} for the docs.",
             style("/help").cyan().bold(),
-            style("/guide").cyan().bold()
+            style("/guide").cyan().bold(),
+            style("/docs").cyan().bold()
         )
     };
     println!("  {next}");

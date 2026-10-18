@@ -1280,19 +1280,24 @@ pub fn activity(ctx: &Ctx, arg: Option<&str>) -> Result<()> {
 // MCP connection guide
 // ---------------------------------------------------------------------------
 
-/// `/mcp`: how to connect common MCP clients to this server.
-pub fn mcp_guide(ctx: &Ctx) -> Result<()> {
-    let snap = ctx.snapshot()?;
-    let base = ctx
-        .setting(&snap, "MEMORA_BASE_URL")
+/// The server's public origin without a trailing slash: `MEMORA_BASE_URL`
+/// when set, else `http://<server-ip>:<port>`.
+pub(crate) fn public_base(ctx: &Ctx, snap: &store::Snapshot) -> String {
+    ctx.setting(snap, "MEMORA_BASE_URL")
         .map(|b| b.trim_end_matches('/').to_string())
         .unwrap_or_else(|| {
             format!(
                 "http://<server-ip>:{}",
-                ctx.setting(&snap, "MEMORA_PORT")
+                ctx.setting(snap, "MEMORA_PORT")
                     .unwrap_or_else(|| "8400".into())
             )
-        });
+        })
+}
+
+/// `/mcp`: how to connect common MCP clients to this server.
+pub fn mcp_guide(ctx: &Ctx) -> Result<()> {
+    let snap = ctx.snapshot()?;
+    let base = public_base(ctx, &snap);
     let url = format!("{base}/mcp");
     let h = |t: &str| println!("{}", style(t).bold().cyan());
     let code = |t: &str| {

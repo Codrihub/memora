@@ -71,6 +71,9 @@ Updates:
   version             print the version
 
 Help:
+  docs [TOPIC|all]    read the docs in the terminal: getting-started,
+                      connecting-agents, agent-instructions, keys-permissions,
+                      commands, backups-updates, troubleshooting, more
   help                show this help
 
 Options:
@@ -90,6 +93,7 @@ Examples:
                                       create and use /srv/notes as the vault
   memora-cli db backup --keep 20      back up now, keep the newest 20
   memora-cli update --check           only check for a newer release
+  memora-cli docs agent-instructions  print the prompt to give your agents
 
 In the browser, open http://<host>:<port>/login, enter the one-time code and
 fill in the form before the window closes. If it expires unfinished, the
@@ -772,6 +776,7 @@ fn main() -> anyhow::Result<()> {
         "vault",
         "db",
         "update",
+        "docs",
         "help",
     ];
     if !known.contains(&cmd.as_str()) {
@@ -794,7 +799,15 @@ fn main() -> anyhow::Result<()> {
         let code = db::cli(&ctx, &o.args)?;
         std::process::exit(code);
     }
-    no_args(&cmd, &o, if cmd == "vault" { 1 } else { 0 });
+    no_args(
+        &cmd,
+        &o,
+        if cmd == "vault" || cmd == "docs" {
+            1
+        } else {
+            0
+        },
+    );
     if o.create && cmd != "vault" {
         usage_error("--create only applies to `vault`");
     }
@@ -804,6 +817,10 @@ fn main() -> anyhow::Result<()> {
     if cmd == "help" {
         print!("{HELP}");
         return Ok(());
+    }
+    if cmd == "docs" {
+        let ctx = resolve_ctx(o.state.clone());
+        std::process::exit(tui::docs::cli(&ctx, o.args.first().map(String::as_str))?);
     }
     let ttl = window_secs(&o);
     let ctx = resolve_ctx(o.state.clone());
