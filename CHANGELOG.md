@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-10-18
+
+### Fixed
+
+- After an update, a normal reload or a hard reload could show the offline
+  page. The service worker now only serves the offline page when the server
+  really cannot be reached (after a retry); pages, scripts and styles always
+  come from the network, the app script URL carries a content hash, and the
+  service worker itself is never served from the HTTP cache.
+- The offline page retries on its own and returns as soon as the server is
+  back.
+
 ## [1.1.2] - 2026-10-18
 
 ### Changed
@@ -89,6 +101,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.1.3]: https://github.com/Codrihub/memora/releases/tag/v1.1.3
 [1.1.2]: https://github.com/Codrihub/memora/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Codrihub/memora/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Codrihub/memora/releases/tag/v1.1.0
