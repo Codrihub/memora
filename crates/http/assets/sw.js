@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = "memora-v1.1.0";
+  const VERSION = "memora-v1.1.1";
   const SHELL = "shell-" + VERSION;
   const sw = self;
   const APP_SHELL = [

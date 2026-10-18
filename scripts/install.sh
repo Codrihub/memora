@@ -2,7 +2,7 @@
 # Memora installer: one step, native, Linux x86_64 / aarch64 with systemd.
 #
 #   curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
-#   sudo sh install.sh --version 1.1.0 --port 8400 --behind-proxy
+#   sudo sh install.sh --version 1.1.1 --port 8400 --behind-proxy
 #   sudo sh install.sh --upgrade --yes
 #   sudo sh install.sh --uninstall [--purge]
 #   sh install.sh --check

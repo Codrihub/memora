@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-10-18
+
+### Added
+
+- Documentation in the web UI at `/docs`: getting started, agent
+  instructions, connecting agents, install, configuration, MCP, a live tool
+  reference, API, security, deployment, architecture, database, changelog and
+  keyboard shortcuts, with search, an on-page table of contents and copy
+  buttons. Reachable from the profile menu, the help dialog, the search
+  palette and Settings.
+- `/docs` in the setup console and `memora-cli docs [topic]`: the same topics
+  in the terminal, including the recommended agent instructions.
+- Recommended agent instructions (a full and a short prompt) that tell an
+  agent to recall from Memora before answering and to save what is worth
+  keeping, with where to paste them for each client.
+
+### Changed
+
+- Connecting an app is a four-step wizard (app, key, set up, instructions)
+  instead of a sideways carousel: searchable app grid, inline key creation,
+  filled-in config with a copy button, a live "Connected" check and the
+  agent instructions. `/agents#connect` opens it directly.
+
 ## [1.1.0] - 2026-10-18
 
 ### Changed
@@ -46,5 +69,6 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.1.1]: https://github.com/Codrihub/memora/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Codrihub/memora/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Codrihub/memora/releases/tag/v1.0.0
