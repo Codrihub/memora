@@ -9958,6 +9958,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-19
+
+### Changed
+
+- Each agent has its own page at \`/agents/<id>\` with tabs for Overview,
+  Setup, Activity, Access and Settings, each with its own address, instead
+  of a long sheet. Overview shows its stats, recent calls, app, access and
+  key; Activity groups calls by day with search, status and range filters.
+- An agent's app is locked once it is known. Setup shows only that app's
+  guide; there is no switching an agent to another app any more. A guessed
+  app is confirmed once, and an agent without an app picks it once. For
+  another app or device, create a new agent.
+- New agents are made on a page at \`/agents/new\` with a stepper that stays
+  in view, a summary panel, and a recommendation of one agent per app or
+  device so Activity shows who did what. Old \`/agents#connect\` links still
+  work.
+
+### Fixed
+
+- Tables: an aliased wikilink such as \`[[Folder/Note|name]]\` in a cell no
+  longer splits the cell and adds a column. Escaped pipes (\`\\|\`) work, and
+  rows with too few or too many cells fit the header.
+
 ## [1.2.0] - 2026-10-18
 
 ### Added
@@ -10094,6 +10117,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.2.1]: https://github.com/Codrihub/memora/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Codrihub/memora/releases/tag/v1.2.0
 [1.1.5]: https://github.com/Codrihub/memora/releases/tag/v1.1.5
 [1.1.4]: https://github.com/Codrihub/memora/releases/tag/v1.1.4
