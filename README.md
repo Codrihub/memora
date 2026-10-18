@@ -1,13 +1,24 @@
-# Memora
+<p align="center">
+  <img src="docs/assets/memora-logo.png" alt="Memora" width="96" height="96">
+</p>
 
-[![Latest release](https://img.shields.io/github/v/release/Codrihub/memora?sort=semver)](https://github.com/Codrihub/memora/releases/latest)
-[![CI](https://github.com/Codrihub/memora/actions/workflows/ci.yml/badge.svg)](https://github.com/Codrihub/memora/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/Codrihub/memora)](LICENSE)
-[![Docker image](https://img.shields.io/badge/ghcr.io-codrihub%2Fmemora-blue?logo=docker)](https://github.com/Codrihub/memora/pkgs/container/memora)
+<h1 align="center">Memora</h1>
 
-**Long-term memory for AI agents, on your own server.**
+<p align="center"><b>Second brain for your AI.</b><br>Long-term memory for AI agents, on your own server.</p>
 
-Website: **[memora.codrihub.tech](https://memora.codrihub.tech)**
+<p align="center">
+  <a href="https://github.com/Codrihub/memora/releases/latest"><img src="https://img.shields.io/github/v/release/Codrihub/memora?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/Codrihub/memora/actions/workflows/ci.yml"><img src="https://github.com/Codrihub/memora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Codrihub/memora" alt="License: MIT"></a>
+  <a href="https://github.com/Codrihub/memora/pkgs/container/memora"><img src="https://img.shields.io/badge/ghcr.io-codrihub%2Fmemora-blue?logo=docker" alt="Docker image"></a>
+</p>
+
+<p align="center">
+  <a href="https://memora.codrihub.tech">Website</a> ·
+  <a href="https://memora.codrihub.tech/docs">Documentation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/Codrihub/memora/releases">Releases</a>
+</p>
 
 Memora is a self-hosted memory vault for AI agents. Notes are plain markdown
 files in a git-backed folder. Agents read and write them over the Model Context
@@ -17,14 +28,14 @@ single port, with all server state in one embedded SQLite database.
 
 ## Screenshots
 
-![Overview](docs/screenshots/overview.webp)
+![Overview](docs/screenshots/overview.jpg)
 
 | | |
 |---|---|
-| ![Brain](docs/screenshots/brain.webp) **Brain**: every folder is a region, every note a node | ![Node card](docs/screenshots/brain-node.webp) **Node card**: links, backlinks and a preview |
-| ![Graph](docs/screenshots/graph.webp) **Graph**: force, radial or cluster layouts | ![Canvas](docs/screenshots/canvas.webp) **Canvas**: one frame per folder |
-| ![Reader](docs/screenshots/reader.webp) **Reader** with contents and reading settings | ![Activity](docs/screenshots/activity.webp) **Activity**: every agent call, live |
-| ![Agents](docs/screenshots/agents.webp) **Agents & API keys**: one key per agent, scoped | |
+| ![Brain](docs/screenshots/brain.jpg) **Brain**: every folder is a region, every note a node | ![Node card](docs/screenshots/brain-node.jpg) **Node card**: links, backlinks and a preview |
+| ![Graph](docs/screenshots/graph.jpg) **Graph**: force, radial or cluster layouts | ![Canvas](docs/screenshots/canvas.jpg) **Canvas**: one frame per folder |
+| ![Reader](docs/screenshots/reader.jpg) **Reader** with contents and reading settings | ![Activity](docs/screenshots/activity.jpg) **Activity**: every agent call, live |
+| ![Agents](docs/screenshots/agents.jpg) **Agents & API keys**: one key per agent, scoped | |
 
 Screenshots use a demo vault.
 
