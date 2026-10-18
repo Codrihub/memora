@@ -17,7 +17,7 @@ import { agentColor, agentInitials, agentKey, avatarHTML, setAgentColors } from 
 import { loadKeys } from '../realtime';
 import { colorPickHTML, wireColorPick } from '../ui/color-pick';
 import { cardsSkeleton, skBlock } from '../ui/skeleton';
-import { mcpUrl, mountConnect, snippets } from '../control/connect';
+import { mcpUrl, mountConnectWizard, snippets, type ConnectKey, type Wizard } from '../control/connect';
 import { loadFeed } from '../control/feed';
 import { ago, codeHTML, copyText, ICO, openMenu, openSheet, sparkSVG, systemHeader, useControlStyles, wireCopy, type Sheet } from '../control/ui';
 import type { KeyCreated, KeyRow, KeyScope, KeysResult, ToolAccess, ToolInfo } from '../types';
@@ -155,6 +155,8 @@ const KEYS_CSS = `
 .ky2-steps{margin:0;padding:12px 16px 14px;list-style:none;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px;
   font-size:12.5px;color:var(--muted)}
 .ky2-steps li{display:flex;gap:9px;align-items:center}
+.ky2-start{padding:12px 16px;border-bottom:1px solid var(--line)}
+.ky2-start .btn{width:100%;height:40px;border-radius:10px}
 .ky2-steps .n{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;flex:none;font-size:11px;font-weight:700;
   color:var(--accent);background:var(--accent-soft)}
 
@@ -174,13 +176,6 @@ const KEYS_CSS = `
   border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
 .ky2-secret .cc-i{color:var(--warn);margin-top:1px}
 .ky2-secret+.cc-code-wrap .cc-code{white-space:pre-wrap;word-break:break-all}
-.ky2-pick{display:flex;flex-direction:column;gap:6px;margin:0 0 16px}
-.ky2-pick>span{font-size:12.5px;font-weight:600;color:var(--muted)}
-.ky2-pick select{height:42px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface-0);color:var(--fg);padding:0 12px;font-size:14px}
-.ky2-urlrow{display:flex;align-items:center;gap:8px;margin:0 0 16px;min-width:0}
-.ky2-urlrow code{flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;padding:9px 11px;border-radius:10px;background:var(--surface-0);
-  border:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ky2-urlrow .cc-ibtn{width:40px;height:40px;border:1px solid var(--line)}
 
 /* permissions editor */
 .pe2-row{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;min-width:0}
@@ -314,6 +309,7 @@ function usageOf(k: KeyRow): Usage | undefined {
 export async function renderKeys(): Promise<void> {
   useControlStyles();
   useStyles('keys-css-2', KEYS_CSS + TOOL_ROW_CSS);
+  takeConnectHash();
   const host = $('#view-keys');
   const seq = ++renderSeq;
   const tile = (k: string): string =>
@@ -357,7 +353,8 @@ export async function renderKeys(): Promise<void> {
       n.focus();
     };
   });
-  $$<HTMLElement>('[data-client]', host).forEach((b) => (b.onclick = () => openConnect({ tab: b.dataset.client })));
+  $('#kConnStart').onclick = () => openConnect({});
+  $$<HTMLElement>('[data-client]', host).forEach((b) => (b.onclick = () => openConnect({ client: b.dataset.client, step: 2 })));
   wireCopy(host);
 
   const cat = loadCatalog(true);
@@ -379,6 +376,7 @@ export async function renderKeys(): Promise<void> {
     $('#kList').innerHTML = `<div class="cc-card cc-empty" style="grid-column:1/-1"><b>Could not load the agents</b>${esc((e as Error).message)}
       <div style="margin-top:12px"><button type="button" class="btn" id="kRetry">${ICO.refresh}Try again</button></div></div>`;
     $('#kRetry').onclick = () => void renderKeys();
+    openFromHash();
     return;
   }
   const total = (await cat)?.length || null;
@@ -435,12 +433,48 @@ export async function renderKeys(): Promise<void> {
         const k = keys.find((x) => x.id === b.dataset.id);
         if (!k) return;
         if (a === 'perms') return void openKeyPermissions(k);
-        if (a === 'connect') return openConnect({ agent: k });
+        if (a === 'connect') return openConnect({ agent: connectKey(k) });
         if (a === 'more') agentMenu(b, k);
       }),
   );
   paintDeleted();
+  openFromHash();
 }
+
+// `/agents#connect` opens the connect wizard; `#connect=<client>` preselects an app.
+// The router rewrites the address before the agents load, so the hash is read
+// as early as possible: when this module loads and when the page starts to render.
+const CONNECT_HASH = /^#connect(?:=([\w-]+))?$/;
+const bootHash = /^\/(agents|keys)\/?$/.test(location.pathname) ? CONNECT_HASH.exec(location.hash) : null;
+let pendingConnect: string | null = bootHash ? bootHash[1] || '' : null;
+
+function takeConnectHash(): void {
+  const m = CONNECT_HASH.exec(location.hash);
+  if (!m) return;
+  pendingConnect = m[1] || '';
+  history.replaceState(history.state, '', location.pathname + location.search);
+}
+
+function openFromHash(): void {
+  if (pendingConnect === null) return;
+  const id = pendingConnect;
+  pendingConnect = null;
+  const client = id && snippets().some((s) => s.id === id) ? id : undefined;
+  openConnect(client ? { client, step: 2 } : {});
+}
+
+// A hash set while the app runs also fires popstate, and the router rewrites the
+// address in its own handler, so take the hash first and open once it settles.
+const onConnectHash = (): void => {
+  if (!CONNECT_HASH.test(location.hash) || !/^\/(agents|keys)\/?$/.test(location.pathname)) return;
+  takeConnectHash();
+  setTimeout(() => {
+    if (document.querySelector('#view-keys:not(.hidden) #kList[aria-busy]')) return; // the render opens it
+    if (document.querySelector('#view-keys:not(.hidden) #kList')) openFromHash();
+  }, 0);
+};
+window.addEventListener('popstate', onConnectHash);
+window.addEventListener('hashchange', onConnectHash);
 
 function connectPanel(): string {
   const url = mcpUrl();
@@ -450,12 +484,13 @@ function connectPanel(): string {
       <div class="row"><code title="${attr(url)}">${esc(url)}</code>
       <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the MCP endpoint" title="Copy">${ICO.copy}</button></div>
       <p>Every app connects to this address. Apps that sign in need nothing else; the rest also need an agent's key.</p></div>
-    <ol class="ky2-steps"><li><span class="n">1</span>Make an agent for the app</li><li><span class="n">2</span>Pick the app below</li><li><span class="n">3</span>Follow the steps, paste and check</li></ol>
+    <ol class="ky2-steps"><li><span class="n">1</span>Choose your app</li><li><span class="n">2</span>Pick or make its key</li><li><span class="n">3</span>Paste the setup and test it</li><li><span class="n">4</span>Give the agent its instructions</li></ol>
+    <div class="ky2-start"><button type="button" class="btn primary" id="kConnStart">${ICO.plug}Set up an app</button></div>
     <div class="ky2-clients">${snippets()
       .map(
         (s) => `<button type="button" class="ky2-cl" data-client="${attr(s.id)}"><span class="ini" aria-hidden="true">${esc(
           agentInitials(s.label),
-        )}</span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.oauth ? 'Signs in, no key to paste' : s.id === 'http' ? 'Any MCP client, with a test' : 'Paste a config with a key')}</small></span>${ICO_CHEV}</button>`,
+        )}</span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind + ' · ' + s.how)}</small></span>${ICO_CHEV}</button>`,
       )
       .join('')}</div></section>`;
 }
@@ -500,7 +535,7 @@ function agentMenu(anchor: HTMLElement, k: KeyRowFull): void {
     anchor,
     [
       { label: 'Edit permissions', desc: 'What it may do and which tools it may call.', icon: ICO.shield, run: () => void openKeyPermissions(k) },
-      { label: 'Connect an app', desc: 'Setup steps and config for each app.', icon: ICO.plug, run: () => openConnect({ agent: k }) },
+      { label: 'Connect an app', desc: 'Setup steps and config for each app.', icon: ICO.plug, run: () => openConnect({ agent: connectKey(k) }) },
       {
         label: 'Activity',
         desc: 'Everything this agent did, at /activity/' + k.id + '.',
@@ -560,63 +595,87 @@ function paintDeleted(): void {
 
 // ── connect ─────────────────────────────────────────────────────────────
 
-/** Connect guides: for one agent, or for any app with an agent picker. */
-function openConnect(o: { agent?: KeyRowFull; tab?: string }): void {
+function connectKey(k: KeyRowFull): ConnectKey {
+  return { id: k.id, name: k.name || k.id, revealable: k.revealable, oauth: oauthKeys.has(k.id) };
+}
+
+/** The connect wizard in a sheet: for one agent, for one app, or from the start. */
+function openConnect(o: { agent?: ConnectKey; client?: string; secret?: string; fresh?: boolean; step?: 1 | 2 | 3 | 4 }): void {
   const fixed = o.agent;
-  const url = mcpUrl();
-  const label = o.tab ? snippets().find((s) => s.id === o.tab)?.label : '';
-  const choices = keys.filter((k) => k.enabled !== false);
-  const body = `${
-    fixed
-      ? ''
-      : `<label class="ky2-pick"><span>Which agent is this for?</span><select id="kcPick">
-          <option value="">Choose later (shows a placeholder)</option>${choices
-            .map((k) => `<option value="${attr(k.id)}">${esc(k.name || k.id)}</option>`)
-            .join('')}</select></label>`
-  }
-    <div class="ky2-urlrow"><code title="${attr(url)}">${esc(url)}</code>
-      <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the MCP endpoint" title="Copy endpoint">${ICO.copy}</button></div>
-    <div id="kcBody"></div>`;
+  const agents = keys.filter((k) => k.enabled !== false).map(connectKey);
+  if (fixed && !agents.some((a) => a.id === fixed.id)) agents.unshift(fixed);
+  let wz: Wizard | null = null;
   openSheet({
-    title: fixed ? 'Connect ' + (fixed.name || fixed.id) : label ? 'Connect ' + label : 'Connect an app',
-    sub: 'MCP over HTTP',
-    lead: fixed ? avatarHTML(fixed.name || fixed.id, 36, '', fixed.id) : '',
-    body,
-    width: 620,
-    actions: [{ label: 'Done', cls: 'primary', run: (s) => s.close() }],
+    title: fixed ? 'Connect ' + fixed.name : 'Connect an app',
+    sub: 'App, key, setup and instructions',
+    lead: fixed ? avatarHTML(fixed.name, 36, '', fixed.id) : '',
+    body: '<div id="kcWizard"></div>',
+    width: 680,
+    actions: [
+      { label: 'Back', cls: 'ghost', left: true, run: () => wz?.back() },
+      { label: 'Next', cls: 'primary', run: (s) => void (wz?.next() && s.close()) },
+    ],
+    onClose: () => wz?.destroy(),
     onOpen: (s) => {
-      const mount = (k?: KeyRowFull): void =>
-        mountConnect($('#kcBody', s.body), {
-          tab: o.tab,
-          key: k ? { id: k.id, name: k.name || k.id, revealable: k.revealable, oauth: oauthKeys.has(k.id) } : undefined,
-          onSecret: () => void renderKeys(),
-        });
-      mount(fixed);
-      const pick = s.body.querySelector<HTMLSelectElement>('#kcPick');
-      if (pick) pick.onchange = () => mount(keys.find((k) => k.id === pick.value));
+      s.root.classList.add('cn-sheet');
+      const [back, next] = Array.from(s.foot?.querySelectorAll<HTMLButtonElement>('.btn') || []);
+      wz = mountConnectWizard($('#kcWizard', s.body), {
+        agents,
+        agent: fixed?.id,
+        secret: o.secret,
+        fresh: o.fresh,
+        client: o.client,
+        step: o.step,
+        createAgent: async (name) => {
+          try {
+            const r = await apiPost<KeyCreated>(KEY_PATHS.create, { name, scopes: DEFAULT_SCOPES, tools: '*' });
+            void renderKeys();
+            if (!r || !r.id || !r.key) throw new Error('the server returned no key');
+            return { key: { id: r.id, name: r.name || name }, secret: r.key };
+          } catch (e) {
+            toast('Could not create the agent: ' + (e as Error).message, 'err');
+            return null;
+          }
+        },
+        onChange: () => void renderKeys(),
+        setNav: (n) => {
+          if (back) back.style.visibility = n.back ? '' : 'hidden';
+          if (next) next.textContent = n.next;
+        },
+      });
     },
   });
 }
 
-/** The one-time secret, with connect steps that already contain it. */
+/** The one-time secret, with a way into the connect wizard that already holds it. */
 function showSecret(title: string, name: string, secret: string, id?: string, extra = ''): void {
   const has = !!secret && secret !== '-';
+  const connect = (s: Sheet): void => {
+    s.close();
+    // The sheet closes with an animation; open the wizard once it is gone.
+    setTimeout(() => openConnect({ agent: { id: id || '', name }, secret, fresh: true, step: 3 }), 260);
+  };
   openSheet({
     title,
     sub: name,
     lead: avatarHTML(name, 36, '', id),
     width: 620,
     body: `${extra}<section class="cc-sh-sec"><h3>Its key</h3>
-      <div class="ky2-secret" role="note">${ICO.key}<span><b>Copy it now and keep it private.</b> Anyone with this key can read and write your notes as ${esc(name)}.</span></div>
+      <div class="ky2-secret" role="note">${ICO.key}<span><b>This key is shown once. Copy it now and keep it private.</b> Anyone with this key can read and write your notes as ${esc(name)}.</span></div>
       ${codeHTML(has ? secret : 'The server did not return a key.', 'Copy key')}</section>
-      ${has ? `<section class="cc-sh-sec"><h3>Connect it</h3><p>Pick the app; the key is already filled in.</p><div class="ky2-urlrow"><code>${esc(mcpUrl())}</code>
-        <button type="button" class="cc-ibtn" data-copy="${attr(mcpUrl())}" aria-label="Copy the MCP endpoint" title="Copy endpoint">${ICO.copy}</button></div><div id="ksConnect"></div></section>` : ''}`,
+      ${
+        has && id
+          ? `<section class="cc-sh-sec"><h3>Connect it</h3><p>Set up an app with this key already filled in: steps, a ready config and a live connection check.</p>
+        <button type="button" class="btn primary" id="ksConnect">${ICO.plug}Connect an app</button></section>`
+          : ''
+      }`,
     actions: [
       { label: 'Copy key', icon: ICO.copy, left: true, run: () => void copyText(has ? secret : '', 'Key copied') },
       { label: 'Done', cls: 'primary', run: (s) => s.close() },
     ],
     onOpen: (s) => {
-      if (has) mountConnect($('#ksConnect', s.body), { secret, tab: 'claude-code', hideKey: true });
+      const b = s.body.querySelector<HTMLButtonElement>('#ksConnect');
+      if (b) b.onclick = () => connect(s);
     },
   });
 }
