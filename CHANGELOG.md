@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-10-18
+
+### Changed
+
+- Agents & API keys page redesigned: a stats strip (agents, active now, calls
+  in 24 hours, MCP endpoint), and an agents list that is a table on wide
+  screens, condensed rows on tablets and cards on phones, with the app each
+  agent uses, its status, access summary, a 24-hour sparkline and last call.
+- Clicking an agent opens a detail sheet with its stats, the app it is used
+  with, access, key details, activity and every action (rename and color,
+  show key, new key, turn off or on, delete, edit permissions, set up again).
+- Connecting an app: pick the app, name the agent and choose Read & write,
+  Read only or Custom access, then follow the setup with the new key filled
+  in and a live "Connected" check. Setting up an existing agent goes straight
+  to its app, with an inline unlock for a sealed key.
+- Permissions editor: a live summary, capability toggles with plain
+  descriptions, and a searchable tool picker grouped by category.
+- Every dropdown in the web UI is a custom, keyboard-accessible select that
+  works inside sheets and opens as a bottom sheet on phones.
+
 ## [1.1.1] - 2026-10-18
 
 ### Added
@@ -69,6 +89,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.1.2]: https://github.com/Codrihub/memora/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Codrihub/memora/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Codrihub/memora/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Codrihub/memora/releases/tag/v1.0.0
