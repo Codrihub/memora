@@ -1359,7 +1359,7 @@ async fn mw_noindex(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
     res.headers_mut().insert(
         header::HeaderName::from_static("x-robots-tag"),
-        header::HeaderValue::from_static("noindex, nofollow, noarchive, nosnippet"),
+        header::HeaderValue::from_static("noindex, nofollow, noarchive, nosnippet, noimageindex"),
     );
     res
 }

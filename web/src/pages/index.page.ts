@@ -82,8 +82,8 @@ export function indexPage(css: string): string {
 <meta name="apple-mobile-web-app-title" content="Memora">
 <meta name="application-name" content="Memora">
 <meta name="description" content="Memora, second brain for your AI: a self-hosted memory vault of Markdown notes, wired into a living brain your agents read and write over MCP.">
-<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-<meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
+<meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="referrer" content="no-referrer">
 <style>
 ${css}

@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-18
+
+### Changed
+
+- Search engines and AI crawlers are kept out of every page: `robots.txt`
+  now disallows the whole instance (with explicit rules for common AI
+  crawlers), and every response and page carries
+  `noindex, nofollow, noarchive, nosnippet, noimageindex`.
+- README: one-command install and screenshots of the web UI.
+
 ## [1.0.0] - 2026-10-18
 
 First public release.
@@ -36,4 +46,5 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.1.0]: https://github.com/Codrihub/memora/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Codrihub/memora/releases/tag/v1.0.0

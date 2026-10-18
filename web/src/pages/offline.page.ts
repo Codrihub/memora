@@ -22,6 +22,7 @@ export function offlinePage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0e14">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <title>Offline · Memora</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">

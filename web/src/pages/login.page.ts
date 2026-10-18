@@ -72,7 +72,7 @@ export function loginPage(css: string, js: string): string {
 <script>${THEME_BOOT}</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0e14">
 <title>Sign in - Memora</title>
