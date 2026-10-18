@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-10-18
+
+### Fixed
+
+- "On this page" in the node reader and the documentation: the last
+  sections are now marked when scrolled to the bottom, a clicked entry is
+  marked right away and stays marked while the page scrolls to it, and the
+  current section is picked earlier while scrolling.
+
+### Changed
+
+- README: a centered header with the logo, badges and links, and screenshots
+  as JPEG so they display everywhere.
+
 ## [1.1.3] - 2026-10-18
 
 ### Fixed
@@ -101,6 +115,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.1.4]: https://github.com/Codrihub/memora/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Codrihub/memora/releases/tag/v1.1.3
 [1.1.2]: https://github.com/Codrihub/memora/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Codrihub/memora/releases/tag/v1.1.1
