@@ -6,7 +6,7 @@ import { Modal } from '../modal';
 import { notify } from '../toast';
 import { SWATCH_COLORS } from '../icons';
 import { colorPickHTML, wireColorPick } from '../ui/color-pick';
-import { I, FOLDER_ICONS, folderGlyph } from './icons';
+import { I, FOLDER_ICONS, folderGlyph, folderIconKey } from './icons';
 
 // ---------------------------------------------------------------------------
 // Context menu
@@ -236,16 +236,17 @@ export function folderLookDialog(
 ): void {
   const box = el('div', 'vx-look');
   const presets = Object.keys(FOLDER_ICONS);
-  const emoji = icon && !FOLDER_ICONS[icon] ? icon : '';
+  const known = icon ? folderIconKey(icon) : '';
+  const emoji = icon && !known ? icon : '';
   box.innerHTML = `<div class="vx-look-prev"><span class="vx-look-ico"></span><b>${esc(folder.split('/').pop() || folder)}</b><small>${esc(folder)}</small></div>
   <div class="vx-look-label">Color</div>${colorPickHTML('vxLookColor', color, { auto: true, presets: SWATCH_COLORS })}
   <div class="vx-look-label" style="margin-top:14px">Icon</div><div class="vx-icons">${['', ...presets]
     .map(
       (k) =>
-        `<button type="button" class="vx-iconpick${k === icon || (!k && !icon) ? ' on' : ''}" data-i="${attr(k)}" title="${attr(k || 'default')}" aria-label="Icon ${attr(k || 'default')}">${folderGlyph(k, false)}</button>`,
+        `<button type="button" class="vx-iconpick${k === known || (!k && !icon) ? ' on' : ''}" data-i="${attr(k)}" title="${attr(k || 'default')}" aria-label="Icon ${attr(k || 'default')}">${folderGlyph(k, false)}</button>`,
     )
     .join('')}</div>
-  <label class="vx-look-emoji"><span>Or any emoji / text</span><input type="text" maxlength="4" value="${attr(emoji)}" placeholder="e.g. 🚀" aria-label="Emoji icon"></label>`;
+  <label class="vx-look-emoji"><span>Or any emoji</span><input type="text" maxlength="4" value="${attr(emoji)}" placeholder="e.g. 🚀" aria-label="Emoji icon"></label>`;
   let cur = { color: color || '', icon: icon || '' };
   const ico = box.querySelector<HTMLElement>('.vx-look-ico')!;
   const paint = (): void => {
@@ -253,7 +254,7 @@ export function folderLookDialog(
     ico.innerHTML = folderGlyph(cur.icon, false);
     ico.style.color = c;
     box.querySelectorAll<HTMLElement>('.vx-iconpick').forEach((b) => {
-      b.classList.toggle('on', (b.dataset.i || '') === cur.icon);
+      b.classList.toggle('on', (b.dataset.i || '') === (cur.icon ? folderIconKey(cur.icon) : ''));
       b.style.color = c;
     });
   };

@@ -364,7 +364,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "ops",
             "Set a folder's color, icon, and description.",
             "To control how the folder appears in the UI.",
-            json!({"folder":{"type":"string"},"color":{"type":"string"},"icon":{"type":"string"},"desc":{"type":"string"}}),
+            json!({"folder":{"type":"string"},"color":{"type":"string","description":"Hex color such as #22c55e."},"icon":{"type":"string","description":"One emoji, or an icon name: star, book, code, brain, flask, briefcase, archive, inbox, user, users, calendar, bulb, heart, credit-card, wallet, cpu, key, lock, shield, server, database, terminal, cloud, globe, home, settings, tag, mail, chart, dollar, cart, rocket, wrench, image, music, map, school, file."},"desc":{"type":"string"}}),
             &["folder"],
         ),
         spec(
