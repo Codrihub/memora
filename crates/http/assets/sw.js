@@ -1,16 +1,8 @@
 (() => {
-  const VERSION = "memora-v1.1.2";
+  const VERSION = "memora-v1.1.1";
   const SHELL = "shell-" + VERSION;
   const sw = self;
-  const APP_SHELL = [
-    "/",
-    "/index.html",
-    "/app.js",
-    "/offline.html",
-    "/manifest.webmanifest",
-    "/icon-192.png",
-    "/icon-512.png"
-  ];
+  const OFFLINE_FILES = ["/offline.html", "/icon-192.png", "/icon-512.png"];
   const NEVER_CACHE = [
     "/api/",
     "/mcp",
@@ -27,7 +19,7 @@
       (async () => {
         const cache = await caches.open(SHELL);
         await Promise.all(
-          APP_SHELL.map((u) => cache.add(new Request(u, { cache: "reload" })).catch(() => null))
+          OFFLINE_FILES.map((u) => cache.add(new Request(u, { cache: "reload" })).catch(() => null))
         );
         await sw.skipWaiting();
       })()
@@ -75,39 +67,25 @@
   function isNever(pathname) {
     return NEVER_CACHE.some((p) => pathname === p || pathname.startsWith(p));
   }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   sw.addEventListener("fetch", ((event) => {
     const req = event.request;
-    if (req.method !== "GET") return;
+    if (req.method !== "GET" || req.mode !== "navigate") return;
     const url = new URL(req.url);
     if (url.origin !== sw.location.origin) return;
     if (isNever(url.pathname)) return;
-    if (req.mode === "navigate") {
-      event.respondWith(
-        (async () => {
-          try {
-            const res = await fetch(req);
-            if (res.ok && res.type === "basic" && !res.redirected) {
-              const cache = await caches.open(SHELL);
-              cache.put("/index.html", res.clone()).catch(() => null);
-            }
-            return res;
-          } catch {
-            const cache = await caches.open(SHELL);
-            return await cache.match(req) || await cache.match("/index.html") || await cache.match("/offline.html") || new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } });
-          }
-        })()
-      );
-      return;
-    }
     event.respondWith(
       (async () => {
-        const cache = await caches.open(SHELL);
         try {
-          const res = await fetch(req, { cache: "no-cache" });
-          if (res && res.ok && res.type === "basic") cache.put(req, res.clone()).catch(() => null);
-          return res;
+          return await fetch(req);
         } catch {
-          return await cache.match(req) || new Response("", { status: 504 });
+          await wait(1200);
+          try {
+            return await fetch(req);
+          } catch {
+            const cache = await caches.open(SHELL);
+            return await cache.match("/offline.html") || new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } });
+          }
         }
       })()
     );

@@ -10,7 +10,7 @@ export const PWA = {
   init(): void {
     if ('serviceWorker' in navigator) {
       const register = (): void => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(() => {
           /* registration is best effort */
         });
       };

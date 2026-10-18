@@ -4,7 +4,7 @@
 // It runs outside the page, so the DOM types do not describe it. Vault data
 // always comes from the network and is never cached.
 
-const VERSION = 'memora-v1.1.2';
+const VERSION = 'memora-v1.1.1';
 const SHELL = 'shell-' + VERSION;
 
 interface SWEvent extends Event {
@@ -23,18 +23,11 @@ interface SWGlobal {
 
 const sw = self as unknown as SWGlobal;
 
-// Enough of the shell to open the UI while offline.
-const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/offline.html',
-  '/manifest.webmanifest',
-  '/icon-192.png',
-  '/icon-512.png',
-];
+// Only the offline page and its icons are kept. Pages, scripts and styles
+// always come from the network, so an update shows on the next load.
+const OFFLINE_FILES = ['/offline.html', '/icon-192.png', '/icon-512.png'];
 
-// Paths that must never be cached: memory data, auth, OAuth, MCP and realtime.
+// Paths the worker never touches: memory data, auth, OAuth, MCP and realtime.
 const NEVER_CACHE = [
   '/api/',
   '/mcp',
@@ -53,7 +46,7 @@ sw.addEventListener('install', ((event: SWEvent) => {
       const cache = await caches.open(SHELL);
       // Individually, so one failed file cannot abort the whole install.
       await Promise.all(
-        APP_SHELL.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => null)),
+        OFFLINE_FILES.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => null)),
       );
       await sw.skipWaiting();
     })(),
@@ -116,52 +109,33 @@ function isNever(pathname: string): boolean {
   return NEVER_CACHE.some((p) => pathname === p || pathname.startsWith(p));
 }
 
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// Navigations go to the network. Only when it fails twice in a row (the
+// server or the connection is down) does the offline page appear; it retries
+// on its own. Everything else is left to the browser.
 sw.addEventListener('fetch', ((event: SWEvent) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
-
+  if (req.method !== 'GET' || req.mode !== 'navigate') return;
   const url = new URL(req.url);
   if (url.origin !== sw.location.origin) return;
-  if (isNever(url.pathname)) return; // straight to the network
+  if (isNever(url.pathname)) return;
 
-  // Navigation: network first, cached shell as fallback, then the offline page.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      (async () => {
+  event.respondWith(
+    (async () => {
+      try {
+        return await fetch(req);
+      } catch {
+        await wait(1200);
         try {
-          const res = await fetch(req);
-          // Only a real app page may become the offline shell: never an error
-          // or a redirect (for example to /login when the session expired).
-          if (res.ok && res.type === 'basic' && !res.redirected) {
-            const cache = await caches.open(SHELL);
-            cache.put('/index.html', res.clone()).catch(() => null);
-          }
-          return res;
+          return await fetch(req);
         } catch {
           const cache = await caches.open(SHELL);
           return (
-            (await cache.match(req)) ||
-            (await cache.match('/index.html')) ||
             (await cache.match('/offline.html')) ||
             new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } })
           );
         }
-      })(),
-    );
-    return;
-  }
-
-  // Static assets: network first so a deploy shows at once (an unchanged
-  // file is a cheap 304); the cache only when offline.
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(SHELL);
-      try {
-        const res = await fetch(req, { cache: 'no-cache' });
-        if (res && res.ok && res.type === 'basic') cache.put(req, res.clone()).catch(() => null);
-        return res;
-      } catch {
-        return (await cache.match(req)) || new Response('', { status: 504 });
       }
     })(),
   );

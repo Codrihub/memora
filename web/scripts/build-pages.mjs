@@ -1,6 +1,7 @@
 // Render the static pages and the service worker from TypeScript sources.
 // Runs after the vite step; output lands in crates/http/assets.
 
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +62,10 @@ const { loginPage } = await loadModule('src/pages/login.page.ts');
 const { offlinePage } = await loadModule('src/pages/offline.page.ts');
 const { robotsTxt } = await loadModule('src/robots.ts');
 
-const indexHtml = indexPage(appCss);
+// Version the script URL by its content, so a deploy is picked up even when a
+// proxy or CDN caches /app.js for hours.
+const appHash = createHash('sha256').update(readFileSync(join(assets, 'app.js'))).digest('hex').slice(0, 12);
+const indexHtml = indexPage(appCss).replace('<script src="/app.js">', `<script src="/app.js?v=${appHash}">`);
 const loginHtml = loginPage(loginCss, loginJs);
 
 // A leftover placeholder would ship a broken tag; fail instead.
