@@ -772,6 +772,70 @@ fn emphasize(s: &str) -> String {
     out
 }
 
+/// Split a table row into trimmed cells. A `|` separates cells except inside
+/// a `[[wikilink]]` (its alias), inside a `code span`, or escaped as `\|`
+/// (the escape is dropped), as in Obsidian and GitHub tables.
+fn table_cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = if t.ends_with('|') && !t.ends_with("\\|") {
+        &t[..t.len() - 1]
+    } else {
+        t
+    };
+    let b = t.as_bytes();
+    let mut cells = Vec::new();
+    let mut cur = String::new();
+    let (mut link, mut code) = (0usize, false);
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'\\' && b.get(i + 1) == Some(&b'|') {
+            cur.push('|');
+            i += 2;
+            continue;
+        }
+        if c == b'`' {
+            code = !code;
+        } else if !code && c == b'[' && b.get(i + 1) == Some(&b'[') {
+            link += 1;
+            cur.push_str("[[");
+            i += 2;
+            continue;
+        } else if !code && link > 0 && c == b']' && b.get(i + 1) == Some(&b']') {
+            link -= 1;
+            cur.push_str("]]");
+            i += 2;
+            continue;
+        } else if c == b'|' && link == 0 && !code {
+            cells.push(cur.trim().to_string());
+            cur.clear();
+            i += 1;
+            continue;
+        }
+        // Copy the whole UTF-8 character.
+        let w = t[i..].chars().next().map_or(1, char::len_utf8);
+        cur.push_str(&t[i..i + w]);
+        i += w;
+    }
+    cells.push(cur.trim().to_string());
+    cells
+}
+
+/// Give a body row exactly `width` cells: short rows get empty cells, extra
+/// cells are joined into the last one so no text is lost.
+fn fit_row(mut row: Vec<String>, width: usize) -> Vec<String> {
+    if width == 0 {
+        return row;
+    }
+    if row.len() > width {
+        let rest = row.split_off(width - 1).join(" | ");
+        row.push(rest);
+    }
+    row.resize(width, String::new());
+    row
+}
+
 fn render_body(text: &str, ctx: &RenderCtx) -> String {
     let table_sep = Regex::new(r"^\s*\|?[\s:]*-{2,}[\s:|-]*\|?\s*$").unwrap();
     let list_re = Regex::new(r"^(\s*)([-*+]|\d+[.)])\s+(.+)$").unwrap();
@@ -807,22 +871,11 @@ fn render_body(text: &str, ctx: &RenderCtx) -> String {
         }
 
         if line.contains('|') && i + 1 < n && table_sep.is_match(lines[i + 1]) {
-            let header: Vec<String> = s
-                .trim_matches('|')
-                .split('|')
-                .map(|c| c.trim().to_string())
-                .collect();
+            let header = table_cells(s);
             i += 2;
             let mut rows: Vec<Vec<String>> = Vec::new();
             while i < n && lines[i].contains('|') && !lines[i].trim().is_empty() {
-                rows.push(
-                    lines[i]
-                        .trim()
-                        .trim_matches('|')
-                        .split('|')
-                        .map(|c| c.trim().to_string())
-                        .collect(),
-                );
+                rows.push(fit_row(table_cells(lines[i]), header.len()));
                 i += 1;
             }
             let th: String = header
@@ -3520,6 +3573,46 @@ mod image_render_tests {
             note_dir: dir,
         };
         render_markdown_ctx(md, &ctx).0
+    }
+
+    #[test]
+    fn table_cells_keep_wikilink_aliases_and_escaped_pipes() {
+        assert_eq!(
+            table_cells("| [[A/B|name]] | desc |"),
+            vec!["[[A/B|name]]", "desc"]
+        );
+        assert_eq!(
+            table_cells("| [[A/B\\|name]] | desc |"),
+            vec!["[[A/B|name]]", "desc"]
+        );
+        assert_eq!(table_cells("| a \\| b | `x|y` |"), vec!["a | b", "`x|y`"]);
+        assert_eq!(table_cells("a | b"), vec!["a", "b"]);
+        assert_eq!(table_cells("| é | ✓ |"), vec!["é", "✓"]);
+    }
+
+    #[test]
+    fn table_rows_match_the_header_width() {
+        assert_eq!(fit_row(vec!["a".into()], 3), vec!["a", "", ""]);
+        assert_eq!(
+            fit_row(vec!["a".into(), "b".into(), "c".into()], 2),
+            vec!["a", "b | c"]
+        );
+    }
+
+    #[test]
+    fn aliased_wikilink_in_a_table_cell_stays_one_link() {
+        let h = render(
+            "| Skill | Description |\n|---|---|\n| [[Note|nginx]] | Manage it |",
+            "",
+        );
+        assert_eq!(h.matches("<th>").count(), 2, "{h}");
+        assert_eq!(h.matches("<td>").count(), 2, "{h}");
+        assert!(h.contains(">nginx</a>"), "{h}");
+        assert!(h.contains("<td>Manage it</td>"), "{h}");
+        assert_no_injection(&render(
+            "| a | b |\n|---|---|\n| [[Note|<img src=x onerror=alert(1)>]] | x |",
+            "",
+        ));
     }
 
     /// No attribute can be opened outside the ones the renderer writes:
