@@ -16,6 +16,7 @@ import { hooks } from './hooks';
 import { state } from './state';
 import { trunc } from './format';
 import { toast } from './toast';
+import { activityToastAllowed } from './storage';
 import { renderRtPop, resetRtPop, type PopAgent } from './ui/rt-pop';
 import { flyHome, flyIn } from './ui/agent-flight';
 import type { KeyRow, KeysResult, WsEvent } from './types';
@@ -103,6 +104,12 @@ export async function loadKeys(): Promise<void> {
   } catch {
     /* keep the last list; idle falls back to recently seen agents */
   }
+}
+
+/** The API key id behind an event: its own id, or the key with that name. */
+function keyOf(aid: string, actor: string): string {
+  if (aid) return aid;
+  return keyList?.find((k) => k.name === actor)?.id || '';
 }
 
 /** Agents with nothing running right now. */
@@ -363,10 +370,16 @@ export const RT = {
       // The activity page refreshes; other pages toast, except the brain,
       // which shows activity itself.
       if (state.page === 'logs') hooks.refreshLogs?.();
-      else if (state.page !== 'brain' && !state.editing && kind === 'agent') {
+      else if (state.page !== 'brain' && !state.editing && kind === 'agent' && activityToastAllowed(keyOf(aid, actor))) {
         toast(actor + ' · ' + trunc(ev.label, 70), 'ok', 2600);
       }
-    } else if (ev.ok === false && state.page !== 'brain' && state.page !== 'logs' && !state.editing) {
+    } else if (
+      ev.ok === false &&
+      state.page !== 'brain' &&
+      state.page !== 'logs' &&
+      !state.editing &&
+      activityToastAllowed(kind === 'agent' ? keyOf(aid, actor) : '')
+    ) {
       toast(actor + ' · ' + trunc(ev.label, 60) + ' failed', 'warn', 3200);
     }
   },

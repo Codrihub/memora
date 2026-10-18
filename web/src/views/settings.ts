@@ -11,12 +11,13 @@
 
 import { RELEASES_URL, takeSettingsSection, updateInfo } from '../version';
 import { apiGet, apiPost } from '../api';
+import { agentColor } from '../control/agents';
 import { setAccountName } from '../account';
 import { $, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
 import { icon } from '../ui/icons';
 import { Modal } from '../modal';
-import { clearTagIndex, pins, savePins, saveUI, ui } from '../storage';
+import { clearTagIndex, pins, savePins, saveToastPrefs, saveUI, toastPrefs, ui } from '../storage';
 import { state, type Page } from '../state';
 import { renderTree } from '../sidebar';
 import { setThemePref, themePref, type ThemePref } from '../theme';
@@ -31,7 +32,7 @@ import {
   systemHeader,
   useControlStyles,
 } from '../control/ui';
-import type { AuthState, Config, OkResult, SettingsInfo } from '../types';
+import type { AuthState, Config, KeyRow, KeysResult, OkResult, SettingsInfo } from '../types';
 
 /** The window listener that keeps the theme cards in step is added once. */
 let themeSync = false;
@@ -77,6 +78,16 @@ const CSS = `
 .st-l b{display:block;font-size:13.5px;font-weight:650;color:var(--fg)}
 .st-l small{display:block;font-size:12.5px;color:var(--text-2);line-height:1.5;margin-top:3px}
 .st-c{min-width:0}
+/* per-key toast switches */
+.st-tkeys{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:opacity .15s}
+.st-tkeys.off{opacity:.5}
+.st-tk{display:flex;align-items:center;gap:10px;padding:9px 12px;min-height:44px}
+.st-tk+.st-tk{border-top:1px solid var(--line)}
+.st-tk .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.st-tk .nm{flex:1;min-width:0;font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-tk .nm em{font-style:normal;font-size:11px;color:var(--muted);margin-left:4px}
+.st-tk .cc-sw:disabled{cursor:not-allowed}
+.st-tk-empty{display:block;padding:12px;font-size:12.5px;color:var(--muted)}
 .st-c.end{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap}
 .st-c .field{margin-bottom:12px}
 .st-c .field input{width:100%;box-sizing:border-box}
@@ -379,6 +390,7 @@ const SECTIONS = [
   ['stAccount', 'Account', 'user'],
   ['stVault', 'Vault folder', 'folder'],
   ['stInterface', 'Interface', 'sidebar'],
+  ['stToasts', 'Notifications', 'bell'],
   ['stLogs', 'Activity log', 'activity'],
   ['stServer', 'Server', 'monitor'],
   ['stVersion', 'Version', 'refresh'],
@@ -530,6 +542,18 @@ export async function renderSettings(): Promise<void> {
       ${row('Tag index', 'A cached index of tags; it is rebuilt the next time it is needed.', '<button class="btn" id="sClearIdx" type="button">Clear the cache</button>', {
         ctl: 'end',
       })}
+    </section>
+
+    <section class="st-card" id="stToasts" aria-labelledby="stToastsT">
+      ${head('stToasts', 'Notifications', 'Pop-up toasts when an agent works in the vault. Kept in this browser.', 'bell')}
+      ${row(
+        '<span id="sToastsL">Agent activity toasts</span>',
+        'The main switch. When it is off, no activity toast appears, even for keys turned on below.',
+        switchHTML('sToasts', !toastPrefs.off, 'Agent activity toasts', ' aria-labelledby="sToastsL"'),
+        { ctl: 'end' },
+      )}
+      <div class="st-row st-keys-row"><div class="st-l"><b>Per API key</b><small>Turn off the toasts of a single agent.</small></div>
+        <div class="st-c"><div class="st-tkeys" id="sToastKeys" aria-live="polite"><span class="st-tk-empty">Loading keys…</span></div></div></div>
     </section>
 
     <section class="st-card" id="stLogs" aria-labelledby="stLogsT">
@@ -1074,6 +1098,57 @@ export async function renderSettings(): Promise<void> {
     saveUI();
     toast(on ? 'The sidebar starts collapsed' : 'The sidebar starts open', 'ok', 1800);
   };
+  // ── notifications ────────────────────────────────────────────────────
+  const tSw = host.querySelector<HTMLButtonElement>('#sToasts')!;
+  const tBox = host.querySelector<HTMLElement>('#sToastKeys')!;
+  const paintToastKeys = (): void => {
+    tBox.classList.toggle('off', toastPrefs.off);
+    tBox.querySelectorAll<HTMLButtonElement>('.cc-sw').forEach((b) => {
+      b.disabled = toastPrefs.off;
+      b.setAttribute('aria-checked', String(!toastPrefs.muted.includes(b.dataset.key || '')));
+    });
+  };
+  tSw.onclick = () => {
+    toastPrefs.off = tSw.getAttribute('aria-checked') === 'true';
+    tSw.setAttribute('aria-checked', String(!toastPrefs.off));
+    saveToastPrefs();
+    paintToastKeys();
+    toast(toastPrefs.off ? 'Activity toasts are off' : 'Activity toasts are on', 'ok', 1800);
+  };
+  void apiGet<KeysResult | KeyRow[]>('/api/keys')
+    .then((d) => {
+      if (seq !== renderSeq) return;
+      const rows = Array.isArray(d) ? d : d.keys || [];
+      if (!rows.length) {
+        tBox.innerHTML = '<span class="st-tk-empty">No API keys yet.</span>';
+        return;
+      }
+      tBox.innerHTML = rows
+        .map((k, i) => {
+          const name = k.name || k.id;
+          return `<div class="st-tk"><span class="dot" style="background:${esc(agentColor(name, k.id))}"></span><span class="nm" id="sTk${i}">${esc(name)}${
+            k.enabled === false ? ' <em>disabled</em>' : ''
+          }</span>${switchHTML('sTkSw' + i, true, 'Toasts for ' + name, ` aria-labelledby="sTk${i}" data-key="${esc(k.id)}"`)}</div>`;
+        })
+        .join('');
+      tBox.querySelectorAll<HTMLButtonElement>('.cc-sw').forEach((b) => {
+        b.onclick = () => {
+          if (toastPrefs.off) return;
+          const id = b.dataset.key || '';
+          const muted = new Set(toastPrefs.muted);
+          if (muted.has(id)) muted.delete(id);
+          else muted.add(id);
+          toastPrefs.muted = [...muted];
+          saveToastPrefs();
+          paintToastKeys();
+        };
+      });
+      paintToastKeys();
+    })
+    .catch(() => {
+      if (seq === renderSeq) tBox.innerHTML = '<span class="st-tk-empty">The key list could not be loaded.</span>';
+    });
+
   host.querySelector<HTMLButtonElement>('#sClearPins')!.onclick = () => {
     pins.folders = [];
     pins.notes = [];

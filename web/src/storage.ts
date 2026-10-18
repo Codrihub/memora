@@ -6,6 +6,7 @@ const LS_PINS = 'memora.pins.v3';
 const LS_UI = 'memora.ui.v3';
 const LS_OPEN = 'memora.openfolders.v3';
 const LS_UPDATE = 'memora.updateNotice';
+const LS_TOASTS = 'memora.toasts.v1';
 const SS_TAGIDX = 'memora.tagidx';
 
 export interface Pins {
@@ -53,6 +54,31 @@ function field(v: unknown, k: string): unknown {
 const storedPins = read('local', LS_PINS);
 export const pins: Pins = { folders: strings(field(storedPins, 'folders')), notes: strings(field(storedPins, 'notes')) };
 export const ui: UiPrefs = { collapsed: field(read('local', LS_UI), 'collapsed') === true };
+
+/** Activity toasts: `off` silences every one; `muted` lists API key ids. */
+export interface ToastPrefs {
+  off: boolean;
+  muted: string[];
+}
+
+const storedToasts = read('local', LS_TOASTS);
+export const toastPrefs: ToastPrefs = {
+  off: field(storedToasts, 'off') === true,
+  muted: strings(field(storedToasts, 'muted')),
+};
+
+export function saveToastPrefs(): void {
+  write('local', LS_TOASTS, toastPrefs);
+}
+
+/**
+ * Whether an agent's activity may toast. The global switch wins: when it is
+ * off nothing toasts, whatever a key says. Otherwise a muted key stays quiet.
+ */
+export function activityToastAllowed(keyId: string): boolean {
+  if (toastPrefs.off) return false;
+  return !keyId || !toastPrefs.muted.includes(keyId);
+}
 
 export function savePins(): void {
   write('local', LS_PINS, pins);

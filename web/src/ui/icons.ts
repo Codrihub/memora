@@ -46,6 +46,7 @@ const P: Record<string, string> = {
   logout: '<path d="M15 4.5h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-3"/><path d="M10 16.5 5.5 12 10 7.5M5.5 12H15"/>',
   user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
   pin: '<path d="M12 17v4.5M8.5 3h7l-1 6 3 3v2h-11v-2l3-3z"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>',
   bolt: '<path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/>',
   wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.3" r=".9"/>',
   'wifi-off':
