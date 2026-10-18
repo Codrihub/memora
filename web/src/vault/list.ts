@@ -39,6 +39,7 @@ import {
 } from './store';
 import { inlineEdit } from './ui';
 import { normQuery, score, similar } from '../ui/match';
+import { mountSelect, type SelectOption } from '../ui/select';
 
 let query = '';
 /** Folders or Nodes, when a folder has both (kept while browsing). */
@@ -232,17 +233,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     prefs.filter === 'all' ? 'Nodes' : esc(FILTERS.find((x) => x.k === prefs.filter)?.label || 'Nodes')
   }<span>${notes.length}</span>${folder && isDeep ? '<em>including sub folders</em>' : ''}</h2>
     <span class="vx-grow"></span>
-    <label class="vx-select" title="Show">${FUNNEL}<span>${esc(
-      FILTERS.find((x) => x.k === prefs.filter)?.label || 'All',
-    )}</span><select class="vx-filter" aria-label="Show">${FILTERS.map(
-      (x) =>
-        `<option value="${x.k}"${prefs.filter === x.k ? ' selected' : ''}>${x.label}${
-          x.k === 'agents' && nAgents ? ` (${nAgents})` : ''
-        }</option>`,
-    ).join('')}</select></label>
-    <label class="vx-select" title="Sort by"><span>${esc(SORTS.find((x) => x.k === prefs.sort)?.label || '')}</span><select class="vx-sort" aria-label="Sort by">${SORTS.map(
-      (x) => `<option value="${x.k}"${prefs.sort === x.k ? ' selected' : ''}>${x.label}</option>`,
-    ).join('')}</select></label>
+    <span data-vx-sel="filter"></span><span data-vx-sel="sort"></span>
     <button class="vx-icon-btn vx-dir${prefs.dir < 0 ? ' desc' : ''}" aria-label="Sort direction: ${
       prefs.dir < 0 ? 'descending' : 'ascending'
     }" title="${prefs.dir < 0 ? 'Descending' : 'Ascending'}, click to reverse">${ARROW}</button>
@@ -355,17 +346,36 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     nq?.focus();
     nq?.setSelectionRange(query.length, query.length);
   }
-  tools.querySelector<HTMLSelectElement>('.vx-sort')!.onchange = (e) => {
-    prefs.sort = (e.target as HTMLSelectElement).value as SortKey;
-    prefs.dir = prefs.sort === 'mtime' ? -1 : 1;
-    savePrefs();
-    renderList(host, mobile);
-  };
-  tools.querySelector<HTMLSelectElement>('.vx-filter')!.onchange = (e) => {
-    prefs.filter = (e.target as HTMLSelectElement).value as ListFilter;
-    savePrefs();
-    renderList(host, mobile);
-  };
+  const label = (o: SelectOption | undefined, lead = ''): string => `${lead}<span>${esc(o?.label || '')}</span>`;
+  mountSelect(tools.querySelector('[data-vx-sel=filter]'), {
+    label: 'Show',
+    className: 'vx-select',
+    align: 'end',
+    minWidth: 180,
+    value: prefs.filter,
+    options: FILTERS.map((x) => ({ value: x.k, label: x.label, hint: x.k === 'agents' && nAgents ? `${nAgents} touched by agents` : undefined })),
+    render: (o) => label(o, FUNNEL),
+    onChange: (v) => {
+      prefs.filter = v as ListFilter;
+      savePrefs();
+      renderList(host, mobile);
+    },
+  }).el.title = 'Show';
+  mountSelect(tools.querySelector('[data-vx-sel=sort]'), {
+    label: 'Sort by',
+    className: 'vx-select',
+    align: 'end',
+    minWidth: 160,
+    value: prefs.sort,
+    options: SORTS.map((x) => ({ value: x.k, label: x.label })),
+    render: (o) => label(o),
+    onChange: (v) => {
+      prefs.sort = v as SortKey;
+      prefs.dir = prefs.sort === 'mtime' ? -1 : 1;
+      savePrefs();
+      renderList(host, mobile);
+    },
+  }).el.title = 'Sort by';
   tools.querySelector<HTMLElement>('.vx-dir')!.onclick = () => {
     prefs.dir = prefs.dir < 0 ? 1 : -1;
     savePrefs();

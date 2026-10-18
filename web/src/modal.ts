@@ -10,17 +10,11 @@ interface ModalAction {
   run: (body: HTMLElement) => void | Promise<void>;
 }
 
-interface FieldOption {
-  v: string;
-  l: string;
-}
-
 interface FieldOptions {
-  type?: 'text' | 'password' | 'number' | 'select' | 'textarea';
+  type?: 'text' | 'password' | 'number' | 'textarea';
   value?: string;
   ph?: string;
   hint?: string;
-  options?: FieldOption[];
 }
 
 interface ModalOptions {
@@ -164,16 +158,6 @@ export const Modal = {
   },
 
   field(label: string, id: string, opts: FieldOptions = {}): string {
-    if (opts.type === 'select') {
-      return `<div class="field"><label for="${attr(id)}">${esc(label)}</label><select id="${attr(id)}">${(
-        opts.options || []
-      )
-        .map(
-          (o) =>
-            `<option value="${attr(o.v)}"${o.v === opts.value ? ' selected' : ''}>${esc(o.l)}</option>`,
-        )
-        .join('')}</select></div>`;
-    }
     if (opts.type === 'textarea') {
       return `<div class="field"><label for="${attr(id)}">${esc(label)}</label><textarea id="${attr(id)}" placeholder="${attr(
         opts.ph || '',

@@ -1,26 +1,40 @@
-// Agents & API keys: every API key is an agent. Cards show who it is (name and
-// avatar, the same identity as in the brain and in Activity), whether it is
-// active, what it may do (scopes + tool access) and how it is used (calls,
-// last IP). Permissions, connect guides, the new key and renames open in a
-// sheet (side sheet on desktop, bottom sheet on phones). Create, permissions,
-// roll, rename, disable and delete keep the server contract of
+// Agents & API keys. An agent is one API key used by one app. The page answers
+// what is connected, whether it is working and what it may do: a compact
+// summary, then one row per agent (its app, status, access, calls and last
+// call). A row opens the agent's sheet, which holds everything else: setup,
+// permissions, rename, show key, new key, turn off and delete. Create,
+// permissions, roll, rename, disable and delete keep the server contract of
 // docs/contracts/tools-permissions.md.
 
-import { apiGet, apiPost, fetchTools, updateKeyPermissions } from '../api';
+import { apiGet, apiPost, updateKeyPermissions } from '../api';
 import { $, $$, esc, attr, useStyles } from '../dom';
 import { fmtTs } from '../format';
 import { Modal } from '../modal';
 import { state } from '../state';
 import { toast } from '../toast';
-import { categoryDesc, categoryLabel, groupTools, riskChip, TOOL_ROW_CSS, toolMatches, toolRisk, toolTitle } from './tools';
-import { agentColor, agentInitials, agentKey, avatarHTML, setAgentColors } from '../control/agents';
-import { loadKeys } from '../realtime';
+import { agentColor, agentKey, avatarHTML, setAgentColors } from '../control/agents';
+import { appOf, loadAgentApps, setAgentApp } from '../control/agent-apps';
+import { loadKeys, onAgents } from '../realtime';
 import { colorPickHTML, wireColorPick } from '../ui/color-pick';
-import { cardsSkeleton, skBlock } from '../ui/skeleton';
-import { mcpUrl, mountConnectWizard, snippets, type ConnectKey, type Wizard } from '../control/connect';
+import { skBlock } from '../ui/skeleton';
+import { appById, appIconHTML, mcpUrl, mountConnectWizard, snippets, type ConnectKey, type Wizard } from '../control/connect';
 import { loadFeed } from '../control/feed';
-import { ago, codeHTML, copyText, ICO, openMenu, openSheet, sparkSVG, systemHeader, useControlStyles, wireCopy, type Sheet } from '../control/ui';
-import type { KeyCreated, KeyRow, KeyScope, KeysResult, ToolAccess, ToolInfo } from '../types';
+import {
+  cachedCatalog,
+  loadCatalog,
+  permsHTML,
+  SCOPES,
+  scopesOf,
+  summarize,
+  toolsOf,
+  wirePerms,
+  type PermEditor,
+  type Permissions,
+} from '../control/perms';
+import { ago, codeHTML, copyText, ICO, openMenu, openSheet, sparkSVG, systemHeader, useControlStyles, whileVisible, wireCopy, type Sheet } from '../control/ui';
+import { createSelect } from '../ui/select';
+import { useFormStyles } from '../ui/forms';
+import type { KeyCreated, KeyRow, KeysResult } from '../types';
 import { icon } from '../ui/icons';
 
 const KEY_PATHS = {
@@ -33,28 +47,8 @@ const KEY_PATHS = {
   reveal: '/api/keys/reveal',
 };
 
-/** Everything except admin: the default for new keys and keys without scopes. */
-const DEFAULT_SCOPES: KeyScope[] = ['mcp', 'read', 'write'];
-
-const SCOPES: { id: KeyScope; label: string; short: string; hint: string }[] = [
-  { id: 'mcp', label: 'Use MCP tools', short: 'MCP', hint: 'Connect over MCP and call the tools allowed below.' },
-  { id: 'read', label: 'Read notes over the HTTP API', short: 'Read', hint: 'Plain HTTP requests that read notes, outside MCP.' },
-  { id: 'write', label: 'Change notes over the HTTP API', short: 'Write', hint: 'Create, edit, move and delete notes with HTTP requests.' },
-  {
-    id: 'admin',
-    label: 'Manage this server',
-    short: 'Admin',
-    hint: "Switch tools on or off for everyone and change any agent's key and permissions, its own included.",
-  },
-];
-
 /** An agent counts as active when it made a call this recently (seconds). */
 const ACTIVE_SECS = 300;
-
-interface Permissions {
-  scopes: KeyScope[];
-  tools: ToolAccess;
-}
 
 interface KeyRowFull extends KeyRow {
   prefix?: string;
@@ -69,324 +63,354 @@ interface Usage {
   spark: number[];
 }
 
-const ICO_EDIT = '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
-const ICO_TRASH =
-  '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
-const ICO_POWER = '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/></svg>';
-const ICO_EYE =
-  '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
-const ICO_CHEV = '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+const svg = (d: string): string => `<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICO_EDIT = svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>');
+const ICO_TRASH = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
+const ICO_POWER = svg('<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>');
+const ICO_EYE = svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>');
+const ICO_CHEV = svg('<path d="m9 6 6 6-6 6"/>');
+const ICO_RESTORE = svg('<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/>');
 
 const KEYS_CSS = `
-/* summary */
-.ky2-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 18px}
-.ky2-stat{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--r-lg);background:var(--panel);border:1px solid var(--line);min-width:0}
-.ky2-stat .tx{min-width:0;flex:1}
-.ky2-stat .k{font-size:12.5px;font-weight:600;color:var(--muted)}
-.ky2-stat .v{font-size:26px;font-weight:720;letter-spacing:-.5px;line-height:1.15;margin-top:2px;font-variant-numeric:tabular-nums}
-.ky2-stat .h{font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ky2-stat .sp{width:96px;flex:none}
-.ky2-stat .sp .cc-spark{height:34px}
-.ky2-stat .v .cc-dot{display:inline-block;vertical-align:middle;margin:-4px 0 0 8px}
+.ky{container:ky/inline-size}
 
-/* tabs (tablet and phone) */
-.ky2-tabs{display:none;gap:4px;padding:4px;margin:0 0 14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}
-.ky2-tabs button{flex:1;min-height:40px;padding:0 12px;border-radius:9px;font-size:13.5px;font-weight:620;color:var(--muted);white-space:nowrap}
-.ky2-tabs button[aria-selected=true]{background:var(--surface-1);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.18),inset 0 0 0 1px var(--line-strong)}
-.ky2-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ky2-tabs .n{font-weight:600;color:var(--muted);margin-left:4px;font-variant-numeric:tabular-nums}
+/* summary strip */
+.ky-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.9fr);margin:0 0 24px;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r-lg);min-width:0}
+.ky-st{display:flex;flex-direction:column;justify-content:center;gap:3px;padding:14px 18px;min-width:0;border-left:1px solid var(--line)}
+.ky-st:first-child{border-left:0}
+.ky-st .k{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+.ky-st .v{display:flex;align-items:center;gap:9px;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.ky-st .v small{font-size:12.5px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.ky-st .sp{width:72px;height:22px;flex:none}
+.ky-st .sp .cc-spark{height:22px}
+.ky-ep .row{display:flex;align-items:center;gap:6px;min-width:0}
+.ky-ep code{flex:1;min-width:0;font:500 12.5px/1.3 var(--mono);color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ky-ep .cc-ibtn{width:30px;height:30px;margin:-4px -6px -4px 0}
+#kReload.spin svg{animation:kySpin .8s linear infinite}
+@keyframes kySpin{to{transform:rotate(360deg)}}
+.ky-live{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
 
-/* layout */
-.ky2-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
-.ky2-h{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
-.ky2-h h2{margin:0;font-size:15px;font-weight:680}
-.ky2-h span{font-size:12.5px;color:var(--muted)}
-.ky2-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:stretch}
+/* section heading */
+.ky-h{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;min-width:0}
+.ky-h h2{margin:0;font-size:15px;font-weight:680}
+.ky-h span{font-size:12.5px;color:var(--muted)}
 
-/* agent card */
-.ky2{display:flex;flex-direction:column;gap:14px;padding:16px;border-radius:var(--r-lg);background:var(--panel);border:1px solid var(--line);
-  min-width:0;transition:border-color .16s}
-.ky2:hover{border-color:color-mix(in srgb,var(--ag,var(--accent)) 35%,var(--line))}
-.ky2.off{background:color-mix(in srgb,var(--panel) 65%,var(--bg))}
-.ky2.off .ag-av{filter:grayscale(1);opacity:.6}
-.ky2-top{display:flex;align-items:center;gap:12px;min-width:0}
-.ky2-id{flex:1;min-width:0}
-.ky2-id h3{margin:0;font-size:15.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ky2-st{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden}
-.ky2-st b{font-weight:620;color:var(--fg)}
-.ky2-st .cc-dot.off{background:var(--danger)}
-.ky2-st span{overflow:hidden;text-overflow:ellipsis}
-.ky2-more{width:44px;height:44px;margin:-6px -8px -6px 0;border-radius:11px}
-.ky2-chips{display:flex;flex-wrap:wrap;gap:6px}
-.kp{display:inline-flex;align-items:center;gap:6px;height:24px;font-size:12px;font-weight:620;padding:0 9px;border-radius:99px;
-  border:1px solid var(--line);background:var(--panel-2);color:var(--fg);white-space:nowrap}
-.kp.admin{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-soft)}
-.kp.tools{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
-.kp.none{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,transparent);background:var(--danger-soft)}
-.kp.oauth{color:var(--muted)}
-.ky2-use{display:grid;grid-template-columns:minmax(0,1.2fr) repeat(2,minmax(0,1fr));gap:12px;padding-top:13px;border-top:1px solid var(--line);margin-top:auto}
-.ky2-use>div{min-width:0}
-.ky2-use .k{display:block;font-size:11.5px;color:var(--muted);font-weight:600}
-.ky2-use .v{display:block;font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;margin-top:2px}
-.ky2-sp{display:block;height:18px;margin-top:4px}
-.ky2-sp .cc-spark{height:18px}
-.ky2-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.ky2-acts .btn{height:38px;border-radius:10px}
-
-/* connect panel */
-.ky2-side{position:sticky;top:12px}
-.ky2-conn .cc-card-h h2{font-size:14.5px;letter-spacing:0}
-.ky2-url{padding:14px 16px;border-bottom:1px solid var(--line)}
-.ky2-url .k{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px}
-.ky2-url .row{display:flex;align-items:center;gap:8px;min-width:0}
-.ky2-url code{flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;padding:9px 11px;border-radius:10px;background:var(--surface-0);
-  border:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ky2-url .cc-ibtn{width:40px;height:40px;border:1px solid var(--line)}
-.ky2-url p{margin:8px 0 0;font-size:12px;color:var(--muted);line-height:1.5}
-.ky2-clients{padding:6px}
-.ky2-cl{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:8px 10px;border-radius:10px;text-align:left}
-.ky2-cl:hover,.ky2-cl:focus-visible{background:var(--panel-2);outline:none}
-.ky2-cl .tx{flex:1;min-width:0}
-.ky2-cl b{display:block;font-size:13.5px;font-weight:620}
-.ky2-cl small{display:block;font-size:12px;color:var(--muted);margin-top:1px}
-.ky2-cl .cc-i{color:var(--muted)}
-.ky2-cl .ini{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;flex:none;font-size:12px;font-weight:750;
-  background:var(--panel-2);border:1px solid var(--line);color:var(--fg)}
-.ky2-steps{margin:0;padding:12px 16px 14px;list-style:none;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px;
-  font-size:12.5px;color:var(--muted)}
-.ky2-steps li{display:flex;gap:9px;align-items:center}
-.ky2-start{padding:12px 16px;border-bottom:1px solid var(--line)}
-.ky2-start .btn{width:100%;height:40px;border-radius:10px}
-.ky2-steps .n{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;flex:none;font-size:11px;font-weight:700;
-  color:var(--accent);background:var(--accent-soft)}
+/* agents list */
+.kl{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;min-width:0}
+.kl ul{list-style:none;margin:0;padding:0}
+.kl-head,.kr{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1.2fr) minmax(0,.9fr) minmax(0,1.35fr) minmax(0,.95fr) minmax(0,.8fr) 36px;
+  align-items:center;gap:16px;padding:0 12px 0 18px}
+.kl-head{height:40px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
+.kr{position:relative;min-height:66px;border-top:1px solid var(--line);transition:background .12s}
+.kr:first-child{border-top:0}
+.kr:hover{background:var(--hover)}
+.kr-hit{position:absolute;inset:0;z-index:0;width:100%;border-radius:0;cursor:pointer}
+.kr-hit:focus-visible{border-radius:0;box-shadow:inset 0 0 0 2px var(--accent)}
+.kr>:not(.kr-hit){position:relative;min-width:0;pointer-events:none}
+.kr>.kr-act{pointer-events:auto;z-index:1}
+.kr-agent{display:flex;align-items:center;gap:12px}
+.kr-agent .t{display:flex;flex-direction:column;min-width:0}
+.kr-agent b{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kr-agent .kid{font:500 11.5px/1.3 var(--mono);color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.kr-agent .sub2{display:none;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.kr-app{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2)}
+.kr-app span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kr-app .none{color:var(--text-3)}
+.kr-st{display:flex;align-items:center;gap:9px;font-size:13px}
+.kr-st .t{display:flex;flex-direction:column;min-width:0}
+.kr-st b{font-weight:600;white-space:nowrap}
+.kr-st small{display:none;font-size:12px;color:var(--muted);white-space:nowrap}
+.sd{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-3)}
+.sd.active{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
+.sd.never{background:transparent;box-shadow:inset 0 0 0 1.5px var(--text-3)}
+.sd.off{background:var(--danger)}
+.kr-perm{display:flex;flex-direction:column;font-size:13px;min-width:0}
+.kr-perm b{font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kr-perm small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kr-perm.warn b{color:var(--warn)}
+.kr-perm.none b{color:var(--danger)}
+.kr-calls{display:flex;align-items:center;gap:10px}
+.kr-calls b{font-size:13.5px;font-weight:620;font-variant-numeric:tabular-nums;min-width:1.6em}
+.kr-calls b.z{color:var(--text-3);font-weight:500}
+.kr-calls .sp{width:56px;height:20px;flex:none}
+.kr-calls .sp .cc-spark{height:20px}
+.kr-seen{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kr-act .cc-ibtn{width:34px;height:34px}
+.kr.off .ag-av{filter:grayscale(1);opacity:.55}
+.kr.off .kr-agent b{color:var(--muted)}
+.kr .tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;margin-left:6px;border-radius:99px;font-size:10.5px;font-weight:650;
+  color:var(--muted);border:1px solid var(--line);vertical-align:1px}
 
 /* deleted */
-.ky2-del{margin-top:22px}
-.ky2-del-row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid var(--line);min-height:56px}
-.ky2-del-row:first-child{border-top:0}
-.ky2-del-row .tx{flex:1;min-width:0}
-.ky2-del-row b{display:block;font-size:13.5px}
-.ky2-del-row small{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.ky-del{margin-top:28px}
+.ky-del .kl{background:transparent}
+.kd{display:flex;align-items:center;gap:12px;padding:10px 12px 10px 18px;border-top:1px solid var(--line);min-height:58px}
+.kd:first-child{border-top:0}
+.kd .ag-av{filter:grayscale(1);opacity:.6}
+.kd .tx{flex:1;min-width:0}
+.kd b{display:block;font-size:13.5px;font-weight:600;color:var(--text-2)}
+.kd small{display:block;font:500 11.5px/1.3 var(--mono);color:var(--text-3)}
+.kd .btn{height:34px}
 
-/* sheets */
-.ky2-prev{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);margin:0 0 18px}
-.ky2-prev b{display:block;font-size:14.5px}
-.ky2-prev small{display:block;font-size:12px;color:var(--muted)}
-.ky2-secret{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:12px;margin:0 0 10px;font-size:12.5px;line-height:1.5;
-  border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
-.ky2-secret .cc-i{color:var(--warn);margin-top:1px}
-.ky2-secret+.cc-code-wrap .cc-code{white-space:pre-wrap;word-break:break-all}
+/* empty */
+.ky-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:44px 22px 40px}
+.ky-empty .ic{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;margin-bottom:16px;background:var(--accent-soft);color:var(--accent);
+  border:1px solid var(--accent-line)}
+.ky-empty .ic .cc-i{width:24px;height:24px}
+.ky-empty h3{margin:0 0 6px;font-size:17px;font-weight:700}
+.ky-empty p{margin:0 0 18px;max-width:52ch;font-size:13.5px;line-height:1.6;color:var(--muted)}
+.ky-empty .btn.primary{height:40px;padding:0 18px;border-radius:11px}
+.ky-pop{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:20px}
+.ky-pop button{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:99px;font-size:13px;font-weight:600;
+  border:1px solid var(--line);background:var(--surface-0);color:var(--text-2)}
+.ky-pop button:hover{border-color:var(--line-strong);color:var(--fg)}
+.ky-err{padding:28px 20px;text-align:center;color:var(--muted);font-size:13px}
+.ky-err b{display:block;color:var(--fg);margin-bottom:4px}
+.ky-sk{display:flex;align-items:center;gap:14px;padding:0 18px;min-height:66px;border-top:1px solid var(--line)}
+.ky-sk:first-child{border-top:0}
 
-/* permissions editor */
-.pe2-row{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;min-width:0}
-.pe2-row .tx{flex:1;min-width:0}
-.pe2-row b{display:block;font-size:13.5px;font-weight:620}
-.pe2-row small{display:block;font-size:12px;color:var(--muted);line-height:1.45;margin-top:2px}
-.pe2-row.admin{border-color:color-mix(in srgb,var(--warn) 30%,var(--line))}
-.pe2-warn{font-size:12.5px;line-height:1.5;padding:10px 12px;border-radius:10px;margin:0 0 8px;
-  border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
-.pe2-warn[hidden],.pe2-pick[hidden],.pe2-note[hidden],.pe2-box[hidden]{display:none}
-.pe2-seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 12px}
-.pe2-opt{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer;min-width:0}
-.pe2-opt:has(input:checked){border-color:var(--accent-line);background:var(--accent-soft)}
-.pe2-opt:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
-.pe2-opt:has(input:disabled){opacity:.5;cursor:not-allowed}
-.pe2-opt input{flex:none;width:17px;height:17px;margin:1px 0 0;accent-color:var(--accent)}
-.pe2-opt b{display:block;font-size:13.5px;font-weight:620}
-.pe2-opt small{display:block;font-size:12px;color:var(--muted);line-height:1.4;margin-top:2px}
-.pe2-note{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 0 10px}
-.pe2-dim{opacity:.55}
-.pe2-pick{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
-.pe2-ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--line);background:var(--panel-2)}
-.pe2-ph .cc-search{flex:1 1 180px;max-width:none;height:40px;background:var(--surface-1)}
-.pe2-ph .btn{height:36px}
-.pe2-cnt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex:1 1 100%}
-.pe2-cnt b{color:var(--fg)}
-.pe2-cat-h{display:flex;align-items:center;gap:12px;padding:10px 12px;background:color-mix(in srgb,var(--panel-2) 60%,transparent);border-top:1px solid var(--line)}
-.pe2-cat:first-child .pe2-cat-h{border-top:0}
-.pe2-cat-h .tx{flex:1;min-width:0}
-.pe2-cat-h b{display:block;font-size:13px;font-weight:680}
-.pe2-cat-h small{display:block;font-size:11.5px;color:var(--muted)}
-.pe2-tool{display:flex;align-items:center;gap:12px;padding:10px 12px;border-top:1px solid var(--line);min-width:0}
-.pe2-tool .tx{flex:1;min-width:0}
-.pe2-tool .nm{font-size:13px;font-weight:600}
-.pe2-tool .ds{font-size:12px;color:var(--muted);line-height:1.4;margin-top:1px}
-.pe2-tool .mt{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0;flex-wrap:wrap}
-.pe2-tool .offall{font-size:11px;font-weight:650;color:var(--danger)}
-.pe2-empty{padding:18px 12px;text-align:center;color:var(--muted);font-size:12.5px}
-.pe2-sum{font-size:12.5px;color:var(--muted);padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);line-height:1.5}
-.pe2-sum b{color:var(--fg)}
-.pe2-box{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2)}
-.pe2-box .tx{flex:1 1 200px;min-width:0;font-size:12.5px;color:var(--muted);line-height:1.5}
-.pe2-box .tx b{color:var(--fg);display:block;font-size:13.5px;margin-bottom:4px}
-.pe2-box .btn{height:38px}
-
-@media (max-width:1100px){
-  .ky2-stat{flex-direction:column;align-items:stretch;gap:6px}
-  .ky2-stat .sp{width:100%}
-  .ky2-stat .sp .cc-spark{height:22px}
-  .ky2-tabs{display:flex}
-  .ky2-layout{grid-template-columns:1fr}
-  .ky2-layout>[data-pane]:not(.on){display:none}
-  .ky2-side{position:static}
-  .ky2-h{display:none}
+/* tablet: condensed rows */
+@container ky (max-width:899px){
+  .ky-sum{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ky-ep{grid-column:1/-1;border-left:0;border-top:1px solid var(--line);flex-direction:row;align-items:center;gap:12px;padding:11px 18px}
+  .ky-ep .row{flex:1}
+  .kl-head{display:none}
+  .kr{grid-template-columns:minmax(0,1fr) 130px 110px 36px;gap:14px}
+  .kr-app,.kr-perm,.kr-seen{display:none}
+  .kr-agent .kid{display:none}
+  .kr-agent .sub2{display:block}
+  .kr-st{align-items:flex-start}
+  .kr-st .sd{margin-top:6px}
+  .kr-st small{display:block}
 }
+/* phone: stacked cards */
+@container ky (max-width:599px){
+  .ky-sum{margin-bottom:20px}
+  .ky-st{padding:12px 14px}
+  .ky-st .v{font-size:20px}
+  .ky-st .sp,.ky-st .v small{display:none}
+  .ky-ep{padding:10px 14px}
+  .ky-ep .k{display:none}
+  .kl{background:transparent;border:0;border-radius:0;overflow:visible}
+  .kl ul{display:flex;flex-direction:column;gap:8px}
+  .kr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"agent act" "st calls";gap:12px 10px;padding:14px 10px 13px 14px;
+    border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+  .kr:first-child{border-top:1px solid var(--line)}
+  .kr-hit{border-radius:14px}
+  .kr-hit:focus-visible{border-radius:14px}
+  .kr-agent{grid-area:agent}
+  .kr-act{grid-area:act;align-self:start;justify-self:end;margin:-6px -2px 0 0}
+  .kr-st{grid-area:st;flex-direction:row;align-items:center;padding-left:52px}
+  .kr-st .sd{margin-top:0}
+  .kr-st .t{flex-direction:row;align-items:baseline;gap:6px}
+  .kr-calls{grid-area:calls;justify-self:end;padding-right:6px}
+  .kr-act .cc-ibtn{width:40px;height:40px}
+  .ky-del .kl{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .kd{padding:10px 12px 10px 14px}
+  .ky-empty{padding:34px 18px 30px}
+}
+
+/* agent sheet */
+.ad-hero{padding:16px;border-radius:14px;border:1px solid var(--line);background:var(--surface-2);margin:0 0 22px}
+.ad-status{display:flex;align-items:center;gap:10px;min-width:0}
+.ad-status .sd{width:10px;height:10px}
+.ad-status b{font-size:15px;font-weight:680}
+.ad-status span{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ad-stats{display:grid;grid-template-columns:minmax(0,1.3fr) repeat(2,minmax(0,1fr));gap:14px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.ad-stats>div{min-width:0}
+.ad-stats .k{display:block;font-size:11.5px;font-weight:600;color:var(--muted)}
+.ad-stats .v{display:flex;align-items:center;gap:10px;margin-top:3px;font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ad-stats .v.mono{font:600 13px/1.6 var(--mono)}
+.ad-stats .sp{width:72px;height:22px;flex:none}
+.ad-stats .sp .cc-spark{height:22px}
+.ad-sec{margin:0 0 22px}
+.ad-sec>h3{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;font-size:12.5px;font-weight:650;color:var(--text-2)}
+.ad-box{border:1px solid var(--line);border-radius:12px;background:var(--surface-0);min-width:0}
+.ad-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line);min-width:0;min-height:56px}
+.ad-row:first-child{border-top:0}
+.ad-row .tx{flex:1;min-width:0}
+.ad-row .tx b{display:block;font-size:13.5px;font-weight:620}
+.ad-row .tx small{display:block;margin-top:1px;font-size:12px;color:var(--muted);line-height:1.45}
+.ad-row code{font:500 12.5px var(--mono);color:var(--fg);word-break:break-all}
+.ad-row .btn{height:34px;flex:none}
+.ad-row .cc-ibtn{width:34px;height:34px;border:1px solid var(--line)}
+.ad-app{display:flex;flex-direction:column;gap:8px}
+.ad-app .ui-sel{height:48px;border-radius:12px}
+.ad-app .ui-sel-v small{display:block;font-size:12px;color:var(--muted);line-height:1.3}
+.ad-app .hint{font-size:12px;color:var(--muted);line-height:1.45}
+.ad-perm{display:flex;align-items:flex-start;gap:12px;padding:14px}
+.ad-perm .tx{flex:1;min-width:0}
+.ad-perm b{display:block;font-size:14px;font-weight:650}
+.ad-perm.warn b{color:var(--warn)}
+.ad-perm.none b{color:var(--danger)}
+.ad-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ad-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:99px;font-size:11.5px;font-weight:620;
+  color:var(--text-2);background:var(--surface-2);border:1px solid var(--line)}
+.ad-chip.admin{color:var(--warn);background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.ad-act{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px 11px 14px;border-top:1px solid var(--line);text-align:left;min-height:56px;
+  color:var(--fg);transition:background .12s}
+.ad-act:first-child{border-top:0;border-radius:12px 12px 0 0}
+.ad-act:last-child{border-radius:0 0 12px 12px}
+.ad-act:hover{background:var(--hover)}
+.ad-act:focus-visible{border-radius:inherit;box-shadow:inset 0 0 0 2px var(--accent)}
+.ad-act .ic{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;flex:none;color:var(--text-2);background:var(--surface-2);
+  border:1px solid var(--line)}
+.ad-act .tx{flex:1;min-width:0}
+.ad-act b{display:block;font-size:13.5px;font-weight:620}
+.ad-act small{display:block;margin-top:1px;font-size:12px;color:var(--muted);line-height:1.4}
+.ad-act>.cc-i{color:var(--text-3)}
+.ad-act.danger b,.ad-act.danger .ic{color:var(--danger)}
+.ad-act.danger .ic{background:var(--danger-soft);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+.ad-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:620;color:var(--accent)}
+.ad-link .cc-i{width:15px;height:15px}
+
+/* small sheets */
+.ky-prev{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);margin:0 0 18px}
+.ky-prev b{display:block;font-size:14.5px}
+.ky-prev small{display:block;font-size:12px;color:var(--muted)}
+.ky-secret{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:12px;margin:0 0 10px;font-size:12.5px;line-height:1.5;
+  border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
+.ky-secret .cc-i{color:var(--warn);margin-top:1px}
+.ky-secret+.cc-code-wrap .cc-code,.ky-reveal .cc-code{white-space:pre-wrap;word-break:break-all}
 @media (max-width:760px){
-  .ky2-stats{gap:8px;margin-bottom:14px}
-  .ky2-stat{padding:11px 12px;flex-direction:column;align-items:stretch;gap:4px}
-  .ky2-stat .v{font-size:21px}
-  .ky2-stat .h{display:none}
-  .ky2-stat .sp{display:none}
-  .ky2-grid{grid-template-columns:1fr;gap:10px}
-  .ky2{padding:14px}
-  .ky2-acts .btn{height:44px}
-  .pe2-seg{grid-template-columns:1fr}
-  .pe2-ph .btn{flex:1;height:40px}
-  .pe2-ph .cc-search{flex-basis:100%;height:44px}
+  .ad-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ad-stats>div:first-child{grid-column:1/-1}
 }
 `;
 
-let catalog: ToolInfo[] | null = null;
-
-/** The tool catalog, cached for the session; null when the server has none. */
-async function loadCatalog(force = false): Promise<ToolInfo[] | null> {
-  if (catalog && !force) return catalog;
-  try {
-    catalog = await fetchTools();
-  } catch {
-    catalog = null;
-  }
-  return catalog;
-}
-
-function scopesOf(k: { scopes?: string[] }): KeyScope[] {
-  if (!k.scopes) return [...DEFAULT_SCOPES];
-  return SCOPES.map((s) => s.id).filter((id) => k.scopes!.includes(id));
-}
-
-function toolsOf(k: { tools?: ToolAccess }): ToolAccess {
-  return Array.isArray(k.tools) ? k.tools : '*';
-}
-
-function toolSummary(tools: ToolAccess, scopes: KeyScope[], total: number | null): { text: string; cls: string } {
-  if (!scopes.includes('mcp')) return { text: 'No MCP access', cls: 'none' };
-  if (tools === '*') return { text: total ? `All ${total} tools` : 'All tools', cls: 'tools' };
-  if (!tools.length) return { text: 'No tools', cls: 'none' };
-  return {
-    text: total ? `${tools.length} of ${total} tools` : `${tools.length} tool${tools.length === 1 ? '' : 's'}`,
-    cls: 'tools',
-  };
-}
-
-function permPills(p: Permissions, total: number | null): string {
-  const sum = toolSummary(p.tools, p.scopes, total);
-  const scopes = p.scopes.length
-    ? p.scopes
-        .map((s) => {
-          const def = SCOPES.find((x) => x.id === s)!;
-          return `<span class="kp${s === 'admin' ? ' admin' : ''}" title="${attr(def.label)}">${esc(def.short)}</span>`;
-        })
-        .join('')
-    : '<span class="kp none">Nothing allowed</span>';
-  return `${scopes}<span class="kp ${sum.cls}">${esc(sum.text)}</span>`;
-}
-
-function scopeText(scopes: KeyScope[]): string {
-  return scopes.length ? scopes.map((x) => SCOPES.find((d) => d.id === x)!.short).join(', ') : 'nothing';
-}
-
 let keys: KeyRowFull[] = [];
-let oauthKeys = new Set<string>();
+/** Keys an AI app got by signing in over OAuth, with the app's client name. */
+let oauthKeys = new Map<string, string>();
 let usage = new Map<string, Usage>();
-let pane: 'agents' | 'connect' = 'agents';
-/** Bumped on every render so a slower, older load cannot paint over a newer one. */
-let renderSeq = 0;
+/** Bumped on every load so a slower, older load cannot paint over a newer one. */
+let loadSeq = 0;
+let loaded = false;
+
+const nameOf = (k: { id: string; name?: string }): string => k.name || k.id;
+const permsOf = (k: KeyRow): Permissions => ({ scopes: scopesOf(k), tools: toolsOf(k) });
 
 function usageOf(k: KeyRow): Usage | undefined {
-  return usage.get(agentKey(k.name || k.id));
+  return usage.get(agentKey(nameOf(k)));
 }
+
+function appFor(k: KeyRow): { id: string; label: string; guessed: boolean } {
+  const a = appOf(k, oauthKeys.get(k.id));
+  const s = a.id ? appById(a.id) : undefined;
+  return { id: s ? a.id : '', label: s?.label || '', guessed: a.guessed };
+}
+
+type Status = 'active' | 'idle' | 'never' | 'off';
+
+function statusOf(k: KeyRowFull, now = Date.now() / 1000): { st: Status; label: string; seen: string } {
+  const u = usageOf(k);
+  const seen = u ? (ago(u.last) === 'now' ? 'Just now' : ago(u.last) + ' ago') : k.uses ? 'Over a week ago' : 'Never';
+  if (k.enabled === false) return { st: 'off', label: 'Off', seen };
+  if (u && now - u.last < ACTIVE_SECS) return { st: 'active', label: 'Active', seen };
+  if (u || k.uses) return { st: 'idle', label: 'Idle', seen };
+  return { st: 'never', label: 'Never used', seen };
+}
+
+// ── page ────────────────────────────────────────────────────────────────
 
 export async function renderKeys(): Promise<void> {
   useControlStyles();
-  useStyles('keys-css-2', KEYS_CSS + TOOL_ROW_CSS);
+  useFormStyles();
+  useStyles('keys-css-3', KEYS_CSS);
   takeConnectHash();
   const host = $('#view-keys');
-  const seq = ++renderSeq;
-  const tile = (k: string): string =>
-    `<div class="ky2-stat"><div class="tx"><div class="k">${k}</div><div class="v">${skBlock('42px', 24)}</div><div class="h">${skBlock('70%', 9)}</div></div></div>`;
-  host.innerHTML = `<div class="cc">
+  loaded = false;
+  host.innerHTML = `<div class="cc ky">
     ${systemHeader(
       'keys',
       'Agents & API keys',
-      'Each agent connects over MCP with its own key; its name is how it shows up everywhere.',
-      `<button type="button" class="btn primary" id="kNew">${ICO.plus}New agent</button>
-       <button type="button" class="cc-ibtn" id="kReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>`,
+      'Each agent is one API key used by one app. Its name is how it shows up in Activity, the brain and the graph.',
+      `<button type="button" class="cc-ibtn" id="kReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>
+       <button type="button" class="btn primary" id="kNew">${ICO.plug}Connect an app</button>`,
     )}
-    <div class="ky2-stats" id="kStats" aria-live="polite">${tile('Agents')}${tile('Active now')}${tile('Calls in 24h')}</div>
-    <div class="ky2-tabs" role="tablist" aria-label="Section">
-      <button type="button" role="tab" id="kTabA" aria-controls="kPaneA" data-pane-t="agents" aria-selected="${pane === 'agents'}">Agents<span class="n" id="kTabN"></span></button>
-      <button type="button" role="tab" id="kTabC" aria-controls="kPaneC" data-pane-t="connect" aria-selected="${pane === 'connect'}">Connect an app</button>
-    </div>
-    <div class="ky2-layout">
-      <section class="ky2-main${pane === 'agents' ? ' on' : ''}" data-pane="agents" id="kPaneA" role="tabpanel" aria-labelledby="kTabA">
-        <div class="ky2-h"><h2>Agents</h2><span id="kCount"></span></div>
-        <div class="ky2-grid" id="kList" aria-busy="true">${cardsSkeleton(4, 'ky2')}</div>
-        <div id="kDel"></div>
-      </section>
-      <aside class="ky2-side${pane === 'connect' ? ' on' : ''}" data-pane="connect" id="kPaneC" role="tabpanel" aria-labelledby="kTabC">
-        ${connectPanel()}
-      </aside>
-    </div></div>`;
-  $('#kNew').onclick = () => void openNewKey();
-  $('#kReload').onclick = () => void renderKeys();
-  $$<HTMLButtonElement>('[data-pane-t]', host).forEach((b, i, all) => {
-    b.onclick = () => {
-      pane = b.dataset.paneT as typeof pane;
-      all.forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-      $$<HTMLElement>('[data-pane]', host).forEach((p) => p.classList.toggle('on', p.dataset.pane === pane));
-    };
-    b.onkeydown = (e) => {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-      e.preventDefault();
-      const n = all[(i + 1) % all.length];
-      n.click();
-      n.focus();
+    <div class="ky-sum" id="kStats" aria-live="polite">${statsHTML(null)}</div>
+    <div class="ky-h"><h2>Agents</h2><span id="kCount"></span></div>
+    <div class="kl" id="kList" aria-busy="true">${skeletonRows()}</div>
+    <div id="kDel"></div></div>`;
+  $('#kNew').onclick = () => void openConnect();
+  $('#kReload').onclick = () => void load(true);
+  wireCopy($('#kStats'));
+  whileVisible(host, () => {
+    let t = 0;
+    const unsub = onAgents((_n, seen) => {
+      // A call shows up at once: bump the agent's last call and repaint soon.
+      let changed = false;
+      for (const s of seen) {
+        if (s.kind !== 'agent') continue;
+        const k = keys.find((x) => (s.id ? x.id === s.id : agentKey(nameOf(x)) === agentKey(s.actor)));
+        if (!k) continue;
+        const key = agentKey(nameOf(k));
+        const last = Math.floor(s.lastAt / 1000);
+        const u = usage.get(key);
+        if (!u) usage.set(key, { last, day: 0, spark: new Array(24).fill(0) });
+        else if (last > u.last) u.last = last;
+        else continue;
+        changed = true;
+      }
+      if (changed && !t) t = window.setTimeout(() => ((t = 0), paint()), 800);
+    });
+    // Active turns Idle after five quiet minutes; keep the times honest.
+    const tick = window.setInterval(() => paint(), 30000);
+    return () => {
+      unsub();
+      clearTimeout(t);
+      clearInterval(tick);
     };
   });
-  $('#kConnStart').onclick = () => openConnect({});
-  $$<HTMLElement>('[data-client]', host).forEach((b) => (b.onclick = () => openConnect({ client: b.dataset.client, step: 2 })));
-  wireCopy(host);
+  await load();
+}
 
-  const cat = loadCatalog(true);
+function skeletonRows(): string {
+  return Array.from(
+    { length: 4 },
+    () => `<div class="ky-sk">${skBlock('32px', 32)}<span style="flex:1">${skBlock('28%', 11)}</span><span style="flex:1">${skBlock('40%', 10)}</span></div>`,
+  ).join('');
+}
+
+/** Fetch keys, OAuth connections, app choices, the catalog and the feed, then paint. */
+async function load(reload = false): Promise<void> {
+  const seq = ++loadSeq;
+  const btn = document.getElementById('kReload');
+  btn?.classList.add('spin');
+  const cat = loadCatalog(reload || !cachedCatalog());
+  const apps = loadAgentApps(reload);
   const feedP = loadFeed('7d', 1500).catch(() => []);
   try {
     const d = await apiGet<KeysResult | KeyRow[]>('/api/keys');
     keys = (Array.isArray(d) ? d : d.keys || []) as KeyRowFull[];
     setAgentColors(keys);
-    // Keys an AI app got by signing in over OAuth.
-    oauthKeys = new Set(
-      ((await apiGet<{ connections?: { key_id: string }[] }>('/api/oauth/clients').catch(() => null))?.connections || []).map(
-        (c) => c.key_id,
-      ),
-    );
+    const o = await apiGet<{ clients?: { client_id: string; name?: string; client_name?: string }[]; connections?: { key_id: string; client_id: string }[] }>(
+      '/api/oauth/clients',
+    ).catch(() => null);
+    const names = new Map((o?.clients || []).map((c) => [c.client_id, c.name || c.client_name || '']));
+    oauthKeys = new Map((o?.connections || []).map((c) => [c.key_id, names.get(c.client_id) || '']));
   } catch (e) {
-    if (seq !== renderSeq) return;
-    $('#kStats').innerHTML = '';
-    $('#kList').removeAttribute('aria-busy');
-    $('#kList').innerHTML = `<div class="cc-card cc-empty" style="grid-column:1/-1"><b>Could not load the agents</b>${esc((e as Error).message)}
-      <div style="margin-top:12px"><button type="button" class="btn" id="kRetry">${ICO.refresh}Try again</button></div></div>`;
-    $('#kRetry').onclick = () => void renderKeys();
+    btn?.classList.remove('spin');
+    if (seq !== loadSeq || !$('#kList')) return;
+    $('#kStats').innerHTML = statsHTML(null);
+    const list = $('#kList');
+    list.removeAttribute('aria-busy');
+    list.innerHTML = `<div class="ky-err"><b>Could not load the agents</b>${esc((e as Error).message)}
+      <div style="margin-top:14px"><button type="button" class="btn" id="kRetry">${ICO.refresh}Try again</button></div></div>`;
+    $('#kRetry').onclick = () => void load(true);
     openFromHash();
     return;
   }
-  const total = (await cat)?.length || null;
+  await Promise.all([cat, apps]);
   const feed = await feedP;
-  if (seq !== renderSeq || !document.body.contains(host) || !host.querySelector('#kList')) return;
+  btn?.classList.remove('spin');
+  if (seq !== loadSeq || !document.getElementById('kList')) return;
 
   // Usage per agent name: last call, calls in 24h and an hourly sparkline.
   const now = Date.now() / 1000;
   usage = new Map();
-  const all24 = new Array(24).fill(0);
   for (const it of feed) {
     if (it.source !== 'agent') continue;
     const k = agentKey(it.actor);
@@ -397,160 +421,143 @@ export async function renderKeys(): Promise<void> {
     if (h >= 0 && h < 24) {
       u.day++;
       u.spark[23 - h]++;
-      all24[23 - h]++;
     }
   }
-  const on = keys.filter((k) => k.enabled !== false);
-  const active = on.filter((k) => {
-    const u = usageOf(k);
-    return u && now - u.last < ACTIVE_SECS;
-  }).length;
-  const day = all24.reduce((a, b) => a + b, 0);
-  const off = keys.length - on.length;
-  $('#kStats').innerHTML = `
-    <div class="ky2-stat"><div class="tx"><div class="k">Agents</div><div class="v">${keys.length}</div><div class="h">${
-      off ? `${off} turned off` : keys.length ? 'All turned on' : 'None yet'
-    }</div></div></div>
-    <div class="ky2-stat"><div class="tx"><div class="k">Active now</div><div class="v">${active}${active ? '<span class="cc-dot ok"></span>' : ''}</div><div class="h">Called in the last 5 minutes</div></div></div>
-    <div class="ky2-stat"><div class="tx"><div class="k">Calls in 24h</div><div class="v">${day}</div><div class="h">Across all agents</div></div>${
-      day ? `<div class="sp">${sparkSVG(all24, 96, 34)}</div>` : ''
-    }</div>`;
-  $('#kTabN').textContent = String(keys.length);
-  $('#kCount').textContent = keys.length ? `${on.length} on, ${off} off` : '';
-
-  const list = $('#kList');
-  list.removeAttribute('aria-busy');
-  list.innerHTML = keys.length
-    ? keys.map((k) => keyCard(k, total, now)).join('')
-    : `<div class="cc-card cc-empty" style="grid-column:1/-1;padding:34px 20px"><b>No agents yet</b>Make one agent per app (Claude Code, Cursor, Codex...) so each shows up under its own name.
-        <div style="margin-top:14px"><button type="button" class="btn primary" data-a="new">${ICO.plus}New agent</button></div></div>`;
-
-  $$<HTMLElement>('[data-a]', list).forEach(
-    (b) =>
-      (b.onclick = () => {
-        const a = b.dataset.a!;
-        if (a === 'new') return void openNewKey();
-        const k = keys.find((x) => x.id === b.dataset.id);
-        if (!k) return;
-        if (a === 'perms') return void openKeyPermissions(k);
-        if (a === 'connect') return openConnect({ agent: connectKey(k) });
-        if (a === 'more') agentMenu(b, k);
-      }),
-  );
-  paintDeleted();
+  loaded = true;
+  paint();
   openFromHash();
 }
 
-// `/agents#connect` opens the connect wizard; `#connect=<client>` preselects an app.
-// The router rewrites the address before the agents load, so the hash is read
-// as early as possible: when this module loads and when the page starts to render.
-const CONNECT_HASH = /^#connect(?:=([\w-]+))?$/;
-const bootHash = /^\/(agents|keys)\/?$/.test(location.pathname) ? CONNECT_HASH.exec(location.hash) : null;
-let pendingConnect: string | null = bootHash ? bootHash[1] || '' : null;
-
-function takeConnectHash(): void {
-  const m = CONNECT_HASH.exec(location.hash);
-  if (!m) return;
-  pendingConnect = m[1] || '';
-  history.replaceState(history.state, '', location.pathname + location.search);
+function paint(): void {
+  if (!loaded || !document.getElementById('kList')) return;
+  $('#kStats').innerHTML = statsHTML(keys);
+  wireCopy($('#kStats'));
+  paintList();
+  paintDeleted();
 }
 
-function openFromHash(): void {
-  if (pendingConnect === null) return;
-  const id = pendingConnect;
-  pendingConnect = null;
-  const client = id && snippets().some((s) => s.id === id) ? id : undefined;
-  openConnect(client ? { client, step: 2 } : {});
-}
-
-// A hash set while the app runs also fires popstate, and the router rewrites the
-// address in its own handler, so take the hash first and open once it settles.
-const onConnectHash = (): void => {
-  if (!CONNECT_HASH.test(location.hash) || !/^\/(agents|keys)\/?$/.test(location.pathname)) return;
-  takeConnectHash();
-  setTimeout(() => {
-    if (document.querySelector('#view-keys:not(.hidden) #kList[aria-busy]')) return; // the render opens it
-    if (document.querySelector('#view-keys:not(.hidden) #kList')) openFromHash();
-  }, 0);
-};
-window.addEventListener('popstate', onConnectHash);
-window.addEventListener('hashchange', onConnectHash);
-
-function connectPanel(): string {
+function statsHTML(rows: KeyRowFull[] | null): string {
   const url = mcpUrl();
-  return `<section class="cc-card ky2-conn" aria-labelledby="kConnT">
-    <div class="cc-card-h"><h2 id="kConnT">Connect an app</h2></div>
-    <div class="ky2-url"><span class="k">MCP endpoint</span>
-      <div class="row"><code title="${attr(url)}">${esc(url)}</code>
-      <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the MCP endpoint" title="Copy">${ICO.copy}</button></div>
-      <p>Every app connects to this address. Apps that sign in need nothing else; the rest also need an agent's key.</p></div>
-    <ol class="ky2-steps"><li><span class="n">1</span>Choose your app</li><li><span class="n">2</span>Pick or make its key</li><li><span class="n">3</span>Paste the setup and test it</li><li><span class="n">4</span>Give the agent its instructions</li></ol>
-    <div class="ky2-start"><button type="button" class="btn primary" id="kConnStart">${ICO.plug}Set up an app</button></div>
-    <div class="ky2-clients">${snippets()
+  const ep = `<div class="ky-st ky-ep"><span class="k">MCP endpoint</span><span class="row"><code title="${attr(url)}">${esc(url)}</code>
+    <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the MCP endpoint" title="Copy">${ICO.copy}</button></span></div>`;
+  if (!rows) {
+    const sk = (k: string): string => `<div class="ky-st"><span class="k">${k}</span><span class="v">${skBlock('38px', 22)}</span></div>`;
+    return sk('Agents') + sk('Active now') + sk('Calls in 24h') + ep;
+  }
+  const now = Date.now() / 1000;
+  const on = rows.filter((k) => k.enabled !== false);
+  const active = on.filter((k) => statusOf(k, now).st === 'active').length;
+  const all24 = new Array(24).fill(0);
+  for (const k of rows) usageOf(k)?.spark.forEach((v, i) => (all24[i] += v));
+  const day = all24.reduce((a, b) => a + b, 0);
+  const off = rows.length - on.length;
+  return `<div class="ky-st"><span class="k">Agents</span><span class="v">${rows.length}${
+    rows.length ? `<small>${off ? `${on.length} on · ${off} off` : 'all on'}</small>` : ''
+  }</span></div>
+    <div class="ky-st"><span class="k">Active now</span><span class="v">${active}${active ? '<span class="ky-live" aria-hidden="true"></span>' : ''}</span></div>
+    <div class="ky-st"><span class="k">Calls in 24h</span><span class="v">${day}${day ? `<span class="sp">${sparkSVG(all24, 72, 22)}</span>` : ''}</span></div>${ep}`;
+}
+
+/** Live agents first, most recent call first; never used next; turned off last. */
+function sorted(): KeyRowFull[] {
+  const rank = (k: KeyRowFull): number => (k.enabled === false ? 2 : usageOf(k) || k.uses ? 0 : 1);
+  return [...keys].sort((a, b) => rank(a) - rank(b) || (usageOf(b)?.last || 0) - (usageOf(a)?.last || 0) || nameOf(a).localeCompare(nameOf(b)));
+}
+
+function paintList(): void {
+  const list = $('#kList');
+  list.removeAttribute('aria-busy');
+  const on = keys.filter((k) => k.enabled !== false).length;
+  $('#kCount').textContent = keys.length ? `${keys.length} · ${on === keys.length ? 'all turned on' : `${keys.length - on} turned off`}` : '';
+  if (!keys.length) {
+    const pop = ['claude-code', 'cursor', 'claude-ai', 'chatgpt', 'codex']
+      .map((id) => appById(id))
+      .filter(Boolean)
+      .map((s) => `<button type="button" data-pop="${attr(s!.id)}">${appIconHTML(s!.label, 26)}${esc(s!.label)}</button>`)
+      .join('');
+    list.innerHTML = `<div class="ky-empty"><span class="ic">${ICO.plug}</span><h3>No agents yet</h3>
+      <p>Connect an app to give it a memory. Each app gets its own agent and key, so you can see what it does and turn it off on its own.</p>
+      <button type="button" class="btn primary" data-a="new">${ICO.plug}Connect an app</button><div class="ky-pop" aria-label="Popular apps">${pop}</div></div>`;
+    $('[data-a=new]', list).onclick = () => void openConnect();
+    $$<HTMLElement>('[data-pop]', list).forEach((b) => (b.onclick = () => void openConnect({ client: b.dataset.pop })));
+    return;
+  }
+  const now = Date.now() / 1000;
+  list.innerHTML = `<div class="kl-head" aria-hidden="true"><span>Agent</span><span>App</span><span>Status</span><span>Access</span><span>Calls 24h</span><span>Last call</span><span></span></div>
+    <ul aria-label="Agents">${sorted()
+      .map((k) => rowHTML(k, now))
+      .join('')}</ul>`;
+  $$<HTMLElement>('[data-open]', list).forEach((b) => (b.onclick = () => openAgent(b.dataset.open!)));
+  $$<HTMLElement>('[data-more]', list).forEach(
+    (b) =>
+      (b.onclick = (e) => {
+        e.stopPropagation();
+        const k = keys.find((x) => x.id === b.dataset.more);
+        if (k) agentMenu(b, k);
+      }),
+  );
+}
+
+function rowHTML(k: KeyRowFull, now: number): string {
+  const name = nameOf(k);
+  const s = statusOf(k, now);
+  const u = usageOf(k);
+  const app = appFor(k);
+  const p = summarize(permsOf(k));
+  const signed = oauthKeys.has(k.id) ? '<span class="tag">Signed in</span>' : '';
+  const day = u ? u.day : 0;
+  return `<li class="kr${s.st === 'off' ? ' off' : ''}" style="--ag:${agentColor(name, k.id)}">
+    <button type="button" class="kr-hit" data-open="${attr(k.id)}" aria-label="${attr(`${name}: ${s.label}, ${app.label || 'app not set'}, ${p.level}`)}"></button>
+    <div class="kr-agent">${avatarHTML(name, 34, '', k.id)}<span class="t"><b>${esc(name)}${signed}</b><span class="kid">${esc(k.id)}</span>
+      <span class="sub2">${esc(app.label || 'App not set')} · ${esc(p.level)}</span></span></div>
+    <div class="kr-app">${appIconHTML(app.label, 24)}<span class="${app.label ? '' : 'none'}">${esc(app.label || 'Not set')}</span></div>
+    <div class="kr-st"><span class="sd ${s.st}" aria-hidden="true"></span><span class="t"><b>${s.label}</b><small>${esc(s.st === 'never' ? 'No calls yet' : s.seen)}</small></span></div>
+    <div class="kr-perm${p.tone ? ' ' + p.tone : ''}"><b>${esc(p.level)}</b><small>${esc(p.tools)}</small></div>
+    <div class="kr-calls"><b class="${day ? '' : 'z'}">${day}</b><span class="sp">${day ? sparkSVG(u!.spark, 56, 20) : ''}</span></div>
+    <div class="kr-seen">${esc(s.seen)}</div>
+    <div class="kr-act"><button type="button" class="cc-ibtn" data-more="${attr(k.id)}" aria-haspopup="menu" aria-label="Actions for ${attr(name)}" title="Actions">${ICO.more}</button></div>
+  </li>`;
+}
+
+function paintDeleted(): void {
+  const box = $('#kDel');
+  if (!state.keysDeleted.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = `<section class="ky-del"><div class="ky-h"><h2>Recently deleted</h2><span>Restore until you reload the app</span></div>
+    <div class="kl">${state.keysDeleted
       .map(
-        (s) => `<button type="button" class="ky2-cl" data-client="${attr(s.id)}"><span class="ini" aria-hidden="true">${esc(
-          agentInitials(s.label),
-        )}</span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind + ' · ' + s.how)}</small></span>${ICO_CHEV}</button>`,
+        (k) => `<div class="kd">${avatarHTML(nameOf(k), 32, '', k.id)}<span class="tx"><b>${esc(nameOf(k))}</b><small>${esc(k.id)}</small></span>
+        <button type="button" class="btn" data-restore="${attr(k.id)}">${ICO_RESTORE}Restore</button></div>`,
       )
       .join('')}</div></section>`;
-}
-
-function statusOf(k: KeyRowFull, now: number): { dot: string; text: string } {
-  if (k.enabled === false) return { dot: 'off', text: '<b>Turned off</b><span>· cannot connect</span>' };
-  const u = usageOf(k);
-  if (u && now - u.last < ACTIVE_SECS) return { dot: 'ok', text: `<b>Active</b><span>· ${ago(u.last) === 'now' ? 'just now' : ago(u.last) + ' ago'}</span>` };
-  if (u) return { dot: 'idle', text: `<b>Idle</b><span>· last seen ${ago(u.last)} ago</span>` };
-  if (k.uses) return { dot: 'idle', text: '<b>Idle</b><span>· last seen over a week ago</span>' };
-  return { dot: 'idle', text: '<b>Never used</b><span>· no calls yet</span>' };
-}
-
-function keyCard(k: KeyRowFull, total: number | null, now: number): string {
-  const name = k.name || k.id;
-  const off = k.enabled === false;
-  const u = usageOf(k);
-  const st = statusOf(k, now);
-  return `<article class="ky2${off ? ' off' : ''}" style="--ag:${agentColor(name, k.id)}" aria-label="${attr(name)}">
-    <div class="ky2-top">${avatarHTML(name, 44, '', k.id)}<div class="ky2-id"><h3 title="${attr(name + (k.created ? ' · created ' + fmtTs(k.created) : ''))}">${esc(name)}</h3>
-      <div class="ky2-st"><span class="cc-dot ${st.dot}" aria-hidden="true"></span>${st.text}</div></div>
-      <button type="button" class="cc-ibtn ky2-more" data-a="more" data-id="${attr(k.id)}" aria-haspopup="menu" aria-label="More for ${attr(name)}" title="More">${ICO.more}</button></div>
-    <div class="ky2-chips" aria-label="Permissions">${permPills({ scopes: scopesOf(k), tools: toolsOf(k) }, total)}${
-      oauthKeys.has(k.id) ? '<span class="kp oauth" title="Connected by signing in over OAuth">Signed in</span>' : ''
-    }</div>
-    <div class="ky2-use">
-      <div><span class="k">Calls in 24h</span><span class="v">${u ? u.day : 0}</span><span class="ky2-sp">${u && u.day ? sparkSVG(u.spark, 100, 18) : ''}</span></div>
-      <div><span class="k">All time</span><span class="v">${k.uses || 0}</span></div>
-      <div><span class="k">Last IP</span><span class="v cc-mono" title="${attr(k.last_ip || '')}">${esc(k.last_ip || 'none yet')}</span></div>
-    </div>
-    <div class="ky2-acts">
-      <button type="button" class="btn" data-a="perms" data-id="${attr(k.id)}" aria-label="Permissions for ${attr(name)}">${ICO.shield}Permissions</button>
-      <button type="button" class="btn" data-a="connect" data-id="${attr(k.id)}" aria-label="Connect ${attr(name)}">${ICO.plug}Connect</button>
-    </div>
-  </article>`;
+  $$<HTMLElement>('[data-restore]', box).forEach(
+    (b) =>
+      (b.onclick = async () => {
+        const id = b.dataset.restore!;
+        try {
+          await apiPost<KeyCreated>(KEY_PATHS.restore, { id });
+          state.keysDeleted = state.keysDeleted.filter((k) => k.id !== id);
+          toast('Agent restored', 'ok');
+          void load();
+        } catch (e) {
+          toast('Could not restore: ' + (e as Error).message, 'err');
+        }
+      }),
+  );
 }
 
 function agentMenu(anchor: HTMLElement, k: KeyRowFull): void {
-  const name = k.name || k.id;
+  const name = nameOf(k);
   const off = k.enabled === false;
   openMenu(
     anchor,
     [
+      { label: 'Open', desc: 'Status, key, permissions and every action.', icon: ICO_CHEV, run: () => openAgent(k.id) },
+      { label: setupLabel(k), desc: 'Setup steps for its app, with its key filled in.', icon: ICO.plug, run: () => void openSetup(k) },
       { label: 'Edit permissions', desc: 'What it may do and which tools it may call.', icon: ICO.shield, run: () => void openKeyPermissions(k) },
-      { label: 'Connect an app', desc: 'Setup steps and config for each app.', icon: ICO.plug, run: () => openConnect({ agent: connectKey(k) }) },
-      {
-        label: 'Activity',
-        desc: 'Everything this agent did, at /activity/' + k.id + '.',
-        icon: icon('activity'),
-        run: () => {
-          // Its own address; the router reads it and the Activity page opens its card.
-          history.pushState(null, '', '/activity/' + encodeURIComponent(k.id));
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        },
-      },
-      { label: 'Rename', desc: 'Change its name and colour everywhere.', icon: ICO_EDIT, run: () => openRename(k) },
-      ...(k.revealable
-        ? [{ label: 'Show key', desc: 'See and copy its key again; asks for your password.', icon: ICO_EYE, run: () => openReveal(k) }]
-        : []),
-      { label: 'Make a new key', desc: 'The current key stops working at once.', icon: ICO.key, run: () => rollKey(k) },
+      { label: 'View activity', desc: 'Everything this agent did.', icon: icon('activity'), run: () => goActivity(k) },
       { sep: true, label: '' },
       {
         label: off ? 'Turn on' : 'Turn off',
@@ -564,109 +571,304 @@ function agentMenu(anchor: HTMLElement, k: KeyRowFull): void {
   );
 }
 
-function paintDeleted(): void {
-  const box = $('#kDel');
-  if (!state.keysDeleted.length) {
-    box.innerHTML = '';
-    return;
-  }
-  box.innerHTML = `<div class="ky2-del"><div class="ky2-h" style="display:flex"><h2>Deleted</h2><span>can be restored until you reload the app</span></div>
-    <div class="cc-card">${state.keysDeleted
-      .map(
-        (k) => `<div class="ky2-del-row">${avatarHTML(k.name || k.id, 32)}<span class="tx"><b>${esc(k.name || k.id)}</b><small>${esc(k.id)}</small></span>
-        <button type="button" class="btn" data-restore="${attr(k.id)}">Restore</button></div>`,
-      )
-      .join('')}</div></div>`;
-  $$<HTMLElement>('[data-restore]', box).forEach(
-    (b) =>
-      (b.onclick = async () => {
-        const id = b.dataset.restore!;
-        try {
-          await apiPost<KeyCreated>(KEY_PATHS.restore, { id });
-          state.keysDeleted = state.keysDeleted.filter((k) => k.id !== id);
-          toast('Agent restored', 'ok');
-          void renderKeys();
-        } catch (e) {
-          toast('Could not restore: ' + (e as Error).message, 'err');
-        }
-      }),
-  );
+function goActivity(k: KeyRow): void {
+  // Its own address; the router reads it and the Activity page opens its card.
+  history.pushState(null, '', '/activity/' + encodeURIComponent(k.id));
+  window.dispatchEvent(new PopStateEvent('popstate'));
 }
+
+const setupLabel = (k: KeyRowFull): string => (statusOf(k).st === 'never' ? 'Connect' : 'Set up again');
+
+// ── agent sheet ─────────────────────────────────────────────────────────
+
+function openAgent(id: string): void {
+  const k = keys.find((x) => x.id === id);
+  if (!k) return;
+  const name = nameOf(k);
+  const s = statusOf(k);
+  const u = usageOf(k);
+  const app = appFor(k);
+  const perms = permsOf(k);
+  const p = summarize(perms);
+  const off = k.enabled === false;
+  const signed = oauthKeys.has(k.id);
+  const statusLine =
+    s.st === 'off'
+      ? 'Turned off: its key is refused until you turn it back on'
+      : s.st === 'never'
+        ? 'No calls yet: set up its app to connect it'
+        : 'Last call ' + s.seen.toLowerCase();
+  const chips = perms.scopes.length
+    ? perms.scopes
+        .map((sc) => {
+          const d = SCOPES.find((x) => x.id === sc)!;
+          return `<span class="ad-chip${sc === 'admin' ? ' admin' : ''}" title="${attr(d.label)}">${esc(d.short)}</span>`;
+        })
+        .join('')
+    : '';
+  const act = (a: string, ic: string, label: string, desc: string, danger = false): string =>
+    `<button type="button" class="ad-act${danger ? ' danger' : ''}" data-act="${a}"><span class="ic">${ic}</span><span class="tx"><b>${esc(label)}</b><small>${esc(
+      desc,
+    )}</small></span>${ICO_CHEV}</button>`;
+  const body = `<div class="ad-hero" style="--ag:${agentColor(name, k.id)}"><div class="ad-status"><span class="sd ${s.st}" aria-hidden="true"></span><b>${s.label}</b><span>${esc(statusLine)}</span></div>
+      <div class="ad-stats"><div><span class="k">Calls in 24h</span><span class="v">${u ? u.day : 0}${u && u.day ? `<span class="sp">${sparkSVG(u.spark, 72, 22)}</span>` : ''}</span></div>
+        <div><span class="k">All time</span><span class="v">${k.uses || 0}</span></div>
+        <div><span class="k">Last IP</span><span class="v mono" title="${attr(k.last_ip || '')}">${esc(k.last_ip || 'None yet')}</span></div></div></div>
+    <section class="ad-sec"><h3><span id="adAppL">Used with</span></h3><div class="ad-app"><span id="adApp"></span>
+      <span class="hint">${
+        app.id && app.guessed ? 'Guessed from its name. Pick the app to remember it.' : app.id ? 'The setup steps follow this app.' : 'Pick the app so its setup steps are ready.'
+      }</span></div></section>
+    <section class="ad-sec"><h3>Access <button type="button" class="ad-link" data-act="perms">Edit ${ICO_CHEV}</button></h3>
+      <div class="ad-box"><div class="ad-perm${p.tone ? ' ' + p.tone : ''}"><span class="tx"><b>${esc(p.level)} · ${esc(p.tools)}</b>${
+        chips ? `<div class="ad-chips">${chips}${signed ? '<span class="ad-chip">Signed in over OAuth</span>' : ''}</div>` : ''
+      }</span></div></div></section>
+    <section class="ad-sec"><h3>Key</h3><div class="ad-box">
+      <div class="ad-row"><span class="tx"><b>Key ID</b><code>${esc(k.id)}</code></span><button type="button" class="cc-ibtn" data-copy="${attr(
+        k.id,
+      )}" aria-label="Copy the key ID" title="Copy">${ICO.copy}</button></div>
+      <div class="ad-row"><span class="tx"><b>${k.revealable ? 'Stored sealed' : signed ? 'Held by the app' : 'Shown once'}</b><small>${
+        k.revealable
+          ? 'Your password shows it again.'
+          : signed
+            ? 'The app signed in and holds its own token.'
+            : 'It was shown when it was made. Make a new key to see one again.'
+      }</small></span>${
+        k.revealable ? `<button type="button" class="btn" data-act="reveal">${ICO_EYE}Show key</button>` : ''
+      }</div>
+      ${k.created ? `<div class="ad-row"><span class="tx"><b>Created</b><small>${esc(fmtTs(k.created))}</small></span></div>` : ''}
+    </div></section>
+    <section class="ad-sec"><h3>Activity <a class="ad-link" href="/activity/${attr(encodeURIComponent(k.id))}" data-act="activity">View activity ${ICO_CHEV}</a></h3></section>
+    <section class="ad-sec"><h3>Manage</h3><div class="ad-box">
+      ${act('rename', ICO_EDIT, 'Rename & colour', 'Change how it shows up everywhere.')}
+      ${k.revealable ? act('reveal', ICO_EYE, 'Show key', 'See and copy its key again; asks for your password.') : ''}
+      ${act('roll', ICO.key, 'Make a new key', 'The current key stops working at once.')}
+      ${act('toggle', off ? ICO.check : ICO_POWER, off ? 'Turn on' : 'Turn off', off ? 'Let it connect again with the same key.' : 'Block it without deleting; turn back on any time.')}
+      ${act('delete', ICO_TRASH, 'Delete', 'Remove the agent; its key stops working at once.', true)}
+    </div></section>`;
+  openSheet({
+    title: name,
+    sub: `${app.label || 'App not set'} · ${s.label}`,
+    lead: avatarHTML(name, 40, '', k.id),
+    width: 600,
+    full: true,
+    body,
+    actions: [
+      { label: 'Edit permissions', icon: ICO.shield, left: true, run: () => void openKeyPermissions(k, true) },
+      { label: setupLabel(k), cls: 'primary', icon: ICO.plug, run: () => void openSetup(k, { back: true }) },
+    ],
+    onOpen: (sh) => {
+      const sel = createSelect({
+        label: 'App',
+        labelledBy: 'adAppL',
+        className: 'block',
+        value: app.id,
+        searchable: true,
+        placeholder: 'Choose the app',
+        options: snippets().map((c) => ({ value: c.id, label: c.label, hint: `${c.kind} · ${c.how}`, lead: appIconHTML(c.label, 26) })),
+        render: (o) =>
+          `${appIconHTML(o?.label, 28)}<span class="ui-sel-v${o ? '' : ' ph'}">${esc(o?.label || 'Choose the app')}${
+            o ? `<small>${esc(o.hint || '')}</small>` : ''
+          }</span><svg class="ui-sel-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`,
+        onChange: async (v) => {
+          await setAgentApp(k.id, v);
+          paint();
+          const hint = sh.body.querySelector('.ad-app .hint');
+          if (hint) hint.textContent = 'The setup steps follow this app.';
+          const sub = sh.root.querySelector('.cc-sh-h p');
+          if (sub) sub.textContent = `${appById(v)?.label || 'App not set'} · ${s.label}`;
+          toast(`${name} is used with ${appById(v)?.label || 'that app'}`, 'ok', 1800);
+        },
+      });
+      $('#adApp', sh.body).replaceWith(sel.el);
+      $$<HTMLElement>('[data-act]', sh.body).forEach(
+        (b) =>
+          (b.onclick = (e) => {
+            const a = b.dataset.act;
+            if (a === 'activity') {
+              e.preventDefault();
+              sh.close();
+              return goActivity(k);
+            }
+            if (a === 'perms') return void openKeyPermissions(k, true);
+            if (a === 'rename') return openRename(k, true);
+            if (a === 'reveal') return openReveal(k, true);
+            if (a === 'roll') return rollKey(k);
+            if (a === 'toggle') return void toggleKey(k, true);
+            if (a === 'delete') return delKey(k, sh);
+          }),
+      );
+    },
+  });
+}
+
+/** Back to the agent's sheet, with fresh data. */
+const backTo = (id: string) => (): void => openAgent(id);
 
 // ── connect ─────────────────────────────────────────────────────────────
 
 function connectKey(k: KeyRowFull): ConnectKey {
-  return { id: k.id, name: k.name || k.id, revealable: k.revealable, oauth: oauthKeys.has(k.id) };
+  return { id: k.id, name: nameOf(k), revealable: k.revealable, oauth: oauthKeys.has(k.id), perms: permsOf(k) };
 }
 
-/** The connect wizard in a sheet: for one agent, for one app, or from the start. */
-function openConnect(o: { agent?: ConnectKey; client?: string; secret?: string; fresh?: boolean; step?: 1 | 2 | 3 | 4 }): void {
-  const fixed = o.agent;
-  const agents = keys.filter((k) => k.enabled !== false).map(connectKey);
-  if (fixed && !agents.some((a) => a.id === fixed.id)) agents.unshift(fixed);
+async function createAgent(name: string, p: Permissions): Promise<{ key: ConnectKey; secret: string } | null> {
+  try {
+    const r = await apiPost<KeyCreated>(KEY_PATHS.create, { name, scopes: p.scopes, tools: p.tools });
+    if (!r || !r.id || !r.key) throw new Error('the server returned no key');
+    if (Array.isArray(p.tools)) {
+      try {
+        await updateKeyPermissions({ id: r.id, scopes: p.scopes, tools: p.tools });
+      } catch (e) {
+        toast('Agent created, but its tool list was not saved: ' + (e as Error).message, 'err', 6000);
+      }
+    }
+    void load();
+    return { key: { id: r.id, name: r.name || name, perms: p }, secret: r.key };
+  } catch (e) {
+    toast('Could not create the agent: ' + (e as Error).message, 'err');
+    return null;
+  }
+}
+
+/** Mount the wizard in a sheet; the footer's Back and Continue drive it. */
+function wizardSheet(o: {
+  title: string;
+  sub: string;
+  lead?: string;
+  back?: () => void;
+  mount: (host: HTMLElement, nav: (n: { back: boolean; next: string }) => void, setSub: (t: string) => void) => Wizard;
+}): void {
   let wz: Wizard | null = null;
   openSheet({
-    title: fixed ? 'Connect ' + fixed.name : 'Connect an app',
-    sub: 'App, key, setup and instructions',
-    lead: fixed ? avatarHTML(fixed.name, 36, '', fixed.id) : '',
+    title: o.title,
+    sub: o.sub,
+    lead: o.lead,
     body: '<div id="kcWizard"></div>',
-    width: 680,
+    width: 640,
+    full: true,
+    back: o.back,
     actions: [
       { label: 'Back', cls: 'ghost', left: true, run: () => wz?.back() },
-      { label: 'Next', cls: 'primary', run: (s) => void (wz?.next() && s.close()) },
+      { label: 'Continue', cls: 'primary', run: async (s) => void ((await wz?.next()) && s.close()) },
     ],
     onClose: () => wz?.destroy(),
     onOpen: (s) => {
       s.root.classList.add('cn-sheet');
       const [back, next] = Array.from(s.foot?.querySelectorAll<HTMLButtonElement>('.btn') || []);
-      wz = mountConnectWizard($('#kcWizard', s.body), {
-        agents,
-        agent: fixed?.id,
-        secret: o.secret,
-        fresh: o.fresh,
-        client: o.client,
-        step: o.step,
-        createAgent: async (name) => {
-          try {
-            const r = await apiPost<KeyCreated>(KEY_PATHS.create, { name, scopes: DEFAULT_SCOPES, tools: '*' });
-            void renderKeys();
-            if (!r || !r.id || !r.key) throw new Error('the server returned no key');
-            return { key: { id: r.id, name: r.name || name }, secret: r.key };
-          } catch (e) {
-            toast('Could not create the agent: ' + (e as Error).message, 'err');
-            return null;
-          }
-        },
-        onChange: () => void renderKeys(),
-        setNav: (n) => {
+      const sub = s.root.querySelector<HTMLElement>('.cc-sh-h p');
+      wz = o.mount(
+        $('#kcWizard', s.body),
+        (n) => {
           if (back) back.style.visibility = n.back ? '' : 'hidden';
           if (next) next.textContent = n.next;
         },
-      });
+        (t) => {
+          if (sub) sub.textContent = t;
+        },
+      );
     },
   });
 }
 
-/** The one-time secret, with a way into the connect wizard that already holds it. */
-function showSecret(title: string, name: string, secret: string, id?: string, extra = ''): void {
+/** "Connect an app": pick the app, name the agent, make its key, set it up. */
+async function openConnect(o: { client?: string } = {}): Promise<void> {
+  await loadCatalog();
+  wizardSheet({
+    title: 'Connect an app',
+    sub: 'Pick an app',
+    mount: (host, setNav, setSub) =>
+      mountConnectWizard(host, {
+        client: o.client,
+        names: keys.map(nameOf),
+        createAgent,
+        onAppChosen: (id, c) => void setAgentApp(id, c).then(paint),
+        onChange: () => void load(),
+        setNav,
+        setSub,
+      }),
+  });
+}
+
+/** Set up one agent: straight to its app's setup with its key. */
+async function openSetup(k: KeyRowFull, o: { secret?: string; fresh?: boolean; back?: boolean; pickApp?: boolean } = {}): Promise<void> {
+  await loadAgentApps();
+  const name = nameOf(k);
+  const app = appFor(k);
+  wizardSheet({
+    title: (statusOf(k).st === 'never' ? 'Connect ' : 'Set up ') + name,
+    sub: app.label || 'Pick its app',
+    lead: avatarHTML(name, 36, '', k.id),
+    back: o.back ? backTo(k.id) : undefined,
+    mount: (host, setNav, setSub) =>
+      mountConnectWizard(host, {
+        agent: connectKey(k),
+        client: app.id,
+        secret: o.secret,
+        fresh: o.fresh,
+        pickApp: o.pickApp,
+        createAgent,
+        onAppChosen: (id, c) => void setAgentApp(id, c).then(paint),
+        onChange: () => void load(),
+        setNav,
+        setSub,
+      }),
+  });
+}
+
+// `/agents#connect` opens the connect flow; `#connect=<client>` preselects an app.
+// The router rewrites the address before the agents load, so the hash is read
+// as early as possible: when this module loads and when the page starts to render.
+const CONNECT_HASH = /^#connect(?:=([\w-]+))?$/;
+const bootHash = /^\/(agents|keys)\/?$/.test(location.pathname) ? CONNECT_HASH.exec(location.hash) : null;
+let pendingConnect: string | null = bootHash ? bootHash[1] || '' : null;
+
+/** Open the connect flow once the Agents page has loaded (for links from other pages). */
+export function connectOnLoad(client = ''): void {
+  pendingConnect = client;
+}
+
+function takeConnectHash(): void {
+  const m = CONNECT_HASH.exec(location.hash);
+  if (!m) return;
+  pendingConnect = m[1] || '';
+  history.replaceState(history.state, '', location.pathname + location.search);
+}
+
+function openFromHash(): void {
+  if (pendingConnect === null) return;
+  const id = pendingConnect;
+  pendingConnect = null;
+  void openConnect({ client: id && appById(id) ? id : undefined });
+}
+
+// A hash set while the app runs also fires popstate, and the router rewrites the
+// address in its own handler, so take the hash first and open once it settles.
+const onConnectHash = (): void => {
+  if (!CONNECT_HASH.test(location.hash) || !/^\/(agents|keys)\/?$/.test(location.pathname)) return;
+  takeConnectHash();
+  setTimeout(() => {
+    if (document.querySelector('#view-keys:not(.hidden) #kList[aria-busy]')) return; // the load opens it
+    if (document.querySelector('#view-keys:not(.hidden) #kList')) openFromHash();
+  }, 0);
+};
+window.addEventListener('popstate', onConnectHash);
+window.addEventListener('hashchange', onConnectHash);
+
+/** The one-time secret, with a way into the setup that already holds it. */
+function showSecret(title: string, k: KeyRowFull, secret: string): void {
+  const name = nameOf(k);
   const has = !!secret && secret !== '-';
-  const connect = (s: Sheet): void => {
-    s.close();
-    // The sheet closes with an animation; open the wizard once it is gone.
-    setTimeout(() => openConnect({ agent: { id: id || '', name }, secret, fresh: true, step: 3 }), 260);
-  };
   openSheet({
     title,
     sub: name,
-    lead: avatarHTML(name, 36, '', id),
-    width: 620,
-    body: `${extra}<section class="cc-sh-sec"><h3>Its key</h3>
-      <div class="ky2-secret" role="note">${ICO.key}<span><b>This key is shown once. Copy it now and keep it private.</b> Anyone with this key can read and write your notes as ${esc(name)}.</span></div>
+    lead: avatarHTML(name, 36, '', k.id),
+    width: 600,
+    body: `<section class="cc-sh-sec"><h3>Its new key</h3>
+      <div class="ky-secret" role="note">${ICO.key}<span><b>This key is shown once. Copy it now and keep it private.</b> Anyone with this key can read and write your notes as ${esc(name)}.</span></div>
       ${codeHTML(has ? secret : 'The server did not return a key.', 'Copy key')}</section>
       ${
-        has && id
-          ? `<section class="cc-sh-sec"><h3>Connect it</h3><p>Set up an app with this key already filled in: steps, a ready config and a live connection check.</p>
-        <button type="button" class="btn primary" id="ksConnect">${ICO.plug}Connect an app</button></section>`
+        has
+          ? `<section class="cc-sh-sec"><h3>Update its app</h3><p>The old key stopped working. Open the setup with the new key already filled in.</p>
+        <button type="button" class="btn primary" id="ksConnect">${ICO.plug}Set up with the new key</button></section>`
           : ''
       }`,
     actions: [
@@ -675,25 +877,26 @@ function showSecret(title: string, name: string, secret: string, id?: string, ex
     ],
     onOpen: (s) => {
       const b = s.body.querySelector<HTMLButtonElement>('#ksConnect');
-      if (b) b.onclick = () => connect(s);
+      if (b) b.onclick = () => void openSetup(k, { secret, fresh: true });
     },
   });
 }
 
-function openReveal(k: KeyRowFull): void {
-  const name = k.name || k.id;
+function openReveal(k: KeyRowFull, fromAgent = false): void {
+  const name = nameOf(k);
   openSheet({
     title: 'Show key',
     sub: name,
     lead: avatarHTML(name, 36, '', k.id),
-    width: 480,
-    body: `<form id="krForm" class="field" style="margin:0"><label for="krPw">Your Memora password</label>
-        <input id="krPw" type="password" autocomplete="current-password" style="height:44px">
-        <span class="hint">The key is stored sealed on the server; your password unlocks it.</span></form>
-      <div id="krOut" style="margin-top:16px"></div>`,
+    width: 520,
+    back: fromAgent ? backTo(k.id) : undefined,
+    body: `<form id="krForm" class="ui-fld" style="margin:0"><label for="krPw">Your Memora password</label>
+        <input id="krPw" class="ui-input" type="password" autocomplete="current-password">
+        <span class="ui-help">The key is stored sealed on the server; your password unlocks it.</span></form>
+      <div id="krOut" class="ky-reveal" style="margin-top:16px"></div>`,
     actions: [
-      { label: 'Close', cls: 'ghost', left: true, run: (s) => s.close() },
-      { label: 'Show key', cls: 'primary', run: (s) => reveal(s) },
+      { label: fromAgent ? 'Back' : 'Close', cls: 'ghost', left: true, run: (s) => (fromAgent ? openAgent(k.id) : s.close()) },
+      { label: 'Show key', cls: 'primary', icon: ICO_EYE, run: (s) => reveal(s) },
     ],
     onOpen: (s) => {
       ($('#krForm', s.body) as HTMLFormElement).onsubmit = (e) => {
@@ -703,15 +906,16 @@ function openReveal(k: KeyRowFull): void {
     },
   });
   async function reveal(s: Sheet): Promise<void> {
-    const pw = ($('#krPw', s.body) as HTMLInputElement).value;
-    if (!pw) {
+    const pw = $('#krPw', s.body) as HTMLInputElement;
+    if (!pw.value) {
       toast('Enter your password', 'warn');
+      pw.focus();
       return;
     }
     try {
-      const r = await apiPost<{ key?: string }>(KEY_PATHS.reveal, { id: k.id, current: pw });
+      const r = await apiPost<{ key?: string }>(KEY_PATHS.reveal, { id: k.id, current: pw.value });
       if (!r || !r.key) throw new Error('the server returned no key');
-      ($('#krPw', s.body) as HTMLInputElement).value = '';
+      pw.value = '';
       const out = $('#krOut', s.body);
       out.innerHTML = codeHTML(r.key, 'Copy key');
       wireCopy(out);
@@ -721,188 +925,22 @@ function openReveal(k: KeyRowFull): void {
   }
 }
 
-// ── permissions editor ──────────────────────────────────────────────────
+// ── permissions ─────────────────────────────────────────────────────────
 
-interface PermEditor {
-  read: () => Permissions;
-  /** A reason the choice cannot be saved, or ''. */
-  problem: () => string;
-}
-
-function permsHTML(initial: Permissions, tools: ToolInfo[] | null): string {
-  const all = initial.tools === '*' || !tools;
-  const selected = new Set<string>(Array.isArray(initial.tools) ? initial.tools : (tools || []).map((t) => t.name));
-  const scopeRows = SCOPES.map(
-    (s) => `<div class="pe2-row${s.id === 'admin' ? ' admin' : ''}"><span class="tx"><b id="pes-${s.id}">${esc(s.label)}</b><small id="pesd-${s.id}">${esc(
-      s.hint,
-    )}</small></span>
-      <button type="button" class="cc-sw${s.id === 'admin' ? ' warn' : ''}" role="switch" data-scope="${s.id}" aria-checked="${initial.scopes.includes(
-        s.id,
-      )}" aria-labelledby="pes-${s.id}" aria-describedby="pesd-${s.id}"><i></i></button></div>${
-      s.id === 'admin'
-        ? '<div class="pe2-warn" id="peAdminWarn" role="alert" hidden><b>Careful:</b> with this on, the agent can turn tools back on, widen its own permissions and make or delete other agents. Only for automation you fully trust.</div>'
-        : ''
-    }`,
-  ).join('');
-  const pick = tools
-    ? groupTools([...tools])
-        .map(
-          ([cat, items]) => `<div class="pe2-cat" data-cat="${attr(cat)}"><div class="pe2-cat-h"><span class="tx"><b>${esc(categoryLabel(cat))}</b><small data-cnt></small></span>
-          <button type="button" class="cc-sw" role="switch" data-catall="${attr(cat)}" aria-label="All ${attr(categoryLabel(cat))} tools" title="${attr(
-            categoryDesc(cat),
-          )}"><i></i></button></div>
-          ${items
-            .map(
-              (t) => `<div class="pe2-tool" data-tool="${attr(t.name)}"><span class="tx"><div class="nm" id="pet-${attr(t.name)}">${esc(toolTitle(t.name))}</div>${
-                t.description ? `<div class="ds">${esc(t.description)}</div>` : ''
-              }<div class="mt">${riskChip(toolRisk(t))}<code class="tl-code">${esc(t.name)}</code>${
-                t.enabled ? '' : '<span class="offall" title="Switched off for every agent on the server">Off for every agent</span>'
-              }</div></span>
-              <button type="button" class="cc-sw" role="switch" data-t="${attr(t.name)}" aria-checked="${selected.has(t.name)}" aria-labelledby="pet-${attr(
-                t.name,
-              )}"><i></i></button></div>`,
-            )
-            .join('')}</div>`,
-        )
-        .join('')
-    : '';
-  return `<section class="cc-sh-sec"><h3>What it may do</h3><p>Turn on only what the app needs. You can change this any time.</p>${scopeRows}</section>
-    <section class="cc-sh-sec" id="peTools"><h3>Which tools it may call</h3>
-      <p class="pe2-note" id="peMcpNote"></p>
-      <div class="pe2-seg" role="radiogroup" aria-label="Tool access">
-        <label class="pe2-opt"><input type="radio" name="pe-mode" value="all"${all ? ' checked' : ''}><span><b>All tools</b><small>Every tool that is on for the server, including new ones.</small></span></label>
-        <label class="pe2-opt"><input type="radio" name="pe-mode" value="some"${all ? '' : ' checked'}${tools ? '' : ' disabled'}><span><b>Only the ones I pick</b><small>${
-          tools ? 'Tools added later stay blocked for this agent.' : 'The tool list could not be loaded right now.'
-        }</small></span></label></div>
-      <div class="pe2-pick" id="pePick"${all ? ' hidden' : ''}>
-        <div class="pe2-ph"><label class="cc-search">${ICO.search}<span class="sr-only">Search tools</span>
-          <input type="search" id="peQ" placeholder="Search tools" autocomplete="off"></label>
-          <button type="button" class="btn" id="peAll">Pick all shown</button><button type="button" class="btn" id="peNone">Clear shown</button>
-          <span class="pe2-cnt" id="peCount" aria-live="polite"></span></div>
-        <div id="peList" role="group" aria-label="Tools">${pick}<div class="pe2-empty" id="peEmpty" hidden>No tool matches.</div></div>
-      </div></section>
-    <div class="pe2-sum" id="peSum" aria-live="polite"></div>`;
-}
-
-function wirePerms(b: HTMLElement, initial: Permissions, tools: ToolInfo[] | null): PermEditor {
-  const selected = new Set<string>(Array.isArray(initial.tools) ? initial.tools : (tools || []).map((t) => t.name));
-  const scopes = new Set<KeyScope>(initial.scopes);
-  const read = (): Permissions => {
-    const mode = ($('input[name=pe-mode]:checked', b) as HTMLInputElement).value;
-    return {
-      scopes: SCOPES.map((s) => s.id).filter((s) => scopes.has(s)),
-      tools: mode === 'some' ? [...selected].filter((n) => !tools || tools.some((t) => t.name === n)).sort() : '*',
-    };
-  };
-  const refresh = (): void => {
-    const p = read();
-    const mcp = p.scopes.includes('mcp');
-    $$<HTMLElement>('[data-scope]', b).forEach((sw) => sw.setAttribute('aria-checked', String(scopes.has(sw.dataset.scope as KeyScope))));
-    ($('#peAdminWarn', b) as HTMLElement).hidden = !scopes.has('admin');
-    $('#peMcpNote', b).textContent = mcp
-      ? 'A tool switched off for the whole server stays blocked, whatever you pick here.'
-      : 'MCP is off above, so this only matters once you turn it on.';
-    $('#peTools', b).classList.toggle('pe2-dim', !mcp);
-    ($('#pePick', b) as HTMLElement).hidden = p.tools === '*';
-    const total = tools ? tools.length : 0;
-    $('#peCount', b).innerHTML = `<b>${selected.size}</b> of ${total} picked`;
-    $$<HTMLElement>('[data-t]', b).forEach((sw) => sw.setAttribute('aria-checked', String(selected.has(sw.dataset.t!))));
-    $$<HTMLElement>('[data-catall]', b).forEach((c) => {
-      const names = (tools || []).filter((t) => (t.category || 'other') === c.dataset.catall).map((t) => t.name);
-      const n = names.filter((x) => selected.has(x)).length;
-      c.setAttribute('aria-checked', n === names.length && n > 0 ? 'true' : n ? 'mixed' : 'false');
-      const cnt = c.parentElement!.querySelector('[data-cnt]');
-      if (cnt) cnt.textContent = `${n} of ${names.length} picked`;
-    });
-    const s = toolSummary(p.tools, p.scopes, total || null);
-    $('#peSum', b).innerHTML = p.scopes.length
-      ? `This agent will be allowed <b>${esc(scopeText(p.scopes))}</b> with <b>${esc(s.text.toLowerCase())}</b>.`
-      : '<b>Nothing is allowed.</b> Turn something on, or turn the agent off instead.';
-  };
-  $$<HTMLElement>('[data-scope]', b).forEach(
-    (sw) =>
-      (sw.onclick = () => {
-        const id = sw.dataset.scope as KeyScope;
-        if (scopes.has(id)) scopes.delete(id);
-        else scopes.add(id);
-        refresh();
-      }),
-  );
-  $$<HTMLInputElement>('input[name=pe-mode]', b).forEach((i) => (i.onchange = () => refresh()));
-  $$<HTMLElement>('[data-t]', b).forEach(
-    (sw) =>
-      (sw.onclick = () => {
-        const n = sw.dataset.t!;
-        if (selected.has(n)) selected.delete(n);
-        else selected.add(n);
-        refresh();
-      }),
-  );
-  $$<HTMLElement>('[data-catall]', b).forEach(
-    (c) =>
-      (c.onclick = () => {
-        const names = (tools || []).filter((t) => (t.category || 'other') === c.dataset.catall).map((t) => t.name);
-        const on = c.getAttribute('aria-checked') !== 'true';
-        names.forEach((n) => (on ? selected.add(n) : selected.delete(n)));
-        refresh();
-      }),
-  );
-  const bulk = (on: boolean): void => {
-    $$<HTMLElement>('.pe2-tool', b)
-      .filter((r) => !r.hidden && !(r.parentElement as HTMLElement).hidden)
-      .forEach((r) => (on ? selected.add(r.dataset.tool!) : selected.delete(r.dataset.tool!)));
-    refresh();
-  };
-  const all = b.querySelector<HTMLElement>('#peAll');
-  if (all) all.onclick = () => bulk(true);
-  const none = b.querySelector<HTMLElement>('#peNone');
-  if (none) none.onclick = () => bulk(false);
-  const q = b.querySelector<HTMLInputElement>('#peQ');
-  if (q) {
-    q.oninput = () => {
-      const s = q.value.trim().toLowerCase();
-      let any = false;
-      $$<HTMLElement>('.pe2-cat', b).forEach((cat) => {
-        let shown = 0;
-        $$<HTMLElement>('.pe2-tool', cat).forEach((row) => {
-          const t = (tools || []).find((x) => x.name === row.dataset.tool);
-          const ok = !!t && toolMatches(t, s);
-          row.hidden = !ok;
-          if (ok) shown++;
-        });
-        cat.hidden = !shown;
-        if (shown) any = true;
-      });
-      ($('#peEmpty', b) as HTMLElement).hidden = any;
-    };
-    q.onkeydown = (e) => {
-      if (e.key === 'Enter') e.preventDefault();
-    };
-  }
-  refresh();
-  return {
-    read,
-    problem: () => {
-      const p = read();
-      if (!p.scopes.length) return 'Turn on at least one thing it may do, or turn the agent off instead.';
-      if (Array.isArray(p.tools) && !p.tools.length && p.scopes.includes('mcp')) return 'Pick at least one tool, or choose All tools.';
-      return '';
-    },
-  };
-}
-
-async function openKeyPermissions(k: KeyRowFull): Promise<void> {
+async function openKeyPermissions(k: KeyRowFull, fromAgent = false): Promise<void> {
   const tools = await loadCatalog();
-  const name = k.name || k.id;
+  const name = nameOf(k);
   let ed: PermEditor | null = null;
   openSheet({
     title: 'Permissions',
     sub: name,
     lead: avatarHTML(name, 36, '', k.id),
-    width: 600,
-    body: permsHTML({ scopes: scopesOf(k), tools: toolsOf(k) }, tools),
+    width: 620,
+    full: true,
+    back: fromAgent ? backTo(k.id) : undefined,
+    body: permsHTML(permsOf(k), tools),
     actions: [
-      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => s.close() },
+      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => (fromAgent ? openAgent(k.id) : s.close()) },
       {
         label: 'Save permissions',
         cls: 'primary',
@@ -915,9 +953,10 @@ async function openKeyPermissions(k: KeyRowFull): Promise<void> {
           const p = ed!.read();
           try {
             await updateKeyPermissions({ id: k.id, scopes: p.scopes, tools: p.tools });
-            s.close();
             toast('Permissions saved for ' + name, 'ok');
-            void renderKeys();
+            await load();
+            if (fromAgent) openAgent(k.id);
+            else s.close();
           } catch (e) {
             toast('Could not save permissions: ' + (e as Error).message, 'err', 5200);
           }
@@ -925,130 +964,31 @@ async function openKeyPermissions(k: KeyRowFull): Promise<void> {
       },
     ],
     onOpen: (s) => {
-      ed = wirePerms(s.body, { scopes: scopesOf(k), tools: toolsOf(k) }, tools);
+      ed = wirePerms(s.body, permsOf(k), tools);
     },
   });
 }
 
-// ── create, rename, roll, toggle, delete ────────────────────────────────
-
-async function createKey(name: string, p: Permissions, color = ''): Promise<boolean> {
-  try {
-    const r = await apiPost<KeyCreated>(KEY_PATHS.create, { name, scopes: p.scopes, tools: p.tools, ...(color ? { color } : {}) });
-    if (color) void loadKeys();
-    if (r && r.id && Array.isArray(p.tools)) {
-      try {
-        await updateKeyPermissions({ id: r.id, scopes: p.scopes, tools: p.tools });
-      } catch (e) {
-        toast('Agent created, but its tool list was not saved: ' + (e as Error).message, 'err', 6000);
-      }
-    }
-    void renderKeys();
-    if (r && r.key) {
-      showSecret(
-        'Agent created',
-        r.name || name,
-        r.key,
-        r.id,
-        `<div class="ky2-chips" style="margin:-4px 0 18px">${permPills(p, catalog?.length || null)}</div>`,
-      );
-    } else {
-      toast('Agent created', 'ok');
-    }
-    return true;
-  } catch (e) {
-    toast('Could not create the agent: ' + (e as Error).message, 'err');
-    return false;
-  }
-}
+// ── rename, roll, toggle, delete ────────────────────────────────────────
 
 function previewHTML(name: string, color: string, sub: string): string {
-  return `<span class="ag-av" style="--ag:${color};width:44px;height:44px;font-size:16px">${esc(agentInitials(name || '?'))}</span><span><b>${esc(
-    name || 'New agent',
-  )}</b><small>${esc(sub)}</small></span>`;
+  return `${avatarHTML(name || '?', 44).replace(/--ag:[^;]+;/, `--ag:${color};`)}<span><b>${esc(name || 'Agent')}</b><small>${esc(sub)}</small></span>`;
 }
 
-async function openNewKey(): Promise<void> {
-  const tools = await loadCatalog();
-  const defaults: Permissions = { scopes: [...DEFAULT_SCOPES], tools: '*' };
-  let ed: PermEditor | null = null;
+function openRename(k: KeyRowFull, fromAgent = false): void {
+  const old = nameOf(k);
   openSheet({
-    title: 'New agent',
-    sub: 'One agent per app, each with its own key',
-    width: 600,
-    body: `<div class="ky2-prev" id="kPrev"></div>
-      <div class="field"><label for="kN">Name</label><input id="kN" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. claude-code, cursor, codex" style="height:44px">
-        <span class="hint">It shows up under this name in the brain, the graph and Activity.</span></div>
-      <div class="field"><label>Colour</label>${colorPickHTML('kColor', '', { auto: true })}</div>
-      <div class="field" style="margin-bottom:0"><label>Permissions</label>
-        <div class="pe2-box" id="kPermBox"><span class="tx"><b>Everything except managing the server</b>MCP tools and reading and writing notes, with every tool.
-          <span class="ky2-chips" style="margin-top:8px">${permPills(defaults, tools?.length || null)}</span></span>
-          <button type="button" class="btn" id="kCustom">Customize</button></div>
-        <div id="kPerms" hidden style="margin-top:16px"></div></div>`,
-    actions: [
-      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => s.close() },
-      {
-        label: 'Create agent',
-        cls: 'primary',
-        run: async (s) => {
-          const input = $('#kN', s.body) as HTMLInputElement;
-          const name = input.value.trim();
-          if (!name) {
-            toast('Give the agent a name', 'warn');
-            input.focus();
-            return;
-          }
-          const p = ed ? ed.read() : defaults;
-          const why = ed?.problem();
-          if (why) {
-            toast(why, 'warn');
-            return;
-          }
-          if (await createKey(name, p, ($('#kColor', s.body) as HTMLElement).dataset.value || '')) s.close();
-        },
-      },
-    ],
-    onOpen: (s) => {
-      const b = s.body;
-      const input = $('#kN', b) as HTMLInputElement;
-      const prev = (): void => {
-        const n = input.value.trim();
-        const c = ($('#kColor', b) as HTMLElement).dataset.value || agentColor(n);
-        $('#kPrev', b).innerHTML = previewHTML(n, c, n ? 'Its colour follows it everywhere' : 'Type a name to see its avatar');
-      };
-      wireColorPick(b, 'kColor', prev);
-      prev();
-      input.oninput = prev;
-      input.onkeydown = (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          (s.foot?.querySelector('.btn.primary') as HTMLButtonElement | null)?.click();
-        }
-      };
-      $('#kCustom', b).onclick = () => {
-        const box = $('#kPerms', b);
-        box.hidden = false;
-        box.innerHTML = permsHTML(defaults, tools);
-        ($('#kPermBox', b) as HTMLElement).hidden = true;
-        ed = wirePerms(box, defaults, tools);
-      };
-    },
-  });
-}
-
-function openRename(k: KeyRowFull): void {
-  const old = k.name || k.id;
-  openSheet({
-    title: 'Rename',
+    title: 'Rename & colour',
     sub: old,
     width: 520,
-    body: `<div class="ky2-prev" id="kPrev"></div>
-      <div class="field"><label for="kN">Name</label><input id="kN" type="text" autocomplete="off" spellcheck="false" value="${attr(k.name || '')}" style="height:44px">
-        <span class="hint">Past activity keeps the old name; new activity uses this one.</span></div>
-      <div class="field" style="margin-bottom:0"><label>Colour</label>${colorPickHTML('kColor', k.color || '', { auto: true })}
-        <span class="hint">On its avatar, its sparks in the brain and every activity row.</span></div>`,
+    back: fromAgent ? backTo(k.id) : undefined,
+    body: `<div class="ky-prev" id="kPrev"></div>
+      <div class="ui-fld"><label for="kN">Name</label><input id="kN" class="ui-input" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(k.name || '')}">
+        <span class="ui-help">Past activity keeps the old name; new activity uses this one.</span></div>
+      <div class="ui-fld" style="margin-bottom:0"><span class="ui-lbl">Colour</span>${colorPickHTML('kColor', k.color || '', { auto: true })}
+        <span class="ui-help">On its avatar, its sparks in the brain and every activity row.</span></div>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => s.close() },
+      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => (fromAgent ? openAgent(k.id) : s.close()) },
       {
         label: 'Save',
         cls: 'primary',
@@ -1062,10 +1002,11 @@ function openRename(k: KeyRowFull): void {
           try {
             if (name !== (k.name || '')) await apiPost(KEY_PATHS.rename, { id: k.id, name });
             if (color !== (k.color || '')) await apiPost(KEY_PATHS.rename, { id: k.id, color });
-            s.close();
             toast('Saved', 'ok');
             await loadKeys();
-            void renderKeys();
+            await load();
+            if (fromAgent) openAgent(k.id);
+            else s.close();
           } catch (e) {
             toast('Could not save: ' + (e as Error).message, 'err');
           }
@@ -1077,8 +1018,8 @@ function openRename(k: KeyRowFull): void {
       const input = $('#kN', b) as HTMLInputElement;
       const prev = (): void => {
         const n = input.value.trim() || old;
-        const c = ($('#kColor', b) as HTMLElement).dataset.value || agentColor(n, null);
-        $('#kPrev', b).innerHTML = previewHTML(n, c, ($('#kColor', b) as HTMLElement).dataset.value ? 'Chosen colour' : 'Automatic colour from the name');
+        const picked = ($('#kColor', b) as HTMLElement).dataset.value;
+        $('#kPrev', b).innerHTML = previewHTML(n, picked || agentColor(n, null), picked ? 'Chosen colour' : 'Automatic colour from the name');
       };
       wireColorPick(b, 'kColor', prev);
       input.oninput = prev;
@@ -1094,7 +1035,7 @@ function openRename(k: KeyRowFull): void {
 }
 
 function rollKey(k: KeyRowFull): void {
-  const name = k.name || k.id;
+  const name = nameOf(k);
   Modal.confirm(
     'Make a new key',
     `${name}'s current key stops working at once. The new key is shown next; update the app that uses ${name}.`,
@@ -1103,8 +1044,8 @@ function rollKey(k: KeyRowFull): void {
       try {
         const r = await apiPost<KeyCreated>(KEY_PATHS.roll, { id: k.id });
         Modal.close();
-        showSecret('New key made', name, (r && (r.key || r.secret)) || '-', k.id);
-        void renderKeys();
+        showSecret('New key made', k, (r && (r.key || r.secret)) || '-');
+        void load();
       } catch (e) {
         toast('Could not make a new key: ' + (e as Error).message, 'err');
       }
@@ -1113,19 +1054,20 @@ function rollKey(k: KeyRowFull): void {
   );
 }
 
-async function toggleKey(k: KeyRowFull): Promise<void> {
+async function toggleKey(k: KeyRowFull, reopen = false): Promise<void> {
   const on = k.enabled !== false;
   try {
     await apiPost(KEY_PATHS.toggle, { id: k.id, enabled: !on });
-    toast(on ? `${k.name || k.id} is turned off` : `${k.name || k.id} is turned on`, 'ok');
-    void renderKeys();
+    toast(on ? `${nameOf(k)} is turned off` : `${nameOf(k)} is turned on`, 'ok');
+    await load();
+    if (reopen) openAgent(k.id);
   } catch (e) {
     toast('Failed: ' + (e as Error).message, 'err');
   }
 }
 
-function delKey(k: KeyRowFull): void {
-  const name = k.name || k.id;
+function delKey(k: KeyRowFull, sheet?: Sheet): void {
+  const name = nameOf(k);
   Modal.confirm(
     'Delete agent',
     `${name} will be deleted and its key stops working at once. You can restore it until you reload the app.`,
@@ -1135,8 +1077,9 @@ function delKey(k: KeyRowFull): void {
         await apiPost(KEY_PATHS.del, { id: k.id });
         state.keysDeleted.push({ id: k.id, name: k.name });
         Modal.close();
+        sheet?.close();
         toast(name + ' deleted', 'ok');
-        void renderKeys();
+        void load();
       } catch (e) {
         toast('Failed: ' + (e as Error).message, 'err');
       }

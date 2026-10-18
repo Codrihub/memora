@@ -142,9 +142,18 @@ button.cc-stat:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line
 .cc-sh-f .grow{flex:1}
 .cc-sh-f .btn{height:40px;padding:0 16px;border-radius:11px}
 .cc-sh .cc-grab{display:none}
+.cc-sh.swap{transition:none}
+.cc-sh.swap .cc-sh-b,.cc-sh.swap .cc-sh-h .t{animation:ccShSwap .2s var(--ease)}
+@keyframes ccShSwap{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+.cc-sh-back{width:36px;height:36px;margin-left:-8px;border-radius:10px}
+.cc-sh-back svg{width:18px;height:18px}
+/* Toasts never cover a sheet's header or buttons: beside it on wide screens, above its footer otherwise. */
+@media (min-width:1101px){body:has(.cc-sh.in) .toasts{right:calc(var(--cc-sh-open,560px) + 16px)}}
+@media (max-width:1100px){body:has(.cc-sh.in) .toasts{top:auto;bottom:calc(var(--cc-sh-foot,76px) + 10px)}}
 @media (max-width:760px){
   .cc-sh{top:auto;left:0;width:100%;max-height:calc(100dvh - 24px);border-left:0;border-top:1px solid var(--line-strong);
     border-radius:20px 20px 0 0;transform:translateY(100%)}
+  .cc-sh.full{height:calc(100dvh - 10px - env(safe-area-inset-top));max-height:none}
   .cc-sh .cc-grab{display:block;flex:none;margin:8px auto 0}
   .cc-sh-h{padding:8px 12px 12px 16px}
   .cc-sh-b{padding:16px}
@@ -201,6 +210,7 @@ button.cc-stat:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line
 @media (prefers-reduced-motion:reduce){
   .cc-dot.run{animation:none}
   .cc-drawer,.cc-scrim,.cc-sh,.cc-sh-scrim,.cc-menu.sheet,.cc-menu-scrim.dim{transition:none}
+  .cc-sh.swap .cc-sh-b,.cc-sh.swap .cc-sh-h .t{animation:none}
 }
 `;
 
@@ -531,6 +541,10 @@ export interface SheetOptions {
   actions?: SheetAction[];
   /** Desktop width in px (default 520). */
   width?: number;
+  /** Full height on phones (long or multi-step content). */
+  full?: boolean;
+  /** Shows a back button in the header that runs this (e.g. reopen the sheet this one came from). */
+  back?: () => void;
   onOpen?: (sheet: Sheet) => void;
   onClose?: () => void;
 }
@@ -542,28 +556,41 @@ export interface Sheet {
   close: () => void;
 }
 
-let closeSheetFn: (() => void) | null = null;
+let closeSheetFn: ((instant?: boolean) => void) | null = null;
+/** Where focus goes back to when the last sheet of a chain closes. */
+let sheetOrigin: HTMLElement | null = null;
 
 export function closeSheet(): void {
   closeSheetFn?.();
 }
 
+const BACK_ICO = '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>';
+
+/**
+ * Opens a sheet. When another sheet is open it is replaced in place, without
+ * the slide, so moving between related sheets (an agent and its permissions)
+ * feels like one panel.
+ */
 export function openSheet(o: SheetOptions): Sheet {
-  closeSheet();
+  const swap = !!closeSheetFn;
+  if (swap) closeSheetFn!(true);
+  else sheetOrigin = document.activeElement as HTMLElement | null;
   useControlStyles();
-  const last = document.activeElement as HTMLElement | null;
+  const last = sheetOrigin;
   const scrim = document.createElement('div');
   scrim.className = 'cc-sh-scrim';
   const d = document.createElement('div');
-  d.className = 'cc-sh';
+  d.className = 'cc-sh' + (o.full ? ' full' : '') + (swap ? ' swap' : '');
   d.setAttribute('role', 'dialog');
   d.setAttribute('aria-modal', 'true');
   const tid = 'ccSh' + Math.random().toString(36).slice(2, 8);
   d.setAttribute('aria-labelledby', tid);
-  d.style.setProperty('--sh-w', (o.width || 520) + 'px');
-  d.innerHTML = `<div class="cc-grab" aria-hidden="true"></div><header class="cc-sh-h">${o.lead || ''}<div class="t"><h2 id="${tid}">${esc(
-    o.title,
-  )}</h2>${o.sub ? `<p>${esc(o.sub)}</p>` : ''}</div>
+  const width = o.width || 520;
+  d.style.setProperty('--sh-w', width + 'px');
+  document.documentElement.style.setProperty('--cc-sh-open', Math.min(width, window.innerWidth) + 'px');
+  d.innerHTML = `<div class="cc-grab" aria-hidden="true"></div><header class="cc-sh-h">${
+    o.back ? `<button type="button" class="cc-ibtn cc-sh-back" data-back aria-label="Back" title="Back">${BACK_ICO}</button>` : ''
+  }${o.lead || ''}<div class="t"><h2 id="${tid}">${esc(o.title)}</h2>${o.sub ? `<p>${esc(o.sub)}</p>` : ''}</div>
     <button type="button" class="cc-ibtn cc-sh-x" data-x aria-label="Close">${ICO.close}</button></header>
     <div class="cc-sh-b">${o.body}</div>${o.actions?.length ? '<footer class="cc-sh-f"></footer>' : ''}`;
   const body = d.querySelector('.cc-sh-b') as HTMLElement;
@@ -571,10 +598,15 @@ export function openSheet(o: SheetOptions): Sheet {
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
   document.body.append(scrim, d);
-  requestAnimationFrame(() => {
+  if (swap) {
     scrim.classList.add('in');
     d.classList.add('in');
-  });
+    setTimeout(() => d.classList.remove('swap'), 260);
+  } else
+    requestAnimationFrame(() => {
+      scrim.classList.add('in');
+      d.classList.add('in');
+    });
   const sheet: Sheet = { root: d, body, foot, close: () => close() };
   if (foot && o.actions) {
     for (const a of o.actions) {
@@ -598,9 +630,10 @@ export function openSheet(o: SheetOptions): Sheet {
       }
     }
   }
-  // Another layer (a confirm, a menu, the palette) handles its own keys first.
+  document.documentElement.style.setProperty('--cc-sh-foot', (foot ? foot.offsetHeight || 64 : 0) + 'px');
+  // Another layer (a confirm, a menu, a select, the palette) handles its own keys first.
   const covered = (): boolean =>
-    !!document.querySelector('#modalHost:not(.hidden),.cc-menu') || !document.body.contains(d);
+    !!document.querySelector('#modalHost:not(.hidden),.cc-menu,.ui-sel-pop') || !document.body.contains(d);
   const key = (e: KeyboardEvent): void => {
     if (covered()) return;
     if (e.key === 'Escape') {
@@ -622,19 +655,26 @@ export function openSheet(o: SheetOptions): Sheet {
     }
   };
   let closed = false;
-  const close = (): void => {
+  const close = (instant = false): void => {
     if (closed) return;
     closed = true;
     if (closeSheetFn === close) closeSheetFn = null;
     document.removeEventListener('keydown', key, true);
     document.body.style.overflow = prevOverflow;
-    scrim.classList.remove('in');
-    d.classList.remove('in');
-    setTimeout(() => {
+    if (instant) {
       scrim.remove();
       d.remove();
-    }, 240);
+    } else {
+      scrim.classList.remove('in');
+      d.classList.remove('in');
+      setTimeout(() => {
+        scrim.remove();
+        d.remove();
+      }, 240);
+    }
     o.onClose?.();
+    if (instant) return;
+    sheetOrigin = null;
     try {
       last?.focus();
     } catch {
@@ -643,8 +683,10 @@ export function openSheet(o: SheetOptions): Sheet {
   };
   closeSheetFn = close;
   document.addEventListener('keydown', key, true);
-  scrim.onclick = close;
-  (d.querySelector('[data-x]') as HTMLElement).onclick = close;
+  scrim.onclick = () => close();
+  (d.querySelector('[data-x]') as HTMLElement).onclick = () => close();
+  const back = d.querySelector<HTMLElement>('[data-back]');
+  if (back && o.back) back.onclick = o.back;
   wireCopy(d);
   o.onOpen?.(sheet);
   setTimeout(() => {

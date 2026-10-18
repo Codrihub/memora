@@ -12,6 +12,7 @@ import { fmtTs, noteName, relTs } from '../format';
 import { hooks } from '../hooks';
 import { state, allNotes, colorOfFolder } from '../state';
 import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
+import { connectOnLoad } from './keys';
 import { useActivityStyles, wireActRows } from '../control/activity';
 import { loadFeed, onLive, pushLive, verb, type ActivityItem } from '../control/feed';
 import { ago, copyText, ICO, plural, sparkSVG, useControlStyles, whileVisible } from '../control/ui';
@@ -734,7 +735,7 @@ function paintAgents(): void {
         ? `<div class="ov-foot"><button type="button" class="ov-lnk" data-more>+${plural(rows.length - AGENT_ROWS, 'more agent')}</button></div>`
         : '');
   if (!setHTML(box, html)) return;
-  box.querySelector<HTMLElement>('#ovNewKey')?.addEventListener('click', () => hooks.go('keys'));
+  box.querySelector<HTMLElement>('#ovNewKey')?.addEventListener('click', newAgent);
   box.querySelector<HTMLElement>('[data-more]')?.addEventListener('click', () => hooks.go('keys'));
   box.querySelectorAll<HTMLElement>('[data-agent]').forEach((b) => {
     b.onclick = () => {
@@ -855,6 +856,12 @@ function paintHealth(): void {
         : '<span class="ov-pill"><span class="cc-dot ok"></span>All systems normal</span>';
 }
 
+/** New agent: the Agents page with the connect flow open. */
+function newAgent(): void {
+  connectOnLoad();
+  hooks.go('keys');
+}
+
 /** Agents card footer: where agents connect, with copy and a New agent shortcut. */
 function paintConnect(): void {
   const box = document.getElementById('ovConnect');
@@ -868,5 +875,5 @@ function paintConnect(): void {
   }${loaded && keys.length ? `<button type="button" class="btn sm" data-new-agent aria-label="New agent" title="New agent">${ICO.plus}<span class="lbl">New agent</span></button>` : ''}`;
   if (!setHTML(box, html)) return;
   box.querySelector<HTMLElement>('[data-copy-mcp]')?.addEventListener('click', () => void copyText(mcp, 'MCP endpoint copied'));
-  box.querySelector<HTMLElement>('[data-new-agent]')?.addEventListener('click', () => hooks.go('keys'));
+  box.querySelector<HTMLElement>('[data-new-agent]')?.addEventListener('click', newAgent);
 }

@@ -33,7 +33,7 @@ import { renderHome } from './views/home';
 import { renderGraph } from './views/graph';
 import { renderTags } from './views/tags';
 import { renderLogs } from './views/logs';
-import { renderKeys } from './views/keys';
+import { connectOnLoad, renderKeys } from './views/keys';
 import { renderTools } from './views/tools';
 import { brainView, renderBrain } from './views/brain';
 import { renderCanvas } from './views/canvas';
@@ -112,7 +112,7 @@ function wireShell(): void {
     { id: 'open-brain', title: 'Open brain', hint: 'Your memory as a living brain', icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
     { id: 'new-folder', title: 'New folder', hint: 'Create a folder', icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
     { id: 'activity', title: 'Show live activity', hint: 'What agents are doing now', icon: 'activity', keywords: 'logs agents feed', run: () => go('logs') },
-    { id: 'new-key', title: 'Connect an agent', hint: 'Create an API key on Agents & API keys', icon: 'key', keywords: 'api key mcp token', run: () => go('keys') },
+    { id: 'new-key', title: 'Connect an agent', hint: 'Create an API key on Agents & API keys', icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
     { id: 'theme', title: 'Switch theme', hint: 'Dark, light or system', icon: 'sun', keywords: 'dark light mode appearance', run: () => cycleTheme() },
     { id: 'theme-dark', title: 'Use dark theme', icon: 'moon', keywords: 'appearance mode', run: () => setThemePref('dark') },
     { id: 'theme-light', title: 'Use light theme', icon: 'sun', keywords: 'appearance mode', run: () => setThemePref('light') },

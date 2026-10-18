@@ -259,14 +259,11 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-near{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;margin-top:10px;font-size:12.5px;color:var(--muted)}
 .vx-near-b{height:28px;padding:0 10px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:12.5px;font-weight:600}
 .vx-near-b:hover{border-color:var(--accent-line);color:var(--accent)}
-.vx-select{position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:var(--r-sm);color:var(--muted);
-  font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
-.vx-select:hover{background:var(--hover);color:var(--fg)}
-.vx-select:focus-within{box-shadow:0 0 0 2px var(--accent-line)}
+.ui-sel.vx-select{position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:var(--r-sm);color:var(--muted);
+  font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s;border:0;background:transparent;max-width:none}
+.ui-sel.vx-select:hover{background:var(--hover);color:var(--fg)}
+.ui-sel.vx-select:focus-visible,.ui-sel.vx-select[aria-expanded=true]{box-shadow:0 0 0 2px var(--accent-line);background:var(--hover);color:var(--fg)}
 .vx-select .vx-i{width:14px;height:14px}
-/* The native select sits invisibly on top: the label shows the choice. */
-.vx-select select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font:inherit;border:0}
-.vx-select option{background:var(--panel);color:var(--fg)}
 .vx-dir .vx-i{width:15px;height:15px;transform:rotate(180deg);transition:transform .2s}
 .vx-dir.desc .vx-i{transform:none}
 .vx-bulk{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 8px 8px 16px;border-radius:var(--r);font-size:13px;
@@ -659,7 +656,7 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
   .vx-ltools{overflow-x:auto;scrollbar-width:none;margin-right:-16px;padding-right:16px}
   .vx-ltools::-webkit-scrollbar{display:none}
   .vx-ltools>*{flex:none}
-  .vx-ltools .vx-select,.vx-ltools .vx-icon-btn{height:40px}
+  .vx-ltools .ui-sel.vx-select,.vx-ltools .vx-icon-btn{height:40px;font-size:13px}
   .vx-searchrow{margin-top:16px}
   .vx-search{height:48px}
   .vx-search input{font-size:16px}
