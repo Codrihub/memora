@@ -60,6 +60,14 @@ The image is `ghcr.io/codrihub/memora` (linux/amd64 and linux/arm64). See
 
 ### Native installer (Linux x86_64 / aarch64 with systemd)
 
+One command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
+```
+
+Or download it and read it first:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh -o install.sh
 less install.sh                          # read it first
