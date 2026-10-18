@@ -1,0 +1,4 @@
+{"at":1790000000,"event":"key_created","ip":null,"user":null,"detail":"agent (memora-cli)"}
+{"at":1790000001,"event":"Bad-Event","ip":null,"user":null,"detail":""}
+{"event":"no_time"}
+{"at":1790000002,"event":"login_fail","ip":"127.0.0.1","user":"alice","detail":"wrong password"}

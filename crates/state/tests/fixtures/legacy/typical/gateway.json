@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "memora",
+      "prefix": "/"
+    }
+  ],
+  "users": {
+    "alice": {
+      "password": "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA",
+      "role": "owner",
+      "enabled": true,
+      "display_name": "Alice"
+    }
+  },
+  "api_keys": {
+    "k_new": {
+      "name": "agent",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "prefix": "memora_live_",
+      "enabled": true,
+      "scopes": [
+        "mcp",
+        "read"
+      ],
+      "tools": [
+        "search_notes",
+        "read_note"
+      ],
+      "created": 1790000000,
+      "grace_until": 1790100000
+    },
+    "k_old": {
+      "name": "legacy",
+      "hash": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "prefix": "memora_live_",
+      "enabled": false,
+      "role": "admin",
+      "created": "2026-10-14T20:49:30+09:00",
+      "last_used": "2026-10-15T00:00:00Z",
+      "use_count": 7
+    },
+    "k_argon": {
+      "name": "argon",
+      "hash": "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA",
+      "prefix": "memora_",
+      "enabled": true,
+      "scopes": [
+        "mcp",
+        "read",
+        "write",
+        "admin"
+      ],
+      "tools": "*",
+      "created": 1700000000
+    }
+  },
+  "api_keys_deleted": {
+    "k_gone": {
+      "name": "gone",
+      "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "enabled": true,
+      "scopes": [
+        "read"
+      ],
+      "tools": "*"
+    }
+  },
+  "settings": {
+    "realm": "My Memora",
+    "session_ttl": 7200,
+    "session_max_age": 0,
+    "min_password_len": 12,
+    "rate_limit_login": 8,
+    "trusted_proxies": [
+      "10.0.0.1"
+    ]
+  }
+}

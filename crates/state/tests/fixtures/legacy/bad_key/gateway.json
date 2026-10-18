@@ -1,0 +1,15 @@
+{
+  "users": {
+    "alice": {
+      "password": "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA"
+    }
+  },
+  "api_keys": {
+    "k_bad": {
+      "name": "x",
+      "hash": "not-a-hash",
+      "prefix": "memora_live_",
+      "created": 1
+    }
+  }
+}

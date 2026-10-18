@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+#
+# Release image: packages the static (musl) binaries that the release workflow
+# already built and verified, instead of compiling again under emulation.
+# Used by .github/workflows/release.yml only. For a local build from source,
+# use the Dockerfile at the repository root.
+#
+# Build context layout (prepared by the workflow):
+#   bin/amd64/memora  bin/amd64/memora-cli
+#   bin/arm64/memora  bin/arm64/memora-cli
+#   assets/           the built web UI
+#   docker/entrypoint.sh  docker/setup-wrapper.sh
+
+FROM debian:bookworm-slim
+
+ARG TARGETARCH
+ARG VERSION=dev
+
+LABEL org.opencontainers.image.title="Memora" \
+      org.opencontainers.image.description="Long-term memory for AI agents: a git-backed markdown vault served over MCP and one HTTP port." \
+      org.opencontainers.image.source="https://github.com/Codrihub/memora" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git tini \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd -g 1000 memora \
+ && useradd -u 1000 -g 1000 -m -d /home/memora -s /usr/sbin/nologin memora
+
+WORKDIR /app
+
+COPY bin/${TARGETARCH}/memora     /usr/local/bin/memora
+COPY bin/${TARGETARCH}/memora-cli /usr/local/bin/memora-cli
+COPY assets /app/assets
+COPY docker/entrypoint.sh    /usr/local/bin/entrypoint.sh
+COPY docker/setup-wrapper.sh /usr/local/bin/setup
+
+RUN chmod 0755 /usr/local/bin/memora /usr/local/bin/memora-cli \
+      /usr/local/bin/entrypoint.sh /usr/local/bin/setup \
+ && mkdir -p /data /state \
+ && chown -R memora:memora /app /data /state \
+ && printf '%s\n' "${VERSION}" > /app/VERSION
+
+ENV MEMORA_VAULT=/data \
+    MEMORA_STATE=/state \
+    MEMORA_PORT=8400 \
+    MEMORA_BIND=0.0.0.0 \
+    MEMORA_ARM_TTL=300 \
+    MEMORA_ASSETS=/app/assets \
+    GIT_AUTHOR_NAME=Memora \
+    GIT_AUTHOR_EMAIL=memora@localhost \
+    GIT_COMMITTER_NAME=Memora \
+    GIT_COMMITTER_EMAIL=memora@localhost \
+    RUST_LOG=info
+
+EXPOSE 8400
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${MEMORA_PORT}/healthz" || exit 1
+
+USER memora
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["serve"]

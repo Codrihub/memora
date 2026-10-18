@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/mcp",
+    "crates/gateway",
+    "crates/http",
+    "crates/cli",
+    "crates/state",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+authors = ["Codrihub Tech"]
+description = "Long-term memory for AI agents: a git-backed markdown vault served over MCP and a single HTTP front door."
+repository = "https://github.com/Codrihub/memora"
+homepage = "https://github.com/Codrihub/memora"
+readme = "README.md"
+keywords = ["memory", "mcp", "ai-agents", "markdown", "knowledge-base"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+walkdir = "2"
+regex = "1"
+anyhow = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Debug builds keep line numbers for backtraces but no full debug info, which
+# keeps target/debug a fraction of its size.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

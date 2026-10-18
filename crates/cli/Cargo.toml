@@ -1,0 +1,19 @@
+[package]
+name = "memora-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "memora-cli"
+path = "src/main.rs"
+
+[dependencies]
+memora-gateway = { path = "../gateway" }
+memora-mcp = { path = "../mcp" }
+memora-state = { path = "../state" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dialoguer = { version = "0.11", default-features = false, features = ["password"] }
+console = "0.15"
+libc = "0.2"

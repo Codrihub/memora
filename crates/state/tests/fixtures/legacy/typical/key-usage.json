@@ -1,0 +1,12 @@
+{
+  "k_new": {
+    "last_used": 1790050000,
+    "last_ip": "192.0.2.1",
+    "count": 42
+  },
+  "k_unknown": {
+    "last_used": 1,
+    "last_ip": null,
+    "count": 1
+  }
+}

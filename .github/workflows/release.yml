@@ -1,0 +1,332 @@
+name: Release
+
+# Push a SemVer tag that matches Cargo.toml to publish a release:
+#   git tag -a v1.0.1 -m "Memora 1.0.1" && git push origin v1.0.1
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  IMAGE: ghcr.io/codrihub/memora
+
+jobs:
+  # ------------------------------------------------------------------ verify
+  verify:
+    name: Verify tag and changelog
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match Cargo.toml
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag '$tag' is not vMAJOR.MINOR.PATCH[-pre]"; exit 1
+          fi
+          cargo_version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::error::tag $tag does not match Cargo.toml version $cargo_version"; exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.version }}"
+          # Everything between "## [v]" and the next "## [" heading.
+          awk -v v="$v" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no '## [$v]' section (move [Unreleased] entries under it)"; exit 1
+          fi
+          {
+            echo
+            echo "### Install"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/v$v/scripts/install.sh | sudo sh -s -- --version $v"
+            echo "docker pull ${IMAGE}:$v"
+            echo '```'
+            echo
+            echo "Verify downloads with \`sha256sum -c SHA256SUMS --ignore-missing\`."
+          } >> notes.md
+          cat notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes.md
+
+  # --------------------------------------------------------------------- web
+  web:
+    name: Build web UI
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: npm ci && npm run build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets
+          path: crates/http/assets/
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------- build
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: [verify, web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+            docker: amd64
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            docker: arm64
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Build static binaries
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }} --bin memora --bin memora-cli
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: assets
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="memora-${VERSION}-${{ matrix.arch }}-linux"
+          bin="target/${{ matrix.target }}/release"
+          mkdir -p "dist/$name" "dist/bin/${{ matrix.docker }}"
+          install -m 0755 "$bin/memora" "$bin/memora-cli" "dist/$name/"
+          install -m 0755 "$bin/memora" "$bin/memora-cli" "dist/bin/${{ matrix.docker }}/"
+          cp -R assets "dist/$name/assets"
+          install -m 0755 scripts/install.sh "dist/$name/install.sh"
+          cp LICENSE README.md "dist/$name/"
+          printf '%s\n' "$VERSION" > "dist/$name/VERSION"
+          file "dist/$name/memora"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.arch }}
+          path: dist/memora-*.tar.gz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.docker }}
+          path: dist/bin/${{ matrix.docker }}/
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- smoke test
+  smoke:
+    name: Install smoke test (x86_64)
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball-x86_64
+          path: dist
+
+      - name: install.sh --from-dir into a temp prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C dist -xzf "dist/memora-${VERSION}-x86_64-linux.tar.gz"
+          pkg="dist/memora-${VERSION}-x86_64-linux"
+          root="$(mktemp -d)"
+          sh "$pkg/install.sh" --from-dir "$pkg" --prefix "$root/usr" \
+            --data-dir "$root/var/lib/memora" --no-systemd
+          test -x "$root/usr/bin/memora"
+          test -x "$root/usr/bin/memora-cli"
+          test "$(cat "$root/usr/share/memora/VERSION")" = "$VERSION"
+          shellcheck -s sh scripts/install.sh
+          # Start the installed server and wait for /healthz; this also creates
+          # and migrates the state database.
+          MEMORA_STATE="$root/var/lib/memora/state" MEMORA_VAULT="$root/var/lib/memora/vault" \
+          MEMORA_ASSETS="$root/usr/share/memora/assets" MEMORA_PORT=18400 MEMORA_BIND=127.0.0.1 \
+            "$root/usr/bin/memora" > server.log 2>&1 &
+          pid=$!
+          ok=0
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18400/healthz; then ok=1; break; fi
+            sleep 1
+          done
+          kill "$pid" || true
+          cat server.log
+          test "$ok" = 1
+          ls -la "$root/var/lib/memora/state"
+
+  # ----------------------------------------------------------------- release
+  release:
+    name: GitHub Release
+    needs: [verify, build, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tarball-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: notes
+          path: .
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum memora-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "${GITHUB_REF_NAME}" dist/memora-*.tar.gz dist/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Memora ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag "${flags[@]}"
+
+  # ------------------------------------------------------------------ docker
+  docker:
+    name: Docker image (amd64 + arm64)
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: ctx/assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-amd64
+          path: ctx/bin/amd64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-arm64
+          path: ctx/bin/arm64
+
+      - name: Prepare build context
+        run: |
+          mkdir -p ctx/docker
+          cp docker/entrypoint.sh docker/setup-wrapper.sh ctx/docker/
+          chmod 0755 ctx/bin/*/*
+          find ctx -maxdepth 3 | sort
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=${{ needs.verify.outputs.prerelease != 'true' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ctx
+          file: docker/Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

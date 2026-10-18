@@ -1,0 +1,29 @@
+[package]
+name = "memora-http"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+memora-core = { path = "../core" }
+memora-mcp = { path = "../mcp" }
+memora-gateway = { path = "../gateway" }
+memora-state = { path = "../state" }
+serde_json.workspace = true
+anyhow.workspace = true
+libc = "0.2"
+axum = { version = "0.8", features = ["json", "ws"] }
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["timeout"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Fetches OAuth client metadata documents (CIMD) for remote MCP clients.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# Seals API key secrets so the owner can show them again (Agents page).
+chacha20poly1305 = "0.10"
+# gzip for the UI bundle (already in the tree via zip).
+flate2 = "1"
+
+[[bin]]
+name = "memora"
+path = "src/main.rs"

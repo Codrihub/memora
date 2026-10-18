@@ -1,0 +1,39 @@
+# Keep the build context small and deterministic.
+
+# Version control and repository metadata.
+.git
+.gitignore
+.gitattributes
+
+# Rust build output.
+target/
+
+# Node build output and caches, if the UI is ever built separately.
+node_modules/
+web/node_modules/
+web/dist/
+
+# Runtime data that must never enter an image: vault and state.
+data/
+state/
+vault/
+
+# Local secrets and environment files.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.leak-patterns
+internal.token
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.bak
+
+# Documentation is not needed inside the image.
+*.md
+!docker/README.md
+docs/
+LICENSE

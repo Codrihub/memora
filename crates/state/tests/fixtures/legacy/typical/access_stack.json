@@ -1,0 +1,27 @@
+{
+  "rules": [
+    {
+      "id": "r1",
+      "kind": "cidr",
+      "value": "10.0.0.0/8",
+      "action": "allow",
+      "enabled": true,
+      "note": "lan"
+    },
+    {
+      "id": "r_bad",
+      "kind": "cidr",
+      "value": "not-a-cidr",
+      "action": "block",
+      "enabled": true
+    },
+    {
+      "id": "r2",
+      "kind": "all",
+      "value": "*",
+      "action": "block",
+      "enabled": false
+    }
+  ],
+  "default_allow": false
+}

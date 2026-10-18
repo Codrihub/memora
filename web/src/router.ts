@@ -1,0 +1,264 @@
+// View router with real URLs (History API):
+//
+//   /brain /brain?mode=graph /brain?mode=canvas /nodes /node/<path> /tags /overview
+//   /activity /agents /tools /access /settings
+//
+// `go()` swaps the visible view, updates the navigation (sidebar, tab bar),
+// the title and the URL. Back/forward and deep links work; the node path in
+// /node/<path> is validated (see `safeNodePath`) and only ever used to select
+// a node that exists in the loaded tree. Renderers register themselves, so
+// this module imports no view.
+
+import { $, $$ } from './dom';
+import { clearPeek } from './peek';
+import { allNotes, onNoteChange, state, type Page } from './state';
+
+export type NavGroup = 'content' | 'system';
+
+export interface PageMeta {
+  label: string;
+  /** Longer title for the top bar. */
+  title: string;
+  /** One-line description (command palette, tooltips). */
+  hint: string;
+  icon: string;
+  group: NavGroup;
+  /** URL path. */
+  path: string;
+}
+
+/** Every page, in navigation order; Alt+1..9 follow it. */
+export const PAGE_META: Record<Page, PageMeta> = {
+  home: { label: 'Overview', title: 'Overview', hint: 'Vault summary and recent changes', icon: 'overview', group: 'system', path: '/overview' },
+  brain: { label: 'Brain', title: 'Brain', hint: 'Your memory as a living brain', icon: 'brain', group: 'content', path: '/brain' },
+  vault: { label: 'Nodes', title: 'Nodes', hint: 'Browse, read and write your nodes', icon: 'note', group: 'content', path: '/nodes' },
+  graph: { label: 'Graph', title: 'Graph', hint: 'Map of every link between nodes', icon: 'graph', group: 'content', path: '/brain?mode=graph' },
+  canvas: { label: 'Canvas', title: 'Canvas', hint: 'Arrange nodes on an infinite board', icon: 'canvas', group: 'content', path: '/brain?mode=canvas' },
+  tags: { label: 'Tags', title: 'Tags', hint: 'Every tag and its nodes', icon: 'tags', group: 'content', path: '/tags' },
+  logs: { label: 'Activity', title: 'Activity', hint: 'Live agent and vault activity', icon: 'activity', group: 'system', path: '/activity' },
+  keys: { label: 'Agents & API keys', title: 'Agents & API keys', hint: 'Keys your agents connect with', icon: 'key', group: 'system', path: '/agents' },
+  tools: { label: 'Tools', title: 'MCP tools', hint: 'Turn MCP tools on or off', icon: 'tools', group: 'system', path: '/tools' },
+  access: { label: 'Access rules', title: 'Access rules', hint: 'IP and domain access rules', icon: 'shield', group: 'system', path: '/access' },
+  settings: { label: 'Settings', title: 'Settings', hint: 'Account, vault and preferences', icon: 'settings', group: 'system', path: '/settings' },
+};
+
+export const PAGES = Object.keys(PAGE_META) as Page[];
+export const CONTENT_PAGES = PAGES.filter((p) => PAGE_META[p].group === 'content');
+
+export function isPage(v: unknown): v is Page {
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(PAGE_META, v);
+}
+
+/* ───────────────────────── URLs ───────────────────────── */
+
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Validate a vault-relative node path taken from a URL. Returns the
+ * normalized path, or null when it is unsafe or malformed (absolute paths,
+ * drive letters, backslashes, control characters, empty, "." or ".."
+ * segments).
+ */
+export function safeNodePath(raw: string): string | null {
+  if (!raw || raw.length > 1024) return null;
+  if (raw.startsWith('/') || raw.includes('\\') || CONTROL.test(raw) || /^[a-zA-Z]:/.test(raw)) return null;
+  const parts = raw.split('/');
+  for (const p of parts) {
+    if (!p || p === '.' || p === '..' || CONTROL.test(p)) return null;
+  }
+  return parts.join('/');
+}
+
+/** URL for a node: every segment percent-encoded. */
+export function nodeUrl(path: string): string {
+  return '/node/' + path.split('/').map(encodeURIComponent).join('/');
+}
+
+export interface Route {
+  page: Page;
+  /** Validated node path (not yet checked against the tree). */
+  node?: string;
+  /** The URL named a node, but it was malformed or unsafe. */
+  badNode?: boolean;
+  /** The URL matched no route. */
+  unknown?: boolean;
+}
+
+const BY_PATH = new Map<string, Page>(PAGES.map((p) => [PAGE_META[p].path, p]));
+// Aliases kept for old links and muscle memory.
+BY_PATH.set('/vault', 'vault');
+BY_PATH.set('/home', 'home');
+// The welcome page opens over the Overview (views/welcome.ts).
+BY_PATH.set('/welcome', 'home');
+BY_PATH.set('/logs', 'logs');
+BY_PATH.set('/keys', 'keys');
+// Graph and canvas are modes of the brain (/brain?mode=graph); old paths still work.
+BY_PATH.set('/graph', 'graph');
+BY_PATH.set('/canvas', 'canvas');
+
+/** The sidebar entry a page lights up: brain modes count as Brain. */
+export function navPageOf(page: Page): Page {
+  return page === 'graph' || page === 'canvas' ? 'brain' : page;
+}
+
+/** The brain's mode from `?mode=` (graph, canvas; anything else is the 3D brain). */
+function brainMode(loc: Location): Page {
+  const m = new URLSearchParams(loc.search).get('mode');
+  return m === 'graph' || m === 'canvas' ? m : 'brain';
+}
+
+/** The key id of an /activity/<id> address, for the Activity page to open (it clears it). */
+export let routeAgent: string | null = null;
+
+export function takeRouteAgent(): string | null {
+  const id = routeAgent;
+  routeAgent = null;
+  return id;
+}
+
+/** Parse the current location (also accepts the legacy #/page and #graph hashes). */
+export function parseLocation(loc: Location = location): Route {
+  const legacy = loc.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
+  if (legacy && isPage(legacy)) return { page: legacy };
+  const path = loc.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/' || path === '/index.html' || path === '/brain') return { page: brainMode(loc) };
+  if (path.startsWith('/node/')) {
+    const segs = path.slice(6).split('/');
+    const decoded: string[] = [];
+    for (const s of segs) {
+      try {
+        decoded.push(decodeURIComponent(s));
+      } catch {
+        return { page: 'vault', badNode: true };
+      }
+    }
+    // A decoded segment must not smuggle in a separator.
+    if (decoded.some((d) => d.includes('/'))) return { page: 'vault', badNode: true };
+    const node = safeNodePath(decoded.join('/'));
+    return node ? { page: 'vault', node } : { page: 'vault', badNode: true };
+  }
+  // /activity/<key id>: one agent's activity.
+  const ag = /^\/activity\/([A-Za-z0-9_-]{1,64})$/.exec(path);
+  if (ag) {
+    routeAgent = ag[1];
+    return { page: 'logs' };
+  }
+  const page = BY_PATH.get(path);
+  return page ? { page } : { page: 'brain', unknown: true };
+}
+
+/** The node in the loaded tree for a URL path (exact, or without ".md"). */
+export function findNode(path: string): string | null {
+  const notes = allNotes();
+  const hit =
+    notes.find((n) => n.path === path) ||
+    notes.find((n) => n.path === path + '.md') ||
+    notes.find((n) => n.path.replace(/\.md$/i, '') === path);
+  return hit ? hit.path : null;
+}
+
+function urlFor(page: Page): string {
+  // An /activity/<id> address being opened keeps its agent (the page reads it).
+  if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
+  return page === 'vault' && state.note ? nodeUrl(state.note) : PAGE_META[page].path;
+}
+
+let replaceNext = false;
+
+/** Make the next URL update replace the history entry instead of pushing. */
+export function replaceHistory(): void {
+  replaceNext = true;
+}
+
+/** Bring the URL in line with the visible page / open node. */
+export function syncUrl(): void {
+  const url = urlFor(state.page);
+  const replace = replaceNext;
+  replaceNext = false;
+  if (location.pathname + location.search + location.hash === url) return;
+  try {
+    if (replace) history.replaceState({ page: state.page }, '', url);
+    else history.pushState({ page: state.page }, '', url);
+  } catch {
+    /* sandboxed frames can refuse history writes */
+  }
+}
+
+/* ───────────────────────── navigation ───────────────────────── */
+
+/** The page renderers, filled in by main.ts at boot. */
+export const renderers: Partial<Record<Page, () => void | Promise<void>>> = {};
+
+/** Called after every navigation (the shell repaints its nav state). */
+const listeners: ((page: Page) => void)[] = [];
+export function onNavigate(fn: (page: Page) => void): void {
+  listeners.push(fn);
+}
+
+export function registerView(page: Page, render: () => void | Promise<void>): void {
+  renderers[page] = render;
+}
+
+function leaf(path: string): string {
+  return (path.split('/').pop() || path).replace(/\.md$/i, '');
+}
+
+/** Top bar title for the current page. */
+export function paintTitle(): void {
+  const page = state.page;
+  const crumb = $('.crumb');
+  const title = page === 'vault' && state.note ? leaf(state.note) : PAGE_META[page].title;
+  crumb.textContent = title;
+  crumb.title = page === 'vault' && state.note ? state.note : '';
+  document.title = title + ' · Memora';
+}
+
+/**
+ * Show a page. `keepEditing` is used by openNote, which navigates to the vault
+ * without discarding the note the user is reading.
+ */
+export function go(page: Page, keepEditing = false): void {
+  if (!isPage(page)) page = 'brain';
+  if (!keepEditing) state.editing = false;
+  const prev = state.page;
+  state.page = page;
+  $$('[data-page].nav-item,[data-page].tab-item,[data-page].pm-item').forEach((b) => {
+    const on = b.dataset.page === navPageOf(page);
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  for (const key of PAGES) {
+    $('#view-' + key).classList.toggle('hidden', key !== page);
+  }
+  paintTitle();
+  $('#app').classList.remove('side-open');
+  if (page !== 'graph' && state.graph.stop) {
+    state.graph.stop();
+    state.graph.stop = null;
+  }
+  clearPeek();
+  syncUrl();
+  for (const fn of listeners) {
+    try {
+      fn(page);
+    } catch (e) {
+      console.error('navigate listener failed', e);
+    }
+  }
+  if (prev !== page) $('#views').scrollTop = 0;
+  void renderers[page]?.();
+}
+
+/** Redraw whichever view is visible. */
+export function refreshPage(): void {
+  void renderers[state.page]?.();
+}
+
+// Opening or closing a node while on the Nodes page updates the URL.
+onNoteChange(() => {
+  if (state.page !== 'vault') return;
+  syncUrl();
+  paintTitle();
+});

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --release
+
+      - name: Test
+        run: cargo test --workspace
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: memora:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  installer:
+    name: Installer lint and dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck -s sh scripts/install.sh docker/entrypoint.sh docker/setup-wrapper.sh
+
+      - name: install.sh --dry-run
+        run: |
+          mkdir -p /tmp/pkg/assets
+          printf '#!/bin/sh\n' > /tmp/pkg/memora
+          cp /tmp/pkg/memora /tmp/pkg/memora-cli
+          sh scripts/install.sh --from-dir /tmp/pkg --version 0.0.0-ci --dry-run
+          sh scripts/install.sh --from-dir /tmp/pkg --version 0.0.0-ci \
+            --prefix /tmp/root/usr --data-dir /tmp/root/var --no-systemd
+          test -x /tmp/root/usr/bin/memora
+          test -f /tmp/root/usr/share/memora/install.sh

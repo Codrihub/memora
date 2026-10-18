@@ -1,0 +1,83 @@
+{
+  "id": "/",
+  "name": "Memora",
+  "short_name": "Memora",
+  "description": "Memora, second brain for your AI: a self-hosted memory vault of Markdown notes, wired into a living brain your agents read and write over MCP.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open the brain",
+      "short_name": "Brain",
+      "description": "The 3D brain of your vault",
+      "url": "/brain",
+      "icons": [
+        {
+          "src": "/assets/shortcut-brain.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Nodes",
+      "short_name": "Nodes",
+      "description": "Browse and write nodes",
+      "url": "/nodes",
+      "icons": [
+        {
+          "src": "/assets/shortcut-nodes.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Activity",
+      "short_name": "Activity",
+      "description": "What your agents are doing, live",
+      "url": "/activity",
+      "icons": [
+        {
+          "src": "/assets/shortcut-activity.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

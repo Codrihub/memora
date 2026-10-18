@@ -1,0 +1,79 @@
+# Memora: one container, one published port (HTTP API, MCP, web UI, WebSocket).
+#
+# Quick start:
+#   cp .env.example .env                 # optional: every value has a default
+#   mkdir -p data state
+#   sudo chown -R 1000:1000 data state   # or set MEMORA_UID / MEMORA_GID in .env
+#   docker compose up -d
+#   docker compose exec -it gateway memora-cli   # type /web for a one-time setup code
+#
+# Both host directories must persist:
+#   data  -> /data   the vault: markdown notes, git history, search index
+#   state -> /state  memora.db (owner, API key hashes, sessions, settings) and backups
+#
+# Settings changed in the console with /config are stored in memora.db and win
+# over the values below; run `docker compose restart gateway` after a change.
+
+name: ${COMPOSE_PROJECT_NAME:-memora}
+
+services:
+  gateway:
+    # Released images: ghcr.io/codrihub/memora:<version>, <major>.<minor>, latest.
+    # To build from this checkout instead: docker compose build
+    image: ${IMAGE:-ghcr.io/codrihub/memora:1.0.0}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Must own both host directories, otherwise the entrypoint refuses to start
+    # and prints the uid it expected.
+    user: "${MEMORA_UID:-1000}:${MEMORA_GID:-1000}"
+    command: ["serve"]
+    ports:
+      # Use 127.0.0.1:8400 to expose it to a reverse proxy on this host only.
+      - "${MEMORA_HTTP_PORT:-8400}:8400"
+    volumes:
+      # Long syntax: a missing host directory is an error instead of being
+      # created owned by root.
+      - type: bind
+        source: ${MEMORA_DATA_DIR:-./data}
+        target: /data
+      - type: bind
+        source: ${MEMORA_STATE_DIR:-./state}
+        target: /state
+    environment:
+      # Fixed inside the container; change the host side with MEMORA_HTTP_PORT,
+      # MEMORA_DATA_DIR and MEMORA_STATE_DIR instead.
+      MEMORA_VAULT: /data
+      MEMORA_STATE: /state
+      MEMORA_PORT: "8400"
+      MEMORA_BIND: 0.0.0.0
+      MEMORA_ASSETS: /app/assets
+      # Tunable from .env.
+      MEMORA_ARM_TTL: "${MEMORA_ARM_TTL:-300}"
+      MEMORA_BASE_URL: "${MEMORA_BASE_URL:-}"
+      MEMORA_DOMAIN: "${MEMORA_DOMAIN:-}"
+      MEMORA_TRUSTED_PROXIES: "${MEMORA_TRUSTED_PROXIES:-}"
+      MEMORA_VAULT_AUTO: "${MEMORA_VAULT_AUTO:-false}"
+      MEMORA_SETUP_HINT: "${MEMORA_SETUP_HINT:-docker compose exec -it gateway memora-cli}"
+      MEMORA_UPDATE_CHECK: "${MEMORA_UPDATE_CHECK:-true}"
+      MEMORA_ADMIN_USER: "${MEMORA_ADMIN_USER:-}"
+      MEMORA_ADMIN_PASSWORD: "${MEMORA_ADMIN_PASSWORD:-}"
+      MEMORA_ADMIN_PASSWORD_FILE: "${MEMORA_ADMIN_PASSWORD_FILE:-}"
+      MEMORA_API_KEY: "${MEMORA_API_KEY:-}"
+      MEMORA_API_KEY_FILE: "${MEMORA_API_KEY_FILE:-}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8400/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true

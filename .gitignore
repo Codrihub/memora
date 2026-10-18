@@ -1,0 +1,45 @@
+# --- Rust build output ---
+/target/
+
+# --- Runtime data: never commit a vault or gateway state ---
+/data/
+/state/
+/vault/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# --- Secrets ---
+internal.token
+gateway.json
+sessions.json
+arm.json
+lock.json
+access.jsonl
+# Test fixtures of the legacy JSON import (fake data, no secrets).
+!crates/state/tests/fixtures/**
+.actors.json
+.events.jsonl
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Local list of private terms for scripts/oss-audit.sh and scan-leaks.py.
+.leak-patterns
+
+# --- Local and OS noise ---
+*.bak
+*.bak.*
+*.bak-*
+*.log
+*.tar.gz
+.DS_Store
+Thumbs.db
+
+# --- Node build output ---
+node_modules/
+web/node_modules/
+web/dist/

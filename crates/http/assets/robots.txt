@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /api/
+Disallow: /mcp
+Disallow: /_bus
+Disallow: /ws
+Disallow: /login
+Disallow: /logout

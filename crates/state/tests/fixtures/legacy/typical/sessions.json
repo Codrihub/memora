@@ -1,0 +1,48 @@
+[
+  {
+    "sid": "sid-live-1",
+    "user": "alice",
+    "alias": null,
+    "created": 1790000000,
+    "last_seen": 4102444800,
+    "source": "password",
+    "ip": "127.0.0.1",
+    "agent": "Mozilla/5.0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "sid": "sid-live-2",
+    "user": "alice",
+    "alias": "phone",
+    "created": 1790000000,
+    "last_seen": 4102444800,
+    "source": "password",
+    "ip": "10.1.1.1"
+  },
+  {
+    "sid": "sid-expired",
+    "user": "alice",
+    "alias": null,
+    "created": 1700000000,
+    "last_seen": 1700000100,
+    "source": "password",
+    "ip": null
+  },
+  {
+    "sid": "sid-other",
+    "user": "bob",
+    "alias": null,
+    "created": 1790000000,
+    "last_seen": 4102444800,
+    "source": "password",
+    "ip": null
+  },
+  {
+    "sid": "sid-gone",
+    "user": "alice",
+    "alias": null,
+    "created": 1790000000,
+    "last_seen": 4102444800,
+    "source": "password",
+    "ip": null
+  }
+]
