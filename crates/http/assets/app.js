@@ -9617,6 +9617,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-18
+
+### Added
+
+- Settings, Notifications: turn agent activity toasts off for every agent,
+  or for single API keys. The main switch always wins: when it is off, no
+  activity toast appears, even for keys that are turned on.
+- Node editor: Save and Cancel buttons. On phones they sit in a large bar
+  pinned to the bottom of the screen while editing. Cancel asks before
+  discarding changes, Esc cancels, and Ctrl+S saves without closing.
+
+### Changed
+
+- The node editor no longer saves while you type; changes are saved with
+  Save or Ctrl+S, and closing the tab with unsaved changes asks first.
+  Leaving the node still keeps your changes.
+
 ## [1.1.5] - 2026-10-18
 
 ### Fixed
@@ -9736,6 +9753,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.2.0]: https://github.com/Codrihub/memora/releases/tag/v1.2.0
 [1.1.5]: https://github.com/Codrihub/memora/releases/tag/v1.1.5
 [1.1.4]: https://github.com/Codrihub/memora/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Codrihub/memora/releases/tag/v1.1.3
