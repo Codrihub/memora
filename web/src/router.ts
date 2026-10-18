@@ -2,6 +2,7 @@
 //
 //   /brain /brain?mode=graph /brain?mode=canvas /nodes /node/<path> /tags /overview
 //   /activity /agents /tools /access /settings /docs /docs/<section>
+//   /agents/new /agents/new/<client> /agents/<key id> /agents/<key id>/<tab>
 //
 // `go()` swaps the visible view, updates the navigation (sidebar, tab bar),
 // the title and the URL. Back/forward and deep links work; the node path in
@@ -118,6 +119,24 @@ export function takeRouteAgent(): string | null {
   return id;
 }
 
+/** The tabs of an agent's own page, at /agents/<id>/<tab> (overview has no segment). */
+export const AGENT_TABS = ['overview', 'setup', 'activity', 'access', 'settings'] as const;
+
+/**
+ * The address inside the Agents page to show next (/agents/new, /agents/<id>/setup...):
+ * set by a parsed URL or by `setKeysRoute`, used once by the next URL sync.
+ */
+let routeKeys: string | null = null;
+
+/** Make the next navigation to the Agents page land on this address (an /agents/... path). */
+export function setKeysRoute(path: string | null): void {
+  routeKeys = path;
+}
+
+// /agents/new, /agents/new/<client>, /agents/<id>, /agents/<id>/<tab>
+const KEYS_SUB = new RegExp(`^/(?:new(?:/[a-z0-9-]{1,40})?|[A-Za-z0-9_-]{1,64}(?:/(?:${AGENT_TABS.join('|')}))?)$`);
+const CONNECT_HASH = /^#connect(?:=([\w-]{1,40}))?$/;
+
 /** Parse the current location (also accepts the legacy #/page and #graph hashes). */
 export function parseLocation(loc: Location = location): Route {
   const path = loc.pathname.replace(/\/+$/, '') || '/';
@@ -148,6 +167,18 @@ export function parseLocation(loc: Location = location): Route {
     routeAgent = ag[1];
     return { page: 'logs' };
   }
+  // The Agents page and the addresses inside it; /keys is the old name.
+  const ks = /^\/(?:agents|keys)(\/.*)?$/.exec(path);
+  if (ks) {
+    const sub = ks[1] || '';
+    const hash = sub ? null : CONNECT_HASH.exec(loc.hash);
+    // `/agents#connect` and `#connect=<client>` (older links) open the new-agent page.
+    if (hash) routeKeys = '/agents/new' + (hash[1] ? '/' + hash[1].toLowerCase() : '');
+    else if (sub && KEYS_SUB.test(sub)) routeKeys = '/agents' + sub;
+    else if (sub) return { page: 'brain', unknown: true };
+    else routeKeys = null;
+    return { page: 'keys' };
+  }
   const page = BY_PATH.get(path);
   return page ? { page } : { page: 'brain', unknown: true };
 }
@@ -176,6 +207,11 @@ function urlFor(page: Page): string {
   }
   // An /activity/<id> address being opened keeps its agent (the page reads it).
   if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
+  if (page === 'keys' && routeKeys) {
+    const to = routeKeys;
+    routeKeys = null;
+    return to;
+  }
   return page === 'vault' && state.note ? nodeUrl(state.note) : PAGE_META[page].path;
 }
 

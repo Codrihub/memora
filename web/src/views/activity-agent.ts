@@ -35,6 +35,7 @@ import {
 import { CAT_COLOR, CLOCK, bars, chip, dayViewHTML, skeletonHTML, statTile, timeChart } from './activity-views';
 import { count, opt, toggle } from './activity-filters';
 import { reducedMotion } from './activity-vt';
+import { setKeysRoute } from '../router';
 
 const CSS = `
 .ad{--ag:var(--accent)}
@@ -303,20 +304,14 @@ async function load(soft: boolean, my = ++seq): Promise<void> {
     paint(false);
   }
   try {
-    const [logs, auth, newest] = await Promise.all([
-      apiGet<LogsResult>(`/api/logs?range=${fetchRange()}&actor=${actor}&limit=${fetchLimit}`).catch(() => ({ events: [] }) as LogsResult),
-      apiGet<LogsResult>('/api/auth/events?limit=300').catch(() => ({ events: [] }) as LogsResult),
+    const [got, newest] = await Promise.all([
+      fetchAgentEvents(w, fetchRange(), fetchLimit),
       soft && lastSeen
         ? Promise.resolve({ events: [] } as LogsResult)
         : apiGet<LogsResult>(`/api/logs?range=all&actor=${actor}&limit=1`).catch(() => ({ events: [] }) as LogsResult),
     ]);
     if (my !== seq) return;
-    const authMine = (auth.events || []).filter((e: LogEvent) => {
-      const r = e as Record<string, unknown>;
-      return (w.id && r.actor_id === w.id) || r.actor === w.name || r.user === w.name;
-    });
-    const ev = logs.events || [];
-    const fetched = mergePhases([...ev.map(fromLog), ...authMine.map(fromAuth)]).filter((x) => x.actor === w.name || x.raw.actor_id === w.id);
+    const fetched = got.items;
     // Keep live items newer than the snapshot (the log can lag a little).
     const top = fetched.length ? fetched[0].ts : 0;
     const keep = all.filter((x) => x.live && x.ts > top - 15 && !fetched.some((f) => f.action === x.action && Math.abs(f.ts - x.ts) < 15));
@@ -325,7 +320,7 @@ async function load(soft: boolean, my = ++seq): Promise<void> {
       fetched.forEach((x) => known.has(x.action + Math.round(x.ts)) || fresh.add(x.id));
     }
     all = [...keep, ...fetched];
-    older = ev.length >= fetchLimit * 0.95;
+    older = got.logged >= fetchLimit * 0.95;
     const n = (newest.events || [])[0] as Record<string, unknown> | undefined;
     const nts = n ? Number(n._ts || n.ts || 0) : 0;
     lastSeen = Math.max(lastSeen, nts, all[0]?.ts || 0);
@@ -335,6 +330,31 @@ async function load(soft: boolean, my = ++seq): Promise<void> {
   }
   state = 'ready';
   paint(soft);
+}
+
+/**
+ * One agent's events, newest first: its rows in the vault log for `range`
+ * plus its gateway audit events. `logged` is how many log rows came back (to
+ * tell whether older ones were cut off). The Agents page loads its activity
+ * tab through this too.
+ */
+export async function fetchAgentEvents(
+  w: { id: string | null; name: string },
+  range: string,
+  limit: number,
+): Promise<{ items: ActivityItem[]; logged: number }> {
+  const actor = encodeURIComponent(w.name);
+  const [logs, auth] = await Promise.all([
+    apiGet<LogsResult>(`/api/logs?range=${encodeURIComponent(range)}&actor=${actor}&limit=${limit}`).catch(() => ({ events: [] }) as LogsResult),
+    apiGet<LogsResult>('/api/auth/events?limit=300').catch(() => ({ events: [] }) as LogsResult),
+  ]);
+  const authMine = (auth.events || []).filter((e: LogEvent) => {
+    const r = e as Record<string, unknown>;
+    return (w.id && r.actor_id === w.id) || r.actor === w.name || r.user === w.name;
+  });
+  const ev = logs.events || [];
+  const items = mergePhases([...ev.map(fromLog), ...authMine.map(fromAuth)]).filter((x) => x.actor === w.name || x.raw.actor_id === w.id);
+  return { items, logged: ev.length };
 }
 
 // ── live ────────────────────────────────────────────────────────────────
@@ -686,7 +706,12 @@ function wireRoot(): void {
         { label: 'Export shown as CSV', icon: ICO.download, run: () => exportRows(rows(), 'csv', who?.name) },
       ]);
   const ky = r.querySelector<HTMLElement>('#adKey');
-  if (ky) ky.onclick = () => hooks.go('keys' as Page);
+  if (ky)
+    ky.onclick = () => {
+      // Straight to the agent's own settings on the Agents page.
+      if (who?.key) setKeysRoute('/agents/' + encodeURIComponent(who.key.id) + '/settings');
+      hooks.go('keys' as Page);
+    };
   const q = r.querySelector<HTMLInputElement>('#adQ');
   if (q) {
     const apply = debounce(() => {

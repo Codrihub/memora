@@ -1,8 +1,10 @@
 // "Connect an app". Two ways in:
-// - a new agent: pick the app, name the agent and choose what it may do (its
-//   key is made then), set the app up with that key, give it its instructions;
-// - an existing agent: straight to the setup of the app it is used with, with
-//   its key filled in (unlocked with the owner's password when it is sealed).
+// - a new agent (the /agents/new page): pick the app, name the agent and
+//   choose what it may do (its key is made then), set the app up with that
+//   key, give it its instructions;
+// - an existing agent (the Setup tab of its page): straight to the setup of
+//   the one app it belongs to, with its key filled in (unlocked with the
+//   owner's password when it is sealed). An agent never moves to another app.
 // Apps that sign in over OAuth skip the key entirely.
 
 import { apiGet, apiPost } from '../api';
@@ -285,6 +287,12 @@ const CSS = `
 .cn-prog .done button{color:var(--text-2)}
 .cn-prog .done .n{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
 .cn-prog-m{display:none}
+.cn-same{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:12px;margin:0 0 16px;font-size:12.5px;line-height:1.5;
+  color:var(--text-2);border:1px solid var(--accent-line);background:color-mix(in srgb,var(--accent) 6%,var(--surface-1))}
+.cn-same .ic{display:grid;color:var(--accent);margin-top:1px}
+.cn-same b{color:var(--fg)}
+.cn-used{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:650;white-space:nowrap;
+  color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line)}
 
 .cn-h{margin:0;font-size:18px;font-weight:700;letter-spacing:-.015em;line-height:1.3;outline:none}
 .cn-sub{margin:5px 0 18px;font-size:13px;color:var(--muted);line-height:1.55}
@@ -306,15 +314,16 @@ const CSS = `
 .cn-group>h4{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;margin:0 0 9px;font-size:12.5px;font-weight:650;color:var(--text-2)}
 .cn-group>h4 span{font-weight:500;color:var(--muted)}
 .cn-tile .how-m{display:none}
-.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px}
-.cn-tile{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:13px;border-radius:12px;min-width:0;text-align:left;
+.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.cn-tile{display:flex;align-items:center;gap:11px;padding:10px 12px;min-height:60px;border-radius:12px;min-width:0;text-align:left;
   border:1px solid var(--line);background:var(--surface-0);color:var(--fg);transition:border-color .15s,background .15s,transform .15s}
 .cn-tile:hover{border-color:var(--line-strong);background:var(--surface-2)}
 .cn-tile:active{transform:scale(.985)}
 .cn-tile:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft);border-color:var(--accent-line)}
 .cn-tile[aria-pressed=true]{border-color:var(--accent-line);background:var(--accent-soft)}
-.cn-tile .top{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%}
-.cn-tile .tx{min-width:0;width:100%}
+.cn-tile .top{display:contents}
+.cn-tile .tx{flex:1;min-width:0;order:1}
+.cn-tile .cn-how,.cn-tile .cn-used{order:2;flex:none}
 .cn-tile b{display:block;font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cn-tile small{display:block;font-size:12px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cn-how{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:640;white-space:nowrap;
@@ -389,6 +398,9 @@ const CSS = `
 .cn-live.on{color:var(--ok)}
 .cn-live.on b{color:var(--ok)}
 .cn-live code{font:500 12px var(--mono)}
+.cn-live .grow{flex:1;min-width:0}
+.cn-live .btn{flex:none;height:34px;border-radius:9px}
+.cn-live .btn .cc-i{width:14px;height:14px;margin:0 0 0 2px}
 
 /* instructions */
 .cn-where{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);
@@ -404,37 +416,32 @@ const CSS = `
 
 @media (max-width:760px){
   .cn-prog{margin-bottom:18px}
-  .cn-prog-m{display:block;margin:0 0 8px;font-size:12px;color:var(--muted)}
-  .cn-prog-m b{color:var(--fg);font-weight:650}
-  .cn-prog ol{gap:4px}
-  .cn-prog li,.cn-prog li:last-child{flex:1 1 0}
-  .cn-prog li::after{display:none}
-  .cn-prog button{width:100%;height:4px;padding:0;margin:0;border-radius:99px;background:var(--line-strong);overflow:hidden}
-  .cn-prog button::before{content:"";position:absolute;inset:-10px 0}
-  .cn-prog button{position:relative}
-  .cn-prog .n,.cn-prog .l{display:none}
-  .cn-prog .on button,.cn-prog .done button{background:var(--accent)}
+  .cn-prog li:not(:last-child)::after{margin:0 6px;min-width:8px}
+  .cn-prog li:not(.on) .l{display:none}
+  .cn-prog li.on{flex:1 1 auto}
+  .cn-prog li:not(.on){flex:0 1 auto}
+  .cn-prog li:not(.on):not(:last-child){flex:1 1 0}
   .cn-h{font-size:17px}
-  .cn-grid{grid-template-columns:1fr;gap:6px}
-  .cn-tile{flex-direction:row;align-items:center;padding:11px 12px;min-height:62px}
-  .cn-tile .top{width:auto}
-  .cn-tile .top .cn-how{display:none}
-  .cn-tile .tx{flex:1}
-  .cn-tile .go{display:inline-flex}
-  .cn-tile .how-m{display:inline}
+  .cn-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .cn-tile{gap:10px;padding:10px;min-height:58px}
+  .cn-tile .top .cn-how,.cn-tile .top .cn-used{display:none}
+  .cn-tile b{font-size:13px}
   .cn-group>h4 span{flex-basis:100%}
   .cn-key{flex-wrap:wrap}
   .cn-key .acts{width:100%}
   .cn-key .acts .btn{flex:1;height:40px}
   .cn-unlock .row{flex-direction:column}
+  .cn-unlock .row .ui-input{flex:none}
   .cn-unlock .row .btn{height:46px}
   .cn-steps li,.cn-steps li.code{padding-left:32px}
   .cn-steps li.code{padding-left:0}
+  .cn-live{flex-wrap:wrap}
 }
+@media (max-width:360px){.cn-grid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.cn-live .pulse::after{animation:none}}
 `;
 
-type StepId = 'app' | 'access' | 'setup' | 'prompt';
+export type StepId = 'app' | 'access' | 'setup' | 'prompt';
 const STEP_LABEL: Record<StepId, string> = { app: 'App', access: 'Name & access', setup: 'Set up', prompt: 'Instructions' };
 
 export interface WizardOptions {
@@ -446,10 +453,10 @@ export interface WizardOptions {
   secret?: string;
   /** The secret was just made and is shown this once. */
   fresh?: boolean;
-  /** For an agent: start on the app picker even when its app is known. */
-  pickApp?: boolean;
   /** Names already taken, so the suggested name is unique. */
   names?: string[];
+  /** Agents that exist, with the app each one belongs to ('' when unknown), for the one-agent-per-app notice. */
+  existing?: { name: string; app: string }[];
   /** Make the agent; null when it failed (the caller toasts). */
   createAgent: (name: string, perms: Permissions) => Promise<{ key: ConnectKey; secret: string } | null>;
   /** The agent is used with this app from now on. */
@@ -460,10 +467,31 @@ export interface WizardOptions {
   setNav: (nav: { back: boolean; next: string }) => void;
   /** The chosen app, for the sheet's subtitle. */
   setSub?: (sub: string) => void;
+  /** After every repaint: where the run is, for a summary beside it. */
+  onInfo?: (info: WizardInfo) => void;
+  /** Offered once connected: open the agent's own page. */
+  onOpenAgent?: (keyId: string) => void;
+}
+
+export interface WizardInfo {
+  step: StepId;
+  /** The chosen app, if any. */
+  client: ClientSnippet | null;
+  /** The agent, once it is made (or the one being set up). */
+  agent: ConnectKey | null;
+  /** The name typed so far (new agent, before it is made). */
+  name: string;
+  /** "Read & write · all tools" and the like. */
+  access: string;
+  /** The key id of the agent that connected (an OAuth sign-in makes its own). */
+  connectedId: string;
+  /** Its first call (or sign-in) arrived while the run was open. */
+  connected: boolean;
 }
 
 export interface Wizard {
   back: () => void;
+  info: () => WizardInfo;
   /** Moves on; resolves true once the last step is done. */
   next: () => Promise<boolean>;
   destroy: () => void;
@@ -474,6 +502,7 @@ const mask = (s: string): string => s.slice(0, 10) + '•'.repeat(Math.max(4, Ma
 const ICON = {
   lock: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   file: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg>',
+  info: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
   pin: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   chev: '<svg class="cc-i go" viewBox="0 0 24 24" aria-hidden="true" style="color:var(--muted)"><path d="m9 6 6 6-6 6"/></svg>',
 };
@@ -490,8 +519,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     if (o.fresh) fresh.add(agent.id);
   }
   let client = o.client && appById(o.client) ? o.client : '';
-  /** The app step is part of this run (always for a new agent). */
-  let picking = !forAgent || !!o.pickApp || !client;
+  /** The app step is part of this run: always for a new agent, never once an agent has its app. */
+  const picking = !forAgent || !client;
   let step: StepId = forAgent ? (picking ? 'app' : 'setup') : client ? (appById(client)!.oauth ? 'setup' : 'access') : 'app';
   let name = '';
   let nameEdited = false;
@@ -528,6 +557,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   let watchFor = '';
   let stopWatch = (): void => {};
   let connected: { name: string; what: string } | null = null;
+  let connectedId = '';
 
   const target = (): string => {
     const c = cur();
@@ -541,9 +571,12 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     host.querySelectorAll<HTMLElement>('[data-live]').forEach((box) => {
       box.classList.toggle('on', !!connected);
       if (connected) {
-        box.innerHTML = `<span class="ok">${ICO.check}</span><span><b>Connected</b> · ${esc(connected.name)} ${
+        const open = !forAgent && o.onOpenAgent && (connectedId || agent?.id);
+        box.innerHTML = `<span class="ok">${ICO.check}</span><span class="grow"><b>Connected</b> · ${esc(connected.name)} ${
           connected.what ? 'called <code>' + esc(connected.what) + '</code>' : 'made its first call'
-        }.</span>`;
+        }.</span>${open ? `<button type="button" class="btn sm" data-open-agent>Open ${esc(connected.name)} ${ICO.arrow}</button>` : ''}`;
+        const ob = box.querySelector<HTMLButtonElement>('[data-open-agent]');
+        if (ob) ob.onclick = () => o.onOpenAgent?.(connectedId || agent!.id);
       } else if (target().startsWith('oauth:') && c) {
         box.innerHTML = `<span class="pulse" aria-hidden="true"></span><span>Waiting for <b>${esc(c.label)}</b> to sign in…</span>`;
       } else if (agent) {
@@ -552,12 +585,14 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     });
   };
 
-  const hit = (who: string, what: string): void => {
+  const hit = (who: string, what: string, id = ''): void => {
     if (connected || destroyed) return;
     connected = { name: who, what };
+    connectedId = id || agent?.id || '';
     toast(who + ' is connected', 'ok');
     paintLive();
     o.onChange?.();
+    o.onInfo?.(info());
   };
 
   const watch = (): void => {
@@ -590,7 +625,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         const m = seen.find(
           (x) => x.kind === 'agent' && x.lastAt >= since && (x.id ? x.id === a.id : agentKey(x.actor) === agentKey(a.name)),
         );
-        if (m) hit(a.name, m.lastAction || '');
+        if (m) hit(a.name, m.lastAction || '', a.id);
       });
       let base: number | null = null;
       const poll = async (): Promise<void> => {
@@ -599,7 +634,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         const row = d ? (Array.isArray(d) ? d : d.keys || []).find((k) => k.id === a.id) : undefined;
         if (!row || watchFor !== t) return;
         if (base === null) base = row.uses || 0;
-        else if ((row.uses || 0) > base) hit(a.name, '');
+        else if ((row.uses || 0) > base) hit(a.name, '', a.id);
       };
       void poll();
       timer = window.setInterval(() => void poll(), 4000);
@@ -619,7 +654,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         const k = await apiGet<KeysResult | KeyRow[]>('/api/keys').catch(() => null);
         const row = k ? (Array.isArray(k) ? k : k.keys || []).find((r) => r.id === added) : undefined;
         if (row) o.onAppChosen?.(row.id, c.id);
-        hit(row?.name || c.label, '');
+        hit(row?.name || c.label, '', row?.id || '');
       };
       void poll();
       timer = window.setInterval(() => void poll(), 4000);
@@ -645,12 +680,35 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       .join('')}</ol></nav>`;
   };
 
-  const tile = (s: ClientSnippet): string =>
-    `<button type="button" class="cn-tile" data-client="${attr(s.id)}" data-q="${attr(
+  /** Agents that already belong to this app. */
+  const sameApp = (id: string): string[] => (o.existing || []).filter((e) => e.app === id).map((e) => e.name);
+
+  const tile = (s: ClientSnippet): string => {
+    const used = forAgent ? [] : sameApp(s.id);
+    const usedNote = used.length ? `${used.length === 1 ? used[0] : used.length + ' agents'} already uses it` : '';
+    return `<button type="button" class="cn-tile" data-client="${attr(s.id)}" data-q="${attr(
       (s.label + ' ' + s.kind + ' ' + s.how).toLowerCase(),
-    )}" aria-pressed="${s.id === client}"><span class="top">${appIconHTML(s.label, 34)}<span class="cn-how">${esc(
-      s.how,
-    )}</span></span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind)}<span class="how-m"> · ${esc(s.how)}</span></small></span>${ICON.chev}</button>`;
+    )}" aria-pressed="${s.id === client}"${usedNote ? ` aria-description="${attr(usedNote)}"` : ''}><span class="top">${appIconHTML(s.label, 34)}${
+      used.length ? `<span class="cn-used" title="${attr(usedNote)}">${used.length === 1 ? 'Has an agent' : used.length + ' agents'}</span>` : `<span class="cn-how">${esc(s.how)}</span>`
+    }</span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind)}<span class="how-m"> · ${esc(s.how)}</span></small></span>${ICON.chev}</button>`;
+  };
+
+  /** "You already have Cursor for Cursor": shown once an app with an agent is picked; continuing is fine. */
+  const sameAppNote = (): string => {
+    const c = cur();
+    if (forAgent || !c) return '';
+    const used = [...new Set(sameApp(c.id))];
+    if (!used.length) return '';
+    const who =
+      used.length === 1
+        ? esc(used[0])
+        : used.length === 2
+          ? `${esc(used[0])} and ${esc(used[1])}`
+          : `${esc(used[0])}, ${esc(used[1])} and ${used.length - 2} more`;
+    return `<div class="cn-same" role="note"><span class="ic">${ICON.info}</span><span>You already have <b>${who}</b> for ${esc(
+      c.label,
+    )}. A separate agent per device keeps activity apart, so go ahead if this is another computer or setup.</span></div>`;
+  };
 
   const stepApp = (): string => {
     const all = snippets();
@@ -659,7 +717,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       : 'Which app do you want to connect?';
     const sub = forAgent
       ? `The setup is shown for that app, with ${esc(agent!.name)}'s key filled in.`
-      : `Every app connects to <code>${esc(mcpUrl())}</code> as its own agent, so it shows up under its own name and can be turned off on its own.`;
+      : `Give each app or device its own agent. Activity then shows exactly who did what, and you can turn one off without touching the others.`;
     const oauth = all.filter((s) => s.oauth);
     const keyed = all.filter((s) => !s.oauth);
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>${head}</h3><p class="cn-sub">${sub}</p>
@@ -683,9 +741,11 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const ro = presetPerms('ro', tools);
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>Name it and choose what it may do</h3>
       <p class="cn-sub">${esc(c.label)} gets its own agent and key. The key is made when you continue and filled in on the next step.</p>
-      <div class="ui-fld"><label for="cnName">Agent name</label>
+      ${sameAppNote()}<div class="ui-fld"><label for="cnName">Agent name</label>
         <input class="ui-input" id="cnName" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(nameEdited ? name : defaultName())}">
-        <span class="ui-help">It shows up under this name in Activity, the brain and the graph.</span></div>
+        <span class="ui-help">It shows up under this name in Activity, the brain and the graph. Name it after the device when you use ${esc(
+          c.label,
+        )} in more than one place, like "${esc(appAgentName(c))} laptop".</span></div>
       <div class="ui-fld" style="margin:0"><span class="ui-lbl" id="cnAccL">Access</span>
         <div class="ui-rcs cn-acc" role="radiogroup" aria-labelledby="cnAccL">
           ${radioCardHTML('rw', preset === 'rw', 'Read &amp; write', 'Search, read and save notes with every MCP tool. It cannot manage the server or other agents.', 'Recommended')}
@@ -764,9 +824,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       )
       .join('');
     const ask = 'Call the Memora healthcheck tool, then search my memory for "project".';
-    const other = forAgent ? `<span class="sep" aria-hidden="true"></span><button type="button" class="cn-link" data-reapp>Use with a different app</button>` : '';
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>Set up ${esc(c.label)}</h3>
-      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(c.how)}</span>${other}</div>${away}${keyHTML(c)}
+      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(c.how)}</span></div>${away}${agent ? '' : sameAppNote()}${keyHTML(c)}
       <ol class="cn-steps">${steps}</ol>
       <section class="cn-test" aria-label="Test the connection"><div class="cn-live" data-live role="status" aria-live="polite"></div>
         <p>Restart or reload the app if it asks, then ask the agent:</p>
@@ -814,10 +873,24 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     watch();
     paintLive();
     o.setSub?.(cur()?.label || (forAgent ? agent!.name : 'Pick an app'));
+    o.onInfo?.(info());
     if (focus) {
-      host.closest('.cc-sh-b')?.scrollTo(0, 0);
-      host.querySelector<HTMLElement>('.cn-h')?.focus();
+      // The step starts at its top, progress included, wherever the page was scrolled.
+      if (host.getBoundingClientRect().top < 0) host.scrollIntoView({ block: 'start' });
+      host.querySelector<HTMLElement>('.cn-h')?.focus({ preventScroll: true });
     }
+  };
+
+  const info = (): WizardInfo => {
+    const input = host.querySelector<HTMLInputElement>('#cnName');
+    const typed = input ? input.value.trim() : nameEdited ? name : defaultName();
+    let access = '';
+    if (agent?.perms) access = summaryText(agent.perms);
+    else if (!agent && cur() && !cur()!.oauth) {
+      const p = preset === 'custom' ? (editor ? editor.read() : custom) : presetPerms(preset, cachedCatalog());
+      access = p ? summaryText(p) : preset === 'custom' ? 'Custom' : '';
+    } else if (cur()?.oauth && !agent) access = 'Chosen when it signs in';
+    return { step, client: cur() || null, agent, name: agent ? agent.name : typed, access, connectedId, connected: !!connected };
   };
 
   /** Keep the custom permissions when leaving the access step. */
@@ -932,13 +1005,6 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       });
       showCustom();
     }
-    const reapp = host.querySelector<HTMLElement>('[data-reapp]');
-    if (reapp)
-      reapp.onclick = () => {
-        // The picker joins this run as its first step.
-        picking = true;
-        go('app');
-      };
     const eye = host.querySelector<HTMLButtonElement>('#cnKeyEye');
     if (eye)
       eye.onclick = () => {
@@ -1021,6 +1087,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   paint();
 
   return {
+    info,
     back: () => {
       const ids = steps();
       const i = ids.indexOf(step);
