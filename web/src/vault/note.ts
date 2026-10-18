@@ -276,10 +276,14 @@ function draw(): void {
   c.querySelectorAll<HTMLElement>('.vx-rail [data-create],.vx-rfoot [data-create]').forEach(
     (b) => (b.onclick = () => offerCreate(b.dataset.create || '', b)),
   );
+  const pickToc = heads.length ? watchToc(scroller, heads, side) : null;
   side.querySelectorAll<HTMLElement>('[data-h]').forEach((b) => {
-    b.onclick = () => jump(heads[Number(b.dataset.h)]);
+    b.onclick = () => {
+      const i = Number(b.dataset.h);
+      pickToc?.(i);
+      jump(heads[i]);
+    };
   });
-  if (heads.length) watchToc(scroller, heads, side);
   paintSave();
   c.onkeydown = onPaneKey;
 }
@@ -303,23 +307,55 @@ function offerCreate(name: string, at: HTMLElement): void {
   );
 }
 
-/** Highlight the outline entry of the section being read. */
-function watchToc(scroller: HTMLElement, heads: HTMLElement[], side: HTMLElement): void {
+/**
+ * Highlight the outline entry of the section being read. The current section
+ * is the last heading above a line at 30% of the view; at the very bottom it is
+ * the last heading on screen, so short final sections still get their turn.
+ * Returns a function that marks an entry at once (a click) and holds it until
+ * the jump's scrolling stops.
+ */
+function watchToc(scroller: HTMLElement, heads: HTMLElement[], side: HTMLElement): (i: number) => void {
   const items = Array.from(side.querySelectorAll<HTMLElement>('[data-h]'));
+  let held = -1;
+  let release = 0;
+  const paint = (cur: number): void => items.forEach((b, i) => b.classList.toggle('on', i === cur));
   const mark = (): void => {
-    const top = scroller.getBoundingClientRect().top + 90;
+    if (held >= 0) return;
+    const box = scroller.getBoundingClientRect();
+    const line = box.top + box.height * 0.3;
     let cur = 0;
     heads.forEach((h, i) => {
-      if (h.getBoundingClientRect().top <= top) cur = i;
+      if (h.getBoundingClientRect().top <= line) cur = i;
     });
-    items.forEach((b, i) => b.classList.toggle('on', i === cur));
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+      heads.forEach((h, i) => {
+        if (h.getBoundingClientRect().top < box.bottom) cur = Math.max(cur, i);
+      });
+    }
+    paint(cur);
   };
   let raf = 0;
   scroller.addEventListener('scroll', () => {
+    if (held >= 0) {
+      clearTimeout(release);
+      release = window.setTimeout(() => {
+        held = -1;
+      }, 160);
+      return;
+    }
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(mark);
   });
   mark();
+  return (i: number): void => {
+    held = i;
+    paint(i);
+    clearTimeout(release);
+    // Released by the end of the jump's scroll, or now if nothing scrolls.
+    release = window.setTimeout(() => {
+      held = -1;
+    }, 900);
+  };
 }
 
 /** The reader's more menu. */

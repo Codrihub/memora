@@ -24,6 +24,9 @@ interface Heading {
 let current = '';
 let headings: Heading[] = [];
 let spyFrame = 0;
+/** A heading picked in the contents, held until its jump stops scrolling. */
+let heldAnchor = '';
+let heldTimer = 0;
 /** Plain text and headings of every section, built on the first search. */
 let index: { sec: DocSection; text: string; heads: Heading[] }[] | null = null;
 
@@ -107,6 +110,11 @@ function buildShell(host: HTMLElement): void {
   const root = $('.dc', host);
   root.addEventListener('click', onClick);
   $('#dcMain', root).addEventListener('scroll', () => {
+    if (heldAnchor) {
+      clearTimeout(heldTimer);
+      heldTimer = window.setTimeout(() => (heldAnchor = ''), 160);
+      return;
+    }
     if (!spyFrame) spyFrame = requestAnimationFrame(spy);
   });
   const q = $('#dcQ', root) as HTMLInputElement;
@@ -175,24 +183,40 @@ function paintToc(): void {
 function spy(): void {
   spyFrame = 0;
   const main = document.getElementById('dcMain');
-  if (!main || !headings.length) return;
-  const top = main.getBoundingClientRect().top + 96;
-  let at = '';
-  let at2 = '';
+  if (!main || !headings.length || heldAnchor) return;
+  const box = main.getBoundingClientRect();
+  const line = box.top + Math.min(160, box.height * 0.3);
+  // Above the first heading (the intro), the first section is current.
+  let at = headings[0].id;
   for (const h of headings) {
     const el = document.getElementById(HEADING_PREFIX + h.id);
-    if (!el || el.getBoundingClientRect().top > top) break;
+    if (!el || el.getBoundingClientRect().top > line) break;
     at = h.id;
-    if (h.level === 2) at2 = h.id;
   }
-  // At the very bottom the last heading counts, even when it cannot reach the top.
+  // At the very bottom, the last heading on screen counts, even when it
+  // cannot scroll up to the line.
   if (main.scrollTop + main.clientHeight >= main.scrollHeight - 4) {
-    const last = headings[headings.length - 1];
-    at = last.id;
-    at2 = [...headings].reverse().find((h) => h.level === 2)?.id || at2;
+    for (const h of headings) {
+      const el = document.getElementById(HEADING_PREFIX + h.id);
+      if (el && el.getBoundingClientRect().top < box.bottom) at = h.id;
+    }
   }
+  paintSpy(at);
+}
+
+function paintSpy(at: string): void {
+  const i = headings.findIndex((h) => h.id === at);
+  const at2 = i < 0 ? '' : [...headings.slice(0, i + 1)].reverse().find((h) => h.level === 2)?.id || '';
   document.querySelectorAll<HTMLElement>('#dcToc a').forEach((a) => a.classList.toggle('on', a.dataset.anchor === at));
   document.querySelectorAll<HTMLElement>('#dcNav .dc-sub a').forEach((a) => a.classList.toggle('on', a.dataset.anchor === at2));
+}
+
+/** Mark a heading at once (a click) and keep it until the jump stops scrolling. */
+function holdSpy(id: string): void {
+  heldAnchor = id;
+  paintSpy(id);
+  clearTimeout(heldTimer);
+  heldTimer = window.setTimeout(() => (heldAnchor = ''), 900);
 }
 
 function scrollToAnchor(id: string, smooth: boolean): boolean {
@@ -279,6 +303,7 @@ function onClick(e: MouseEvent): void {
   } else if (a.dataset.anchor !== undefined) {
     e.preventDefault();
     const id = a.dataset.anchor;
+    holdSpy(id);
     scrollToAnchor(id, true);
     try {
       history.replaceState(history.state, '', docUrl(current, id));
