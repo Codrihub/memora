@@ -591,7 +591,11 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-editor.note-editor{display:block;width:100%;min-height:360px;border:0;border-radius:0;resize:none;background:transparent;color:var(--fg);
   font-family:var(--mono);font-size:14px;line-height:1.75;padding:20px 24px;outline:none;tab-size:2;overflow:hidden;box-sizing:border-box}
 .vx-edit:focus-within{border-color:var(--accent-line)}
-.vx-edit-foot{display:flex;justify-content:flex-end;padding:8px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.vx-edit-foot{display:flex;align-items:center;gap:10px;padding:8px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.vx-edit-btns{display:inline-flex;gap:6px;align-items:center}
+.vx-edit-btns .vx-i,.vx-edit-acts .vx-i{width:15px;height:15px}
+.vx-edit-btns .btn.primary,.vx-edit-acts .btn.primary{display:inline-flex;align-items:center;gap:6px}
+.vx-edit-acts{display:none;gap:8px}
 .vx-suggest{position:absolute;left:24px;z-index:5;min-width:220px;max-width:340px;background:var(--panel);border:1px solid var(--line);
   border-radius:var(--r);box-shadow:var(--shadow);padding:4px;display:flex;flex-direction:column}
 .vx-suggest button{display:flex;align-items:center;gap:8px;border:0;background:none;color:var(--fg);font:inherit;font-size:13px;
@@ -688,6 +692,15 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
   .vx-prose{line-height:1.7}
   .vx-edit-hint{display:none}
   .vx-editor.note-editor{padding:16px}
+  /* Phones: Save and Cancel move to a bar pinned to the bottom of the screen. */
+  .vx-edit-btns{display:none}
+  .vx-edit-foot{position:sticky;bottom:0;z-index:4;background:var(--bg);padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line2, var(--line));box-shadow:0 -8px 24px rgba(0,0,0,.22)}
+  .vx-edit-foot .vx-wc{display:none}
+  .vx-edit-foot .vx-grow{display:none}
+  .vx-edit-acts{display:flex;flex:1}
+  .vx-edit-acts .btn{flex:1;height:46px;justify-content:center;font-size:15px;font-weight:650;border-radius:12px}
+  .vx-edit-acts .btn.primary{flex:1.6}
 }
 @media (max-width:760px){
   .vx-row,.vx-pin{height:40px;min-height:40px}

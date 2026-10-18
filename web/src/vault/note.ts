@@ -20,6 +20,7 @@ import { baseName, dirOf, folderColor, initials, isPinned, mutationInfo, touched
 import { inlineEdit, openMenu, undoToast } from './ui';
 import { nodeUrl, replaceHistory } from '../router';
 import { readerSkeleton } from '../ui/skeleton';
+import { Modal } from '../modal';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
 
 interface FullNote extends NoteDoc {
@@ -51,6 +52,14 @@ export function editorDirty(): boolean {
   const ta = host?.querySelector<HTMLTextAreaElement>('.vx-editor');
   return !!(state.editing && ta && ta.value !== ed.base);
 }
+
+// Edits are saved on demand, so closing or reloading the tab with unsaved
+// changes asks first.
+window.addEventListener('beforeunload', (e) => {
+  if (!editorDirty()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 
 /** Save pending edits before navigating away. */
 export async function flushEditor(): Promise<void> {
@@ -132,9 +141,12 @@ function draw(): void {
         : `<button class="vx-icon-btn" data-contents aria-haspopup="dialog" aria-expanded="false" aria-label="Contents" title="Contents: outline and links">${I.toc}</button>
     <button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="Reading settings" title="Reading settings">Aa</button>`
     }
-    <button class="btn sm vx-mode${state.editing ? ' primary' : ''}" data-mode="${state.editing ? 'read' : 'edit'}" aria-pressed="${state.editing}" title="${
-      state.editing ? 'Done editing (Esc)' : 'Edit (E)'
-    }">${state.editing ? I.check + '<span>Done</span>' : I.edit + '<span>Edit</span>'}</button>
+    ${
+      state.editing
+        ? `<span class="vx-edit-btns"><button class="btn sm ghost" type="button" data-cancel title="Cancel: discard unsaved changes (Esc)">Cancel</button>
+    <button class="btn sm primary" type="button" data-save title="Save and close (Ctrl+S saves and keeps editing)">${I.check}<span>Save</span></button></span>`
+        : `<button class="btn sm vx-mode" type="button" data-mode="edit" aria-pressed="false" title="Edit (E)">${I.edit}<span>Edit</span></button>`
+    }
     <button class="vx-icon-btn" data-more aria-label="More actions" title="More">${I.more}</button>`;
   c.appendChild(bar);
   // Phones: the breadcrumb gets its own scrollable row under the bar.
@@ -243,7 +255,10 @@ function draw(): void {
   c.querySelectorAll<HTMLElement>('.vx-crumb[data-f],.vx-meta-folder').forEach((b) => {
     b.onclick = () => nav.selectFolder(b.dataset.f || '');
   });
-  bar.querySelector<HTMLElement>('[data-mode]')!.onclick = (e) => setMode((e.currentTarget as HTMLElement).dataset.mode === 'edit');
+  const modeBtn = bar.querySelector<HTMLElement>('[data-mode]');
+  if (modeBtn) modeBtn.onclick = () => setMode(true);
+  bar.querySelector<HTMLElement>('[data-save]')?.addEventListener('click', () => void saveAndClose());
+  bar.querySelector<HTMLElement>('[data-cancel]')?.addEventListener('click', () => cancelEdit());
   bar.querySelector<HTMLElement>('[data-more]')!.onclick = (e) => moreMenu(path, e.currentTarget as HTMLElement);
   bar.querySelector<HTMLElement>('[data-aa]')?.addEventListener('click', (e) =>
     openReadingPanel(e.currentTarget as HTMLElement, () => applyReading(scroller, state.editing)),
@@ -481,15 +496,38 @@ function renameTitle(): void {
 function setMode(edit: boolean): void {
   if (state.editing === edit) return;
   if (!edit) {
-    void flushEditor().then(async () => {
-      state.editing = false;
-      if (ed.path) await renderNote(host!, ed.path, mobileBack, true);
-    });
+    void saveAndClose();
     return;
   }
   state.editing = true;
   draw();
   host?.querySelector<HTMLTextAreaElement>('.vx-editor')?.focus();
+}
+
+/** Save, and go back to reading once the save went through. */
+async function saveAndClose(): Promise<void> {
+  if (!(await saveNow())) return;
+  state.editing = false;
+  if (ed.path && host) await renderNote(host, ed.path, mobileBack, true);
+}
+
+/** Leave the editor without saving; ask first when there are changes. */
+function cancelEdit(): void {
+  const leave = async (): Promise<void> => {
+    clearTimeout(ed.timer);
+    state.editing = false;
+    ed.status = 'saved';
+    ed.theirs = null;
+    if (ed.path && host) await renderNote(host, ed.path, mobileBack, true);
+  };
+  if (!editorDirty()) {
+    void leave();
+    return;
+  }
+  Modal.confirm('Discard changes?', 'Your edits since the last save will be lost.', 'Discard', () => {
+    Modal.close();
+    void leave();
+  });
 }
 
 function onPaneKey(e: KeyboardEvent): void {
@@ -539,9 +577,10 @@ function editorEl(): HTMLElement {
   wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="Formatting">${TOOLS.map(
     (x) =>
       `<button data-t="${x.k}" title="${attr(x.label + (x.key ? ' (' + x.key + ')' : ''))}" aria-label="${attr(x.label)}">${x.icon}</button>`,
-  ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint">Saves as you type · <kbd>Esc</kbd> done</span></div>
+  ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint"><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> cancel</span></div>
   <textarea class="vx-editor note-editor" spellcheck="true" aria-label="Node markdown"></textarea>
-  <div class="vx-edit-foot"><span class="vx-wc"></span></div>`;
+  <div class="vx-edit-foot"><span class="vx-wc"></span><span class="vx-grow"></span>
+    <span class="vx-edit-acts"><button class="btn ghost" type="button" data-cancel>Cancel</button><button class="btn primary" type="button" data-save>${I.check}<span>Save</span></button></span></div>`;
   const ta = wrap.querySelector<HTMLTextAreaElement>('.vx-editor')!;
   ta.value = ed.base;
   const autosize = (): void => {
@@ -561,6 +600,8 @@ function editorEl(): HTMLElement {
     suggest(ta);
   };
   ta.onkeydown = (e) => editorKey(e, ta);
+  wrap.querySelector<HTMLElement>('.vx-edit-acts [data-save]')!.onclick = () => void saveAndClose();
+  wrap.querySelector<HTMLElement>('.vx-edit-acts [data-cancel]')!.onclick = () => cancelEdit();
   ta.onblur = () => setTimeout(() => closeSuggest(), 150);
   wrap.querySelectorAll<HTMLElement>('[data-t]').forEach((b) => {
     b.onmousedown = (e) => e.preventDefault();
@@ -576,8 +617,6 @@ function markDirty(): void {
   if (ed.status === 'conflict') return;
   ed.status = 'dirty';
   paintSave();
-  clearTimeout(ed.timer);
-  ed.timer = window.setTimeout(() => void saveNow(), 1200);
 }
 
 function paintSave(): void {
@@ -586,25 +625,27 @@ function paintSave(): void {
   s.dataset.state = ed.status;
   const label: Record<SaveState, string> = {
     saved: state.editing && ed.lastSavedAt ? 'Saved' : '',
-    dirty: 'Unsaved',
+    dirty: 'Unsaved changes',
     saving: 'Saving…',
-    error: 'Save failed, retrying',
+    error: 'Save failed',
     conflict: 'Conflict',
   };
   s.innerHTML = label[ed.status] ? `<i></i>${label[ed.status]}` : '';
   s.title = ed.lastSavedAt ? 'Last saved ' + new Date(ed.lastSavedAt).toLocaleTimeString() : '';
 }
 
-async function saveNow(): Promise<void> {
+/** Write the editor to the server; true once the vault has this text. */
+async function saveNow(): Promise<boolean> {
   clearTimeout(ed.timer);
   const ta = host?.querySelector<HTMLTextAreaElement>('.vx-editor');
   const path = ed.path;
-  if (!ta || !path) return;
+  if (!ta || !path) return false;
+  if (ed.status === 'conflict') return false;
   const mine = ta.value;
   if (mine === ed.base) {
     ed.status = 'saved';
     paintSave();
-    return;
+    return true;
   }
   ed.status = 'saving';
   paintSave();
@@ -614,20 +655,20 @@ async function saveNow(): Promise<void> {
     const cur = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path));
     if ((cur.content || '') !== ed.base && (cur.content || '') !== mine) {
       raiseConflict(cur.content || '', touched.get(path)?.actor || 'someone else');
-      return;
+      return false;
     }
     await saveNote(path, mine);
     ed.base = mine;
     ed.lastSavedAt = Date.now();
     const now = host?.querySelector<HTMLTextAreaElement>('.vx-editor');
     ed.status = now && now.value !== mine ? 'dirty' : 'saved';
-    if (ed.status === 'dirty') ed.timer = window.setTimeout(() => void saveNow(), 1200);
     paintSave();
+    return true;
   } catch (e) {
     ed.status = 'error';
     paintSave();
     console.warn('save failed', e);
-    ed.timer = window.setTimeout(() => void saveNow(), 5000);
+    return false;
   }
 }
 
@@ -786,7 +827,7 @@ function editorKey(e: KeyboardEvent, ta: HTMLTextAreaElement): void {
   } else if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
-    setMode(false);
+    cancelEdit();
   } else if (e.key === 'Tab') {
     e.preventDefault();
     const { selectionStart: s, value: v } = ta;

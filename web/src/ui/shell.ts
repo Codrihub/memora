@@ -492,6 +492,9 @@ export const SHELL_CSS = `
      the home-indicator zone (safe area) is added underneath, not inside. */
   :root{--tabbar:60px;--tb-pad:var(--safe-b)}
   #main{padding-bottom:calc(var(--tabbar) + var(--tb-pad))}
+  /* While a node is being edited, Save and Cancel own the bottom of the screen. */
+  #app:has(.vx-page.editing) .tabbar{display:none}
+  #main:has(.vx-page.editing){padding-bottom:0}
   #sidebar{position:fixed;top:0;bottom:0;left:0;width:min(320px,88vw);z-index:60;transform:translateX(-104%);
     border-radius:0 22px 22px 0;border-right:1px solid var(--line-strong);box-shadow:var(--shadow-lg);
     transition:transform var(--dur-3) var(--ease-out),visibility 0s linear var(--dur-3);visibility:hidden;
