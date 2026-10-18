@@ -221,9 +221,10 @@ jobs:
             sleep 1
           done
           kill "$pid" || true
+          wait "$pid" || true
           cat server.log
           test "$ok" = 1
-          ls -la "$root/var/lib/memora/state"
+          test -f "$root/var/lib/memora/state/memora.db"
 
   # ----------------------------------------------------------------- release
   release:
