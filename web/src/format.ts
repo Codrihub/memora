@@ -84,12 +84,20 @@ export function parseTags(content?: string | null): string[] {
   return Array.from(out);
 }
 
-/** Targets of [[wikilink]] and [[target|label]] references. */
+/** Targets of [[wikilink]], [[target|label]] and table-safe [[target\|label]] references. */
 export function wikilinks(content?: string | null): string[] {
   const raw = String(content || '').match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
   return Array.from(
     new Set(
-      raw.map((m) => m.replace(/^\[\[|\]\]$/g, '').split('|')[0].trim()).filter(Boolean),
+      raw
+        .map((m) =>
+          m
+            .replace(/^\[\[|\]\]$/g, '')
+            .split('|')[0]
+            .replace(/\\$/, '')
+            .trim(),
+        )
+        .filter(Boolean),
     ),
   );
 }

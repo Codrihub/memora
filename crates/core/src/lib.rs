@@ -28,10 +28,12 @@ fn cached<F: FnOnce() -> Regex>(cell: &'static OnceLock<Regex>, f: F) -> &'stati
     cell.get_or_init(f)
 }
 
+/// `[[target]]`, `[[target|alias]]`, and the table-safe `[[target\|alias]]`
+/// (Obsidian's escape): the backslash is never part of the target.
 pub fn re_wikilink() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     cached(&RE, || {
-        Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap()
+        Regex::new(r"\[\[([^\]|]+?)\\?(?:\|([^\]]+))?\]\]").unwrap()
     })
 }
 pub fn re_placeholder() -> &'static Regex {
@@ -1128,6 +1130,65 @@ mod resource_tests {
             assert!(d.join(n).is_file(), "{n} lost");
         }
         assert!(!d.join("Work").exists());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn patch_rejects_ops_missing_their_fields() {
+        let d = tmp_vault("patch-guard");
+        fs::write(d.join("n.md"), "keep this line\nand this\n").unwrap();
+        let s = MemoryStore::new(&d);
+        let bad = [
+            serde_json::json!({"op": "replace", "find": "keep this line"}),
+            serde_json::json!({"op": "replace", "find": "", "with": "x"}),
+            serde_json::json!({"op": "replace", "find": "absent", "with": "x"}),
+            serde_json::json!({"op": "append"}),
+            serde_json::json!({"op": "add_tag"}),
+            serde_json::json!({"op": "set_field", "value": "v"}),
+        ];
+        for op in bad {
+            assert!(
+                s.patch_memory_impl("n.md", std::slice::from_ref(&op))
+                    .is_err(),
+                "{op}"
+            );
+        }
+        // A later bad op leaves the note untouched: ops apply all or none.
+        let mixed = [
+            serde_json::json!({"op": "append", "text": "added"}),
+            serde_json::json!({"op": "replace", "find": "keep this line"}),
+        ];
+        assert!(s.patch_memory_impl("n.md", &mixed).is_err());
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "keep this line\nand this\n"
+        );
+        // `with` and its alias `replace` both work; "" deletes on purpose.
+        s.patch_memory_impl(
+            "n.md",
+            &[serde_json::json!({"op": "replace", "find": "keep", "with": "kept"})],
+        )
+        .unwrap();
+        s.patch_memory_impl(
+            "n.md",
+            &[serde_json::json!({"op": "replace", "find": "and this", "replace": ""})],
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "kept this line\n\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn escaped_alias_pipe_is_not_part_of_the_link_target() {
+        let d = tmp_vault("escaped-pipe");
+        let s = MemoryStore::new(&d);
+        assert_eq!(
+            s.link_targets("| [[A/B\\|name]] | x |\n[[C|d]] [[E]]"),
+            vec!["A/B".to_string(), "C".to_string(), "E".to_string()]
+        );
         fs::remove_dir_all(&d).ok();
     }
 

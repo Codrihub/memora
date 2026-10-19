@@ -516,7 +516,7 @@ fn image_html(
 /// `![[target|300]]` / `![[target|300x200]]` / `![[target|alt]]` (escaped text).
 fn re_embed() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]").unwrap())
+    RE.get_or_init(|| Regex::new(r"!\[\[([^\]|]+?)\\?(?:\|([^\]]*))?\]\]").unwrap())
 }
 
 /// `![alt](src "title")`, `![alt](&lt;path with spaces&gt;)`, `![alt](a b.png)`
@@ -1857,13 +1857,24 @@ impl MemoryStore {
                 .to_string();
         }
         let mut fm = FmLines::parse(&fm_text);
-        let s = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        // A field an op cannot do without: a missing one is an error, never an
+        // empty string (a `replace` without its replacement used to delete
+        // the matched text). Ops apply all at once, so nothing is saved.
+        let need = |v: &Value, k: &str, t: &str| -> MResult<String> {
+            match v.get(k).and_then(|x| x.as_str()) {
+                Some(x) => Ok(x.to_string()),
+                None => err(format!("patch op `{t}` needs a string `{k}`")),
+            }
+        };
 
         for op in ops {
             let t = op.get("op").and_then(|v| v.as_str()).unwrap_or("");
             match t {
                 "set_field" => {
-                    let field = s(op, "field");
+                    let field = need(op, "field", t)?;
+                    if field.trim().is_empty() {
+                        return err("patch op `set_field` needs a non-empty `field`".to_string());
+                    }
                     let val = op
                         .get("value")
                         .map(|v| match v {
@@ -1874,13 +1885,15 @@ impl MemoryStore {
                     fm.set(&field, val);
                 }
                 "append" => {
-                    body = format!("{}\n{}\n", body.trim_end_matches('\n'), s(op, "text"));
+                    let text = need(op, "text", t)?;
+                    body = format!("{}\n{}\n", body.trim_end_matches('\n'), text);
                 }
                 "prepend" => {
-                    body = format!("\n{}\n{}", s(op, "text"), body.trim_start_matches('\n'));
+                    let text = need(op, "text", t)?;
+                    body = format!("\n{}\n{}", text, body.trim_start_matches('\n'));
                 }
                 "add_tag" | "remove_tag" => {
-                    let tag = s(op, "tag");
+                    let tag = need(op, "tag", t)?;
                     let mut items = fm.list("tags");
                     if t == "add_tag" && !tag.is_empty() && !items.contains(&tag) {
                         items.push(tag.clone());
@@ -1891,7 +1904,22 @@ impl MemoryStore {
                     fm.set("tags", format!("[{}]", items.join(", ")));
                 }
                 "replace" => {
-                    body = body.replace(&s(op, "find"), &s(op, "with"));
+                    // Literal text, not a regex. `replace` is accepted as an
+                    // alias of `with` (bulk_replace names it that way).
+                    let find = need(op, "find", t)?;
+                    let with = match (op.get("with"), op.get("replace")) {
+                        (Some(Value::String(w)), _) | (None, Some(Value::String(w))) => w.clone(),
+                        _ => return err("patch op `replace` needs a string `with` (the replacement; \"\" deletes)".to_string()),
+                    };
+                    if find.is_empty() {
+                        return err("patch op `replace` needs a non-empty `find`".to_string());
+                    }
+                    if !body.contains(&find) {
+                        return err(format!(
+                            "patch op `replace`: `find` text not found in {path}"
+                        ));
+                    }
+                    body = body.replace(&find, &with);
                 }
                 other => return err(format!("unknown patch op: {other}")),
             }
