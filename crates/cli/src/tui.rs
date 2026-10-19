@@ -21,15 +21,18 @@ use dialoguer::{Confirm, Input, Password, Select};
 use memora_state::arm::ArmMode;
 use memora_state::{config, owner};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::OnceLock;
 
 type Result<T> = anyhow::Result<T>;
 
 /// Terminal settings at startup, restored by the SIGINT guard.
+#[cfg(unix)]
 static SAVED_TERMIOS: OnceLock<libc::termios> = OnceLock::new();
 
 /// SIGINT handler: restore the terminal, show the cursor, exit 130.
 /// Only async-signal-safe calls are used.
+#[cfg(unix)]
 extern "C" fn on_sigint(_: libc::c_int) {
     if let Some(t) = SAVED_TERMIOS.get() {
         unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, t) };
@@ -41,7 +44,24 @@ extern "C" fn on_sigint(_: libc::c_int) {
     }
 }
 
+/// Windows: the console restores its own input mode when the process exits on
+/// Ctrl-C; only the cursor needs showing again.
+#[cfg(windows)]
+fn install_sigint_guard() {
+    extern "system" fn on_ctrl(_: u32) -> i32 {
+        eprint!("\x1b[?25h\n");
+        std::process::exit(130);
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetConsoleCtrlHandler(handler: extern "system" fn(u32) -> i32, add: i32) -> i32;
+    }
+    // SAFETY: registers a handler with the right signature for the process lifetime.
+    unsafe { SetConsoleCtrlHandler(on_ctrl, 1) };
+}
+
 /// Remember the terminal settings and install the SIGINT guard.
+#[cfg(unix)]
 fn install_sigint_guard() {
     let mut t = std::mem::MaybeUninit::<libc::termios>::uninit();
     if unsafe { libc::tcgetattr(libc::STDIN_FILENO, t.as_mut_ptr()) } == 0 {

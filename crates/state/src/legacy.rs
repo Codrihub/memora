@@ -261,6 +261,7 @@ fn archive(state_dir: &Path, marker: &str, report: &mut ImportReport) -> Result<
             continue;
         }
         if !dir.is_dir() {
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut b = std::fs::DirBuilder::new();
             #[cfg(unix)]
             {

@@ -184,6 +184,45 @@ jobs:
           path: dist/bin/${{ matrix.docker }}/
           if-no-files-found: error
 
+  build-windows:
+    name: Build x86_64 Windows
+    needs: [verify]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      # static CRT, so memora.exe runs without the VC++ redistributable
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Build binaries
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc --bin memora --bin memora-cli
+
+      - name: Check versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/x86_64-pc-windows-msvc/release"
+          test "$("$bin/memora.exe" --version | tr -d '\r')" = "memora $VERSION"
+          test "$("$bin/memora-cli.exe" --version | tr -d '\r')" = "memora-cli $VERSION"
+          mkdir -p dist/bin/windows-amd64
+          cp "$bin/memora.exe" "$bin/memora-cli.exe" dist/bin/windows-amd64/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-windows-amd64
+          path: dist/bin/windows-amd64/
+          if-no-files-found: error
+
   # --------------------------------------------------------------- smoke test
   smoke:
     name: Install smoke test (x86_64)
@@ -271,13 +310,13 @@ jobs:
             --verify-tag "${flags[@]}"
 
   # --------------------------------------------------------------------- npm
-  # @codrihub/memora runs the binary from @codrihub/memora-linux-<cpu>, an
+  # @codrihub/memora runs the binary from @codrihub/memora-<os>-<cpu>, an
   # optionalDependency npm installs only on a matching machine (see npm/).
   # Publishing needs the NPM_TOKEN secret; without it the packages are still
   # built and smoke tested, and the publish step is skipped with a notice.
   npm:
     name: npm packages
-    needs: [verify, build, smoke, release]
+    needs: [verify, build, build-windows, smoke, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -307,10 +346,16 @@ jobs:
           name: bin-arm64
           path: bin/linux-arm64
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-windows-amd64
+          path: bin/win32-x64
+
       - name: Assemble packages
         run: |
           node --no-warnings npm/build.ts --version "$VERSION" --out npm-dist --assets assets \
-            --bin linux-x64=bin/linux-x64 --bin linux-arm64=bin/linux-arm64
+            --bin linux-x64=bin/linux-x64 --bin linux-arm64=bin/linux-arm64 \
+            --bin win32-x64=bin/win32-x64
 
       - name: Pack and smoke test
         shell: bash
@@ -341,7 +386,7 @@ jobs:
           if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then tag=next; fi
           # Platform packages first, so the wrapper never points at a missing
           # version. A re-run skips what is already published.
-          for pkg in memora-linux-x64 memora-linux-arm64 memora; do
+          for pkg in memora-linux-x64 memora-linux-arm64 memora-win32-x64 memora; do
             name="$(node -p "require('./npm-dist/$pkg/package.json').name")"
             if npm view "$name@$VERSION" version >/dev/null 2>&1; then
               echo "$name@$VERSION is already published"

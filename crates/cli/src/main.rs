@@ -7,6 +7,7 @@
 mod db;
 mod manage;
 mod store;
+mod sys;
 mod tui;
 mod update;
 
@@ -537,7 +538,7 @@ pub(crate) fn create_vault_dir(ctx: &Ctx, path: &Path) -> anyhow::Result<()> {
 /// A warning when the vault and the state dir have different owners, so the
 /// server user may not be able to write the vault.
 pub(crate) fn vault_owner_warning(ctx: &Ctx, vault: &Path) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
+    use crate::sys::MetadataExt;
     let v = std::fs::metadata(vault).ok()?;
     let s = std::fs::metadata(&ctx.state).ok()?;
     (v.uid() != s.uid() && s.uid() != 0).then(|| {
@@ -556,8 +557,9 @@ fn invoking_user() -> String {
     std::env::var("SUDO_USER")
         .ok()
         .or_else(|| std::env::var("USER").ok())
+        .or_else(|| std::env::var("USERNAME").ok())
         .filter(|u| !u.is_empty())
-        .unwrap_or_else(|| format!("uid {}", unsafe { libc::getuid() }))
+        .unwrap_or_else(|| format!("uid {}", sys::euid()))
 }
 
 /// How long `clear_cooldowns` waits for the server's acknowledgement.
@@ -753,7 +755,7 @@ fn no_args(cmd: &str, o: &Opts, max: usize) {
 
 fn main() -> anyhow::Result<()> {
     // exit quietly instead of panicking when piped into `head` and the like
-    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    sys::default_sigpipe();
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let o = parse_args(&raw);
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();

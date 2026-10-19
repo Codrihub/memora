@@ -577,6 +577,13 @@ fn readiness(st: &AppState) -> serde_json::Map<String, Value> {
 
 /// Whether this process may create files in `dir`, asked with `access(2)`
 /// (`W_OK | X_OK`; honours read-only mounts and ACLs) instead of writing a probe.
+#[cfg(windows)]
+fn dir_writable(dir: &Path) -> bool {
+    // No access(2) on Windows: honour the read-only attribute of the folder.
+    std::fs::metadata(dir).is_ok_and(|m| m.is_dir() && !m.permissions().readonly())
+}
+
+#[cfg(unix)]
 fn dir_writable(dir: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     if !dir.is_dir() {

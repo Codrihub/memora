@@ -1,7 +1,8 @@
 // Assemble the npm packages for one Memora release from its built binaries.
 //
 //   node npm/build.ts --version 1.2.1 --out npm-dist --assets crates/http/assets \
-//     --bin linux-x64=dist/bin/amd64 --bin linux-arm64=dist/bin/arm64
+//     --bin linux-x64=dist/bin/amd64 --bin linux-arm64=dist/bin/arm64 \
+//     --bin win32-x64=dist/bin/windows-amd64
 //
 // Writes <out>/memora (the @codrihub/memora wrapper: launcher + web UI assets)
 // and <out>/memora-<platform> for every --bin given, each a folder ready for
@@ -15,7 +16,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { PLATFORMS, type Binary } from './src/launcher.ts';
+import { PLATFORMS, binaryFile, type Binary } from './src/launcher.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -68,13 +69,14 @@ for (const [key, dir] of bins) {
   const dest = join(out, `memora-${key}`);
   mkdirSync(join(dest, 'bin'), { recursive: true });
   for (const name of BINARIES) {
-    const src = join(dir, name);
+    const file = binaryFile(name, os);
+    const src = join(dir, file);
     if (!existsSync(src)) die(`${src} is missing`);
-    copyFileSync(src, join(dest, 'bin', name));
-    chmodSync(join(dest, 'bin', name), 0o755);
+    copyFileSync(src, join(dest, 'bin', file));
+    chmodSync(join(dest, 'bin', file), 0o755);
     // A binary from another release would be published under this version.
     if (key === `${process.platform}-${process.arch}`) {
-      const got = execFileSync(join(dest, 'bin', name), ['--version'], { encoding: 'utf8' }).trim();
+      const got = execFileSync(join(dest, 'bin', file), ['--version'], { encoding: 'utf8' }).trim();
       if (got !== `${name} ${version}`) die(`${src} reports '${got}', expected '${name} ${version}'`);
     }
   }

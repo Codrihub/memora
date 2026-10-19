@@ -94,8 +94,7 @@ fn check(script: &PathBuf) -> Result<(String, String), String> {
 }
 
 fn is_root() -> bool {
-    // SAFETY: geteuid has no preconditions.
-    unsafe { libc::geteuid() == 0 }
+    crate::sys::is_root()
 }
 
 /// Shared by the subcommand and the console. `confirm` asks before upgrading;

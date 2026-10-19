@@ -17,8 +17,10 @@ use crate::{fmt_secs, mark, store, Ctx};
 use anyhow::{anyhow, bail, Context, Result};
 use memora_state::{Connection, Db, APPLICATION_ID, DB_FILE, SCHEMA_VERSION};
 use serde_json::{json, Value};
-use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
+use crate::sys::{self, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 /// Backups kept in `state/backups/` by default.
@@ -57,8 +59,24 @@ root-owned memora.db* files appear.
 // ---------------------------------------------------------------------------
 
 /// uid / gid the DB work must run as, or `None` to run in-process.
+#[cfg(windows)]
+fn drop_target(_state: &Path) -> Result<Option<(u32, u32)>> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn drop_to(_uid: u32, _gid: u32) -> Result<()> {
+    bail!("dropping privileges is not supported on Windows")
+}
+
+#[cfg(windows)]
+pub(crate) fn as_owner(_state: &Path, f: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    f()
+}
+
+#[cfg(unix)]
 fn drop_target(state: &Path) -> Result<Option<(u32, u32)>> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !sys::is_root() {
         return Ok(None);
     }
     let meta =
@@ -73,6 +91,7 @@ fn drop_target(state: &Path) -> Result<Option<(u32, u32)>> {
 }
 
 /// The primary group of `uid` from the passwd database.
+#[cfg(unix)]
 fn primary_gid(uid: u32) -> Option<u32> {
     let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
     let mut out: *mut libc::passwd = std::ptr::null_mut();
@@ -82,6 +101,7 @@ fn primary_gid(uid: u32) -> Option<u32> {
 }
 
 /// Irreversibly become `uid:gid` (no supplementary groups), umask 077.
+#[cfg(unix)]
 fn drop_to(uid: u32, gid: u32) -> Result<()> {
     unsafe {
         if libc::setgroups(0, std::ptr::null()) != 0 {
@@ -101,6 +121,7 @@ fn drop_to(uid: u32, gid: u32) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn flush_stdio() {
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
@@ -108,6 +129,7 @@ fn flush_stdio() {
 
 /// Run `f` as the owner of `state` (see the module docs). `f` may print; its
 /// result or error comes back to the caller.
+#[cfg(unix)]
 pub(crate) fn as_owner(state: &Path, f: impl FnOnce() -> Result<Value>) -> Result<Value> {
     let Some((uid, gid)) = drop_target(state)? else {
         return f();
@@ -179,7 +201,7 @@ pub(crate) fn with_db_as_owner(
 /// `setup` and the console work before the server's first start. As root, the
 /// state dir must already exist: its owner decides who the work runs as.
 pub(crate) fn with_state_db(state: &Path, f: impl FnOnce(&Db) -> Result<Value>) -> Result<Value> {
-    if unsafe { libc::geteuid() } == 0 && !state.is_dir() {
+    if sys::is_root() && !state.is_dir() {
         bail!(
             "state dir {} does not exist; start the memora server once (it creates it) \
              or pass --state",
@@ -258,6 +280,7 @@ fn raw_conn(path: &Path) -> Result<Connection> {
 }
 
 /// The message of a caught panic.
+#[cfg(unix)]
 fn panic_text(p: &Box<dyn std::any::Any + Send>) -> String {
     p.downcast_ref::<String>()
         .cloned()
@@ -407,7 +430,7 @@ fn backup_inner(state: &Path, to: Option<&Path>, keep: usize) -> Result<Value> {
         }
         None => {
             std::fs::create_dir_all(&default_dir)?;
-            std::fs::set_permissions(&default_dir, std::fs::Permissions::from_mode(0o700))?;
+            sys::make_private_dir(&default_dir)?;
             unique(&default_dir.join(format!("memora-{stamp}.db")))
         }
     };
@@ -648,7 +671,7 @@ fn restore_inner(state: &Path, src: &str, bytes: &[u8]) -> Result<Value> {
     if db.exists() {
         let dir = state.join(BACKUP_DIR);
         std::fs::create_dir_all(&dir)?;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        sys::make_private_dir(&dir)?;
         let keep = unique(&dir.join(format!(
             "memora-{}-pre-restore.db",
             utc_stamp(memora_state::now())
@@ -1000,9 +1023,9 @@ pub(crate) fn vacuum(ctx: &Ctx) -> Result<Value> {
 fn find_in_path(bin: &str) -> Option<PathBuf> {
     std::env::var_os("PATH")?
         .to_string_lossy()
-        .split(':')
-        .map(|d| Path::new(d).join(bin))
-        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.mode() & 0o111 != 0))
+        .split(sys::PATH_LIST_SEP)
+        .map(|d| Path::new(d).join(format!("{bin}{}", std::env::consts::EXE_SUFFIX)))
+        .find(|p| sys::is_executable(p))
 }
 
 /// `db shell`: exec `sqlite3` on the database as the state dir owner.
@@ -1037,8 +1060,7 @@ fn shell(ctx: &Ctx, write: bool) -> Result<i32> {
         cmd.arg("-readonly");
     }
     cmd.arg(&db);
-    use std::os::unix::process::CommandExt;
-    Err(anyhow!("running sqlite3: {}", cmd.exec()))
+    Err(anyhow!("running sqlite3: {}", sys::exec(&mut cmd)))
 }
 
 // ---------------------------------------------------------------------------

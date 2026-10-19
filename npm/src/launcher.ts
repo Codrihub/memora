@@ -27,7 +27,13 @@ export interface Platform {
 export const PLATFORMS: Record<string, Platform> = {
   'linux-x64': { pkg: '@codrihub/memora-linux-x64', os: 'linux', cpu: 'x64' },
   'linux-arm64': { pkg: '@codrihub/memora-linux-arm64', os: 'linux', cpu: 'arm64' },
+  'win32-x64': { pkg: '@codrihub/memora-win32-x64', os: 'win32', cpu: 'x64' },
 };
+
+/** File name of a binary on `os` (`.exe` on Windows). */
+export function binaryFile(name: Binary, os: string = process.platform): string {
+  return os === 'win32' ? `${name}.exe` : name;
+}
 
 const REPO = 'https://github.com/Codrihub/memora';
 
@@ -42,12 +48,11 @@ function binaryPath(name: Binary): string {
   if (!platform) {
     fail([
       `${name}: there is no prebuilt Memora binary for ${process.platform}/${process.arch}.`,
-      `The npm package ships Linux binaries only (${Object.keys(PLATFORMS).join(', ')}).`,
+      `The npm package ships binaries for ${Object.keys(PLATFORMS).join(', ')}.`,
       '',
       'Other ways to run Memora:',
       `  Docker (any OS):  ghcr.io/codrihub/memora, see ${REPO}#docker-compose`,
       `  From source:      cargo build --release, see ${REPO}#from-source`,
-      ...(process.platform === 'win32' ? ['  On Windows you can also install it inside WSL 2: npm install -g @codrihub/memora'] : []),
     ]);
   }
   let pkgDir: string;
@@ -61,7 +66,7 @@ function binaryPath(name: Binary): string {
       'Reinstall without that flag, for example: npm install -g @codrihub/memora',
     ]);
   }
-  return join(pkgDir, 'bin', name);
+  return join(pkgDir, 'bin', binaryFile(name));
 }
 
 export function run(name: Binary): void {

@@ -886,6 +886,27 @@ fn exchange_file(name: &str) -> std::io::Result<PathBuf> {
         ));
     }
     let dir = std::env::temp_dir().join("memora-exchange");
+    #[cfg(windows)]
+    {
+        // %TEMP% is per user on Windows; still refuse a symlink or junction
+        // planted in its place.
+        match std::fs::create_dir(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        let meta = std::fs::symlink_metadata(&dir)?;
+        if !meta.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "{} is not a private folder of this server; remove it and retry",
+                    dir.display()
+                ),
+            ));
+        }
+    }
+    #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt};
         match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
