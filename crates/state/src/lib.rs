@@ -176,6 +176,20 @@ pub fn is_absolute_path(p: &str) -> bool {
     p.starts_with('/') || std::path::Path::new(p).is_absolute()
 }
 
+/// `canonicalize`, but on Windows without the `\\?\` prefix it adds to local
+/// drive paths, so stored and printed paths stay readable and usable by other
+/// tools (git). UNC paths keep their verbatim form.
+pub fn canonical_path(p: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let c = p.canonicalize()?;
+    #[cfg(windows)]
+    if let Some(s) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        if !s.starts_with(r"UNC\") {
+            return Ok(std::path::PathBuf::from(s));
+        }
+    }
+    Ok(c)
+}
+
 /// Constant-time byte comparison for hash checks done in Rust (setup codes).
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -197,5 +211,15 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn canonical_paths_are_plain_and_absolute() {
+        let tmp = std::env::temp_dir();
+        let c = canonical_path(&tmp).unwrap();
+        assert!(c.is_absolute());
+        assert!(!c.to_string_lossy().starts_with(r"\\?\"));
+        assert!(is_absolute_path(&c.to_string_lossy()));
+        assert!(canonical_path(&tmp.join("memora-no-such-dir-x7")).is_err());
     }
 }

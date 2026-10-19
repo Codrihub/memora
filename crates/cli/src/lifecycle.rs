@@ -382,7 +382,7 @@ fn absolute(p: &Path) -> PathBuf {
 
 /// `path` with symlinks resolved, or absolute when it does not exist.
 fn resolve(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| absolute(p))
+    memora_state::canonical_path(p).unwrap_or_else(|_| absolute(p))
 }
 
 /// The pid of the server `memora-cli start` launched on `state`, when it
@@ -1757,6 +1757,41 @@ mod tests {
         assert!(
             unsafe_to_delete(Path::new("/data/me"), Some(Path::new("/data/me")), None).is_some()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn deletion_safety_on_windows() {
+        let home = Some(Path::new(r"C:\Users\Alice Smith"));
+        let prog = Some(Path::new(r"C:\Tools\memora-1.3.3"));
+        let bad = |p: &str| unsafe_to_delete(Path::new(p), home, prog).is_some();
+        for p in [
+            r"C:\",
+            r"D:\",
+            r"C:\Users",
+            r"C:\Users\Alice Smith",
+            r"C:\Users\Bob",
+            r"C:\Windows",
+            r"C:\Windows\System32\memora",
+            r"C:\WINDOWS\Temp\vault",
+            r"C:\Program Files\Memora",
+            r"C:\ProgramData\memora",
+            r"C:\Tools",
+            r"C:\Tools\memora-1.3.3",
+            r"C:\Users\Alice Smith\..\Bob\vault",
+            r"relative\state",
+            r"\\?\C:\",
+        ] {
+            assert!(bad(p), "{p} must be refused");
+        }
+        for p in [
+            r"C:\Users\Alice Smith\memora\state",
+            r"C:\Users\Alice Smith\Documents\vault",
+            r"D:\notes\memora",
+            r"C:\Tools\memora-data\state",
+        ] {
+            assert!(!bad(p), "{p} must be allowed");
+        }
     }
 
     #[cfg(unix)]

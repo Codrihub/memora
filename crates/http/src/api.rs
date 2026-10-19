@@ -1915,17 +1915,9 @@ pub(crate) fn validate_vault_path(
     Ok((abs, created))
 }
 
-/// `canonicalize`, but on Windows without the `\\?\` prefix it adds to local
-/// drive paths, so stored paths stay readable and usable by other tools (git).
+/// `canonicalize` without the Windows `\\?\` prefix ([`memora_state::canonical_path`]).
 fn canonical(p: &Path) -> std::io::Result<PathBuf> {
-    let c = p.canonicalize()?;
-    #[cfg(windows)]
-    if let Some(s) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-        if !s.starts_with(r"UNC\") {
-            return Ok(PathBuf::from(s));
-        }
-    }
-    Ok(c)
+    memora_state::canonical_path(p)
 }
 
 /// Refuse a vault (symlinks already resolved in `abs`) that is, contains or sits

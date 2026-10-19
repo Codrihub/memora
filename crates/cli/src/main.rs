@@ -522,8 +522,7 @@ pub(crate) fn unlock_instance(ctx: &Ctx) -> anyhow::Result<()> {
 /// Validate a vault folder and store it, absolute, in the state database.
 /// A running server picks it up at its next start.
 pub(crate) fn save_vault(ctx: &Ctx, path: &Path) -> anyhow::Result<PathBuf> {
-    let abs = path
-        .canonicalize()
+    let abs = memora_state::canonical_path(path)
         .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
     if !abs.is_dir() {
         anyhow::bail!("{} is not a directory", abs.display());
