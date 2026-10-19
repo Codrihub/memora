@@ -433,7 +433,7 @@ thing:
 | Install | What `memora-cli start / stop / restart` does | By hand |
 |---|---|---|
 | Native (systemd) | runs `systemctl start / stop / restart memora` (as root) | `sudo systemctl start memora` |
-| npm, Windows zip, source | runs the server in the background, with `memora.pid` and `memora.log` in the state folder; `stop` asks it to end and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
+| npm, Windows zip, source | runs the server in the background, with `memora.pid`, `memora.log` and `stop.token` in the state folder; `stop` asks it to end over a local, token-protected request and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
 | Docker | prints the host commands (a container cannot stop itself) | `docker start / stop / restart memora` |
 
 From the browser, the owner can shut the server down in Settings, Server, Shut

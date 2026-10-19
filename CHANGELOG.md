@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-10-20
+
+### Added
+
+- Agents see new tools without reconnecting. The MCP session id now carries
+  the tool catalog it was issued for; when tools are added or switched off
+  (after an update, or in Settings), the next request on an older session is
+  answered as a short SSE stream that first sends
+  `notifications/tools/list_changed`, once, and then the normal response.
+  `initialize` advertises `tools.listChanged: true`. Old sessions are never
+  refused, so clients that do not re-initialize keep working. This is what
+  made `list_pins`, `pin` and `unpin` missing for agents connected before
+  1.2.2.
+- Pins animate when they are added, moved or removed, in every open browser,
+  and a toast names the agent or person who pinned or unpinned (following the
+  activity toast setting).
+- `memora-cli stop` stops a background server gracefully on every OS through
+  `POST /_stop`, a loopback-only request that needs the token the server
+  writes to `<state>/stop.token`. It falls back to SIGTERM or `taskkill`.
+
+### Fixed
+
+- Windows: `memora-cli stop` without `--force` could not stop a server it
+  started, because Windows refuses a polite `taskkill` for a process without
+  a console.
+- Windows: `memora-cli start` handed its console pipes to the server, so a
+  script or CI step reading its output waited until the server exited.
+- Windows: the vault chooser in the browser (first run and Settings) refused
+  paths such as `C:\Users\you\memora`; it accepts drive and UNC paths.
+- Windows: `memora-cli db backup` always failed with "Access is denied",
+  which also stopped the final backup during uninstall (nothing was
+  deleted). `db restore` finds a server started by `memora-cli start` and
+  says clearly when the database is in use.
+- Windows: paths are stored and printed without the `\\?\` prefix
+  (`memora-cli vault`, uninstall output, the npm assets path in the log).
+- Windows: Ctrl+C in the console restores the console input mode, so the
+  shell never stays without echo after a password prompt.
+
 ## [1.3.2] - 2026-10-20
 
 ### Added
@@ -298,6 +336,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.3]: https://github.com/Codrihub/memora/releases/tag/v1.3.3
 [1.3.2]: https://github.com/Codrihub/memora/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Codrihub/memora/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Codrihub/memora/releases/tag/v1.3.0

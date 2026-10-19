@@ -279,6 +279,20 @@ When a client leaves, the others get a `presence` event with the new count.
 Messages from the client are ignored; the server pings every 30 seconds and
 closes a connection that has been silent for 75 seconds.
 
+### Local stop
+
+| Method | Path | Auth | Returns |
+|---|---|---|---|
+| POST | `/_stop` | Loopback and stop token | Stops the server gracefully, like Ctrl+C (open requests finish, buffered usage is written). Returns `{ok:true}` and exits shortly after. `403` unless the caller is on the same machine, not behind a proxy (any forwarding header), and sends the `X-Memora-Stop-Token` header. Also accepted while the instance is locked. |
+
+At startup, once the port is bound, the server writes a fresh random token to
+`<state>/stop.token` (readable by the server's user only on Linux and macOS)
+and removes it on exit. `memora-cli stop` reads that file and calls `/_stop`
+first on every OS; only if that fails does it fall back to SIGTERM (Linux,
+macOS) or `taskkill` (Windows, where a server started without a console
+ignores a polite `taskkill`). Anyone who can read the state folder can stop
+the server; they can already read its database.
+
 ### `ai_activity` events
 
 Every MCP `tools/call` publishes a `start` and an `end` event sharing `call_id`:
