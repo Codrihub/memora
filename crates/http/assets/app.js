@@ -10111,6 +10111,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-10-20
+
+### Added
+
+- \`memora-cli start\`, \`stop\` (\`--force\`), \`restart\` and \`uninstall\`, and
+  \`/start\`, \`/shutdown\` (alias \`/stop\`), \`/restart\` and \`/uninstall\` in the
+  console. They detect how the install runs: a systemd service is driven
+  with \`systemctl\`; an npm, release zip or source install runs the server in
+  the background with \`memora.pid\` and \`memora.log\` in the state folder;
+  inside Docker the console prints the host commands.
+- Uninstall explains what it removes, then offers a checklist (space to
+  select) to also delete the settings and accounts and the vault. Both are
+  kept by default; deleting the vault needs its folder name typed, a final
+  database backup is offered before the state goes, and system folders, the
+  home folder and the program folder are never deleted. Without a terminal
+  it needs \`--yes\` and only deletes what \`--delete-config\` and
+  \`--delete-vault\` say.
+- \`/guide\` gains a "Run and manage the server" step; \`memora-cli docs manage\`
+  covers it per install.
+
+### Changed
+
+- The install guide's introduction names Windows and the npm and zip
+  installs and leads with \`memora-cli setup\`.
+
 ## [1.3.1] - 2026-10-20
 
 ### Added
@@ -10379,6 +10404,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.2]: https://github.com/Codrihub/memora/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Codrihub/memora/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Codrihub/memora/releases/tag/v1.3.0
 [1.2.3]: https://github.com/Codrihub/memora/releases/tag/v1.2.3
