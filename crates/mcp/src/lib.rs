@@ -276,7 +276,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "patch_memory",
             category: "note",
-            description: "Apply partial edits. Each op is one object: {op:\"append\"|\"prepend\", text}, {op:\"replace\", find, with} (literal text, not regex; find must occur; with \"\" deletes), {op:\"set_field\", field, value}, {op:\"add_tag\"|\"remove_tag\", tag}. All ops apply together or none do.",
+            description: "Apply partial edits. Each op is one object: {op:\"append\"|\"prepend\", text}, {op:\"replace\", find, with} (literal text, not regex; replaces every occurrence; find must occur; with \"\" deletes), {op:\"set_field\", field, value} (field: letters, digits, _ - .; value: one line), {op:\"add_tag\"|\"remove_tag\", tag} (letters, digits, - _ / .; matching ignores case). Other keys are refused. All ops apply together or none do.",
             when: "Cheaper than save_memory for small changes.",
             input_schema: obj(
                 j!({"path": {"type":"string"}, "ops": {"type":"array","items":{"type":"object"}}}),

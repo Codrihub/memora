@@ -109,7 +109,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "rename_tag",
             "query",
-            "Rename a tag across the whole vault.",
+            "Rename a tag across the whole vault (frontmatter and inline #tags; matching ignores case). The new name must be a valid tag (letters, digits, - _ / .). Renaming a tag no note has is an error.",
             "When consolidating duplicate or misspelled tags.",
             json!({"old":{"type":"string"},"new":{"type":"string"}}),
             &["old", "new"],
@@ -117,7 +117,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "merge_tag",
             "query",
-            "Merge tag `a` into tag `b` across every note (dedup).",
+            "Merge tag `a` into tag `b` across every note (dedup; matching ignores case). `b` must be a valid tag (letters, digits, - _ / .); merging a tag no note has is an error.",
             "To tidy up synonymous tags.",
             json!({"a":{"type":"string"},"b":{"type":"string"}}),
             &["a", "b"],
@@ -126,7 +126,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "add_tags",
             "tag",
-            "Add one or more tags to a note's frontmatter.",
+            "Add one or more tags to a note's frontmatter. A tag may contain only letters, digits and - _ / . (a leading # is dropped). Matching ignores case: a tag already there in another case is kept as written.",
             "To make a note discoverable by tag.",
             json!({"path":{"type":"string"},"tags":{"type":"string","description":"Comma-separated"}}),
             &["path", "tags"],
@@ -134,7 +134,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "remove_tags",
             "tag",
-            "Remove tags from a note's frontmatter.",
+            "Remove tags from a note's frontmatter (matching ignores case). A tag the note does not have is reported in `note`.",
             "To clear tags that no longer apply.",
             json!({"path":{"type":"string"},"tags":{"type":"string"}}),
             &["path", "tags"],
@@ -142,7 +142,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "set_tags",
             "tag",
-            "Replace a note's entire tag list.",
+            "Replace a note's entire frontmatter tag list with exactly these tags (comma-separated; letters, digits, - _ / . only; \"\" clears).",
             "When you want to set tags explicitly rather than add to them.",
             json!({"path":{"type":"string"},"tags":{"type":"string"}}),
             &["path", "tags"],
@@ -578,8 +578,9 @@ pub fn call_extra(
             "list_tags" => json!(store.list_tags_impl()),
             "rename_tag" => store.rename_tag_impl(&s("old"), &s("new"))?,
             "merge_tag" => {
-                let a = s("a");
-                let bb = s("b");
+                // Echo the names as applied: trimmed, without a leading `#`.
+                let a = s("a").trim().trim_start_matches('#').trim().to_string();
+                let bb = s("b").trim().trim_start_matches('#').trim().to_string();
                 if a.is_empty() || bb.is_empty() {
                     anyhow::bail!("both `a` and `b` are required");
                 }

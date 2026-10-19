@@ -302,3 +302,50 @@ fn documented_aliases_nulls_and_empty_arguments_still_work() {
     assert!(is_err && text.contains("tools/list"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn tag_tools_refuse_unsafe_tags_and_echo_normalized_names() {
+    let dir = scratch("tags");
+    let srv = server(&dir);
+    let index = dir.join("vault/Plan/Index.md");
+    let before = std::fs::read_to_string(&index).unwrap();
+    for bad in [
+        "ok\nstatus: hacked",
+        "ok\n---\nbody",
+        "[brack]",
+        "a,b]",
+        "quo\"te",
+    ] {
+        let (is_err, text) = call(
+            &srv,
+            "add_tags",
+            json!({"path": "Plan/Index.md", "tags": bad}),
+        );
+        assert!(
+            is_err && text.contains("a tag may contain only"),
+            "{bad:?}: {text}"
+        );
+        let (is_err, _) = call(
+            &srv,
+            "set_tags",
+            json!({"path": "Plan/Index.md", "tags": bad}),
+        );
+        assert!(is_err, "{bad:?}");
+    }
+    let (is_err, text) = call(&srv, "rename_tag", json!({"old": "tech", "new": "a,b"}));
+    assert!(is_err, "{text}");
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), before);
+
+    let (is_err, text) = call(&srv, "merge_tag", json!({"a": "#TECH", "b": " #project "}));
+    assert!(!is_err, "{text}");
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["merged"], "TECH");
+    assert_eq!(v["into"], "project");
+    assert_eq!(v["renamed"], "TECH -> project");
+    let (is_err, text) = call(&srv, "merge_tag", json!({"a": "nope", "b": "project"}));
+    assert!(
+        is_err && text.contains("tag 'nope' is not on any note"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
