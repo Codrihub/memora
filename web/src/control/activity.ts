@@ -3,6 +3,8 @@
 import { attr, esc, useStyles } from '../dom';
 import { fmtTs, noteName } from '../format';
 import { hooks } from '../hooks';
+import { setKeysRoute } from '../router';
+import { icon } from '../ui/icons';
 import { agentColor, avatarHTML } from './agents';
 import { verb, type ActivityItem } from './feed';
 import { ago, clock, copyText, ICO, openDrawer, closeDrawer } from './ui';
@@ -19,6 +21,9 @@ const CSS = `
 .act .av{padding-top:1px}
 .act-l1{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;min-width:0;font-size:13.2px;line-height:1.45}
 .act-who{font-weight:680;color:var(--ag)}
+.act-who.go{all:unset;font-weight:680;color:var(--ag);cursor:pointer;border-radius:4px}
+.act-who.go:hover{text-decoration:underline;text-underline-offset:2px}
+.act-who.go:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .act-verb{color:var(--fg);font-weight:550}
 .act-lbl{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .act-l2{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
@@ -79,7 +84,11 @@ export function actRowHTML(it: ActivityItem, opts: { fresh?: boolean; extra?: st
     it.id,
   )}" style="--ag:${c}" aria-label="${attr(`${it.actor} ${verb(it.action)} ${label || paths.join(', ')}`)}">
     <span class="av">${avatarHTML(it.actor, 30, it.running ? 'live' : '', kid)}</span>
-    <span style="min-width:0"><span class="act-l1"><span class="act-who">${esc(it.actor)}</span><span class="act-verb">${esc(
+    <span style="min-width:0"><span class="act-l1">${
+      kid
+        ? `<button type="button" class="act-who go" data-agent-page="${attr(kid)}" title="${attr(`Open ${it.actor}'s agent page`)}">${esc(it.actor)}</button>`
+        : `<span class="act-who">${esc(it.actor)}</span>`
+    }<span class="act-verb">${esc(
       verb(it.action),
     )}</span>${label ? `<span class="act-lbl" title="${attr(label)}">${esc(label)}</span>` : ''}${opts.extra || ''}</span>${
       paths.length
@@ -113,6 +122,12 @@ export function wireActRows(
       hooks.openNote(note.dataset.note!);
       return;
     }
+    const agent = t.closest<HTMLElement>('[data-agent-page]');
+    if (agent) {
+      e.stopPropagation();
+      openAgentPage(agent.dataset.agentPage!);
+      return;
+    }
     const row = t.closest<HTMLElement>('[data-act]');
     if (!row) return;
     const it = find(row.dataset.act!);
@@ -126,6 +141,12 @@ export function wireActRows(
     const it = find(t.dataset.act!);
     if (it) openActivity(it, onFilterActor);
   };
+}
+
+/** An agent's own page on the Agents page (/agents/<key id>). */
+export function openAgentPage(keyId: string): void {
+  setKeysRoute('/agents/' + encodeURIComponent(keyId));
+  hooks.go('keys');
 }
 
 /** The detail drawer of one activity item. */
@@ -165,7 +186,9 @@ export function openActivity(it: ActivityItem, onFilterActor?: (actor: string) =
     title: it.actor,
     sub: verb(it.action),
     body,
-    foot: `${onFilterActor ? `<button type="button" class="btn" data-fa>Only ${esc(it.actor)}</button>` : ''}<span style="flex:1"></span><button type="button" class="btn ghost" data-cp>Copy JSON</button>`,
+    foot: `${onFilterActor ? `<button type="button" class="btn" data-fa>Only ${esc(it.actor)}</button>` : ''}${
+      kid ? `<button type="button" class="btn" data-ap>${icon('agents')}Agent page</button>` : ''
+    }<span style="flex:1"></span><button type="button" class="btn ghost" data-cp>Copy JSON</button>`,
     onOpen: (d) => {
       d.querySelectorAll<HTMLElement>('[data-note]').forEach((b) => {
         b.onclick = () => {
@@ -178,6 +201,12 @@ export function openActivity(it: ActivityItem, onFilterActor?: (actor: string) =
         fa.onclick = () => {
           closeDrawer();
           onFilterActor(it.actor);
+        };
+      const ap = d.querySelector<HTMLElement>('[data-ap]');
+      if (ap && kid)
+        ap.onclick = () => {
+          closeDrawer();
+          openAgentPage(kid);
         };
       const cp = d.querySelector<HTMLElement>('[data-cp]');
       if (cp) cp.onclick = () => void copyText(JSON.stringify(raw, null, 2), 'Event copied');

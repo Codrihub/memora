@@ -13,6 +13,7 @@ import { hooks } from '../hooks';
 import { agentColor, avatarHTML } from '../control/agents';
 import { wireActRows } from '../control/activity';
 import { fromAuth, fromLog, mergePhases, pushLive, verb, type ActivityItem } from '../control/feed';
+import { icon } from '../ui/icons';
 import { ago, copyText, download, ICO, openDrawer, openMenu, plural } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
 import { toast } from '../toast';
@@ -615,7 +616,7 @@ function heroHTML(): string {
     w && state !== 'missing'
       ? `<button type="button" class="lg-live" id="adLive" aria-pressed="${live}"></button>
         <button type="button" class="btn" id="adExport" aria-haspopup="menu" aria-label="Export">${ICO.download}<span class="l">Export</span></button>
-        ${w.key ? `<button type="button" class="btn ghost" id="adKey" aria-label="Key settings">${ICO.key}<span class="l">Key settings</span></button>` : ''}`
+        ${w.key ? `<button type="button" class="btn ghost" id="adKey" aria-label="Agent page" title="This agent's page: setup, access and settings">${icon('agents')}<span class="l">Agent page</span></button>` : ''}`
       : ''
   }</div>`;
   if (!w) {
@@ -706,8 +707,8 @@ function wireRoot(): void {
   const ky = r.querySelector<HTMLElement>('#adKey');
   if (ky)
     ky.onclick = () => {
-      // Straight to the agent's own settings on the Agents page.
-      if (who?.key) setKeysRoute('/agents/' + encodeURIComponent(who.key.id) + '/settings');
+      // Straight to the agent's own page on the Agents page.
+      if (who?.key) setKeysRoute('/agents/' + encodeURIComponent(who.key.id));
       hooks.go('keys' as Page);
     };
   const q = r.querySelector<HTMLInputElement>('#adQ');

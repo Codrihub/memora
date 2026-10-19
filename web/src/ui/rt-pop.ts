@@ -8,6 +8,7 @@ import { agentColor, avatarHTML } from '../control/agents';
 import { actRowHTML, useActivityStyles, wireActRows } from '../control/activity';
 import { loadFeed, verb, type ActivityItem } from '../control/feed';
 import { icon } from './icons';
+import { setKeysRoute } from '../router';
 
 export interface PopAgent {
   name: string;
@@ -197,8 +198,12 @@ function detail(a: PopAgent): string {
     <div class="rp2-top">
       <button type="button" class="rp2-btn icon" data-rp="back" aria-label="Back to all agents" title="All agents">${icon('chev-left')}</button>
       <h3></h3>
-      <button type="button" class="rp2-btn" data-rp="agent-activity">${icon('activity')}Open in Activity</button>
-      <button type="button" class="rp2-btn icon" data-rp="keys" title="Manage key" aria-label="Manage key">${icon('key')}</button>
+      <button type="button" class="rp2-btn" data-rp="agent-activity" title="This agent's activity">${icon('activity')}Activity</button>
+      ${
+        a.id
+          ? `<button type="button" class="rp2-btn" data-rp="agent-page" title="This agent's page: setup, access and settings">${icon('agents')}Agent page</button>`
+          : `<button type="button" class="rp2-btn icon" data-rp="keys" title="Agents &amp; API keys" aria-label="Agents and API keys">${icon('key')}</button>`
+      }
     </div>
     <div class="rp2-who">${avatarHTML(a.name, 42, a.active ? 'live' : '', a.id)}<div style="min-width:0;flex:1"><b>${esc(a.name)}</b>
       <small>${a.active ? 'Working now' : l ? 'Idle · last call ' + esc(when(l.at)) : 'Idle · no calls yet'}</small></div></div>
@@ -259,7 +264,8 @@ function wire(pop: HTMLElement, d: PopData): void {
         d.retry();
         return;
       }
-      const name = d.agents.find((a) => (a.id || a.name) === view)?.name;
+      const cur = d.agents.find((a) => (a.id || a.name) === view);
+      const name = cur?.name;
       d.close();
       if (what === 'activity') hooks.go('logs');
       else if (what === 'agent-activity' && name) {
@@ -269,6 +275,9 @@ function wire(pop: HTMLElement, d: PopData): void {
           /* optional */
         }
         hooks.go('logs');
+      } else if (what === 'agent-page' && cur?.id) {
+        setKeysRoute('/agents/' + encodeURIComponent(cur.id));
+        hooks.go('keys');
       } else if (what === 'keys') hooks.go('keys');
     };
   });
