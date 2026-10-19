@@ -32,7 +32,8 @@ pub(super) const COMMANDS: &[Cmd] = &[
         short: "documentation: setup, agents, prompts, keys, fixes",
         long: "Opens a menu of topics (arrow keys, Enter to read, Esc to close):\n\
                getting started, connecting agents, the recommended agent instructions,\n\
-               keys and permissions, commands, backups and updates, troubleshooting.\n\
+               keys and permissions, commands, backups and updates, running and\n\
+               removing the server, troubleshooting.\n\
                /docs <topic> prints one directly, e.g. /docs prompt or /docs 7.\n\
                The same pages: `memora-cli docs [topic|all]`. Full docs: <base>/docs." },
     Cmd { name: "/web", args: "", group: "Start here",
@@ -134,10 +135,36 @@ pub(super) const COMMANDS: &[Cmd] = &[
                server loads the new values. Secrets are never stored: \"create a\n\
                default API key\" makes a key and shows it once (it then lives in\n\
                /keys); the owner password is set with /setup or /reset." },
-    Cmd { name: "/restart", args: "", group: "Server settings",
-        short: "restart the server so changed settings apply",
-        long: "Restarts the systemd unit running memora (needs root). In Docker it\n\
-               prints the command to run." },
+    Cmd { name: "/start", args: "", group: "Run the server",
+        short: "start the server",
+        long: "Systemd service: systemctl start (needs root, sudo memora-cli).\n\
+               npm, release zip, Windows or source: runs memora in the background\n\
+               with this console's settings; log in state/memora.log, pid in\n\
+               state/memora.pid. Refused when a server already answers on the port.\n\
+               Docker: prints the host command (docker start memora).\n\
+               Same as `memora-cli start`." },
+    Cmd { name: "/shutdown", args: "[force]", group: "Run the server",
+        short: "stop the server (also /stop)",
+        long: "Systemd service: systemctl stop (needs root).\n\
+               Started with /start: asks it to stop and waits up to 10 seconds;\n\
+               if it is still running it asks before ending it (/shutdown force\n\
+               ends it without asking). A server started by hand in a terminal is\n\
+               stopped with Ctrl+C there. Docker: prints docker stop memora.\n\
+               Same as `memora-cli stop [--force]`." },
+    Cmd { name: "/restart", args: "", group: "Run the server",
+        short: "stop, then start; loads changed settings",
+        long: "Restarts the systemd unit running memora (needs root), or stops and\n\
+               starts the server that /start launched. In Docker it prints the\n\
+               command to run on the host. Same as `memora-cli restart`." },
+    Cmd { name: "/uninstall", args: "", group: "Run the server",
+        short: "remove Memora; settings and notes stay unless picked",
+        long: "Explains what goes for this install, then asks what else to delete:\n\
+               settings and accounts (the state folder) and the vault notes, both\n\
+               unticked, so by default only the program goes. Deleting the state\n\
+               writes a final database backup first; deleting the vault asks you to\n\
+               type its folder name. Native installs run install.sh --uninstall;\n\
+               npm installs end with npm uninstall -g @codrihub/memora; in Docker\n\
+               it prints the host commands. Same as `memora-cli uninstall`." },
     Cmd { name: "/update", args: "", group: "Updates",
         short: "check for a newer release and upgrade this install",
         long: "Checks GitHub Releases. On a native install it shows what is new, asks,\n\
@@ -155,11 +182,14 @@ pub(super) const COMMANDS: &[Cmd] = &[
 /// `/help` lists every command; `/help <command>` explains one.
 pub(super) fn help(topic: Option<&str>) {
     if let Some(t) = topic {
-        let want = if t.starts_with('/') {
+        let mut want = if t.starts_with('/') {
             t.to_string()
         } else {
             format!("/{t}")
         };
+        if want == "/stop" {
+            want = "/shutdown".into();
+        }
         match COMMANDS.iter().find(|c| c.name == want) {
             Some(c) => {
                 println!("{} {}", style(c.name).cyan().bold(), style(c.args).cyan());

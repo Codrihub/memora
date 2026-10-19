@@ -81,6 +81,11 @@ pub(crate) const TOPICS: &[Topic] = &[
         summary: "db backup, restore, check; /update; Docker",
     },
     Topic {
+        id: "manage",
+        title: "Run & manage the server",
+        summary: "start, stop, restart, uninstall per install",
+    },
+    Topic {
         id: "troubleshooting",
         title: "Troubleshooting",
         summary: "401, -32003, unreachable server, locked",
@@ -142,7 +147,8 @@ pub(crate) fn find(arg: &str) -> Option<&'static Topic> {
         "keys" | "permissions" | "scopes" | "privacy" => "keys-permissions",
         "backup" | "backups" | "update" | "updates" | "db" => "backups-updates",
         "errors" | "help" | "trouble" => "troubleshooting",
-        "start" | "setup" | "install" => "getting-started",
+        "setup" | "install" => "getting-started",
+        "start" | "stop" | "shutdown" | "restart" | "uninstall" | "remove" | "run" => "manage",
         "docs" | "web" | "full" => "more",
         _ => "",
     };
@@ -395,6 +401,7 @@ fn page(id: &str, base: &str) -> Vec<Block> {
         "keys-permissions" => keys_permissions(),
         "commands" => commands(),
         "backups-updates" => backups_updates(),
+        "manage" => manage(),
         "troubleshooting" => troubleshooting(base),
         _ => return more(base),
     };
@@ -650,6 +657,102 @@ fn backups_updates() -> Vec<Block> {
     ]
 }
 
+fn manage() -> Vec<Block> {
+    vec![
+        p(
+            "The console starts, stops, restarts and removes the server. The commands are the \
+           same on every install; what they do depends on how Memora was installed.",
+        ),
+        Def(
+            "/start".into(),
+            "start the server (`memora-cli start`)".into(),
+        ),
+        Def(
+            "/shutdown".into(),
+            "stop it; also /stop (`memora-cli stop`)".into(),
+        ),
+        Def(
+            "/restart".into(),
+            "stop, then start, e.g. after /config (`memora-cli restart`)".into(),
+        ),
+        Def(
+            "/uninstall".into(),
+            "remove Memora; settings and notes stay unless you pick them (`memora-cli uninstall`)"
+                .into(),
+        ),
+        h("Native install (systemd service)"),
+        li(
+            "The service is driven with systemctl, so these need root: open the console with \
+            `sudo memora-cli`, or run:",
+        ),
+        code(
+            "sudo systemctl start memora\n\
+              sudo systemctl stop memora\n\
+              sudo systemctl restart memora\n\
+              sudo memora-cli uninstall",
+        ),
+        li(
+            "Uninstall runs the installer's `install.sh --uninstall`, with `--purge` when you \
+            delete both the state and the vault of /var/lib/memora.",
+        ),
+        h("npm"),
+        li(
+            "There is no service. `memora-cli start` runs `memora` in the background with the \
+            same settings, logging to `state/memora.log` with its pid in `state/memora.pid`. \
+            `memora-cli stop` asks it to stop and waits up to 10 seconds; `--force` ends it if \
+            it hangs.",
+        ),
+        code(
+            "MEMORA_STATE=./state memora-cli start\n\
+              MEMORA_STATE=./state memora-cli stop\n\
+              MEMORA_STATE=./state memora-cli uninstall\n\
+              npm uninstall -g @codrihub/memora",
+        ),
+        li("A server you started yourself in a terminal is stopped with Ctrl+C there."),
+        h("Docker"),
+        li(
+            "A container cannot start, stop or remove itself, so in Docker these commands print \
+            what to run on the host:",
+        ),
+        code(
+            "docker start memora\n\
+              docker stop memora\n\
+              docker restart memora\n\
+              docker rm -f memora\n\
+              docker volume rm memora-state memora-data",
+        ),
+        li(
+            "Docker Compose: `docker compose stop`, `docker compose restart` and \
+            `docker compose down` in the folder of docker-compose.yml; then delete the ./state \
+            and ./data folders if you want them gone.",
+        ),
+        h("Windows (release zip)"),
+        li(
+            "Like npm: `memora-cli start` runs memora.exe in the background without a window. \
+            `memora-cli stop` asks it to stop; if Windows cannot, `memora-cli stop --force` \
+            ends it.",
+        ),
+        code(
+            "memora-cli.exe --state .\\state start\n\
+              memora-cli.exe --state .\\state stop --force\n\
+              memora-cli.exe --state .\\state uninstall",
+        ),
+        li("After uninstall, delete the program folder."),
+        h("What uninstall keeps"),
+        li(
+            "By default only the program goes. Settings and accounts (the state folder: \
+            database, keys, sessions) and the vault notes stay unless you select them. \
+            Deleting the state writes a final database backup to the current folder first; \
+            deleting the vault asks you to type its folder name.",
+        ),
+        li("Without a terminal, add `--yes`; only what the flags name is deleted:"),
+        code(
+            "memora-cli uninstall --yes\n\
+              memora-cli uninstall --delete-config --delete-vault --yes",
+        ),
+    ]
+}
+
 fn troubleshooting(base: &str) -> Vec<Block> {
     vec![
         h("401 Unauthorized"),
@@ -758,6 +861,11 @@ mod tests {
         assert_eq!(find("3").unwrap().id, "agent-instructions");
         assert_eq!(find("trouble").unwrap().id, "troubleshooting");
         assert_eq!(find("Keys").unwrap().id, "keys-permissions");
+        assert_eq!(find("manage").unwrap().id, "manage");
+        for a in ["start", "stop", "shutdown", "restart", "uninstall"] {
+            assert_eq!(find(a).unwrap().id, "manage", "{a}");
+        }
+        assert_eq!(find("setup").unwrap().id, "getting-started");
         assert!(find("nope-nothing").is_none());
         assert!(find("0").is_none());
         assert!(find("").is_none());

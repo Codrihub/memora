@@ -5,6 +5,7 @@
 //! dir (`db.rs`), so no root-owned `memora.db*` files appear.
 
 mod db;
+mod lifecycle;
 mod manage;
 mod store;
 mod sys;
@@ -66,6 +67,18 @@ Data & backups (state/memora.db):
   Run as root, every db command works as the owner of the state dir, so the
   server can still open every memora.db* file.
 
+Run the server:
+  start               start the server in the background
+  stop [--force]      stop it; waits up to 10 s, --force ends it if it hangs
+  restart [--force]   stop, then start
+  uninstall [--delete-config] [--delete-vault] [--yes]
+                      remove Memora from this machine; settings, accounts
+                      (state dir) and vault notes stay unless named
+  A systemd service is driven with systemctl (needs root). In Docker these
+  print the commands to run on the host. Otherwise (npm, release zip,
+  Windows, source) start runs memora in the background and writes
+  state/memora.pid and state/memora.log; stop ends that process.
+
 Updates:
   update [--check] [--yes]
                       check for a newer release and upgrade this install
@@ -74,7 +87,7 @@ Updates:
 Help:
   docs [TOPIC|all]    read the docs in the terminal: getting-started,
                       connecting-agents, agent-instructions, keys-permissions,
-                      commands, backups-updates, troubleshooting, more
+                      commands, backups-updates, manage, troubleshooting, more
   help                show this help
 
 Options:
@@ -94,6 +107,8 @@ Examples:
                                       create and use /srv/notes as the vault
   memora-cli db backup --keep 20      back up now, keep the newest 20
   memora-cli update --check           only check for a newer release
+  memora-cli --state ./state start    run the server in the background
+  memora-cli uninstall                remove Memora (asks what to keep)
   memora-cli docs agent-instructions  print the prompt to give your agents
 
 In the browser, open http://<host>:<port>/login, enter the one-time code and
@@ -152,7 +167,11 @@ fn parse_args(raw: &[String]) -> Opts {
             break;
         }
         let state_flag = a == "--state" || a.starts_with("--state=");
-        if matches!(o.cmd.as_deref(), Some("db") | Some("update")) && !state_flag {
+        let passthrough = matches!(o.cmd.as_deref(), Some("db") | Some("update"))
+            || o.cmd
+                .as_deref()
+                .is_some_and(|c| lifecycle::SUBCOMMANDS.contains(&c));
+        if passthrough && !state_flag {
             o.args.push(a.clone());
             continue;
         }
@@ -780,6 +799,10 @@ fn main() -> anyhow::Result<()> {
         "update",
         "docs",
         "help",
+        "start",
+        "stop",
+        "restart",
+        "uninstall",
     ];
     if !known.contains(&cmd.as_str()) {
         usage_error(&format!("unknown command `{cmd}`"));
@@ -800,6 +823,11 @@ fn main() -> anyhow::Result<()> {
         let ctx = resolve_ctx(o.state.clone());
         let code = db::cli(&ctx, &o.args)?;
         std::process::exit(code);
+    }
+    if lifecycle::SUBCOMMANDS.contains(&cmd.as_str()) {
+        let flags = lifecycle::parse_flags(&cmd, &o.args).unwrap_or_else(|e| usage_error(&e));
+        let ctx = resolve_ctx(o.state.clone());
+        std::process::exit(lifecycle::cli(&ctx, &cmd, &flags)?);
     }
     no_args(
         &cmd,

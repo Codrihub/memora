@@ -293,7 +293,7 @@ fn panic_text(p: &Box<dyn std::any::Any + Send>) -> String {
 // ---------------------------------------------------------------------------
 
 /// `YYYYMMDD-HHMMSS` in UTC.
-fn utc_stamp(secs: i64) -> String {
+pub(crate) fn utc_stamp(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let sod = secs.rem_euclid(86_400);
     // civil_from_days (H. Hinnant)

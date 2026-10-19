@@ -92,7 +92,7 @@ const NAME_NOTE: &str =
     "Memora is memory, advanced: built to remember what you and your AI learn, and to remember more the more you use it.";
 
 /// Greedy word wrap of `text` to lines of at most `width` characters.
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
     for word in text.split_whitespace() {
@@ -170,7 +170,22 @@ pub fn run(ctx: &Ctx) -> Result<()> {
             "/close" => close_window(ctx).map(|_| ok("Window closed (no lock applied).")),
             "/unlock" => unlock(ctx),
             "/config" => config(ctx, &theme),
-            "/restart" => restart(ctx, &theme, true),
+            "/start" => crate::lifecycle::start(ctx).map(|_| ()),
+            "/shutdown" | "/stop" => {
+                let force = matches!(arg.as_deref(), Some("force" | "--force"));
+                crate::lifecycle::stop(ctx, Some(&theme), force).map(|_| ())
+            }
+            "/restart" => crate::lifecycle::restart(ctx, Some(&theme), false).map(|_| ()),
+            "/uninstall" => {
+                match crate::lifecycle::uninstall(ctx, Some(&theme), &Default::default()) {
+                    // the program or its folders are gone: nothing left to manage here
+                    Ok(done) if done.went_ahead => {
+                        println!("Leaving the console.");
+                        return Ok(());
+                    }
+                    other => other.map(|_| ()),
+                }
+            }
             "/cooldowns" => cooldowns(ctx),
             "/update" => {
                 crate::update::run(Some(&theme), false, false);
@@ -366,6 +381,19 @@ fn guide(ctx: &Ctx, theme: &ColorfulTheme) -> Result<()> {
             style("/cooldowns").cyan()
         ),
     );
+    step(5, "Run and manage the server:".into());
+    for (cmd, what) in [
+        ("/start", "start the server"),
+        ("/shutdown", "stop it (also /stop)"),
+        ("/restart", "stop, then start; loads changed settings"),
+        (
+            "/uninstall",
+            "remove Memora; your settings and notes stay unless you pick them",
+        ),
+    ] {
+        println!("      {}  {what}", style(format!("{cmd:<11}")).cyan());
+    }
+    println!("      {}", style("Details: /docs manage").dim());
     if snap.vault_configured.is_none() {
         println!();
         println!(
@@ -976,7 +1004,7 @@ fn config(ctx: &Ctx, theme: &ColorfulTheme) -> Result<()> {
         println!();
     }
     if changed {
-        restart(ctx, theme, false)?;
+        crate::lifecycle::after_change(ctx, theme)?;
     }
     Ok(())
 }
@@ -1070,46 +1098,4 @@ fn validate_setting(key: &str, v: &str) -> std::result::Result<(), String> {
         memora_state::Error::Invalid { reason, .. } => reason,
         other => other.to_string(),
     })
-}
-
-/// `/restart`: restart the systemd unit running the server, or explain how.
-fn restart(ctx: &Ctx, theme: &ColorfulTheme, asked: bool) -> Result<()> {
-    let Some(unit) = ctx.server_unit() else {
-        println!("Restart the server to load the new settings:");
-        if std::path::Path::new("/.dockerenv").exists() {
-            println!("  {}", style("docker compose restart").cyan());
-        } else {
-            println!(
-                "  {}",
-                style("systemctl restart <memora unit>  (or restart the process)").cyan()
-            );
-        }
-        return Ok(());
-    };
-    if !asked {
-        let go = Confirm::with_theme(theme)
-            .with_prompt(format!("Restart {unit} now to load the new settings?"))
-            .default(true)
-            .interact_opt()?;
-        if go != Some(true) {
-            println!(
-                "Later: type {} when you are ready.",
-                style("/restart").cyan()
-            );
-            return Ok(());
-        }
-    }
-    let status = std::process::Command::new("systemctl")
-        .args(["restart", &unit])
-        .status()?;
-    if status.success() {
-        ok(&format!("{unit} restarted; the new settings are loaded."));
-    } else {
-        println!(
-            "{} could not restart {unit} (are you root?). Run: {}",
-            style("error:").red().bold(),
-            style(format!("sudo systemctl restart {unit}")).cyan()
-        );
-    }
-    Ok(())
 }

@@ -12,8 +12,8 @@ use dialoguer::Confirm;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// The installer copies itself here so updates can run it again.
-fn installer() -> Option<PathBuf> {
+/// The installer copies itself here so updates (and uninstall) can run it again.
+pub(crate) fn installer() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
     let prefix = exe.parent()?.parent()?;
     [
@@ -25,13 +25,14 @@ fn installer() -> Option<PathBuf> {
 }
 
 /// True when this binary came from the `@codrihub/memora` npm package (it then
-/// lives in `node_modules/@codrihub/memora-<platform>/bin`).
-fn npm_install() -> bool {
+/// lives in `node_modules/@codrihub/memora-<platform>/bin`, with backslashes on Windows).
+pub(crate) fn npm_install() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.canonicalize().ok())
         .is_some_and(|p| {
             p.to_string_lossy()
+                .replace('\\', "/")
                 .contains("/node_modules/@codrihub/memora-")
         })
 }
