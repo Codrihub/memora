@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Codrihub/memora/releases/latest"><img src="https://img.shields.io/github/v/release/Codrihub/memora?sort=semver" alt="Latest release"></a>
+  <a href="https://www.npmjs.com/package/@codrihub/memora"><img src="https://img.shields.io/npm/v/@codrihub/memora?logo=npm&label=npm" alt="npm: @codrihub/memora"></a>
   <a href="https://github.com/Codrihub/memora/actions/workflows/ci.yml"><img src="https://github.com/Codrihub/memora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Codrihub/memora" alt="License: MIT"></a>
   <a href="https://github.com/Codrihub/memora/pkgs/container/memora"><img src="https://img.shields.io/badge/ghcr.io-codrihub%2Fmemora-blue?logo=docker" alt="Docker image"></a>
@@ -17,8 +18,11 @@
   <a href="https://memora.codrihub.tech">Website</a> ·
   <a href="https://memora.codrihub.tech/docs">Documentation</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="https://www.npmjs.com/package/@codrihub/memora">npm</a> ·
   <a href="https://github.com/Codrihub/memora/releases">Releases</a>
 </p>
+
+<p align="center"><code>npm install -g @codrihub/memora</code></p>
 
 Memora is a self-hosted memory vault for AI agents. Notes are plain markdown
 files in a git-backed folder. Agents read and write them over the Model Context
