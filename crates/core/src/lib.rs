@@ -1077,11 +1077,247 @@ mod resource_tests {
         assert!(s.rename_tag_impl("", "x").is_err());
         assert!(s.rename_tag_impl("old", " ").is_err());
         assert_eq!(fs::read_to_string(d.join("a.md")).unwrap(), src);
-        s.rename_tag_impl("#old", "n$1").unwrap();
+        // `$1` is not a valid tag (it used to be a regex replacement trap).
+        assert!(s.rename_tag_impl("old", "n$1").is_err());
+        s.rename_tag_impl("#old", "n1").unwrap();
         assert_eq!(
             fs::read_to_string(d.join("a.md")).unwrap(),
-            "---\ntags: [n$1, other]\n---\n#n$1 #old-thing #n$1/sub #older $x\n"
+            "---\ntags: [n1, other]\n---\n#n1 #old-thing #n1/sub #older $x\n"
         );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn tag_writes_refuse_yaml_unsafe_tags() {
+        let d = tmp_vault("tag-unsafe");
+        let src = "---\ntitle: T\ntags: [a]\n---\nbody\n";
+        fs::write(d.join("n.md"), src).unwrap();
+        let s = MemoryStore::new(&d);
+        for bad in [
+            "ok\nstatus: hacked",
+            "ok\n---\nbody",
+            "[brack]",
+            "b]",
+            "tag:colon",
+            "quo\"te",
+            "x#hash",
+            "has space",
+            "a---b",
+            "tab\tx",
+        ] {
+            assert!(s.add_tags_impl("n.md", bad).is_err(), "add {bad:?}");
+            assert!(s.set_tags_impl("n.md", bad).is_err(), "set {bad:?}");
+            let op = serde_json::json!({"op": "add_tag", "tag": bad});
+            assert!(s.patch_memory_impl("n.md", &[op]).is_err(), "patch {bad:?}");
+            s.rename_tag_impl("a", "z").ok();
+            assert!(s.rename_tag_impl("z", bad).is_err(), "rename {bad:?}");
+            s.rename_tag_impl("z", "a").unwrap();
+        }
+        for empty in ["", "  ", "#"] {
+            let op = serde_json::json!({"op": "add_tag", "tag": empty});
+            assert!(s.patch_memory_impl("n.md", &[op]).is_err(), "{empty:?}");
+            let op = serde_json::json!({"op": "remove_tag", "tag": empty});
+            assert!(s.patch_memory_impl("n.md", &[op]).is_err(), "{empty:?}");
+        }
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
+        // A leading # is dropped; unicode letters, digits and - _ / . are fine.
+        s.add_tags_impl("n.md", "#hash, kafé, v1.2, a_b/c-d")
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "---\ntitle: T\ntags: [a, hash, kafé, v1.2, a_b/c-d]\n---\nbody\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn set_field_refuses_frontmatter_injection() {
+        let d = tmp_vault("set-field");
+        let src = "---\ntitle: T\n---\nbody\n";
+        fs::write(d.join("n.md"), src).unwrap();
+        let s = MemoryStore::new(&d);
+        let bad = [
+            serde_json::json!({"op": "set_field", "field": "status", "value": "x\nhacked: yes"}),
+            serde_json::json!({"op": "set_field", "field": "status", "value": "x\r\n---\nbody"}),
+            serde_json::json!({"op": "set_field", "field": "status", "value": "a --- b"}),
+            serde_json::json!({"op": "set_field", "field": "a\nhacked", "value": "v"}),
+            serde_json::json!({"op": "set_field", "field": "a: b", "value": "v"}),
+            serde_json::json!({"op": "set_field", "field": "two words", "value": "v"}),
+        ];
+        for op in bad {
+            assert!(
+                s.patch_memory_impl("n.md", std::slice::from_ref(&op))
+                    .is_err(),
+                "{op}"
+            );
+        }
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
+        let ok = [
+            serde_json::json!({"op": "set_field", "field": "due-date_2.x", "value": "2026-01-01: noon"}),
+            serde_json::json!({"op": "set_field", "field": "n", "value": 3}),
+        ];
+        s.patch_memory_impl("n.md", &ok).unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "---\ntitle: T\ndue-date_2.x: 2026-01-01: noon\nn: 3\n---\nbody\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn patch_refuses_unknown_and_missing_op_keys() {
+        let d = tmp_vault("patch-keys");
+        fs::write(d.join("n.md"), "body\n").unwrap();
+        let s = MemoryStore::new(&d);
+        let e = s
+            .patch_memory_impl(
+                "n.md",
+                &[serde_json::json!({"op": "append", "text": "x", "extra": 1})],
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("op 1") && e.contains("`extra`") && e.contains("op, text"),
+            "{e}"
+        );
+        for bad in [
+            serde_json::json!({}),
+            serde_json::json!("str"),
+            serde_json::json!({"op": 3}),
+        ] {
+            let e = s.patch_memory_impl("n.md", &[bad]).unwrap_err().to_string();
+            assert!(
+                e.contains("op 1 has no `op`")
+                    && e.contains("append, prepend, replace, set_field, add_tag, remove_tag"),
+                "{e}"
+            );
+        }
+        let ops = [
+            serde_json::json!({"op": "append", "text": "x"}),
+            serde_json::json!({"op": "bogus"}),
+        ];
+        let e = s.patch_memory_impl("n.md", &ops).unwrap_err().to_string();
+        assert!(e.contains("op 2") && e.contains("`bogus`"), "{e}");
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), "body\n");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn set_tags_replaces_exactly() {
+        let d = tmp_vault("set-tags");
+        fs::write(
+            d.join("n.md"),
+            "---\ntags: [[brack], old]\n---\nbody #inline\n",
+        )
+        .unwrap();
+        let s = MemoryStore::new(&d);
+        let v = s.set_tags_impl("n.md", "new, NEW, other").unwrap();
+        assert_eq!(v["frontmatter_tags"], serde_json::json!(["new", "other"]));
+        let v = s.set_tags_impl("n.md", "new").unwrap();
+        assert_eq!(v["frontmatter_tags"], serde_json::json!(["new"]));
+        assert_eq!(v["tags"], serde_json::json!(["inline", "new"]));
+        let v = s.set_tags_impl("n.md", "").unwrap();
+        assert_eq!(v["frontmatter_tags"], serde_json::json!([]));
+        // No tags before and none asked: the note is not touched.
+        fs::write(d.join("m.md"), "plain\n").unwrap();
+        s.set_tags_impl("m.md", "").unwrap();
+        assert_eq!(fs::read_to_string(d.join("m.md")).unwrap(), "plain\n");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn tag_writes_ignore_case() {
+        let d = tmp_vault("tag-case");
+        fs::write(d.join("n.md"), "---\ntags: [alpha, Gamma]\n---\nbody\n").unwrap();
+        fs::write(d.join("m.md"), "---\ntags: [Atlas, b]\n---\n#ATLAS here\n").unwrap();
+        let s = MemoryStore::new(&d);
+        let v = s.add_tags_impl("n.md", "ALPHA").unwrap();
+        assert_eq!(v["frontmatter_tags"], serde_json::json!(["alpha", "Gamma"]));
+        let v = s.remove_tags_impl("n.md", "gamma").unwrap();
+        assert_eq!(v["frontmatter_tags"], serde_json::json!(["alpha"]));
+        assert!(v.get("note").is_none(), "{v}");
+        let r = s.rename_tag_impl("atlas", "b").unwrap();
+        assert_eq!(r["notes"], serde_json::json!(["m.md"]));
+        assert_eq!(
+            fs::read_to_string(d.join("m.md")).unwrap(),
+            "---\ntags: [b]\n---\n#b here\n"
+        );
+        // Changing only the case is a rename too.
+        s.rename_tag_impl("ALPHA", "Alpha").unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "---\ntags: [Alpha]\n---\nbody\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn missing_tags_are_reported() {
+        let d = tmp_vault("tag-missing");
+        let src = "---\ntags: [a]\n---\nbody #inl\n";
+        fs::write(d.join("n.md"), src).unwrap();
+        let s = MemoryStore::new(&d);
+        let v = s.remove_tags_impl("n.md", "nope, inl").unwrap();
+        let note = v["note"].as_str().unwrap();
+        assert!(note.contains("'nope' is not on this note"), "{note}");
+        assert!(note.contains("'inl' is only an inline #tag"), "{note}");
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
+        let e = s.rename_tag_impl("nope", "x").unwrap_err().to_string();
+        assert!(e.contains("tag 'nope' is not on any note"), "{e}");
+        assert!(s.rename_tag_impl("a", "#a").is_err());
+        // A note whose tags line lacks the tag is not rewritten.
+        fs::write(d.join("m.md"), "---\ntags: [x,y]\n---\n").unwrap();
+        s.rename_tag_impl("a", "b").unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("m.md")).unwrap(),
+            "---\ntags: [x,y]\n---\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn string_form_tags_are_separate_tags() {
+        let d = tmp_vault("tag-string");
+        fs::write(d.join("n.md"), "---\ntags: \"solo, c#, Solo\"\n---\nbody\n").unwrap();
+        fs::write(d.join("m.md"), "---\ntags: one\n---\nbody\n").unwrap();
+        let s = MemoryStore::new(&d);
+        let v = s.get_note_tags_impl("n.md").unwrap();
+        assert_eq!(
+            v["frontmatter_tags"],
+            serde_json::json!(["solo", "c#", "Solo"])
+        );
+        assert_eq!(
+            s.get_note_tags_impl("m.md").unwrap()["tags"],
+            serde_json::json!(["one"])
+        );
+        s.add_tags_impl("n.md", "solo, new").unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("n.md")).unwrap(),
+            "---\ntags: [solo, c#, new]\n---\nbody\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn ordinary_tags_round_trip_unchanged() {
+        let d = tmp_vault("tag-roundtrip");
+        let src = "---\ncreated: 2026-01-01\ntags: [tech, project/memora, v1.2]\nstatus: open\n---\n\n# T\n\nbody #inline\n";
+        fs::write(d.join("n.md"), src).unwrap();
+        let s = MemoryStore::new(&d);
+        let v = s.get_note_tags_impl("n.md").unwrap();
+        assert_eq!(
+            v["frontmatter_tags"],
+            serde_json::json!(["tech", "project/memora", "v1.2"])
+        );
+        s.add_tags_impl("n.md", "extra").unwrap();
+        s.remove_tags_impl("n.md", "extra").unwrap();
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
+        s.set_tags_impl("n.md", "tech, project/memora, v1.2")
+            .unwrap();
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
+        s.rename_tag_impl("tech", "tek").unwrap();
+        s.rename_tag_impl("tek", "tech").unwrap();
+        assert_eq!(fs::read_to_string(d.join("n.md")).unwrap(), src);
         fs::remove_dir_all(&d).ok();
     }
 

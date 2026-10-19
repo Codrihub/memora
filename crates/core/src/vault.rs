@@ -182,12 +182,10 @@ fn body_and_fm_tags(body: &str, fm: &Map<String, Value>) -> Vec<String> {
         .captures_iter(&scannable)
         .map(|c| c.get(1).unwrap().as_str().to_string())
         .collect();
-    if let Some(Value::Array(list)) = fm.get("tags") {
-        for t in list {
-            let t = t.as_str().unwrap_or("").trim_start_matches('#').trim();
-            if !t.is_empty() && !tags.iter().any(|x| x == t) {
-                tags.push(t.to_string());
-            }
+    for t in fm_tag_values(fm) {
+        let t = t.trim_start_matches('#').trim();
+        if !t.is_empty() && !tags.iter().any(|x| x == t) {
+            tags.push(t.to_string());
         }
     }
     tags
@@ -1234,7 +1232,10 @@ impl MemoryStore {
             return err(format!("not found: {path}"));
         }
         let (tags, fm) = self.note_tags_fm(&ap);
-        let fm_tags = fm.get("tags").cloned().unwrap_or(json!([]));
+        let fm_tags = match fm.as_object() {
+            Some(m) if m.contains_key("tags") => json!(fm_tag_values(m)),
+            _ => json!([]),
+        };
         Ok(json!({"path": path, "tags": tags, "frontmatter_tags": fm_tags}))
     }
 
@@ -1246,8 +1247,20 @@ impl MemoryStore {
             .collect()
     }
 
+    /// Frontmatter `tags` items exactly as written (inline or block list).
+    fn fm_tag_items(&self, ap: &Path) -> Vec<String> {
+        let content = self.read_raw(ap).unwrap_or_default();
+        if !content.starts_with("---") {
+            return Vec::new();
+        }
+        FmLines::parse(&split_frontmatter(&content).0).list("tags")
+    }
+
     pub fn add_tags_impl(&self, path: &str, tags: &str) -> MResult<Value> {
-        let list = Self::tag_list(tags);
+        let list = Self::tag_list(tags)
+            .iter()
+            .map(|t| clean_tag(t))
+            .collect::<MResult<Vec<_>>>()?;
         if list.is_empty() {
             return err("no tags given");
         }
@@ -1264,33 +1277,56 @@ impl MemoryStore {
         if list.is_empty() {
             return err("no tags given");
         }
-        let ops: Vec<Value> = list
+        let ap = self.resolve(path)?;
+        if !ap.is_file() {
+            return err(format!("not found: {path}"));
+        }
+        let have: HashSet<String> = self.fm_tag_items(&ap).iter().map(|t| tag_key(t)).collect();
+        let inline: HashSet<String> = self
+            .note_tags_fm(&ap)
+            .0
             .iter()
-            .map(|t| json!({"op": "remove_tag", "tag": t}))
+            .map(|t| t.to_lowercase())
             .collect();
-        self.patch_memory_impl(path, &ops)?;
-        self.get_note_tags_impl(path)
-    }
-
-    pub fn set_tags_impl(&self, path: &str, tags: &str) -> MResult<Value> {
-        let list = Self::tag_list(tags);
-        let cur = self.get_note_tags_impl(path)?;
-        let cur_list: Vec<String> = cur
-            .get("frontmatter_tags")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .map(|x| x.as_str().unwrap_or("").to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut ops: Vec<Value> = cur_list
-            .iter()
-            .map(|t| json!({"op": "remove_tag", "tag": t}))
-            .collect();
-        ops.extend(list.iter().map(|t| json!({"op": "add_tag", "tag": t})));
+        let mut ops = Vec::new();
+        let mut notes = Vec::new();
+        for t in &list {
+            let k = t.to_lowercase();
+            if have.contains(&k) {
+                ops.push(json!({"op": "remove_tag", "tag": t}));
+            } else if inline.contains(&k) {
+                notes.push(format!(
+                    "tag '{t}' is only an inline #tag in the body; edit the body to remove it"
+                ));
+            } else {
+                notes.push(format!("tag '{t}' is not on this note"));
+            }
+        }
         if !ops.is_empty() {
             self.patch_memory_impl(path, &ops)?;
+        }
+        let mut v = self.get_note_tags_impl(path)?;
+        if !notes.is_empty() {
+            v["note"] = json!(notes.join("; "));
+        }
+        Ok(v)
+    }
+
+    /// Replace the frontmatter tag list with exactly `tags` (inline `#tags` in
+    /// the body stay).
+    pub fn set_tags_impl(&self, path: &str, tags: &str) -> MResult<Value> {
+        let list = Self::tag_list(tags)
+            .iter()
+            .map(|t| clean_tag(t))
+            .collect::<MResult<Vec<_>>>()?;
+        let list = dedup_tags(list);
+        let ap = self.resolve(path)?;
+        if !ap.is_file() {
+            return err(format!("not found: {path}"));
+        }
+        if !(list.is_empty() && self.fm_tag_items(&ap).is_empty()) {
+            let op = json!({"op": "set_field", "field": "tags", "value": format!("[{}]", list.join(", "))});
+            self.patch_memory_impl(path, &[op])?;
         }
         self.get_note_tags_impl(path)
     }
@@ -1318,71 +1354,75 @@ impl MemoryStore {
         Ok(out)
     }
 
-    /// Rewrite a tag in frontmatter and in inline `#old` occurrences (`#old/sub`
-    /// follows, `#old-other` is a different tag and stays).
+    /// Rewrite a tag, ignoring case, in frontmatter and in inline `#old`
+    /// occurrences (`#old/sub` follows, `#old-other` is a different tag and
+    /// stays). The frontmatter is only touched when its `tags` hold `old`.
     fn retag(content: &str, old: &str, new: &str) -> String {
+        let okey = old.to_lowercase();
         let mut c = content.to_string();
         let (fm_text, body) = split_frontmatter(content);
         if content.starts_with("---") && !fm_text.is_empty() {
-            let mut lines: Vec<String> = Vec::new();
-            for line in fm_text.split('\n') {
-                if line.trim().starts_with("tags:") {
-                    let v = line.split_once(':').map(|x| x.1).unwrap_or("");
-                    let items: Vec<String> = v
-                        .trim()
-                        .trim_matches('[')
-                        .trim_matches(']')
-                        .split(',')
-                        .map(|x| x.trim().to_string())
-                        .filter(|x| !x.is_empty())
-                        .map(|t| if t == old { new.to_string() } else { t })
-                        .collect();
-                    let mut seen = HashSet::new();
-                    let dedup: Vec<String> = items
+            let mut fm = FmLines::parse(&fm_text);
+            let items = fm.list("tags");
+            if items.iter().any(|t| tag_key(t) == okey) {
+                let items = dedup_tags(
+                    items
                         .into_iter()
-                        .filter(|t| seen.insert(t.clone()))
-                        .collect();
-                    lines.push(format!("tags: [{}]", dedup.join(", ")));
-                } else {
-                    lines.push(line.to_string());
-                }
+                        .map(|t| {
+                            if tag_key(&t) == okey {
+                                new.to_string()
+                            } else {
+                                t
+                            }
+                        })
+                        .collect(),
+                );
+                fm.set("tags", format!("[{}]", items.join(", ")));
+                let body = body
+                    .strip_prefix("\r\n")
+                    .or_else(|| body.strip_prefix('\n'))
+                    .unwrap_or(&body);
+                c = format!("---\n{}---\n{body}", fm.render());
             }
-            let mut fm_new = lines.join("\n");
-            if !fm_new.ends_with('\n') {
-                fm_new.push('\n');
-            }
-            c = format!("---{fm_new}---{body}");
         }
-        let re = Regex::new(&format!(r"#{}([^\w-]|$)", regex::escape(old))).unwrap();
+        let re = Regex::new(&format!(r"(?i)#{}([^\w-]|$)", regex::escape(old))).unwrap();
         re.replace_all(&c, |cap: &regex::Captures| format!("#{new}{}", &cap[1]))
             .to_string()
     }
 
+    /// Rename (or merge) tag `old` into `new` across the vault, ignoring case.
+    /// `new` must be a valid tag; a tag no note has is an error.
     pub fn rename_tag_impl(&self, old: &str, new: &str) -> MResult<Value> {
-        let old = old.trim().trim_start_matches('#');
-        let new = new.trim().trim_start_matches('#');
-        if old.is_empty() || new.is_empty() {
+        if old.trim().trim_start_matches('#').is_empty()
+            || new.trim().trim_start_matches('#').is_empty()
+        {
             return err("both the old and the new tag are required");
+        }
+        let old = tag_name(old)?;
+        let new = clean_tag(new)?;
+        if old == new {
+            return err(format!("the old and the new tag are the same: '{old}'"));
         }
         let mut changed = Vec::new();
         for (rel, _name, fp) in self.walk() {
             let Some(c) = self.read_raw(&fp) else {
                 continue;
             };
-            let nc = Self::retag(&c, old, new);
+            let nc = Self::retag(&c, &old, &new);
             if nc != c {
                 let ap = self.resolve(&rel)?;
                 fs::write(&ap, nc).ok();
                 changed.push(rel);
             }
         }
-        if !changed.is_empty() {
-            let _ = self.reindex();
-            self.git_commit(&format!(
-                "rename tag {old}->{new} ({} notes)",
-                changed.len()
-            ));
+        if changed.is_empty() {
+            return err(format!("tag '{old}' is not on any note"));
         }
+        let _ = self.reindex();
+        self.git_commit(&format!(
+            "rename tag {old}->{new} ({} notes)",
+            changed.len()
+        ));
         Ok(json!({"ok": true, "renamed": format!("{old} -> {new}"), "notes": changed}))
     }
 }
@@ -1624,6 +1664,101 @@ impl MemoryStore {
     }
 }
 
+/// Every `patch_memory` op, for error messages.
+const PATCH_OPS: &str = "append, prepend, replace, set_field, add_tag, remove_tag";
+
+/// What a tag may contain, for error messages.
+const TAG_RULE: &str = "a tag may contain only letters, digits and - _ / . (no spaces, commas, colons, quotes, brackets, # after the start, `---` or line breaks)";
+
+/// A tag as the caller wrote it, without surrounding spaces and leading `#`s,
+/// or an error when it is empty or holds characters that would break (or
+/// inject into) the frontmatter `tags: [..]` list.
+pub fn clean_tag(raw: &str) -> MResult<String> {
+    let t = raw.trim().trim_start_matches('#');
+    if t.is_empty() {
+        return err("empty tag: give a tag name (a leading # is optional)");
+    }
+    let simple = t
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '/' | '.'));
+    if !simple || t.contains("---") {
+        return err(format!("invalid tag {:?}: {TAG_RULE}", raw.trim()));
+    }
+    Ok(t.to_string())
+}
+
+/// A tag to look up (remove, rename from): any text, minus surrounding spaces
+/// and leading `#`s, so existing odd tags can still be removed.
+fn tag_name(raw: &str) -> MResult<String> {
+    let t = raw.trim().trim_start_matches('#').trim();
+    if t.is_empty() {
+        return err("empty tag: give a tag name (a leading # is optional)");
+    }
+    Ok(t.to_string())
+}
+
+/// Compare key of a frontmatter tag item as written (`"a"`, `#a`, `A` -> `a`).
+fn tag_key(item: &str) -> String {
+    item.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .trim_start_matches('#')
+        .to_lowercase()
+}
+
+/// Items of an inline frontmatter tag value as written: `[a, b]`, `a, b` or
+/// the quoted string form `"a, b"`.
+fn inline_tag_items(v: &str) -> Vec<String> {
+    let v = v.trim();
+    let quoted = v.len() >= 2
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')));
+    let inner = if quoted {
+        &v[1..v.len() - 1]
+    } else {
+        let v = v.strip_prefix('[').unwrap_or(v);
+        v.strip_suffix(']').unwrap_or(v)
+    };
+    inner
+        .split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+/// `items` without later case-insensitive repeats (the first spelling stays).
+fn dedup_tags(items: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    items
+        .into_iter()
+        .filter(|t| seen.insert(tag_key(t)))
+        .collect()
+}
+
+/// Frontmatter tags as parsed by [`parse_frontmatter`]: a list, or the string
+/// form `tags: a, b` split on commas.
+fn fm_tag_values(fm: &Map<String, Value>) -> Vec<String> {
+    let items: Vec<String> = match fm.get("tags") {
+        Some(Value::Array(list)) => list
+            .iter()
+            .map(|t| t.as_str().unwrap_or("").to_string())
+            .collect(),
+        Some(Value::String(s)) => s.split(',').map(|t| t.to_string()).collect(),
+        _ => Vec::new(),
+    };
+    items
+        .iter()
+        .map(|t| {
+            t.trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim()
+                .to_string()
+        })
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
 /// Frontmatter as written, for in-place edits: untouched entries (multi-line
 /// values, block lists, comments) are written back verbatim.
 struct FmLines {
@@ -1700,12 +1835,7 @@ impl FmLines {
                 .map(|x| x.trim().to_string())
                 .collect()
         } else {
-            inline
-                .trim_matches('[')
-                .trim_matches(']')
-                .split(',')
-                .map(|x| x.trim().to_string())
-                .collect()
+            inline_tag_items(inline)
         };
         raw.into_iter().filter(|x| !x.is_empty()).collect()
     }
@@ -1867,13 +1997,48 @@ impl MemoryStore {
             }
         };
 
-        for op in ops {
-            let t = op.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        for (i, op) in ops.iter().enumerate() {
+            let n = i + 1;
+            let Some((t, obj)) = op
+                .as_object()
+                .and_then(|o| Some((o.get("op")?.as_str()?, o)))
+            else {
+                return err(format!("op {n} has no `op`; use one of {PATCH_OPS}"));
+            };
+            let keys: &[&str] = match t {
+                "append" | "prepend" => &["text"],
+                "replace" => &["find", "with", "replace"],
+                "set_field" => &["field", "value"],
+                "add_tag" | "remove_tag" => &["tag"],
+                other => {
+                    return err(format!(
+                        "op {n}: unknown patch op `{other}`; use one of {PATCH_OPS}"
+                    ))
+                }
+            };
+            if let Some(bad) = obj
+                .keys()
+                .find(|k| *k != "op" && !keys.contains(&k.as_str()))
+            {
+                return err(format!(
+                    "op {n} (`{t}`) has an unknown key `{bad}`; `{t}` takes: op, {}",
+                    keys.join(", ")
+                ));
+            }
             match t {
                 "set_field" => {
                     let field = need(op, "field", t)?;
                     if field.trim().is_empty() {
                         return err("patch op `set_field` needs a non-empty `field`".to_string());
+                    }
+                    let key_ok = field
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                        && !field.contains("---");
+                    if !key_ok {
+                        return err(format!(
+                            "patch op `set_field`: invalid field name {field:?}; a field name may contain only letters, digits and _ - . (no spaces, colons, `---` or line breaks)"
+                        ));
                     }
                     let val = op
                         .get("value")
@@ -1882,6 +2047,16 @@ impl MemoryStore {
                             other => other.to_string(),
                         })
                         .unwrap_or_default();
+                    if val.chars().any(|c| c.is_control() && c != '\t') {
+                        return err(format!(
+                            "patch op `set_field`: the value for `{field}` contains a line break or control character; a frontmatter value must be a single line"
+                        ));
+                    }
+                    if val.contains("---") {
+                        return err(format!(
+                            "patch op `set_field`: the value for `{field}` contains `---`, which would end the frontmatter"
+                        ));
+                    }
                     fm.set(&field, val);
                 }
                 "append" => {
@@ -1893,13 +2068,22 @@ impl MemoryStore {
                     body = format!("\n{}\n{}", text, body.trim_start_matches('\n'));
                 }
                 "add_tag" | "remove_tag" => {
-                    let tag = need(op, "tag", t)?;
-                    let mut items = fm.list("tags");
-                    if t == "add_tag" && !tag.is_empty() && !items.contains(&tag) {
-                        items.push(tag.clone());
-                    }
-                    if t == "remove_tag" {
-                        items.retain(|x| x != &tag);
+                    // Matching ignores case; a tag already present keeps its
+                    // spelling. Repeats are dropped whenever the list is rewritten.
+                    let raw = need(op, "tag", t)?;
+                    let tag = if t == "add_tag" {
+                        clean_tag(&raw)?
+                    } else {
+                        tag_name(&raw)?
+                    };
+                    let key = tag.to_lowercase();
+                    let mut items = dedup_tags(fm.list("tags"));
+                    if t == "add_tag" {
+                        if !items.iter().any(|x| tag_key(x) == key) {
+                            items.push(tag);
+                        }
+                    } else {
+                        items.retain(|x| tag_key(x) != key);
                     }
                     fm.set("tags", format!("[{}]", items.join(", ")));
                 }
@@ -1921,7 +2105,7 @@ impl MemoryStore {
                     }
                     body = body.replace(&find, &with);
                 }
-                other => return err(format!("unknown patch op: {other}")),
+                other => return err(format!("op {n}: unknown patch op `{other}`")),
             }
         }
 
