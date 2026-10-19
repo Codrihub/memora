@@ -29,6 +29,9 @@ use std::time::{Duration, Instant};
 const PID_FILE: &str = "memora.pid";
 /// That server's stdout and stderr, in the state dir.
 const LOG_FILE: &str = "memora.log";
+/// The running server's token for `POST /_stop`, in the state dir
+/// (`memora_http::shutdown::STOP_TOKEN_FILE`).
+const STOP_TOKEN_FILE: &str = "stop.token";
 /// The unit install.sh writes, and where.
 const UNIT_NAME: &str = "memora.service";
 const UNIT_FILE: &str = "/etc/systemd/system/memora.service";
@@ -560,6 +563,41 @@ fn health(addr: SocketAddr) -> Option<u16> {
     parse_status(&buf[..n])
 }
 
+/// Ask the server on `addr` to stop gracefully: `POST /_stop` with the token
+/// the server wrote to `<state>/stop.token` (see `memora_http::shutdown`).
+/// True when it accepted. Works the same on every OS; on Windows it is the
+/// only polite way, since a server without a console ignores `taskkill`.
+fn ask_stop(state: &Path, addr: SocketAddr) -> bool {
+    let Ok(token) = std::fs::read_to_string(state.join(STOP_TOKEN_FILE)) else {
+        return false;
+    };
+    let token = token.trim();
+    if token.is_empty()
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return false;
+    }
+    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_secs(1)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+    if write!(
+        s,
+        "POST /_stop HTTP/1.0\r\nHost: {addr}\r\nX-Memora-Stop-Token: {token}\r\n\
+         Content-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    let n = s.read(&mut buf).unwrap_or(0);
+    parse_status(&buf[..n]) == Some(200)
+}
+
 /// The status code of an HTTP status line.
 fn parse_status(head: &[u8]) -> Option<u16> {
     let text = String::from_utf8_lossy(head);
@@ -756,7 +794,11 @@ fn proc_stop(ctx: &Ctx, theme: Option<&ColorfulTheme>, force: bool) -> Result<St
         return Ok(StopResult::NotRunning);
     }
     println!("Stopping memora (pid {pid})...");
-    let asked = terminate(pid, false);
+    let asked = if ask_stop(&state, listen_addr(ctx)) {
+        Ok(())
+    } else {
+        terminate(pid, false)
+    };
     if let Err(e) = &asked {
         println!(
             "{} could not ask it to stop: {e:#}",

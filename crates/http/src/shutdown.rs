@@ -5,15 +5,24 @@
 //! A supervisor that restarts a cleanly exited process (systemd `Restart=always`,
 //! Docker `--restart unless-stopped`) starts it again; `GET` tells the browser
 //! so the confirmation can say how to stop it for good.
+//!
+//! `POST /_stop` is the same graceful stop for `memora-cli stop` on this
+//! machine. Windows has no SIGTERM, and `taskkill` without `/F` cannot close a
+//! server started without a console, so the CLI asks over HTTP first. Only a
+//! loopback caller that is not behind a proxy and sends the token from
+//! `<state>/stop.token` (written at startup, readable by the server user only)
+//! is accepted.
 
-use std::sync::OnceLock;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Extension, Json, Router,
 };
 use serde_json::{json, Value};
@@ -21,6 +30,47 @@ use tokio::sync::Notify;
 
 use crate::api::{client_ip, csrf_fail, csrf_ok};
 use crate::{ApiKeyCaller, AppState};
+
+/// File in the state dir holding the token `POST /_stop` requires.
+pub const STOP_TOKEN_FILE: &str = "stop.token";
+/// Request header carrying that token.
+pub const STOP_TOKEN_HEADER: &str = "x-memora-stop-token";
+
+fn stop_token() -> &'static Mutex<Option<String>> {
+    static T: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(None))
+}
+
+/// Accept `token` on `POST /_stop` from now on (`None`: refuse every request).
+pub fn set_stop_token(token: Option<String>) {
+    *stop_token().lock().unwrap_or_else(|e| e.into_inner()) = token;
+}
+
+/// Create a fresh token, write it to `<state>/stop.token` (mode 0600) and
+/// accept it on `POST /_stop`. Called once the port is bound, so a second
+/// server that fails to start never replaces the running one's token.
+pub fn publish_stop_token(state_dir: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    let token = memora_gateway::random_token("stop");
+    let path = state_dir.join(STOP_TOKEN_FILE);
+    let _ = std::fs::remove_file(&path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(&path)?.write_all(token.as_bytes())?;
+    set_stop_token(Some(token));
+    Ok(())
+}
+
+/// Forget the token and remove `<state>/stop.token` (on exit).
+pub fn withdraw_stop_token(state_dir: &Path) {
+    set_stop_token(None);
+    let _ = std::fs::remove_file(state_dir.join(STOP_TOKEN_FILE));
+}
 
 fn notify() -> &'static Notify {
     static N: OnceLock<Notify> = OnceLock::new();
@@ -38,7 +88,59 @@ pub async fn requested() {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/server/shutdown", get(h_info).post(h_shutdown))
+    Router::new()
+        .route("/api/server/shutdown", get(h_info).post(h_shutdown))
+        .route("/_stop", post(h_stop))
+}
+
+/// `POST /_stop`: graceful stop for `memora-cli stop` on this machine (see the
+/// module docs). Refused with 403 unless the caller is loopback, not
+/// forwarded by a proxy, and sends the current stop token.
+async fn h_stop(
+    State(st): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    let resolved = crate::guard::header_ip(&headers).unwrap_or(peer.ip());
+    let forwarded = [
+        "forwarded",
+        "x-forwarded-for",
+        "x-real-ip",
+        "cf-connecting-ip",
+    ]
+    .iter()
+    .any(|h| headers.contains_key(*h));
+    let sent = headers
+        .get(STOP_TOKEN_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token_ok = stop_token()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_deref()
+        .is_some_and(|t| {
+            !sent.is_empty() && memora_state::constant_time_eq(t.as_bytes(), sent.as_bytes())
+        });
+    if !crate::ip_is_loopback(peer.ip())
+        || !crate::ip_is_loopback(resolved)
+        || forwarded
+        || !token_ok
+    {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden"}))).into_response();
+    }
+    memora_state::activity::log_activity(
+        &st.db,
+        "server_shutdown",
+        Some(&peer.ip().to_string()),
+        None,
+        "from memora-cli",
+    );
+    tracing::warn!("shutdown requested by memora-cli");
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        request();
+    });
+    Json(json!({"ok": true})).into_response()
 }
 
 fn browser_only() -> Response {

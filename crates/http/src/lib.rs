@@ -386,6 +386,7 @@ async fn mw_auth(
         || path == "/login"
         || path == "/logout"
         || path == "/_bus"
+        || path == "/_stop"
         || path == "/"
         || path == "/index.html"
         || path.starts_with("/assets/")
@@ -1763,7 +1764,7 @@ async fn ws_pump(socket: &mut WebSocket, rx: &mut broadcast::Receiver<Arc<str>>)
 }
 
 /// Loopback check that also accepts IPv4-mapped IPv6 loopback (`::ffff:127.0.0.1`).
-fn ip_is_loopback(ip: std::net::IpAddr) -> bool {
+pub(crate) fn ip_is_loopback(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V6(v6) => v6
             .to_ipv4_mapped()

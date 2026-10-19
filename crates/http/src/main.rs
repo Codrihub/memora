@@ -297,12 +297,18 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     let addr = format!("{bind}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("listening on http://{addr}");
-    axum::serve(
+    let state_dir = std::path::PathBuf::from(&state);
+    if let Err(e) = memora_http::shutdown::publish_stop_token(&state_dir) {
+        tracing::warn!("cannot write the stop token for memora-cli stop: {e}");
+    }
+    let served = axum::serve(
         listener,
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    .await;
+    memora_http::shutdown::withdraw_stop_token(&state_dir);
+    served?;
     // Buffered key usage and session activity are written before exit.
     let st = app_state.clone();
     let _ = tokio::task::spawn_blocking(move || cache::flush_all(&st)).await;

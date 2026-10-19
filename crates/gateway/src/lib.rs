@@ -323,6 +323,8 @@ pub const LOCK_ALLOWED: &[&str] = &[
     "/api/auth/reset",
     "/healthz",
     "/favicon.ico",
+    // memora-cli stop (loopback and the state dir token only)
+    "/_stop",
 ];
 
 /// Exact match only (not any `/api/auth/*`).
@@ -841,6 +843,7 @@ mod tests {
         assert!(lock_allows("/api/auth/state"));
         assert!(lock_allows("/api/auth/reset"));
         assert!(lock_allows("/api/auth/verify"));
+        assert!(lock_allows("/_stop"));
         assert!(!lock_allows("/api/auth/me"));
         assert!(!lock_allows("/api/export"));
     }
