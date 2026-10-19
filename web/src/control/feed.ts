@@ -197,7 +197,12 @@ export async function loadFeed(range: FeedRange['range'], limit = 800): Promise<
 export function pushLive(list: ActivityItem[], it: ActivityItem, max = 2000): ActivityItem[] {
   const phase = str((it.raw as { phase?: unknown }).phase);
   if (phase === 'end') {
-    const start = list.find((x) => x.running && x.actor === it.actor && x.action === it.action);
+    // The call id pairs them exactly; parallel calls of one tool would
+    // otherwise close each other's rows.
+    const cid = str((it.raw as { call_id?: unknown }).call_id);
+    const start =
+      (cid && list.find((x) => x.running && str((x.raw as { call_id?: unknown }).call_id) === cid)) ||
+      list.find((x) => x.running && x.actor === it.actor && x.action === it.action);
     if (start) {
       start.running = false;
       start.ok = it.ok ?? true;
