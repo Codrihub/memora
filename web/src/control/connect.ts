@@ -8,7 +8,7 @@
 // Apps that sign in over OAuth skip the key entirely.
 
 import { apiGet, apiPost } from '../api';
-import { AGENT_PROMPT, AGENT_PROMPT_SHORT } from '../docs/agent-prompt';
+import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyleId } from '../docs/agent-prompt';
 import { attr, esc, useStyles } from '../dom';
 import { Modal } from '../modal';
 import { onAgents } from '../realtime';
@@ -408,6 +408,9 @@ const CSS = `
 .cn-where .ic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;flex:none;background:var(--surface-1);color:var(--muted);
   border:1px solid var(--line)}
 .cn-where b.k{display:block;font-size:12px;color:var(--muted);font-weight:650;margin-bottom:1px}
+.cn-pstyle{display:flex;flex-wrap:wrap;width:fit-content;overflow:visible;margin:0 0 8px}
+.cn-pstyle .rec{font-size:10.5px;font-weight:700;color:var(--accent);margin-left:6px}
+.cn-pdesc{margin:0 0 12px;font-size:12.5px;color:var(--muted);line-height:1.5}
 .cn-ptabs{margin:0 0 10px}
 .cn-ptabs .rec{font-size:10.5px;font-weight:700;color:var(--accent);margin-left:6px}
 .cn-prompt .cc-code{white-space:pre-wrap;word-break:break-word;max-height:300px}
@@ -529,6 +532,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   let editor: PermEditor | null = null;
   let shown = false;
   let promptKind: 'full' | 'short' | '' = '';
+  let promptStyle = savedPromptStyle();
   let destroyed = false;
 
   const secret = (): string => (agent && secrets.get(agent.id)) || '';
@@ -835,7 +839,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   const stepPrompt = (): string => {
     const c = cur()!;
     const kind = promptKind || (c.short ? 'short' : 'full');
-    const text = kind === 'short' ? AGENT_PROMPT_SHORT : AGENT_PROMPT;
+    const style = promptStyle;
+    const text = kind === 'short' ? style.short : style.full;
     const rec = c.short ? 'short' : 'full';
     const tab = (k: 'full' | 'short', label: string): string =>
       `<button type="button" role="tab" data-pk="${k}" aria-selected="${kind === k}" aria-controls="cnPrompt" tabindex="${kind === k ? 0 : -1}">${label}${
@@ -846,6 +851,12 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         c.label,
       )} reads them.</p>
       <div class="cn-where"><span class="ic">${ICON.pin}</span><span><b class="k">Where to paste it</b>${c.rules}</span></div>
+      <div class="cc-seg cn-pstyle" role="group" aria-label="Instruction style">${PROMPT_STYLES.map(
+        (st, i) =>
+          `<button type="button" data-pstyle="${st.id}" aria-pressed="${st.id === style.id}">${esc(st.label)}${i === 0 ? '<span class="rec">Recommended</span>' : ''}</button>`,
+      ).join('')}</div>
+      <p class="cn-pdesc">${esc(style.desc)}</p>
+      ${style.warning ? `<div class="cn-once" role="note">${ICON.lock}<span><b>Notes are not a password manager.</b> ${esc(style.warning)}</span></div>` : ''}
       <div class="cc-seg cn-ptabs" role="tablist" aria-label="Instructions">${tab('full', 'Full')}${tab('short', 'Short')}</div>
       <div class="cn-prompt" id="cnPrompt" role="tabpanel">${codeHTML(text, 'Copy the instructions')}
         <div class="cn-copy"><span>${kind === 'short' ? 'A few lines, for small context windows' : 'The complete guide, best for most agents'}</span>
@@ -1066,6 +1077,16 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
           },
           false,
         );
+    });
+    host.querySelectorAll<HTMLButtonElement>('[data-pstyle]').forEach((b) => {
+      b.onclick = () => {
+        const st = PROMPT_STYLES.find((x) => x.id === (b.dataset.pstyle as PromptStyleId));
+        if (!st) return;
+        promptStyle = st;
+        savePromptStyle(st.id);
+        paint();
+        host.querySelector<HTMLElement>(`[data-pstyle="${st.id}"]`)?.focus();
+      };
     });
     const tabs = Array.from(host.querySelectorAll<HTMLButtonElement>('[data-pk]'));
     tabs.forEach((b) => {

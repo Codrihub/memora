@@ -17,7 +17,7 @@ import { fetchTools } from '../api';
 import { esc } from '../dom';
 import { PAGE_META, PAGES } from '../router';
 import { categoryDesc, categoryLabel, groupTools, riskChip, toolRisk, toolTitle } from '../views/tools';
-import { AGENT_PROMPT, AGENT_PROMPT_SHORT } from './agent-prompt';
+import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyle, type PromptStyleId } from './agent-prompt';
 import { calloutHTML, codeBlockHTML, headingHTML, inline, mdPart, renderMarkdown, uniqueSlug, type LinkTarget, type MdOptions } from './markdown';
 
 export const REPO_URL = 'https://github.com/Codrihub/memora';
@@ -138,8 +138,9 @@ function table(head: string[], rows: string[][]): string {
     .join('')}</tbody></table></div>`;
 }
 
-/** A prompt block: wraps long lines instead of scrolling. */
-const prompt = (text: string, label: string): string => `<div class="dc-prompt">${codeBlockHTML(text, '', label)}</div>`;
+/** A prompt block: wraps long lines instead of scrolling. `kind` lets the style picker swap its text. */
+const prompt = (text: string, label: string, kind = ''): string =>
+  `<div class="dc-prompt"${kind ? ` data-pkind="${kind}"` : ''}>${codeBlockHTML(text, '', label)}</div>`;
 
 const isMac = (): boolean => /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 const keys = (...k: string[]): string => `<span class="dc-keys">${k.map((x) => `<kbd>${esc(x)}</kbd>`).join('')}</span>`;
@@ -224,7 +225,10 @@ curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/instal
   );
 }
 
+const CURSOR_HEAD = '---\ndescription: Use Memora as long-term memory\nalwaysApply: true\n---\n\n';
+
 function agentInstructions(c: PageCtx): string {
+  const style = savedPromptStyle();
   const where: [string, string, string][] = [
     [
       'Claude (claude.ai and Claude Desktop)',
@@ -245,7 +249,12 @@ function agentInstructions(c: PageCtx): string {
     ['VS Code (GitHub Copilot)', `${code('.github/copilot-instructions.md')} in the repository.`, 'Full'],
     ['Codex CLI', `${code('AGENTS.md')} in the repository, or ${code('~/.codex/AGENTS.md')} for every project.`, 'Full'],
     ['Gemini CLI', `${code('GEMINI.md')} in the project root, or ${code('~/.gemini/GEMINI.md')} for every project.`, 'Full'],
-    ['Windsurf', `Customizations → <b>Rules</b>: a global rule, or a workspace rule in ${code('.windsurf/rules/')}.`, 'Full'],
+    [
+      'Windsurf',
+      `Customizations → <b>Rules</b>: a global rule, or a workspace rule in ${code('.windsurf/rules/')} (older versions read ${code('.windsurfrules')} in the project root).`,
+      'Full',
+    ],
+    ['Any other client', 'Its system prompt or custom instructions field.', 'Full, or short if space is tight'],
   ];
   return (
     p(
@@ -256,12 +265,22 @@ function agentInstructions(c: PageCtx): string {
       'Connect first',
       p(`The prompt assumes the MCP server is named ${code('memora')} and connected. See ${docLink('connect', 'Connect an agent')}.`),
     ) +
+    c.h2('Pick a style') +
+    p('Each style comes in a full and a short version. Balanced fits most people; pick another when you want the agent to save more, less or nothing at all.') +
+    `<div class="seg dc-pstyle" role="group" aria-label="Instruction style">${PROMPT_STYLES.map(
+      (s, i) =>
+        `<button type="button" data-pstyle="${s.id}" aria-pressed="${s.id === style.id}"><span>${esc(s.label)}</span>${
+          i === 0 ? '<span class="rec">Recommended</span>' : ''
+        }</button>`,
+    ).join('')}</div>` +
+    `<p class="dc-pstyle-desc" data-pstyle-desc aria-live="polite">${esc(style.desc)}</p>` +
+    `<div data-pstyle-warn${style.warning ? '' : ' hidden'}>${calloutHTML('warning', 'Notes are not a password manager', `<p data-pstyle-warn-text>${esc(style.warning || '')}</p>`)}</div>` +
     c.h2('Full instructions') +
     p('For a system prompt, project instructions or a rules file.') +
-    prompt(AGENT_PROMPT, 'Full prompt') +
+    prompt(style.full, 'Full prompt', 'full') +
     c.h2('Short version') +
     p('One paragraph for clients with a small instructions field.') +
-    prompt(AGENT_PROMPT_SHORT, 'Short prompt') +
+    prompt(style.short, 'Short prompt', 'short') +
     c.h2('Where to paste it') +
     table(
       ['Client', 'Where', 'Version'],
@@ -269,7 +288,7 @@ function agentInstructions(c: PageCtx): string {
     ) +
     c.h3('Cursor rule file') +
     p(`A rule in ${code('.cursor/rules/')} applies to every chat when its header sets ${code('alwaysApply: true')}:`) +
-    codeBlockHTML('---\ndescription: Use Memora as long-term memory\nalwaysApply: true\n---\n\n' + AGENT_PROMPT, 'markdown', '.cursor/rules/memora.mdc') +
+    `<div data-pkind="cursor">${codeBlockHTML(CURSOR_HEAD + style.full, 'markdown', '.cursor/rules/memora.mdc')}</div>` +
     c.h2('Tips') +
     `<ul>
       <li>In a file such as ${code('CLAUDE.md')} or ${code('AGENTS.md')} that already has content, add the text under its own heading, for example ${code('## Memory')}.</li>
@@ -277,9 +296,39 @@ function agentInstructions(c: PageCtx): string {
         'tools',
         'Tools',
       )} or narrow a key, adjust the text to match.</li>
-      <li>Every agent that shares the vault should get the same instructions, so they write notes the same way.</li>
+      <li>Give an agent with a read-only key the <b>Read only</b> style, so it does not try to write.</li>
+      <li>Every agent that shares the vault should get the same instructions (or styles that agree), so they write notes the same way.</li>
     </ul>`
   );
+}
+
+/** Wire the style picker: swap both prompts, the Cursor file and the warning in place. */
+async function mountAgentInstructions(root: HTMLElement): Promise<void> {
+  const setText = (kind: string, text: string): void => {
+    const pre = root.querySelector(`[data-pkind="${kind}"] pre code`);
+    if (pre) pre.textContent = text;
+  };
+  const apply = (s: PromptStyle): void => {
+    root.querySelectorAll<HTMLButtonElement>('[data-pstyle]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pstyle === s.id)));
+    const desc = root.querySelector('[data-pstyle-desc]');
+    if (desc) desc.textContent = s.desc;
+    const warn = root.querySelector<HTMLElement>('[data-pstyle-warn]');
+    if (warn) warn.hidden = !s.warning;
+    const warnText = root.querySelector('[data-pstyle-warn-text]');
+    if (warnText) warnText.textContent = s.warning || '';
+    setText('full', s.full);
+    setText('short', s.short);
+    setText('cursor', CURSOR_HEAD + s.full);
+  };
+  root.querySelectorAll<HTMLButtonElement>('[data-pstyle]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const s = PROMPT_STYLES.find((x) => x.id === (b.dataset.pstyle as PromptStyleId));
+      if (!s) return;
+      savePromptStyle(s.id);
+      apply(s);
+    });
+  });
+  apply(savedPromptStyle());
 }
 
 function connect(c: PageCtx): string {
@@ -455,7 +504,7 @@ const part = (src: string, ...names: string[]): string => names.map((n) => mdPar
 
 export const SECTIONS: DocSection[] = [
   { slug: 'get-started', title: 'Get started', group: 'Getting started', lead: 'What Memora is and how to go from install to an agent that remembers.', source: 'README.md', render: getStarted },
-  { slug: 'agent-instructions', title: 'Agent instructions', group: 'Getting started', lead: 'The recommended prompt for agents that use Memora as their memory.', render: agentInstructions },
+  { slug: 'agent-instructions', title: 'Agent instructions', group: 'Getting started', lead: 'Ready-made prompts, in several styles, for agents that use Memora as their memory.', render: agentInstructions, mount: mountAgentInstructions },
   { slug: 'connect', title: 'Connect an agent', group: 'Getting started', lead: 'The MCP URL, API keys and ready-made client configs.', render: connect },
   { slug: 'install', title: 'Install', group: 'Guides', lead: 'Native installer, Docker, npm, reverse proxy, backups and upgrades.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
   { slug: 'configuration', title: 'Configuration', group: 'Guides', lead: 'Every setting and where it lives.', source: 'docs/CONFIGURATION.md', render: (c) => c.md(configMd, 'docs/CONFIGURATION.md') },

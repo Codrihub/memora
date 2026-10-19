@@ -89,6 +89,12 @@ export const DOCS_CSS = `
 .dc-prompt pre{white-space:pre-wrap;max-height:none}
 .dc-prompt pre code{white-space:pre-wrap}
 
+/* agent instruction style picker */
+.dc-pstyle{display:flex;flex-wrap:wrap;width:fit-content;max-width:100%;margin:6px 0 0}
+.dc-pstyle button{height:auto;min-height:30px;padding:4px 11px;text-align:left}
+.dc-pstyle .rec{font-size:10.5px;font-weight:700;color:var(--accent)}
+.dc-pstyle-desc{margin:10px 0 0;font-size:13.5px;color:var(--muted)}
+
 /* tables */
 .dc-table{margin:16px 0;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
 .dc-table table{width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.55}

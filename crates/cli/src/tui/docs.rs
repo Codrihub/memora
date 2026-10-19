@@ -36,6 +36,29 @@ Rules
 - Do not save small talk or anything I ask you not to remember.
 - At the end of a longer session, append a two or three line summary to the project's note."#;
 
+// The other instruction styles (only their short versions; the web page has
+// both). A test checks every prompt here against the TypeScript source.
+
+/// The warning that goes with the "Remember everything" style.
+/// Mirrors `SECRETS_WARNING` in web/src/docs/agent-prompt.ts.
+pub(crate) const SECRETS_WARNING: &str = r#"Notes are plain Markdown on the server: anyone with access to the vault, or an API key with read scope, can read them. Keep secrets in one folder (for example Secrets/), hide that folder from other agents with Memora's privacy rules (the folder's Privacy menu in the vault, or the privacy_set tool), and only do this on a self-hosted Memora you trust."#;
+
+/// Short "Remember everything" instructions.
+/// Mirrors `AGENT_PROMPT_EVERYTHING_SHORT` in web/src/docs/agent-prompt.ts.
+pub(crate) const AGENT_PROMPT_EVERYTHING_SHORT: &str = r#"Use Memora (MCP server "memora") as your long-term memory and remember everything useful. Before answering, search_memory for the topic and read_memory the relevant notes. Save as you go with patch_memory or create_memory, as short Markdown with [[wikilinks]] and #tags: decisions, preferences, personal details, small talk that tells you about me, facts about my projects and people, fixes and todos. When I share a password, API key or token, save it only in the Secrets/ folder and never copy it into other notes. Warning: notes are plain Markdown on the server, and anyone with vault access or a key with read scope can read them. Search before creating and update instead of duplicating."#;
+
+/// Short "Private" instructions.
+/// Mirrors `AGENT_PROMPT_PRIVATE_SHORT` in web/src/docs/agent-prompt.ts.
+pub(crate) const AGENT_PROMPT_PRIVATE_SHORT: &str = r#"Use Memora (MCP server "memora") as your long-term memory, but write to it only when I say so. Before answering, search_memory for the topic and read_memory the relevant notes. Save something only when I explicitly ask you to remember it; if something seems worth keeping, ask me first. Before writing, say which note you will change, and prefer patch_memory on an existing note over create_memory. Never store secrets (passwords, API keys, tokens) or personal data about other people."#;
+
+/// Short "Session journal" instructions.
+/// Mirrors `AGENT_PROMPT_JOURNAL_SHORT` in web/src/docs/agent-prompt.ts.
+pub(crate) const AGENT_PROMPT_JOURNAL_SHORT: &str = r#"Use Memora (MCP server "memora") as your long-term memory and keep a session journal in it. At the start of every session, read_memory the latest note in Journal/ and the project note, summarize where things stand, and review the open todos from last time. During the session, search_memory before answering and patch_memory the project note when something is decided. At the end, create_memory a note Journal/YYYY-MM-DD <topic> with a summary, decisions, open todos (- [ ] ...) and [[wikilinks]] to the notes involved. Never store secrets."#;
+
+/// Short "Read only" instructions.
+/// Mirrors `AGENT_PROMPT_READONLY_SHORT` in web/src/docs/agent-prompt.ts.
+pub(crate) const AGENT_PROMPT_READONLY_SHORT: &str = r#"Use Memora (MCP server "memora") only to look things up. Before answering, search_memory for the topic and read_memory the relevant notes; follow related notes with search_by_tag and get_neighbors, and say which note an answer comes from. Never write to Memora: do not use save_memory, create_memory, patch_memory or any other tool that changes notes. If something seems worth remembering, tell me instead."#;
+
 /// Placeholder for an API key in the client snippets (same as the web guide).
 const KEY: &str = "<YOUR_MEMORA_KEY>";
 
@@ -545,22 +568,34 @@ fn agent_instructions() -> Vec<Block> {
         p(
             "Connecting an agent gives it the tools; these instructions make it use them. Paste \
            the full version where the client keeps standing instructions, or the short one \
-           where space is tight.",
+           where space is tight. This is the Balanced style, which fits most people; other \
+           styles are below.",
         ),
         h("Full instructions"),
         Raw(AGENT_PROMPT.to_string()),
         h("Short version"),
         Raw(AGENT_PROMPT_SHORT.to_string()),
+        h("Other styles"),
+        p("Short versions; the Docs page of the web app has the full ones too."),
+        li("Remember everything: saves everything useful, including small talk, personal details and the passwords or API keys you share."),
+        note(format!("Warning: {SECRETS_WARNING}")),
+        Raw(AGENT_PROMPT_EVERYTHING_SHORT.to_string()),
+        li("Private: recalls freely, but saves only when you say \"remember this\", and asks before it writes."),
+        Raw(AGENT_PROMPT_PRIVATE_SHORT.to_string()),
+        li("Session journal: starts each session from the last journal entry and ends it with a dated session note."),
+        Raw(AGENT_PROMPT_JOURNAL_SHORT.to_string()),
+        li("Read only: only looks things up and never writes. For agents with a read-only key."),
+        Raw(AGENT_PROMPT_READONLY_SHORT.to_string()),
         h("Where to paste it"),
-        li("Claude: a Project's instructions, or Settings > Profile > personal preferences."),
+        li("Claude (claude.ai and Claude Desktop): a Project's instructions, or Settings > Profile > personal preferences."),
         li("ChatGPT: Settings > Personalization > Custom instructions, or a custom GPT."),
         li("Claude Code: `CLAUDE.md` in the project (or `~/.claude/CLAUDE.md` for every project)."),
         li("Cursor: Rules (`.cursor/rules` in a project, or User Rules in settings)."),
         li("VS Code / Copilot: `.github/copilot-instructions.md`."),
-        li("Windsurf: Rules (`.windsurfrules`, or global rules in settings)."),
+        li("Windsurf: Rules (`.windsurf/rules/` or `.windsurfrules` in a project, or global rules)."),
         li("Codex CLI: `AGENTS.md` in the project (or `~/.codex/AGENTS.md`)."),
         li("Gemini CLI: `GEMINI.md` in the project (or `~/.gemini/GEMINI.md`)."),
-        li("Your own agent: the system prompt."),
+        li("Any other client or your own agent: its system prompt or custom instructions field."),
         note("The same text is on the Docs page of the web app, with a copy button."),
     ]
 }
@@ -843,6 +878,60 @@ mod tests {
         let page = render(find("agent-instructions").unwrap(), BASE, 80).join("\n");
         assert!(page.contains(AGENT_PROMPT_SHORT));
         assert!(page.contains("Put notes in the right folder"));
+        for p in OTHER_STYLES {
+            assert!(page.contains(p), "missing: {p}");
+        }
+    }
+
+    /// The other styles' short versions, in page order.
+    const OTHER_STYLES: [&str; 4] = [
+        AGENT_PROMPT_EVERYTHING_SHORT,
+        AGENT_PROMPT_PRIVATE_SHORT,
+        AGENT_PROMPT_JOURNAL_SHORT,
+        AGENT_PROMPT_READONLY_SHORT,
+    ];
+
+    #[test]
+    fn agent_prompts_match_the_web_source() {
+        let ts = include_str!("../../../../web/src/docs/agent-prompt.ts");
+        let body = |name: &str| -> &str {
+            let start = format!("export const {name} = `");
+            let at = ts
+                .find(&start)
+                .unwrap_or_else(|| panic!("{name} missing in agent-prompt.ts"))
+                + start.len();
+            let len = ts[at..].find("`;").unwrap();
+            &ts[at..at + len]
+        };
+        assert_eq!(AGENT_PROMPT, body("AGENT_PROMPT"));
+        assert_eq!(AGENT_PROMPT_SHORT, body("AGENT_PROMPT_SHORT"));
+        assert_eq!(SECRETS_WARNING, body("SECRETS_WARNING"));
+        assert_eq!(
+            AGENT_PROMPT_EVERYTHING_SHORT,
+            body("AGENT_PROMPT_EVERYTHING_SHORT")
+        );
+        assert_eq!(
+            AGENT_PROMPT_PRIVATE_SHORT,
+            body("AGENT_PROMPT_PRIVATE_SHORT")
+        );
+        assert_eq!(
+            AGENT_PROMPT_JOURNAL_SHORT,
+            body("AGENT_PROMPT_JOURNAL_SHORT")
+        );
+        assert_eq!(
+            AGENT_PROMPT_READONLY_SHORT,
+            body("AGENT_PROMPT_READONLY_SHORT")
+        );
+        // A new style in the web source needs its short version here too.
+        let ts_shorts = ts
+            .lines()
+            .filter(|l| l.starts_with("export const AGENT_PROMPT_") && l.contains("_SHORT = `"))
+            .count();
+        assert_eq!(
+            ts_shorts,
+            1 + OTHER_STYLES.len(),
+            "a style in agent-prompt.ts is not mirrored here"
+        );
     }
 
     #[test]
