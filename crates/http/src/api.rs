@@ -1953,10 +1953,23 @@ fn reserved_vault_path(abs: &Path, state_dir: &Path) -> Result<(), String> {
     .collect();
     #[cfg(unix)]
     let system: Vec<PathBuf> = SYSTEM.iter().map(PathBuf::from).collect();
-    if abs.parent().is_none() || system.iter().any(|d| abs.starts_with(d)) {
+    if abs.parent().is_none() || system.iter().any(|d| inside(abs, d, cfg!(windows))) {
         return Err("a system folder cannot be the vault".into());
     }
     Ok(())
+}
+
+/// Whether `p` is `dir` or below it. Windows paths are case-insensitive and
+/// `%SystemRoot%` is often `C:\WINDOWS` while the folder reads `C:\Windows`,
+/// so there each component is compared ignoring case.
+fn inside(p: &Path, dir: &Path, ignore_case: bool) -> bool {
+    if !ignore_case {
+        return p.starts_with(dir);
+    }
+    let low = |c: std::path::Component| c.as_os_str().to_string_lossy().to_lowercase();
+    let mut pc = p.components();
+    dir.components()
+        .all(|d| pc.next().is_some_and(|c| low(c) == low(d)))
 }
 
 /// Note, link and folder counts of the current vault, computed off the async
@@ -2695,6 +2708,17 @@ pub fn api_router() -> Router<AppState> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn system_folder_check_ignores_case_when_asked() {
+        use std::path::Path;
+        let win = Path::new("/C/WINDOWS");
+        assert!(super::inside(Path::new("/C/Windows/System32"), win, true));
+        assert!(!super::inside(Path::new("/C/Windows/System32"), win, false));
+        assert!(!super::inside(Path::new("/C/Win/x"), win, true));
+        assert!(!super::inside(Path::new("/C"), win, true));
+        assert!(super::inside(Path::new("/etc/x"), Path::new("/etc"), false));
+    }
+
     use std::path::{Path, PathBuf};
 
     /// Every call checks against a state folder that does not exist.

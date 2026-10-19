@@ -27,11 +27,19 @@ fn env_or(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
 }
 
-/// Resolve the UI asset directory: `MEMORA_ASSETS`, then `<crate>/assets`, then
-/// `memora/crates/http/assets` relative to the working directory.
+/// Resolve the UI asset directory: `MEMORA_ASSETS`, then an `assets` folder next
+/// to the executable (an unpacked release zip or tarball), then `<crate>/assets`,
+/// then `memora/crates/http/assets` relative to the working directory.
 fn find_assets(explicit: &str) -> String {
     if !explicit.is_empty() && Path::new(explicit).is_dir() {
         return explicit.to_string();
+    }
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("assets")))
+        .filter(|d| d.join("index.html").is_file())
+    {
+        return dir.to_string_lossy().into_owned();
     }
     let candidates = [
         concat!(env!("CARGO_MANIFEST_DIR"), "/assets"),
