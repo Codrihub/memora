@@ -63,6 +63,32 @@ Screenshots use a demo vault.
 
 ## Quick start
 
+Three steps, about two minutes.
+
+**1. Install** (pick one)
+
+```bash
+# Linux server with systemd (x86_64 or aarch64)
+curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
+
+# or anywhere with Docker
+docker run -d --name memora --restart unless-stopped -p 8400:8400 \
+  -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
+```
+
+**2. Get a one-time setup code**
+
+```bash
+sudo memora-cli setup --minutes 15                    # native
+docker exec -it memora memora-cli setup --minutes 15  # Docker
+```
+
+**3. Open the link it prints** (`http://<your-server>:8400/login`), enter the code
+and create your account. Memora then asks which folder to use as the vault and
+shows how to connect your first agent.
+
+That is all. The sections below cover every other option.
+
 ### Docker Compose
 
 ```bash

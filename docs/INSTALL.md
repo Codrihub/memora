@@ -14,6 +14,22 @@ There are two supported ways to run it as a service: **native** (systemd, via
 end the same way: open the console, type `/web`, and finish setup in the
 browser.
 
+**Fastest path:** install with one command, run `memora-cli setup`, open the
+link it prints and enter the code.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
+sudo memora-cli setup --minutes 15
+```
+
+With Docker, no clone or folder permissions needed (named volumes):
+
+```bash
+docker run -d --name memora --restart unless-stopped -p 8400:8400 \
+  -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
+docker exec -it memora memora-cli setup --minutes 15
+```
+
 - [Network exposure](#network-exposure)
 - [Native install](#native-install)
 - [Docker](#docker)

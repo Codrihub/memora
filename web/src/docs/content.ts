@@ -166,17 +166,23 @@ function getStarted(c: PageCtx): string {
     steps([
       [
         'Install Memora',
-        p('Use the native installer on Linux with systemd, Docker Compose, or npm on Linux. All are covered in ' + docLink('install', 'Install') + '.') +
-          codeBlockHTML('curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh', 'bash') +
-          p(`Or with npm on Linux x86_64 or arm64 (Node 18+), then start ${code('memora')} and run ${code('memora-cli')} in a second terminal:`) +
-          codeBlockHTML('npm install -g @codrihub/memora', 'bash'),
+        p('On a Linux server with systemd, anywhere with Docker, or with npm on Linux. Every other option is in ' + docLink('install', 'Install') + '.') +
+          codeBlockHTML(
+            `curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
+
+# or with Docker
+docker run -d --name memora --restart unless-stopped -p 8400:8400 \\
+  -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
+
+# or with npm (Linux x86_64 / arm64, Node 18+), then run memora
+npm install -g @codrihub/memora`,
+            'bash',
+          ),
       ],
       [
-        'Open the console and type /web',
+        'Get a one-time code',
         p(
-          `Run ${code('sudo memora-cli')} on the server (in Docker: ${code('docker compose exec -it gateway memora-cli')}) and type ${code(
-            '/web',
-          )}. It prints a one-time setup code. Open ${code('http://<host>:8400/login')}, enter the code and create the owner account.`,
+          `Run ${code('sudo memora-cli setup --minutes 15')} (Docker: ${code('docker exec -it memora memora-cli setup --minutes 15')}). It prints a one-time code and the link to open. Open it, enter the code and create the owner account.`,
         ),
       ],
       [
