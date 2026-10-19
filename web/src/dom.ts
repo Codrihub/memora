@@ -69,11 +69,23 @@ export function attr(value: unknown): string {
   return esc(value);
 }
 
-/** Escape, then restore the <b> marks the server puts inside search snippets. */
+/** Entities the server uses when it escapes snippet text. */
+const SNIP_ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+
+/**
+ * A search snippet as safe HTML. The server sends escaped text whose only markup is
+ * the <b>...</b> around the match: keep those marks, decode the text between them
+ * and escape it again, so nothing is double-escaped and no other tag can render.
+ */
 export function safeSnip(value: unknown): string {
-  return esc(value)
-    .replace(/&lt;b&gt;/g, '<b>')
-    .replace(/&lt;\/b&gt;/g, '</b>');
+  return String(value == null ? '' : value)
+    .split(/(<\/?b>)/)
+    .map((part) =>
+      part === '<b>' || part === '</b>'
+        ? part
+        : esc(part.replace(/&(?:amp|lt|gt|quot|#39);/g, (e) => SNIP_ENTITIES[e] ?? e)),
+    )
+    .join('');
 }
 
 /** Add a stylesheet string to <head> once (module CSS kept in TypeScript). */
