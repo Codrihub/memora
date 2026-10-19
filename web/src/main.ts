@@ -45,6 +45,7 @@ import { fetchSettings, reloadVaultData, vaultSwitch } from './vault';
 import { showVaultOnboarding } from './views/onboarding';
 import { maybeWelcome, openWelcome } from './views/welcome';
 import { initPullRefresh } from './ui/pull-refresh';
+import { initToTop } from './ui/totop';
 import { closeNotFound, showNotFound } from './ui/notfound';
 import { initToasts, notify, toast } from './toast';
 import { markUpdateNoticeSeen, updateNoticeSeen } from './storage';
@@ -89,6 +90,8 @@ function wireShell(): void {
 
   // Touch screens: pull down to reload the data of the page in view.
   initPullRefresh(reloadAll);
+  // One floating "back to top" button for every page.
+  initToTop();
   $('#pwaBtn').onclick = () => void PWA.install();
   $('#pmScrim').onclick = () => closeProfileMenu(false);
   window.matchMedia('(max-width: 760px)').addEventListener('change', () => closeProfileMenu(false));

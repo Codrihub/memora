@@ -20,7 +20,7 @@ import type { KeyRow, KeysResult } from '../types';
 import { toast } from '../toast';
 import { onNavigate, paintTitle, takeRouteAgent } from '../router';
 import { agentHero, agentLive, agentSlugShown, exportRows, focusAgentSearch, leaveAgent, showAgent } from './activity-agent';
-import { morph, reducedMotion } from './activity-vt';
+import { morph } from './activity-vt';
 import {
   CATS,
   F,
@@ -207,14 +207,6 @@ const CSS = `
 .ax-node small{color:var(--muted);font:500 11.5px var(--mono)}
 .ax-node .n{font-size:12px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
 
-/* back to top: lives in the sticky bar, so it never covers a row */
-.ax-top{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;border:1px solid var(--line-strong);background:var(--panel);
-  color:var(--fg);flex:none}
-.ax-top[hidden]{display:none}
-.ax-top:hover{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
-.ax-top:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ax-top .cc-i{width:18px;height:18px}
-
 /* filter sheet */
 .ax-sheet .cc-drawer-b{padding:4px 18px 18px}
 .ax-fg{padding:16px 0;border-top:1px solid var(--line)}
@@ -294,7 +286,6 @@ const CSS = `
   .ax-nodes{grid-template-columns:minmax(0,1fr);padding:12px 13px}
   .ax-ag-h{padding:12px 10px 8px 13px}
   .ax-ag-stats{padding:0 13px 12px;gap:12px}
-  .ax-top{width:44px;height:44px}
   .ax-sheet .cc-drawer-b{padding:2px 16px 16px}
   .ax-opt{min-height:40px}
 }
@@ -517,7 +508,6 @@ function buildList(lr: HTMLElement): void {
         .map(([v, l]) => `<button type="button" data-view="${v}" aria-pressed="${v === view}">${l}</button>`)
         .join('')}</div>
       <button type="button" class="ax-newb" id="axNew" hidden></button>
-      <button type="button" class="ax-top" id="axTop" aria-label="Back to top" title="Back to top" hidden>${ICO.up}</button>
     </div></div>
     <div class="ax-sub"><div class="ax-chips" id="axChips" aria-label="Active filters"></div><div class="ax-sum" id="axSum" aria-live="polite"></div></div>
     <div class="ax-body" id="axBody">${skeletonHTML(view)}</div>
@@ -671,21 +661,14 @@ function wire(h: HTMLElement): void {
   };
   setStick();
   new ResizeObserver(setStick).observe(bar);
-  const top = $('#axTop') as HTMLButtonElement;
+  // "Back to top" is the shared floating button (ui/totop.ts).
   const onScroll = (): void => {
     if (mode !== 'list') return;
     const y = h.scrollTop;
     const stuck = y > 0 && bar.getBoundingClientRect().top <= h.getBoundingClientRect().top + 1;
     bar.classList.toggle('stuck', stuck);
-    const on = y > 600;
-    if (top.hidden === on) top.hidden = !on;
   };
   h.addEventListener('scroll', onScroll, { passive: true });
-  top.onclick = () => {
-    const reduce = reducedMotion();
-    h.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
-    setTimeout(() => q.focus({ preventScroll: true }), reduce ? 0 : 400);
-  };
 }
 
 function setView(v: ViewKind): void {

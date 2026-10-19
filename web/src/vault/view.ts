@@ -32,6 +32,7 @@ import { TreeView, refreshTrees } from './tree';
 import { promptName } from './ui';
 import { setSheetEditor } from './sheet';
 import { Modal } from '../modal';
+import { setToTopScroller } from '../ui/totop';
 import { VAULT_CSS } from './styles';
 
 type Pane = 'list' | 'note';
@@ -54,13 +55,9 @@ function activeScroller(): HTMLElement | null {
   return p?.querySelector<HTMLElement>('.vx-bscroll,.vx-note-scroll') || null;
 }
 
-/** "Back to top" shows once the visible layer is scrolled down a bit. */
+/** The shared "back to top" button follows the layer on screen. */
 function syncTop(): void {
-  const b = shell?.querySelector<HTMLElement>('.vx-totop');
-  if (!b) return;
-  const on = (activeScroller()?.scrollTop || 0) > 480;
-  b.classList.toggle('on', on);
-  b.tabIndex = on ? 0 : -1;
+  setToTopScroller(activeScroller());
 }
 
 function listHost(): HTMLElement | null {
@@ -81,7 +78,6 @@ function build(host: HTMLElement): void {
     <div class="vx-main">
       <div class="vx-pane vx-pane-list" aria-label="Folder"></div>
       <div class="vx-pane vx-pane-note" aria-label="Node"></div>
-      <button class="vx-totop" aria-label="Scroll to top" title="Scroll to top" tabindex="-1"><svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
     </div>`;
   host.appendChild(shell);
   tree = new TreeView(shell.querySelector<HTMLElement>('.vx-pane-tree')!, {
@@ -89,20 +85,6 @@ function build(host: HTMLElement): void {
     showPins: true,
   });
   wireResizers(shell);
-  const main = shell.querySelector<HTMLElement>('.vx-main')!;
-  let topRaf = 0;
-  main.addEventListener(
-    'scroll',
-    () => {
-      cancelAnimationFrame(topRaf);
-      topRaf = requestAnimationFrame(syncTop);
-    },
-    true,
-  );
-  main.querySelector<HTMLElement>('.vx-totop')!.onclick = () => {
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    activeScroller()?.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
-  };
   shell.addEventListener('keydown', (e) => {
     if (e.key === 'F6') {
       // Move focus between the tree and the main area.

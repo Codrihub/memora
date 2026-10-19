@@ -34,7 +34,6 @@ import {
 } from './activity-model';
 import { CAT_COLOR, CLOCK, bars, chip, dayViewHTML, skeletonHTML, statTile, timeChart } from './activity-views';
 import { count, opt, toggle } from './activity-filters';
-import { reducedMotion } from './activity-vt';
 import { setKeysRoute } from '../router';
 
 const CSS = `
@@ -652,7 +651,6 @@ function shell(): void {
         <kbd aria-hidden="true">/</kbd><button type="button" class="ax-qx" id="adQx" aria-label="Clear search" hidden>${ICO.x}</button></label>
       <button type="button" class="ax-fbtn" id="adFilt" aria-haspopup="dialog">${ICO.filter}<span class="l">Filters</span><span class="ax-badge" id="adBadge" hidden></span></button>
       <button type="button" class="ax-newb" id="adNew" hidden></button>
-      <button type="button" class="ax-top" id="adTop" aria-label="Back to top" title="Back to top" hidden>${ICO.up}</button>
     </div></div>
     <div class="ax-sub"><div class="ax-chips" id="adChips" aria-label="Active filters"></div><div class="ax-sum" id="adSum" aria-live="polite"></div></div>
     <div class="ax-body" id="adBody"></div>
@@ -802,9 +800,6 @@ function wireRoot(): void {
     ro?.disconnect();
     ro = new ResizeObserver(setStick);
     ro.observe(bar);
-    r.querySelector<HTMLElement>('#adTop')!.onclick = () => {
-      h.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
-    };
   }
   if (host && !hostWired) {
     hostWired = true;
@@ -819,8 +814,6 @@ function onScroll(h: HTMLElement): void {
   if (!bar) return;
   const y = h.scrollTop;
   bar.classList.toggle('stuck', y > 0 && bar.getBoundingClientRect().top <= h.getBoundingClientRect().top + 1);
-  const top = root.querySelector<HTMLButtonElement>('#adTop');
-  if (top) top.hidden = y < 600;
 }
 
 function rows(): ActivityItem[] {

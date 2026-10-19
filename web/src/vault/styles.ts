@@ -26,17 +26,6 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-pane-list{container-type:inline-size;container-name:vxlist}
 .vx-pane-note{container-type:inline-size;container-name:vxnote}
 
-/* scroll to top: bottom right of the main area, above the phone tab bar */
-.vx-totop{position:absolute;right:24px;bottom:24px;z-index:6;width:44px;height:44px;display:grid;place-items:center;border-radius:50%;
-  border:1px solid var(--line-strong);background:var(--panel);color:var(--fg);box-shadow:var(--shadow);cursor:pointer;
-  opacity:0;transform:translateY(12px) scale(.92);pointer-events:none;transition:opacity .2s var(--ease),transform .24s var(--ease-out),background .15s}
-.vx-totop.on{opacity:1;transform:none;pointer-events:auto}
-.vx-totop:hover{background:var(--panel-2)}
-.vx-totop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.vx-totop .vx-i{width:18px;height:18px}
-@media (max-width:760px){.vx-totop{right:16px;bottom:calc(var(--tabbar,64px) + 16px + var(--safe-b,0px))}}
-@media (prefers-reduced-motion:reduce){.vx-totop{transition:opacity .1s;transform:none}}
-
 /* ── icon buttons, crumbs ──────────────────────────────────────── */
 .vx-icon-btn{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:var(--r-sm);border:0;
   background:none;color:var(--muted);cursor:pointer;flex:none;transition:background .15s,color .15s}
@@ -487,6 +476,12 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
   --accent-2:#115e59;--accent-line:rgba(15,118,110,.4);--accent-soft:rgba(15,118,110,.1)}
 .vx-note-scroll[data-rtone=contrast] .vx-prose a{text-decoration-thickness:2px}
 .vx-note-scroll[data-rtone=contrast] .vx-prose a.wl{border-bottom-width:2px}
+/* Code in a reading colour takes its colours from that colour, never from the
+   app theme (a light colour such as Paper in the dark app kept the dark
+   block background). Inline code gets a hairline so it reads apart from text. */
+:root .vx-note-scroll[data-rtone] .vx-prose code{color:var(--fg);background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--line)}
+:root .vx-note-scroll[data-rtone] .vx-prose pre{color:var(--fg);background:color-mix(in srgb,var(--panel-2) 70%,var(--bg));border-color:var(--line-strong)}
+:root .vx-note-scroll[data-rtone] .vx-prose pre code{background:none;box-shadow:none}
 
 /* floating panels: popover (wide) and bottom sheet (phones) */
 .vx-pop{position:fixed;inset:0;z-index:190;pointer-events:none}
