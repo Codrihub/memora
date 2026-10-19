@@ -96,6 +96,131 @@ pub fn safe_filename(title: &str) -> MResult<String> {
     Ok(out)
 }
 
+/// The file name a note title makes (see [`note_filename`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteName {
+    /// File name without `.md`.
+    pub file: String,
+    /// The title as given, trimmed and without a trailing `.md`.
+    pub title: String,
+}
+
+impl NoteName {
+    /// Whether characters were removed or the name was cut to make the file name
+    /// (spaces becoming `_` does not count).
+    pub fn changed(&self) -> bool {
+        self.file != self.title.replace(' ', "_")
+    }
+}
+
+/// The file name for a note title: a trailing `.md` is dropped (`Ideas.md` is the
+/// note `Ideas`), then [`safe_filename`] applies. A title that looks like a path
+/// (`/`, `\`, a leading `..`) is refused rather than quietly flattened.
+pub fn note_filename(title: &str) -> MResult<NoteName> {
+    let mut t = title.trim();
+    if t.len() > 3
+        && t.is_char_boundary(t.len() - 3)
+        && t[t.len() - 3..].eq_ignore_ascii_case(".md")
+    {
+        t = t[..t.len() - 3].trim_end();
+    }
+    if t.contains('/') || t.contains('\\') {
+        return err(format!(
+            "title `{title}` contains `/` or `\\`; give the folder in `folder` and only the name in `title`"
+        ));
+    }
+    if t.starts_with("..") {
+        return err(format!("title `{title}` cannot start with `..`"));
+    }
+    Ok(NoteName {
+        file: safe_filename(t)?,
+        title: t.to_string(),
+    })
+}
+
+/// `(renamed_from, note)` for a create reply when the title had to change to make
+/// the file name, so the caller learns the note's real name.
+pub fn title_notice(title: &str, path: &str) -> Option<(String, String)> {
+    let n = note_filename(title).ok()?;
+    n.changed().then(|| {
+        (
+            title.to_string(),
+            format!(
+                "the title was changed to make a safe file name (at most 80 letters, digits, spaces, `_` and `-`); the note is `{path}`"
+            ),
+        )
+    })
+}
+
+/// A note path from a caller with `\` read as `/` and no leading `/`
+/// (`Notes\Ideas.md` -> `Notes/Ideas.md`), so replies echo the stored path.
+pub fn norm_note_path(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches('/')
+        .to_string()
+}
+
+/// Whether a caller's path is absolute (`/etc`, `\\host`, `C:\x`, `C:/x`).
+pub fn is_absolute_input(path: &str) -> bool {
+    let p = path.trim();
+    let b = p.as_bytes();
+    p.starts_with(['/', '\\']) || (b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic())
+}
+
+/// The folder holding a note path, in full (`Projects/Atlas/Overview.md` ->
+/// `Projects/Atlas`); `""` for a note at the top level.
+pub fn parent_folder(rel: &str) -> &str {
+    rel.rsplit_once('/').map_or("", |(d, _)| d)
+}
+
+/// Whether `s` is a date (`YYYY-MM-DD`) or a date and time (ISO 8601 / RFC 3339,
+/// with or without an offset).
+pub fn is_date_like(s: &str) -> bool {
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
+    let s = s.trim();
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+        || DateTime::parse_from_rfc3339(s).is_ok()
+        || [
+            "%Y-%m-%dT%H:%M:%S%.f",
+            "%Y-%m-%d %H:%M:%S%.f",
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%d %H:%M",
+        ]
+        .iter()
+        .any(|f| NaiveDateTime::parse_from_str(s, f).is_ok())
+}
+
+/// Why a note's frontmatter cannot be read, if it is malformed: it opens with
+/// `---` but never closes, or a top-level line is not `key: value`.
+pub fn frontmatter_problem(content: &str) -> Option<String> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let mut lines = content.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return Some("the first line must be exactly `---`".into());
+    }
+    let Some(fm) = lines
+        .clone()
+        .position(|l| l.trim_end() == "---")
+        .map(|end| lines.take(end))
+    else {
+        return Some("no closing `---` line".into());
+    };
+    for line in fm {
+        let t = line.trim();
+        let continuation = line.starts_with([' ', '\t', '-']);
+        if t.is_empty() || t.starts_with('#') || continuation {
+            continue;
+        }
+        if !line.contains(':') {
+            return Some(format!("line `{t}` is not `key: value`"));
+        }
+    }
+    None
+}
+
 /// Split frontmatter from body. Frontmatter is non-empty only when the note
 /// starts with `---`.
 pub fn split_frontmatter(content: &str) -> (String, String) {
@@ -3634,58 +3759,93 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
+    /// A zip of the notes and folders `paths` (`""` is the whole vault). Every
+    /// path must exist: nothing is exported when one is missing.
     pub fn export_zip_impl(&self, paths: &[Value]) -> MResult<Vec<u8>> {
         use std::io::Write;
+        let mut files: Vec<(String, PathBuf)> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut missing = Vec::new();
+        for p in paths {
+            let Some(ps) = p.as_str() else {
+                return err(format!(
+                    "paths must be note or folder paths (strings); got {p}"
+                ));
+            };
+            let ps = norm_note_path(ps);
+            let ap = match self.resolve(&ps) {
+                Ok(ap) => ap,
+                Err(e) if e.0.starts_with("not found") => {
+                    missing.push(ps);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            if ap.is_dir() {
+                // Hidden entries below the exported folder (`.git`, `.Trash`) are skipped.
+                let walk = WalkDir::new(&ap).into_iter().filter_entry(|e| {
+                    e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
+                });
+                for entry in walk.filter_map(Result::ok) {
+                    let name = entry.file_name().to_string_lossy();
+                    if entry.file_type().is_file() && name.ends_with(".md") {
+                        let rel = self.rel_of(entry.path());
+                        if self.visible(&rel) && seen.insert(rel.clone()) {
+                            files.push((rel, entry.path().to_path_buf()));
+                        }
+                    }
+                }
+            } else if ap.is_file() {
+                let rel = self.rel_of(&ap);
+                if seen.insert(rel.clone()) {
+                    files.push((rel, ap));
+                }
+            } else {
+                missing.push(ps);
+            }
+        }
+        if !missing.is_empty() {
+            return err(format!(
+                "not found: {} (nothing was exported)",
+                missing.join(", ")
+            ));
+        }
         let mut buf = Vec::new();
         {
             let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
             let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated);
-            for p in paths {
-                let Some(ps) = p.as_str() else { continue };
-                let ap = self.resolve(ps)?;
-                if ap.is_dir() {
-                    // Hidden entries below the exported folder (`.git`, `.Trash`) are skipped.
-                    let walk = WalkDir::new(&ap).into_iter().filter_entry(|e| {
-                        e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
-                    });
-                    for entry in walk.filter_map(Result::ok) {
-                        let name = entry.file_name().to_string_lossy();
-                        if entry.file_type().is_file() && name.ends_with(".md") {
-                            let rel = self.rel_of(entry.path());
-                            if !self.visible(&rel) {
-                                continue;
-                            }
-                            let data = fs::read(entry.path()).unwrap_or_default();
-                            zw.start_file(rel, opts)
-                                .map_err(|e| MemoryErr(e.to_string()))?;
-                            zw.write_all(&data).map_err(|e| MemoryErr(e.to_string()))?;
-                        }
-                    }
-                } else if ap.is_file() {
-                    let rel = self.rel_of(&ap);
-                    let data = fs::read(&ap).unwrap_or_default();
-                    zw.start_file(rel, opts)
-                        .map_err(|e| MemoryErr(e.to_string()))?;
-                    zw.write_all(&data).map_err(|e| MemoryErr(e.to_string()))?;
-                }
+            for (rel, fp) in files {
+                let data = fs::read(&fp).unwrap_or_default();
+                zw.start_file(rel, opts)
+                    .map_err(|e| MemoryErr(e.to_string()))?;
+                zw.write_all(&data).map_err(|e| MemoryErr(e.to_string()))?;
             }
             zw.finish().map_err(|e| MemoryErr(e.to_string()))?;
         }
         Ok(buf)
     }
 
+    /// Import the `.md` entries of a zip. The reply lists `added` (new notes),
+    /// `overwritten` (existing notes replaced, only with `overwrite`), `skipped`
+    /// (existing notes kept), `unsafe` (entries whose path is absolute, leaves the
+    /// vault or is not allowed, with a reason) and `failed` (too large or
+    /// unreadable, with a reason).
     pub fn import_zip_impl(&self, data: &[u8], overwrite: bool) -> MResult<Value> {
         use std::io::Read;
         let mut added = Vec::new();
+        let mut overwritten = Vec::new();
         let mut skipped = Vec::new();
+        let mut unsafe_ = Vec::new();
+        let mut failed = Vec::new();
         // Bounds against zip bombs: entries are decompressed with a hard cap
         // each and in total, and absurd entry counts are refused up front.
         const MAX_ENTRIES: usize = 20_000;
         const MAX_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
         const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
         let cursor = std::io::Cursor::new(data);
-        let mut zr = zip::ZipArchive::new(cursor).map_err(|e| MemoryErr(e.to_string()))?;
+        let mut zr = zip::ZipArchive::new(cursor)
+            .map_err(|e| MemoryErr(format!("not a valid zip file ({e})")))?;
         if zr.len() > MAX_ENTRIES {
             return err(format!("zip has {} entries (max {MAX_ENTRIES})", zr.len()));
         }
@@ -3696,13 +3856,32 @@ impl MemoryStore {
             if !name.ends_with(".md") || name.ends_with('/') {
                 continue;
             }
-            let rel = name.replace('\\', "/").trim_start_matches('/').to_string();
-            let Ok(ap) = self.resolve(&rel) else {
+            if is_absolute_input(&name) {
+                unsafe_.push(json!({"entry": name, "reason": "absolute path"}));
+                continue;
+            }
+            let rel = name.replace('\\', "/");
+            let ap = match self.resolve(&rel) {
+                Ok(ap) => ap,
+                Err(e) => {
+                    // A path hidden from the caller reads as "not allowed", like
+                    // the store's own hidden files.
+                    let reason = if e.0.starts_with("path escapes") {
+                        "path leaves the vault"
+                    } else {
+                        "path not allowed"
+                    };
+                    unsafe_.push(json!({"entry": name, "reason": reason}));
+                    continue;
+                }
+            };
+            let existed = ap.exists();
+            if existed && !overwrite {
                 skipped.push(json!(rel));
                 continue;
-            };
-            if ap.exists() && !overwrite {
-                skipped.push(json!(rel));
+            }
+            if ap.is_dir() {
+                failed.push(json!({"entry": name, "reason": "a folder has this name"}));
                 continue;
             }
             let mut buf = Vec::new();
@@ -3710,28 +3889,42 @@ impl MemoryStore {
                 .take(MAX_ENTRY_BYTES + 1)
                 .read_to_end(&mut buf)
                 .is_err()
-                || buf.len() as u64 > MAX_ENTRY_BYTES
             {
-                skipped.push(json!(rel));
+                failed.push(json!({"entry": name, "reason": "unreadable entry"}));
+                continue;
+            }
+            if buf.len() as u64 > MAX_ENTRY_BYTES {
+                failed.push(json!({"entry": name, "reason": "larger than 16 MiB"}));
                 continue;
             }
             total += buf.len() as u64;
             if total > MAX_TOTAL_BYTES {
                 // Stop here, but still reindex/commit what was already written.
-                skipped.push(json!(rel));
+                failed.push(json!({"entry": name, "reason": "the zip holds more than 512 MiB; the rest was not imported"}));
                 break;
             }
             if let Some(parent) = ap.parent() {
                 fs::create_dir_all(parent).ok();
             }
-            fs::write(&ap, buf).ok();
-            added.push(json!(rel));
+            if let Err(e) = fs::write(&ap, buf) {
+                failed.push(json!({"entry": name, "reason": e.to_string()}));
+                continue;
+            }
+            if existed {
+                overwritten.push(json!(rel));
+            } else {
+                added.push(json!(rel));
+            }
         }
-        if !added.is_empty() {
+        let written = added.len() + overwritten.len();
+        if written > 0 {
             let _ = self.reindex();
-            self.git_commit(&format!("import: {} notes", added.len()));
+            self.git_commit(&format!("import: {written} notes"));
         }
-        Ok(json!({"added": added, "skipped": skipped}))
+        Ok(json!({
+            "ok": true, "added": added, "overwritten": overwritten, "skipped": skipped,
+            "unsafe": unsafe_, "failed": failed,
+        }))
     }
 }
 

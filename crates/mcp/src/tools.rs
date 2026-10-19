@@ -7,7 +7,7 @@
 use crate::ToolSpec;
 use memora_core::MemoryStore;
 use serde_json::{json, Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Catalog
@@ -404,15 +404,15 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "export_memory",
             "interop",
-            "Export notes or folders as a zip of markdown.",
+            "Export notes or folders as a zip of markdown into this server's exchange folder (private to this Memora instance). Every path must exist. An existing zip of the same name is only replaced with `overwrite`.",
             "To back up or move part of the vault.",
-            json!({"paths":{"type":"array","items":{"type":"string"}},"out_path":{"type":"string","description":"File name only (name.zip); written to the server's exchange folder"}}),
+            json!({"paths":{"type":"array","items":{"type":"string"}},"out_path":{"type":"string","description":"File name only (name.zip); written to the server's exchange folder"},"overwrite":{"type":"boolean","default":false,"description":"Replace an existing zip named out_path"}}),
             &["paths"],
         ),
         spec(
             "import_memory",
             "interop",
-            "Import notes from a markdown zip.",
+            "Import the .md notes of a zip in this server's exchange folder. The reply lists added, overwritten (only with `overwrite`), skipped (existing notes kept), unsafe (absolute or escaping paths, with a reason) and failed entries.",
             "To bring in an export from another machine.",
             json!({"zip_path":{"type":"string","description":"File name of a zip in the server's exchange folder (as export_memory returns)"},"overwrite":{"type":"boolean","default":false}}),
             &["zip_path"],
@@ -512,6 +512,7 @@ pub fn call_extra(
     name: &str,
     args: &Value,
     actor: &str,
+    exchange: &Path,
 ) -> Option<anyhow::Result<Value>> {
     if !extra_specs().iter().any(|t| t.name == name) {
         return None;
@@ -812,22 +813,51 @@ pub fn call_extra(
                     anyhow::bail!("paths is required: the notes or folders to export");
                 }
                 let bytes = store.export_zip_impl(&paths)?;
-                let name = s("out_path");
-                let name = if name.is_empty() {
-                    format!("memora-export-{}.zip", memora_core::vault::now_secs())
-                } else {
-                    name
-                };
+                let given = s("out_path");
                 // Only a plain file name, written into the one export folder:
                 // an agent never picks a place on the server's disk.
-                let dest = exchange_file(&name)?;
+                let (name, dest) = if given.is_empty() {
+                    // Whole seconds; a second export within the same second gets a suffix.
+                    let stamp = memora_core::vault::now_secs() as u64;
+                    let mut n = 1;
+                    loop {
+                        let name = match n {
+                            1 => format!("memora-export-{stamp}.zip"),
+                            _ => format!("memora-export-{stamp}-{n}.zip"),
+                        };
+                        let dest = exchange_file(exchange, &name)?;
+                        if !dest.exists() {
+                            break (name, dest);
+                        }
+                        n += 1;
+                    }
+                } else {
+                    let dest = exchange_file(exchange, &given)?;
+                    (given, dest)
+                };
+                let replaced = dest.exists();
+                if replaced && !b("overwrite", false) {
+                    anyhow::bail!(
+                        "{name} already exists in the exchange folder; pass overwrite: true to replace it, or choose another out_path"
+                    );
+                }
                 std::fs::write(&dest, &bytes)?;
                 // Only the file name: the server's disk layout stays private, and
                 // import_memory takes the same name.
-                json!({"ok": true, "path": name, "name": name, "bytes": bytes.len()})
+                json!({"ok": true, "path": name, "name": name, "bytes": bytes.len(), "replaced": replaced})
             }
             "import_memory" => {
-                let data = std::fs::read(exchange_file(&s("zip_path"))?)?;
+                let name = s("zip_path");
+                if name.trim().is_empty() {
+                    anyhow::bail!("zip_path is required: the file name export_memory returned");
+                }
+                let data = match std::fs::read(exchange_file(exchange, &name)?) {
+                    Ok(d) => d,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        anyhow::bail!("{name} not found in the exchange folder")
+                    }
+                    Err(e) => return Err(e.into()),
+                };
                 store.import_zip_impl(&data, b("overwrite", false))?
             }
 
@@ -868,11 +898,12 @@ pub fn extra_names() -> Vec<&'static str> {
     extra_specs().iter().map(|t| t.name).collect()
 }
 
-/// The folder where `export_memory` writes and `import_memory` reads zips
-/// (`<temp>/memora-exchange`), and the full path of `name` in it. Only plain
-/// names (`[A-Za-z0-9._-]`, ending in `.zip`, no leading dot) are accepted, so
-/// a tool call can never read or write anywhere else on the server.
-fn exchange_file(name: &str) -> std::io::Result<PathBuf> {
+/// The full path of `name` in `dir`, the exchange folder where `export_memory`
+/// writes and `import_memory` reads zips (`<state>/exchange`: one per Memora
+/// instance, created private). Only plain names (`[A-Za-z0-9._-]`, ending in
+/// `.zip`, no leading dot) are accepted, so a tool call can never read or write
+/// anywhere else on the server.
+fn exchange_file(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
     let ok = !name.is_empty()
         && name.len() <= 120
         && !name.starts_with('.')
@@ -886,48 +917,41 @@ fn exchange_file(name: &str) -> std::io::Result<PathBuf> {
             "use a plain file name ending in .zip (letters, digits, . _ -); exports live in the server's exchange folder",
         ));
     }
-    let dir = std::env::temp_dir().join("memora-exchange");
-    #[cfg(windows)]
-    {
-        // %TEMP% is per user on Windows; still refuse a symlink or junction
-        // planted in its place.
-        match std::fs::create_dir(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e),
-        }
-        let meta = std::fs::symlink_metadata(&dir)?;
-        if !meta.is_dir() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "{} is not a private folder of this server; remove it and retry",
-                    dir.display()
-                ),
-            ));
-        }
-    }
+    let not_private = || {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the exchange folder is not a private folder of this server; remove it and retry",
+        )
+    };
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        match std::fs::DirBuilder::new().mode(0o700).create(dir) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e),
         }
-        // The temp dir is shared: refuse a folder (or file) another user could have
-        // planted, so an export can never be redirected through a symlink.
-        let meta = std::fs::symlink_metadata(&dir)?;
+        // Never follow a symlink planted in its place; a folder of ours that is
+        // open to others (made before the mode was set) is closed again.
+        let meta = std::fs::symlink_metadata(dir)?;
         // SAFETY: geteuid has no preconditions.
         let me = unsafe { libc::geteuid() };
-        if !meta.is_dir() || meta.uid() != me || meta.mode() & 0o022 != 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "{} is not a private folder of this server; remove it and retry",
-                    dir.display()
-                ),
-            ));
+        if !meta.is_dir() || meta.uid() != me {
+            return Err(not_private());
+        }
+        if meta.mode() & 0o077 != 0 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        match std::fs::create_dir(dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        if !std::fs::symlink_metadata(dir)?.is_dir() {
+            return Err(not_private());
         }
     }
     let path = dir.join(name);
@@ -944,23 +968,54 @@ fn exchange_file(name: &str) -> std::io::Result<PathBuf> {
 mod tests {
     use super::exchange_file;
 
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("memora-xchg-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     #[test]
     fn exchange_names_are_plain_zip_files() {
+        let state = tmp("names");
+        let dir = state.join("exchange");
         for bad in ["", "../x.zip", "a/b.zip", ".x.zip", "x.tar", "x .zip"] {
-            assert!(exchange_file(bad).is_err(), "{bad:?} accepted");
+            assert!(exchange_file(&dir, bad).is_err(), "{bad:?} accepted");
         }
-        let ok = exchange_file("plain-name_1.zip").unwrap();
-        assert!(ok.ends_with("memora-exchange/plain-name_1.zip"));
+        let ok = exchange_file(&dir, "plain-name_1.zip").unwrap();
+        assert_eq!(ok, dir.join("plain-name_1.zip"));
+        std::fs::remove_dir_all(&state).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn exchange_folder_is_private_per_state_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let state = tmp("private");
+        let dir = state.join("exchange");
+        exchange_file(&dir, "a.zip").unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        // Opened up by someone: closed again on next use.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        exchange_file(&dir, "a.zip").unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        std::fs::remove_dir_all(&state).ok();
     }
 
     #[test]
     #[cfg(unix)]
     fn exchange_refuses_symlinks() {
-        let name = format!("link-{}.zip", std::process::id());
-        let path = exchange_file(&name).unwrap();
-        let _ = std::fs::remove_file(&path);
+        let state = tmp("links");
+        let dir = state.join("exchange");
+        let path = exchange_file(&dir, "link.zip").unwrap();
         std::os::unix::fs::symlink("/etc/hostname", &path).unwrap();
-        assert!(exchange_file(&name).is_err());
-        std::fs::remove_file(&path).unwrap();
+        assert!(exchange_file(&dir, "link.zip").is_err());
+        // Nor a symlinked exchange folder.
+        let other = state.join("exchange2");
+        std::os::unix::fs::symlink("/tmp", &other).unwrap();
+        assert!(exchange_file(&other, "x.zip").is_err());
+        std::fs::remove_dir_all(&state).ok();
     }
 }

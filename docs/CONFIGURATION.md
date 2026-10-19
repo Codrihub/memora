@@ -118,6 +118,7 @@ Inside the container the image sets `MEMORA_VAULT=/data`,
 | `memora.db` (+ `-wal`, `-shm`) | The state database: owner, API keys (hashes), tool switches and per-key permissions, OAuth clients and grants, privacy rules, sessions (hashed ids), setup window and lock state, access rules, settings, `server_config`, activity log. Mode 0600, WAL mode, must be on a local filesystem. See [DATABASE.md](DATABASE.md). |
 | `key-seal.bin` | 32-byte master key (mode 0600) that encrypts the copies of dashboard-created API keys, so the owner can show a key again. Created on first use. Back it up together with `memora.db`. |
 | `backups/` | `memora-cli db backup` output (newest 10 kept by default). |
+| `exchange/` | Zips written by the `export_memory` MCP tool and read by `import_memory` (mode 0700, created on first use). Private to this instance; delete old zips when no longer needed. |
 | `legacy-json-<unix time>/` | JSON state files found at startup, moved here after their one-time import into `memora.db`. |
 | `internal.token` | Created by the Docker entrypoint. Not used by Memora. |
 

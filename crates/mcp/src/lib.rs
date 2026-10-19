@@ -1504,7 +1504,13 @@ impl McpServer {
                 "ok": true,
                 "folder": store.create_folder_impl(&s("name"))?
             }),
-            other => match crate::tools::call_extra(&store, other, args, actor) {
+            other => match crate::tools::call_extra(
+                &store,
+                other,
+                args,
+                actor,
+                &self.db.state_dir().join("exchange"),
+            ) {
                 Some(Ok(v)) => v,
                 Some(Err(e)) => return Err(e),
                 None => anyhow::bail!("unknown tool: {other}"),

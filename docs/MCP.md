@@ -397,10 +397,11 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
-| `export_memory` | W | `paths` (array of strings, required; notes or folders), `out_path` (string) | Writes a zip of the given paths to the server's exchange folder and returns `{ok, path, name, bytes}`, where `path` and `name` are the zip's file name. `out_path` is a plain file name ending in `.zip` (letters, digits, `.`, `_`, `-`, at most 120 characters); the default is `memora-export-<time>.zip`. |
-| `import_memory` | W | `zip_path` (string, required), `overwrite` (boolean, default false) | Imports notes from a zip in the exchange folder, by the file name `export_memory` returned. |
+| `export_memory` | W | `paths` (array of strings, required; notes or folders), `out_path` (string), `overwrite` (boolean, default false) | Writes a zip of the given paths to the server's exchange folder and returns `{ok, path, name, bytes, replaced}`, where `path` and `name` are the zip's file name. Every path must exist; missing ones are listed and nothing is written. `out_path` is a plain file name ending in `.zip` (letters, digits, `.`, `_`, `-`, at most 120 characters); the default is `memora-export-<unix seconds>.zip`. An existing zip of that name is only replaced with `overwrite: true`. |
+| `import_memory` | W | `zip_path` (string, required), `overwrite` (boolean, default false) | Imports the `.md` notes of a zip in the exchange folder, by the file name `export_memory` returned. Returns `{ok, added, overwritten, skipped, unsafe, failed}`: `skipped` are existing notes kept (no `overwrite`), `unsafe` are entries with an absolute or escaping path (`{entry, reason}`), `failed` are entries too large or unreadable. |
 
-The exchange folder is `memora-exchange` in the server's temporary directory.
+The exchange folder is `exchange` in the state directory (`<MEMORA_STATE>/exchange`),
+one per Memora instance, created with mode 0700.
 Tools never read or write anywhere else on the server's disk.
 
 ### Checks, to-dos and pins (`ux`)
