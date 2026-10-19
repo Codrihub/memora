@@ -287,6 +287,20 @@ docker compose pull && docker compose up -d   # Docker upgrade
 Back up the vault folder and `memora.db` (with `memora-cli db backup`, never a
 plain `cp` of the live file). See [docs/INSTALL.md](docs/INSTALL.md#backups).
 
+### Start, stop and restart
+
+| Install | Start | Stop | Restart |
+|---|---|---|---|
+| Native (systemd) | `sudo systemctl start memora` | `sudo systemctl stop memora` | `sudo systemctl restart memora` |
+| Docker | `docker start memora` | `docker stop memora` | `docker restart memora` |
+| npm, Windows zip, source | `memora` (keep it running) | Ctrl+C in its terminal | stop, then start |
+
+The owner can also **shut the server down from the browser**: Settings, Server,
+Shut down. Every browser and agent is disconnected until it is started again on
+the server. When a supervisor restarts it on its own (systemd `Restart=always`,
+Docker `--restart unless-stopped`), the confirmation says so and shows the stop
+command to use instead.
+
 ## Security notes
 
 - The owner password is hashed with argon2id. API keys (`memora_live_...`) and

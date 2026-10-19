@@ -37,6 +37,7 @@ sudo memora-cli setup --minutes 15
 - [Docker](#docker)
 - [npm](#npm)
 - [Windows zip](#windows-zip)
+- [Start, stop and restart](#start-stop-and-restart)
 - [Reverse proxy](#reverse-proxy)
 - [Backups](#backups)
 - [Automation: `--check` and `--upgrade`](#automation---check-and---upgrade)
@@ -419,6 +420,21 @@ $env:MEMORA_STATE = '.\state'; .\memora-cli.exe setup --minutes 15
 
 Open `http://localhost:8400/login` and enter the code. Like the npm install,
 it runs as you with no service; keep the folder under your user profile.
+
+## Start, stop and restart
+
+| Install | Start | Stop | Restart |
+|---|---|---|---|
+| Native (systemd) | `sudo systemctl start memora` | `sudo systemctl stop memora` | `sudo systemctl restart memora` |
+| Docker | `docker start memora` | `docker stop memora` | `docker restart memora` |
+| npm, Windows zip, source | `memora` (keep it running) | Ctrl+C in its terminal | stop, then start |
+
+From the browser, the owner can shut the server down in Settings, Server, Shut
+down: the server answers, then stops gracefully and exits with status 0, the
+same as Ctrl+C or `systemctl stop`. A supervisor that restarts a cleanly exited
+process starts it again (systemd `Restart=always`, Docker
+`--restart unless-stopped`); the installer's unit uses `Restart=on-failure`, so
+it stays stopped. API keys cannot shut the server down.
 
 ## Reverse proxy
 
