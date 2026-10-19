@@ -142,20 +142,31 @@ ${LOGIN_CSS}
     </div>
   </section>
 
-  <!-- NOT SET UP -->
-  <section class="view" id="vSetup" hidden>
-    <h1>Welcome to Memora</h1>
-    <p class="sub">${BRAND_DESC}</p>
-    <ul class="checklist about">
-      <li>${I.folder}<span><b>Vault</b> Your notes stay plain Markdown files, in a folder you choose</span><em></em></li>
-      <li>${I.brain}<span><b>Brain, Graph, Canvas</b> See how every note connects: in 3D, as a graph, or on a board</span><em></em></li>
-      <li>${I.key}<span><b>Set up once, use everywhere</b> Claude, Cursor, ChatGPT and your own agents share one memory, each with its own key, instead of being taught the same things again</span><em></em></li>
-      <li>${I.globe}<span><b>From anywhere</b> on this machine, your local network, or the internet through a tunnel or reverse proxy</span><em></em></li>
-    </ul>
-    <p class="steps-h">Set it up in two steps</p>
-    ${cli('setupCmd', '1. Open the console on the server', 'memora-cli')}
-    <p class="note">2. Type <code id="tuiCmd">/guide</code> and follow the steps. This page moves on by itself.</p>
-    ${waiting('Waiting for setup&hellip;')}
+  <!-- NOT SET UP: a wider card on wide screens, intro beside the steps -->
+  <section class="view setup" id="vSetup" hidden>
+    <div class="su-grid">
+      <div class="su-intro">
+        <h1>Welcome to Memora</h1>
+        <p class="sub">${BRAND_DESC}</p>
+        <ul class="checklist about">
+          <li>${I.folder}<span><b>Vault</b> Your notes stay plain Markdown files, in a folder you choose</span><em></em></li>
+          <li>${I.brain}<span><b>Brain, Graph, Canvas</b> See how every note connects: in 3D, as a graph, or on a board</span><em></em></li>
+          <li>${I.key}<span><b>Set up once, use everywhere</b> Claude, Cursor, ChatGPT and your own agents share one memory, each with its own key, instead of being taught the same things again</span><em></em></li>
+          <li>${I.globe}<span><b>From anywhere</b> on this machine, your local network, or the internet through a tunnel or reverse proxy</span><em></em></li>
+        </ul>
+      </div>
+      <div class="su-steps">
+        <p class="steps-h">Set it up in two steps</p>
+        <ol class="su-list">
+          <li><span class="su-n" aria-hidden="true">1</span><div class="su-b"><b>Get a one-time code on the server</b>
+            ${cli('setupCmd', 'Run this command', 'memora-cli setup --minutes 15')}
+            <p class="note">It prints a one-time code and the link to this page.</p></div></li>
+          <li><span class="su-n" aria-hidden="true">2</span><div class="su-b"><b>Enter the code here</b>
+            <p class="note">This page moves on by itself once the code is ready to enter.</p></div></li>
+        </ol>
+        ${waiting('Waiting for setup&hellip;')}
+      </div>
+    </div>
     <p class="about-name">${BRAND_NAME}</p>
   </section>
 
@@ -170,7 +181,7 @@ ${LOGIN_CSS}
       </div>
       <button class="btn" id="codeBtn" type="submit" disabled><span class="spinner"></span>${I.arrow}<span id="codeBtnTxt">Continue</span></button>
     </form>
-    <p class="note center">Lost the code? Type <code id="codeAgain">/web</code> in the console for a new one.</p>
+    <p class="note center">Lost the code? Run <code id="codeAgain">memora-cli setup</code> on the server for a new one.</p>
   </section>
 
   <!-- WINDOW OPEN: ACCOUNT FORM (setup or reset) -->

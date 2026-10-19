@@ -235,7 +235,16 @@ function limitedOf(status: number, d: unknown, retryHeader: string | null): Limi
 }
 
 let HINT = 'memora-cli setup';
-const cliName = (): string => HINT.trim().split(/\s+/)[0] || 'memora-cli';
+/**
+ * How this install runs the console, from the server's hint: everything up to
+ * and including `memora-cli` (e.g. `docker exec -it memora memora-cli`).
+ */
+const cliName = (): string => {
+  const m = /^(.*?\bmemora-cli(?:\.exe)?)(?=\s|$)/.exec(HINT.trim());
+  return m ? m[1]! : HINT.trim().split(/\s+/)[0] || 'memora-cli';
+};
+/** The one command that opens the setup window and prints the code. */
+const SETUP_ARGS = 'setup --minutes 15';
 
 /* ------------------------------------------------------------------ */
 /* View switching                                                      */
@@ -266,6 +275,8 @@ async function show(v: View): Promise<void> {
     if (k !== v) el.hidden = true;
   });
   card.classList.toggle('splashing', v === 'splash');
+  // Only the welcome view uses the wide two-column card.
+  card.classList.toggle('wide', v === 'setup');
   $(VIEWS[v]).hidden = false;
   const focus: Partial<Record<View, string>> = { signin: '#u', code: '#code', form: '#su' };
   const f = focus[v];
@@ -352,10 +363,11 @@ function enter(v: View, s: AuthState): void {
       $('#resetCmd').textContent = cli;
       break;
     case 'setup':
-      $('#setupCmd').textContent = cli;
+      $('#setupCmd').textContent = cli + ' ' + SETUP_ARGS;
       break;
     case 'code':
       prepareCode(s);
+      $('#codeAgain').textContent = cli + (s.mode === 'reset' || s.mode === 'reset-password' ? ' reset-password' : ' setup');
       break;
     case 'notready': {
       const row = (id: string, ok: boolean | undefined): void => {

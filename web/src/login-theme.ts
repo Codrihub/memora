@@ -257,6 +257,27 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .steps-h{font-size:12px;font-weight:650;color:var(--fg);margin:0 0 8px}
 .about-name{font-size:11.5px;color:var(--muted);line-height:1.5;margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line);font-style:italic}
 
+/* ---------- welcome (no owner yet): two columns on wide screens ---------- */
+.su-list{list-style:none;display:flex;flex-direction:column;gap:14px;margin:0}
+.su-list>li{display:flex;gap:11px;align-items:flex-start;min-width:0}
+.su-n{flex:none;display:grid;place-items:center;width:22px;height:22px;margin-top:1px;border-radius:50%;font-size:11.5px;font-weight:700;
+  background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent)}
+.su-b{flex:1;min-width:0}
+.su-b>b{display:block;font-size:13px;font-weight:650;color:var(--fg);margin-bottom:8px;line-height:1.45}
+.su-b .note{margin-top:8px}
+.su-b>b+.note{margin-top:-4px}
+.su-steps .steps-h{margin-bottom:12px}
+.su-intro .checklist{margin-bottom:0}
+.su-steps{margin-top:18px}
+.su-b .clirow code{white-space:normal;overflow-wrap:anywhere;overflow-x:visible}
+@media (min-width:640px) and (max-width:879px){.card.wide{max-width:600px}}
+@media (min-width:880px){
+  .card.wide{max-width:880px;padding:34px 36px 24px}
+  .card.wide .su-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:36px;align-items:start}
+  .card.wide .su-steps{margin-top:0;padding-left:36px;border-left:1px solid var(--line);align-self:stretch}
+  .card.wide .su-intro .sub{margin-bottom:16px}
+}
+
 /* ---------- cooldown ---------- */
 .timer{font-family:${MONO};font-size:34px;font-weight:700;letter-spacing:.04em;font-variant-numeric:tabular-nums;margin:2px 0 12px;color:var(--fg)}
 .tbar{height:4px;border-radius:4px;background:var(--line);overflow:hidden;margin-bottom:14px}
