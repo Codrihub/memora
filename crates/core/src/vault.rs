@@ -68,6 +68,19 @@ pub fn in_folder(rel: &str, folder: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// Bidi controls (overrides, embeddings, isolates, marks) and zero-width characters:
+/// invisible, and able to make a displayed name read differently from what it is.
+pub fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
 pub fn now_secs() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3468,46 +3481,199 @@ impl MemoryStore {
             .collect()
     }
 
-    pub fn lock_node_impl(&self, path: &str, owner: &str, ttl: i64) -> Value {
-        if !self.visible(path) {
-            return json!({"ok": false, "reason": format!("not found: {path}")});
+    /// Shortest and longest lock a caller may take, in seconds.
+    pub const LOCK_TTL_RANGE: (i64, i64) = (5, 86_400);
+
+    /// The note a lock applies to: `path` resolved like the other note tools (inside
+    /// the vault, hidden = not found), `.md` optional, matched case-insensitively when
+    /// the exact spelling does not exist, so `Readme`, `readme.md` and `Readme.md` all
+    /// name the one note `Readme.md`. Folders cannot be locked.
+    pub fn lock_target(&self, path: &str) -> MResult<String> {
+        let p = path.trim();
+        if p.is_empty() {
+            return err("path is required: the note to lock, such as Notes/Ideas.md");
         }
-        let now = now_secs();
-        let mut locks: Map<String, Value> = self
-            .load_locks()
+        let ap = self.resolve(p)?;
+        if ap.is_dir() {
+            return err(format!("{p} is a folder; locks are taken on single notes"));
+        }
+        if ap.is_file() && p.to_lowercase().ends_with(".md") {
+            return Ok(self.rel_of(&ap));
+        }
+        let with_md = if p.to_lowercase().ends_with(".md") {
+            p.to_string()
+        } else {
+            format!("{p}.md")
+        };
+        if let Ok(ap) = self.resolve(&with_md) {
+            if ap.is_file() {
+                return Ok(self.rel_of(&ap));
+            }
+        }
+        let want = with_md.replace('\\', "/");
+        let want = want.trim_start_matches('/').to_lowercase();
+        let hits: Vec<String> = self
+            .walk()
+            .into_iter()
+            .map(|(rel, _, _)| rel)
+            .filter(|rel| rel.to_lowercase() == want)
+            .collect();
+        match hits.as_slice() {
+            [one] => Ok(one.clone()),
+            [] => err(format!("not found: {p}")),
+            _ => err(format!(
+                "{p} matches several notes that differ only in case ({}); give the exact path",
+                hits.join(", ")
+            )),
+        }
+    }
+
+    /// Active (unexpired) locks.
+    fn active_locks(&self, now: f64) -> Map<String, Value> {
+        self.load_locks()
             .into_iter()
             .filter(|(_, v)| v.get("expires").and_then(|e| e.as_f64()).unwrap_or(0.0) > now)
-            .collect();
-        if let Some(cur) = locks.get(path) {
-            let cur_owner = cur.get("owner").and_then(|v| v.as_str()).unwrap_or("");
-            if cur_owner != owner {
-                let exp = cur.get("expires").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                return json!({"ok": false, "locked_by": cur_owner, "expires_in": (exp - now).round()});
+            .collect()
+    }
+
+    /// Whether lock `v` belongs to holder `holder_id` (locks written before holder ids
+    /// were stored compare by display name).
+    fn lock_held_by(v: &Value, holder_id: &str, holder_name: &str) -> bool {
+        match v.get("owner_id").and_then(|x| x.as_str()) {
+            Some(id) => id == holder_id,
+            None => v.get("owner").and_then(|x| x.as_str()) == Some(holder_name),
+        }
+    }
+
+    fn lock_owner(v: &Value) -> &str {
+        v.get("owner").and_then(|x| x.as_str()).unwrap_or("")
+    }
+
+    fn lock_left(v: &Value, now: f64) -> f64 {
+        (v.get("expires").and_then(|x| x.as_f64()).unwrap_or(0.0) - now)
+            .round()
+            .max(0.0)
+    }
+
+    /// Take (or renew) a soft lock on a note for `ttl` seconds
+    /// ([`Self::LOCK_TTL_RANGE`]) in the name of holder `holder_id` (shown as
+    /// `holder_name`). A note another holder has locked is refused.
+    pub fn lock_node_impl(
+        &self,
+        path: &str,
+        holder_id: &str,
+        holder_name: &str,
+        ttl: i64,
+    ) -> MResult<Value> {
+        let (lo, hi) = Self::LOCK_TTL_RANGE;
+        if !(lo..=hi).contains(&ttl) {
+            return err(format!(
+                "ttl must be {lo}-{hi} seconds (got {ttl}); leave it out for 300"
+            ));
+        }
+        let rel = self.lock_target(path)?;
+        let now = now_secs();
+        let mut locks = self.active_locks(now);
+        if let Some(cur) = locks.get(&rel) {
+            if !Self::lock_held_by(cur, holder_id, holder_name) {
+                let owner = Self::lock_owner(cur);
+                return err(format!(
+                    "{rel} is locked by {owner} for {} s more; wait, or ask {owner} to release it",
+                    Self::lock_left(cur, now)
+                ));
             }
         }
         locks.insert(
-            path.to_string(),
-            json!({"owner": owner, "expires": now + ttl.max(5) as f64}),
+            rel.clone(),
+            json!({"owner": holder_name, "owner_id": holder_id, "expires": now + ttl as f64}),
         );
         self.save_locks(&locks);
-        json!({"ok": true, "path": path, "owner": owner, "ttl": ttl})
+        Ok(json!({"ok": true, "path": rel, "owner": holder_name, "ttl": ttl, "expires_in": ttl}))
     }
 
-    pub fn release_lock_impl(&self, path: &str, owner: &str) -> Value {
-        if !self.visible(path) {
-            return json!({"ok": false, "reason": "not locked"});
-        }
-        let mut locks = self.load_locks();
-        if let Some(cur) = locks.get(path).cloned() {
-            let cur_owner = cur.get("owner").and_then(|v| v.as_str()).unwrap_or("");
-            if cur_owner == owner {
-                locks.remove(path);
-                self.save_locks(&locks);
-                return json!({"ok": true, "released": path});
+    /// Release a lock. Only its holder may release it, unless `force` (the owner's
+    /// session, which may clear any lock).
+    pub fn release_lock_impl(
+        &self,
+        path: &str,
+        holder_id: &str,
+        holder_name: &str,
+        force: bool,
+    ) -> MResult<Value> {
+        let now = now_secs();
+        let mut locks = self.active_locks(now);
+        // A lock on a note deleted since can still be released by its exact path.
+        let rel = match self.lock_target(path) {
+            Ok(r) => r,
+            Err(e) => {
+                let p = path.trim();
+                if !p.is_empty() && self.visible(p) && locks.contains_key(p) {
+                    p.to_string()
+                } else {
+                    return Err(e);
+                }
             }
-            return json!({"ok": false, "reason": "not locked by you"});
+        };
+        let Some(cur) = locks.get(&rel).cloned() else {
+            return Ok(json!({"ok": true, "released": false, "path": rel,
+                             "note": "the note was not locked"}));
+        };
+        if !force && !Self::lock_held_by(&cur, holder_id, holder_name) {
+            let owner = Self::lock_owner(&cur);
+            return err(format!(
+                "{rel} is locked by {owner}; only {owner} can release it, or wait {} s",
+                Self::lock_left(&cur, now)
+            ));
         }
-        json!({"ok": false, "reason": "not locked"})
+        locks.remove(&rel);
+        self.save_locks(&locks);
+        Ok(json!({"ok": true, "released": true, "path": rel, "owner": Self::lock_owner(&cur)}))
+    }
+
+    /// Why a write by holder `holder_id` must wait: the first note among `paths`, or
+    /// inside one of `folders` (`""` = the whole vault), locked by another holder.
+    /// Paths that do not name a visible note are ignored (the write reports them).
+    pub fn lock_conflict(
+        &self,
+        paths: &[String],
+        folders: &[String],
+        holder_id: &str,
+        holder_name: &str,
+    ) -> Option<String> {
+        let now = now_secs();
+        let locks = self.active_locks(now);
+        if locks.is_empty() {
+            return None;
+        }
+        let blocked = |rel: &str| -> Option<String> {
+            let v = locks.get(rel)?;
+            if Self::lock_held_by(v, holder_id, holder_name) || !self.visible(rel) {
+                return None;
+            }
+            Some(format!(
+                "{rel} is locked by {} for {} s more",
+                Self::lock_owner(v),
+                Self::lock_left(v, now)
+            ))
+        };
+        for p in paths {
+            if let Some(m) = self.lock_target(p).ok().and_then(|rel| blocked(&rel)) {
+                return Some(m);
+            }
+        }
+        for f in folders {
+            let f = f.trim().trim_matches('/');
+            let all = f.is_empty() || f == "Root";
+            let prefix = format!("{f}/");
+            for rel in locks.keys() {
+                if all || rel.starts_with(&prefix) {
+                    if let Some(m) = blocked(rel) {
+                        return Some(m);
+                    }
+                }
+            }
+        }
+        None
     }
 
     // ---- events ----
@@ -3671,6 +3837,27 @@ impl MemoryStore {
     }
 
     // ---- activity log (get_logs / search_logs) ----
+    /// The `range` forms [`Self::get_logs_impl`] understands, for error messages.
+    pub const LOG_RANGES: &'static str =
+        "today, yesterday, latest (7 days), week (or 1w), all, or Nd for the last N days (1-3650, e.g. 1d, 30d)";
+
+    /// Whether `range` is one of [`Self::LOG_RANGES`] (blank = the default).
+    pub fn log_range_ok(range: &str) -> bool {
+        let r = range.trim().to_lowercase();
+        if r.is_empty()
+            || matches!(
+                r.as_str(),
+                "all" | "latest" | "recent" | "now" | "today" | "yesterday" | "1w" | "week"
+            )
+        {
+            return true;
+        }
+        r.strip_suffix('d')
+            .filter(|n| n.chars().all(|c| c.is_ascii_digit() || c == '.'))
+            .and_then(|n| n.parse::<f64>().ok())
+            .is_some_and(|n| n > 0.0 && n <= 3650.0)
+    }
+
     /// Logged events in a `range`: `today`, `yesterday`, `latest` (7 days), `Nd`
     /// (N days), `all`; anything else = 1 day. The log's own retention limits how
     /// far back events exist.
@@ -3820,7 +4007,16 @@ impl MemoryStore {
             return err("actor required");
         }
         if alias.is_empty() || alias.chars().count() > 32 {
-            return err("alias must be 1..32 chars");
+            return err("name must be 1-32 characters; spaces at the ends are removed");
+        }
+        if alias
+            .chars()
+            .any(|c| c.is_control() || is_invisible_format(c))
+        {
+            return err(
+                "name must not contain control characters (line breaks, tabs, NUL) or \
+                 invisible text-direction / zero-width characters",
+            );
         }
         let mut aliases = self.get_actor_aliases();
         aliases.insert(actor.to_string(), json!(alias));
@@ -4086,13 +4282,53 @@ impl MemoryStore {
         out
     }
 
+    /// Longest `mention_agent` message, in characters.
+    pub const MENTION_MAX_CHARS: usize = 4000;
+
+    /// Append `> @agent: message` to a note. The agent name must be one line (a
+    /// leading `@` is dropped); every line of a multi-line message stays inside the
+    /// quote, so a message cannot add lines of its own to the note.
     pub fn mention_agent_impl(&self, agent: &str, path: &str, message: &str) -> MResult<Value> {
+        let agent = agent.trim();
+        let agent = agent.strip_prefix('@').unwrap_or(agent).trim();
+        if agent.is_empty() {
+            return err("agent is required: the name of the agent to ping");
+        }
+        if agent.chars().any(char::is_control) {
+            return err("agent must be a single name without line breaks or control characters");
+        }
+        if agent.chars().count() > 64 {
+            return err("agent must be at most 64 characters");
+        }
+        let message = message.trim();
+        if message.is_empty() {
+            return err("message is required: what the agent should know or do");
+        }
+        if message.chars().count() > Self::MENTION_MAX_CHARS {
+            return err(format!(
+                "message must be at most {} characters (got {}); link a note for longer text",
+                Self::MENTION_MAX_CHARS,
+                message.chars().count()
+            ));
+        }
         let ap = self.resolve(path)?;
         if !ap.is_file() {
             return err(format!("not found: {path}"));
         }
+        // Control characters other than line breaks and tabs are dropped; each line
+        // of the message gets its own quote marker.
+        let body = message
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .chars()
+            .filter(|c| *c == '\n' || *c == '\t' || !c.is_control())
+            .collect::<String>()
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n> ");
         let cur = self.read_raw(&ap).unwrap_or_default();
-        let line = format!("\n\n> @{agent}: {message}");
+        let line = format!("\n\n> @{agent}: {body}");
         self.save_impl(
             path,
             &format!("{}{}", cur.trim_end_matches('\n'), line.trim_end()),

@@ -257,17 +257,19 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "lock_node",
             "collab",
-            "Take a soft lock on a note so other agents do not overwrite it.",
+            "Lock a note in your own name for `ttl` seconds (5-86400): while it is locked, \
+             other agents cannot save, patch, move, rename or delete it. Calling it again \
+             renews your lock; a note another agent holds is refused.",
             "Before editing a note another agent may be using.",
-            json!({"path":{"type":"string"},"owner":{"type":"string"},"ttl":{"type":"integer","default":300}}),
+            json!({"path":{"type":"string","description":"The note, e.g. Notes/Ideas.md (.md optional)"},"owner":{"type":"string","description":"Optional; locks are always taken in your own name"},"ttl":{"type":"integer","default":300,"minimum":5,"maximum":86400}}),
             &["path"],
         ),
         spec(
             "release_lock",
             "collab",
-            "Release a note lock you hold.",
+            "Release a note lock you hold (only its holder can release it).",
             "After you finish editing.",
-            json!({"path":{"type":"string"},"owner":{"type":"string"}}),
+            json!({"path":{"type":"string"},"owner":{"type":"string","description":"Optional; must be you"}}),
             &["path"],
         ),
         spec(
@@ -281,10 +283,10 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "mention_agent",
             "collab",
-            "Ping another agent with '> @agent: message' inside a note.",
+            "Ping another agent with '> @agent: message' appended to a note (message up to 4000 characters; every line stays inside the quote).",
             "To hand off a task through the vault instead of chat.",
-            json!({"agent":{"type":"string"},"path":{"type":"string"},"message":{"type":"string"}}),
-            &["agent", "path"],
+            json!({"agent":{"type":"string","description":"Agent name, one line; a leading @ is optional"},"path":{"type":"string"},"message":{"type":"string"}}),
+            &["agent", "path", "message"],
         ),
         spec(
             "get_assignments",
@@ -300,7 +302,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "ops",
             "Recent activity: notes created, updated, or deleted.",
             "To see what just happened in the vault.",
-            json!({"since":{"type":"number"},"folder":{"type":"string"},"actor":{"type":"string"},"limit":{"type":"integer","default":50}}),
+            json!({"since":{"type":"number"},"folder":{"type":"string"},"actor":{"type":"string"},"limit":{"type":"integer","default":50,"minimum":1,"maximum":2000}}),
             &[],
         ),
         spec(
@@ -308,15 +310,15 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "ops",
             "Agents active within the last `window` seconds.",
             "To see who is working right now.",
-            json!({"window":{"type":"integer","default":300}}),
+            json!({"window":{"type":"integer","default":300,"minimum":1}}),
             &[],
         ),
         spec(
             "get_logs",
             "ops",
-            "Vault activity log over a time range (1d, 7d, today, yesterday).",
+            "Vault activity log over a time range: today, yesterday, latest (7 days), week, all, or Nd (last N days, e.g. 1d, 30d).",
             "To audit what happened during a period.",
-            json!({"range":{"type":"string","default":"1d"},"actor":{"type":"string"},"limit":{"type":"integer","default":100}}),
+            json!({"range":{"type":"string","default":"1d"},"actor":{"type":"string"},"limit":{"type":"integer","default":100,"minimum":1,"maximum":2000}}),
             &[],
         ),
         spec(
@@ -324,7 +326,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "ops",
             "Search the activity log by keyword.",
             "When you need a specific trace, such as a note or an action.",
-            json!({"q":{"type":"string"},"range":{"type":"string","default":"7d"},"actor":{"type":"string"},"limit":{"type":"integer","default":100}}),
+            json!({"q":{"type":"string"},"range":{"type":"string","default":"7d","description":"today, yesterday, latest, week, all, or Nd"},"actor":{"type":"string"},"limit":{"type":"integer","default":100,"minimum":1,"maximum":2000}}),
             &["q"],
         ),
         spec(
@@ -379,7 +381,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "set_my_name",
             "identity",
-            "Change your display alias without changing your actor id.",
+            "Change your display alias without changing your actor id. 1-32 characters, no control or text-direction characters, and not a name another agent or the owner already uses.",
             "So your activity trace is easy for humans to read.",
             json!({"name":{"type":"string"}}),
             &["name"],
@@ -505,6 +507,21 @@ pub fn extra_specs() -> Vec<ToolSpec> {
 // ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
+
+/// Most entries `get_events`, `get_logs` and `search_logs` return in one call.
+pub const MAX_LOG_LIMIT: i64 = 2000;
+
+/// The `limit` argument of the event / log tools: `default` when absent, refused
+/// outside 1..=[`MAX_LOG_LIMIT`].
+fn limit_arg(args: &Value, default: usize) -> anyhow::Result<usize> {
+    match args.get("limit") {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => match v.as_i64() {
+            Some(n) if (1..=MAX_LOG_LIMIT).contains(&n) => Ok(n as usize),
+            _ => anyhow::bail!("limit must be 1-{MAX_LOG_LIMIT} (got {v})"),
+        },
+    }
+}
 
 /// Run an additional tool. `None` means the name does not belong to this module.
 pub fn call_extra(
@@ -704,28 +721,8 @@ pub fn call_extra(
             }
 
             // ---------------- collab ----------------
-            "lock_node" => {
-                let owner = {
-                    let v = s("owner");
-                    if v.is_empty() {
-                        actor.to_string()
-                    } else {
-                        v
-                    }
-                };
-                store.lock_node_impl(&s("path"), &owner, i("ttl", 300) as i64)
-            }
-            "release_lock" => {
-                let owner = {
-                    let v = s("owner");
-                    if v.is_empty() {
-                        actor.to_string()
-                    } else {
-                        v
-                    }
-                };
-                store.release_lock_impl(&s("path"), &owner)
-            }
+            // Need the caller's identity: handled in `McpServer::exec_tool`.
+            "lock_node" | "release_lock" => anyhow::bail!("{name} is handled by the server"),
             "get_locks" => json!(store.get_locks_impl()),
             "mention_agent" => store.mention_agent_impl(&s("agent"), &s("path"), &s("message"))?,
             "get_assignments" => json!(store.get_assignments_impl(opt("agent").as_deref())),
@@ -735,33 +732,36 @@ pub fn call_extra(
                 args.get("since").and_then(|v| v.as_f64()),
                 opt("folder").as_deref(),
                 opt("actor").as_deref(),
-                i("limit", 50),
+                limit_arg(args, 50)?,
             )),
-            "presence" => json!(store.presence_impl(i("window", 300) as i64)),
-            "get_logs" => {
-                let range = {
-                    let v = s("range");
-                    if v.is_empty() {
-                        "1d".to_string()
-                    } else {
-                        v
-                    }
+            "presence" => {
+                let window = match args.get("window") {
+                    None | Some(Value::Null) => 300,
+                    Some(v) => v.as_i64().filter(|n| *n >= 1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "window must be at least 1 second (got {v}); leave it out for 300"
+                        )
+                    })?,
                 };
-                store.get_logs_impl(&range, "", &s("actor"), i("limit", 100))
+                json!(store.presence_impl(window))
             }
-            "search_logs" => store.get_logs_impl(
-                &{
-                    let v = s("range");
-                    if v.is_empty() {
-                        "7d".to_string()
-                    } else {
-                        v
-                    }
-                },
-                &s("q"),
-                &s("actor"),
-                i("limit", 100),
-            ),
+            "get_logs" | "search_logs" => {
+                let range = s("range");
+                if !MemoryStore::log_range_ok(&range) {
+                    anyhow::bail!("unknown range {range:?}: use {}", MemoryStore::LOG_RANGES);
+                }
+                let range = if range.trim().is_empty() {
+                    if name == "get_logs" { "1d" } else { "7d" }.to_string()
+                } else {
+                    range
+                };
+                let q = if name == "search_logs" {
+                    s("q")
+                } else {
+                    String::new()
+                };
+                store.get_logs_impl(&range, &q, &s("actor"), limit_arg(args, 100)?)
+            }
             "digest" => store.digest_impl(
                 opt("folder").as_deref(),
                 args.get("since").and_then(|v| v.as_f64()),
@@ -786,13 +786,8 @@ pub fn call_extra(
             "get_folder_meta" => store.get_folder_meta_impl(opt("folder").as_deref()),
 
             // ---------------- identity ----------------
-            "set_my_name" => {
-                let n = s("name");
-                if n.is_empty() {
-                    anyhow::bail!("name is required");
-                }
-                store.set_actor_alias(actor, &n)?
-            }
+            // Needs the key list: handled in `McpServer::set_my_name`.
+            "set_my_name" => anyhow::bail!("{name} is handled by the server"),
             // Needs the caller's key: handled in `McpServer::call_tool_by`.
             "set_my_color" => anyhow::bail!("set_my_color needs an API key caller"),
             // Need the state database: handled in `McpServer::call_pins`.

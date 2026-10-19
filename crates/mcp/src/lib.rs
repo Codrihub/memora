@@ -1361,10 +1361,13 @@ impl McpServer {
             if name == "set_my_color" {
                 return self.set_my_color(caller, args);
             }
+            if name == "set_my_name" {
+                return self.set_my_name(caller, args);
+            }
             if matches!(name, "list_pins" | "pin" | "unpin") {
                 return self.call_pins(caller, name, args);
             }
-            self.exec_tool(name, args, caller.actor(), self.view_for(caller))
+            self.exec_tool(name, args, caller)
         })
     }
 
@@ -1401,30 +1404,82 @@ impl McpServer {
         )?)
     }
 
+    /// `set_my_name`: the caller's display alias. Names other agents (key names and
+    /// aliases) or the owner already use are refused, so no one can pass as someone else.
+    fn set_my_name(&self, caller: &Caller, args: &Value) -> anyhow::Result<Value> {
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let me = caller.actor();
+        let (keys, owner) = self
+            .db
+            .read(|c| Ok((memora_state::keys::list(c)?, memora_state::owner::get(c)?)))?;
+        let store = memora_core::privacy::lock_as(&self.store, self.view_for(caller));
+        let mut taken: Vec<String> = vec!["owner".to_string()];
+        if let Some(o) = owner {
+            taken.push(o.username);
+            taken.push(o.display_name);
+        }
+        taken.extend(
+            keys.into_iter()
+                .filter(|k| k.id != caller.id)
+                .map(|k| k.name),
+        );
+        for (actor, alias) in store.get_actor_aliases() {
+            if actor != me {
+                taken.push(actor);
+                taken.extend(alias.as_str().map(str::to_string));
+            }
+        }
+        if let Some(t) = taken
+            .iter()
+            .map(|t| t.trim())
+            .find(|t| !t.is_empty() && t.to_lowercase() == name.to_lowercase() && *t != me)
+        {
+            anyhow::bail!(
+                "the name {t:?} is already used by another agent or the owner; pick another"
+            );
+        }
+        Ok(store.set_actor_alias(me, name)?)
+    }
+
     /// `set_my_color`: the calling API key's display color.
     fn set_my_color(&self, caller: &Caller, args: &Value) -> anyhow::Result<Value> {
         if caller.perms.is_none() {
-            anyhow::bail!("only API keys have a display color");
+            anyhow::bail!(
+                "only API keys have a display color; the owner's color is set in the web UI"
+            );
         }
         let color = args.get("color").and_then(|v| v.as_str()).unwrap_or("");
         let key = self
             .db
-            .write(|tx| memora_state::keys::set_color(tx, &caller.id, Some(color)))?;
+            .write(|tx| memora_state::keys::set_color(tx, &caller.id, Some(color)))
+            .map_err(|e| match e {
+                memora_state::Error::Invalid { .. } => anyhow::anyhow!(
+                    "color must be a hex color like #f59e0b (#rgb or #rrggbb), or '' to reset (got {color:?})"
+                ),
+                other => other.into(),
+            })?;
         memora_core::events::hub().publish(json!({
             "type": "key_color", "actor": caller.actor(), "actor_id": caller.id, "color": key.color,
         }));
         Ok(json!({"ok": true, "id": key.id, "name": key.name, "color": key.color}))
     }
 
-    fn exec_tool(
-        &self,
-        name: &str,
-        args: &Value,
-        actor: &str,
-        view: Option<Arc<dyn PathView>>,
-    ) -> anyhow::Result<Value> {
+    fn exec_tool(&self, name: &str, args: &Value, caller: &Caller) -> anyhow::Result<Value> {
+        let actor = caller.actor();
         // Locked for this caller: an agent's view hides its private paths everywhere.
-        let store = memora_core::privacy::lock_as(&self.store, view);
+        let store = memora_core::privacy::lock_as(&self.store, self.view_for(caller));
+        // Soft locks bind agents: a write to a note another holder locked is refused
+        // (checked under the store lock, so the lock cannot change in between). The
+        // owner (browser session, local use) is not held up by agents' locks.
+        if caller.perms.is_some() {
+            if let Some(why) = lock_conflict(&store, name, args, caller) {
+                anyhow::bail!("{why}");
+            }
+        }
         let s = |k: &str| {
             args.get(k)
                 .and_then(|v| v.as_str())
@@ -1592,6 +1647,25 @@ impl McpServer {
                 "ok": true,
                 "folder": store.create_folder_impl(&s("name"))?
             }),
+            "lock_node" => {
+                own_lock_name(caller, args)?;
+                let ttl = match args.get("ttl") {
+                    None | Some(Value::Null) => 300,
+                    Some(v) => match v.as_i64() {
+                        Some(n) => n,
+                        None => anyhow::bail!("ttl must be 5-86400 seconds (got {v})"),
+                    },
+                };
+                store.lock_node_impl(&s("path"), &caller.id, actor, ttl)?
+            }
+            "release_lock" => {
+                // The owner's session may clear any lock; an agent only its own.
+                let force = caller.perms.is_none();
+                if !force {
+                    own_lock_name(caller, args)?;
+                }
+                store.release_lock_impl(&s("path"), &caller.id, actor, force)?
+            }
             other => match crate::tools::call_extra(
                 &store,
                 other,
@@ -1605,6 +1679,58 @@ impl McpServer {
             },
         })
     }
+}
+
+/// `owner` of `lock_node` / `release_lock`, when given, must name the caller: locks are
+/// always taken and released in the caller's own name.
+fn own_lock_name(caller: &Caller, args: &Value) -> anyhow::Result<()> {
+    let owner = args
+        .get("owner")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if owner.is_empty() || owner == caller.actor() || owner == caller.id {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "owner must be you ({}): locks are always taken and released in your own name; leave owner out",
+        caller.actor()
+    )
+}
+
+/// Why `caller` may not run write tool `name` now: a note it would change is locked by
+/// another holder. Notes come from the path arguments; folder-wide tools check every
+/// lock inside their folder (`bulk_replace` without a folder: the whole vault).
+fn lock_conflict(store: &MemoryStore, name: &str, args: &Value, caller: &Caller) -> Option<String> {
+    if activity::is_read_only(name) || matches!(name, "lock_node" | "release_lock") {
+        return None;
+    }
+    let str_of = |k: &str| args.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    let mut paths: Vec<String> = ["path", "from", "to", "old_path", "new_path", "into"]
+        .iter()
+        .filter_map(|k| str_of(k))
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
+        paths.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_string));
+    }
+    let mut folders: Vec<String> = Vec::new();
+    match name {
+        "delete_folder" | "rename_folder" | "move_folder" | "move_folder_contents" => {
+            folders.extend(str_of("folder").filter(|f| !f.trim().is_empty()));
+        }
+        "bulk_delete" => folders.extend(str_of("folder").filter(|f| !f.trim().is_empty())),
+        "bulk_replace"
+            if !args
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false) =>
+        {
+            folders.push(str_of("folder").unwrap_or_default());
+        }
+        _ => {}
+    }
+    store.lock_conflict(&paths, &folders, &caller.id, caller.actor())
 }
 
 fn now_secs() -> i64 {
