@@ -20,7 +20,7 @@ services:
   gateway:
     # Released images: ghcr.io/codrihub/memora:<version>, <major>.<minor>, latest.
     # To build from this checkout instead: docker compose build
-    image: ${IMAGE:-ghcr.io/codrihub/memora:1.3.0}
+    image: ${IMAGE:-ghcr.io/codrihub/memora:1.3.1}
     build:
       context: .
       dockerfile: Dockerfile

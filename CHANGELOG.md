@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-20
+
+### Added
+
+- Shut the server down from the browser: Settings, Server, Shut down (owner
+  only, after a confirmation). The server stops gracefully and exits with
+  status 0. When systemd (`Restart=always`) or Docker starts it again, the
+  confirmation says so and shows the stop command to use instead.
+  `POST /api/server/shutdown` refuses API keys and cross-site requests.
+- One floating back-to-top button on every scrolling page, at the bottom
+  right and above the tab bar on phones.
+
+### Changed
+
+- The welcome screen of a new instance is a wider two-column card, and its
+  steps use `memora-cli setup` (it prints the code and the link) with the
+  install's own command prefix.
+- At tablet widths the profile menu opens as a popover next to the sidebar
+  instead of a bottom sheet.
+- README and the install guide list start, stop and restart per install.
+
+### Fixed
+
+- Code in reading themes: inline code and code blocks take the theme's
+  colours (Paper on the dark app was 1.3:1, now about 12:1).
+- The `web/node_modules` symlink of a work tree slipped into 1.2.3; it is no
+  longer tracked and the ignore rules now match a folder or a link.
+
 ## [1.3.0] - 2026-10-19
 
 ### Added
@@ -245,6 +273,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.1]: https://github.com/Codrihub/memora/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Codrihub/memora/releases/tag/v1.3.0
 [1.2.3]: https://github.com/Codrihub/memora/releases/tag/v1.2.3
 [1.2.2]: https://github.com/Codrihub/memora/releases/tag/v1.2.2
