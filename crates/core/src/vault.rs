@@ -165,7 +165,30 @@ pub fn is_folder_icon(icon: &str) -> bool {
     // One emoji: a few code points (skin tones, ZWJ sequences, flags), no letters,
     // digits or spaces, and at least one pictographic (non-ASCII) character.
     let n = icon.chars().count();
-    (1..=10).contains(&n)
+    // Base pictographs: joiners, variation selectors and skin tones attach to one;
+    // a flag is a pair of regional indicators. More than one base is two emoji.
+    let bases = icon
+        .chars()
+        .filter(|&c| {
+            let u = c as u32;
+            u >= 0x2000
+                && u != 0x200D
+                && !(0xFE00..=0xFE0F).contains(&u)
+                && !(0x1F3FB..=0x1F3FF).contains(&u)
+                && !(0x1F1E6..=0x1F1FF).contains(&u)
+        })
+        .count();
+    let flags = icon
+        .chars()
+        .filter(|&c| (0x1F1E6..=0x1F1FF).contains(&(c as u32)))
+        .count();
+    let zwj = icon.contains('\u{200D}');
+    let one = if flags > 0 {
+        flags == 2 && bases == 0
+    } else {
+        bases == 1 || (zwj && bases >= 1)
+    };
+    one && (1..=10).contains(&n)
         && icon.chars().any(|c| (c as u32) >= 0x2000)
         && !icon
             .chars()
@@ -311,7 +334,7 @@ pub fn title_notice(title: &str, path: &str) -> Option<(String, String)> {
         (
             title.to_string(),
             format!(
-                "the title was changed to make a safe file name (at most 80 letters, digits, spaces, `_` and `-`); the note is `{path}`"
+                "the title was changed to make a safe file name (at most 80 letters, digits, `_` and `-`; spaces become `_`); the note is `{path}`"
             ),
         )
     })
@@ -2973,7 +2996,11 @@ impl MemoryStore {
             return Ok(None);
         }
         let asked = folder_arg(into)?;
-        if asked.to_lowercase().ends_with(".md") || self.resolve(&asked).is_ok_and(|p| p.is_file())
+        if asked.to_lowercase().ends_with(".md")
+            || self.resolve(&asked).is_ok_and(|p| p.is_file())
+            || self
+                .resolve(&format!("{asked}.md"))
+                .is_ok_and(|p| p.is_file())
         {
             return err(format!("destination {asked} is a note, not a folder"));
         }
@@ -6474,6 +6501,35 @@ mod note_ops_tests {
 #[cfg(test)]
 mod folder_tests {
     use super::*;
+
+    #[test]
+    fn icons_take_exactly_one_emoji() {
+        for ok in [
+            "🦄",
+            "👍🏽",
+            "👨\u{200D}👩\u{200D}👧",
+            "🇮🇩",
+            "⭐",
+            "❤\u{FE0F}",
+        ] {
+            assert!(is_folder_icon(ok), "{ok}");
+        }
+        for bad in ["🦄🦄", "⭐x", "🇮", "🇮🇩🇮🇩", "a"] {
+            assert!(!is_folder_icon(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_move_into_a_note_named_without_md_is_refused() {
+        let (d, s) = vault(
+            "bare-note",
+            &[("Readme.md", "# R\n"), ("Fresh/A.md", "# A\n")],
+        );
+        let e = s.move_folder_impl("Fresh", "Readme").unwrap_err().0;
+        assert!(e.contains("is a note, not a folder"), "{e}");
+        assert!(!d.join("Readme").exists());
+        assert!(d.join("Fresh/A.md").exists());
+    }
 
     fn vault(tag: &str, files: &[(&str, &str)]) -> (PathBuf, MemoryStore) {
         let d = std::env::temp_dir().join(format!(

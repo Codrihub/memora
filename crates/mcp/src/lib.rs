@@ -365,7 +365,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
             description: "Every note carrying a given tag.",
             when: "To collect notes that share a theme.",
             input_schema: obj(
-                j!({"tag": {"type":"string"}, "limit": {"type":"integer","default":50}}),
+                j!({"tag": {"type":"string"}, "limit": {"type":"integer","default":50,"minimum":0}}),
                 &["tag"],
             ),
         },

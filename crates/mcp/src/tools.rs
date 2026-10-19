@@ -682,7 +682,17 @@ pub fn call_extra(
             }
 
             // ---------------- write ----------------
-            "batch_create" => json!(store.batch_create_impl(&arr("notes"))?),
+            "batch_create" => {
+                let out = store.batch_create_impl(&arr("notes"))?;
+                // One node_created per note, as create_memory sends, so open browsers
+                // and digest see them.
+                for r in &out {
+                    if let Some(p) = r.get("path").and_then(|v| v.as_str()) {
+                        crate::publish_node("node_created", actor, store, p);
+                    }
+                }
+                json!(out)
+            }
             "duplicate_memory" => json!({
                 "ok": true,
                 "path": store.duplicate_memory_impl(&s("path"))?
@@ -843,7 +853,7 @@ pub fn call_extra(
                         "{name} already exists in the exchange folder; pass overwrite: true to replace it, or choose another out_path"
                     );
                 }
-                std::fs::write(&dest, &bytes)?;
+                write_private(&dest, &bytes)?;
                 // Only the file name: the server's disk layout stays private, and
                 // import_memory takes the same name.
                 json!({"ok": true, "path": name, "name": name, "bytes": bytes.len(), "replaced": replaced})
@@ -964,6 +974,20 @@ fn exchange_file(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
         ));
     }
     Ok(path)
+}
+
+/// Write an exchange zip readable by the server's user only (0600 on Unix).
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let _ = std::fs::remove_file(path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(bytes)
 }
 
 #[cfg(test)]
