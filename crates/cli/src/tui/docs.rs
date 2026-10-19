@@ -893,7 +893,10 @@ mod tests {
 
     #[test]
     fn agent_prompts_match_the_web_source() {
-        let ts = include_str!("../../../../web/src/docs/agent-prompt.ts");
+        // A Windows checkout may have CRLF line ends; the Rust copies (string
+        // literals) always have LF.
+        let ts = include_str!("../../../../web/src/docs/agent-prompt.ts").replace("\r\n", "\n");
+        let ts = ts.as_str();
         let body = |name: &str| -> &str {
             let start = format!("export const {name} = `");
             let at = ts
