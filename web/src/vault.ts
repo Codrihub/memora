@@ -45,6 +45,12 @@ export function fetchSettings(): Promise<SettingsInfo> {
   return apiGet<SettingsInfo>('/api/settings');
 }
 
+/** An absolute folder path as the server accepts it: `/...` on any OS, plus
+ *  `C:\...` (or `C:/...`) and `\\server\share` for a server on Windows. */
+export function isAbsolutePath(p: string): boolean {
+  return p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
+}
+
 /** "12 notes" / "1 note" / "no notes yet". */
 export function notesLabel(n: number | undefined | null): string {
   const c = n || 0;
@@ -67,7 +73,7 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
     <div class="field" style="margin-bottom:10px"><label for="${o.id}Path">Folder on the server</label>
       <input id="${o.id}Path" class="vf-path" type="text" placeholder="/srv/memora/vault"
         autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="${o.id}Err">
-      <span class="hint">An absolute path, such as /srv/memora/vault.</span></div>
+      <span class="hint">An absolute path, such as /srv/memora/vault or, on Windows, C:\\Users\\you\\memora.</span></div>
     <label class="switch"><input type="checkbox" id="${o.id}Create"> Create the folder if it is missing</label>
     <div id="${o.id}Err" role="alert" aria-live="polite"></div>
     <div class="vf-row"><button type="submit" class="btn primary" id="${o.id}Go">${esc(o.submitLabel)}</button></div>
@@ -97,7 +103,9 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
     clearError();
     path = path.trim();
     if (!path) return showError('Enter the folder path.');
-    if (!path.startsWith('/')) return showError('Use an absolute path, starting with /.');
+    if (!isAbsolutePath(path)) {
+      return showError('Use an absolute path, starting with / (or C:\\ or \\\\server\\share on Windows).');
+    }
     go.disabled = true;
     if (use) use.disabled = true;
     const label = go.textContent;
