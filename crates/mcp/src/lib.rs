@@ -48,6 +48,167 @@ pub struct ToolSpec {
     pub input_schema: Value,
 }
 
+/// Argument names a tool accepts besides its schema: `(tool, alias, canonical)`.
+const ARG_ALIASES: &[(&str, &str, &str)] = &[("search_memory", "query", "q")];
+
+/// Check a `tools/call` against the tool's `inputSchema` before it runs: the
+/// arguments are an object, every one is a name the tool takes, every required
+/// one is present (not null), and each has the JSON type (and enum value) the
+/// schema names. A wrong name used to be ignored without a word, so a
+/// `move_memory` without `folder` moved the note to the top level and the
+/// agent never learned its call did something else.
+pub fn check_args(tool: &str, schema: &Value, args: &Value) -> Result<(), String> {
+    let usage = || usage_line(tool, schema);
+    let Some(given) = args.as_object() else {
+        return Err(format!(
+            "{tool}: arguments must be a JSON object. {}",
+            usage()
+        ));
+    };
+    let props = schema.get("properties").and_then(|p| p.as_object());
+    let alias_of = |k: &str| {
+        ARG_ALIASES
+            .iter()
+            .find(|(t, a, _)| *t == tool && *a == k)
+            .map(|(_, _, c)| *c)
+    };
+    let mut unknown: Vec<&str> = given
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !props.is_some_and(|p| p.contains_key(*k)) && alias_of(k).is_none())
+        .collect();
+    unknown.sort_unstable();
+    if !unknown.is_empty() {
+        let list = unknown
+            .iter()
+            .map(|k| format!("`{k}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let s = if unknown.len() == 1 { "" } else { "s" };
+        return Err(format!("{tool}: unknown argument{s} {list}. {}", usage()));
+    }
+    let present = |k: &str| {
+        given.get(k).is_some_and(|v| !v.is_null())
+            || ARG_ALIASES.iter().any(|(t, a, c)| {
+                *t == tool && *c == k && given.get(*a).is_some_and(|v| !v.is_null())
+            })
+    };
+    let missing: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .filter(|k| !present(k))
+        .collect();
+    if !missing.is_empty() {
+        let list = missing
+            .iter()
+            .map(|k| format!("`{k}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let s = if missing.len() == 1 { "" } else { "s" };
+        return Err(format!(
+            "{tool}: missing required argument{s} {list}. {}",
+            usage()
+        ));
+    }
+    for (k, v) in given {
+        if v.is_null() {
+            continue;
+        }
+        let key = alias_of(k).unwrap_or(k);
+        let Some(spec) = props.and_then(|p| p.get(key)) else {
+            continue;
+        };
+        if let Some(want) = spec.get("type").and_then(|t| t.as_str()) {
+            let fits = match want {
+                "string" => v.is_string(),
+                "integer" => v.is_i64() || v.is_u64(),
+                "number" => v.is_number(),
+                "boolean" => v.is_boolean(),
+                "array" => v.is_array(),
+                "object" => v.is_object(),
+                _ => true,
+            };
+            if !fits {
+                return Err(format!(
+                    "{tool}: `{k}` must be {} (got {}). {}",
+                    article(want),
+                    json_kind(v),
+                    usage()
+                ));
+            }
+        }
+        if let (Some(allowed), Some(s)) = (spec.get("enum").and_then(|e| e.as_array()), v.as_str())
+        {
+            if !allowed.iter().any(|a| a.as_str() == Some(s)) {
+                let list = allowed
+                    .iter()
+                    .filter_map(|a| a.as_str())
+                    .map(|a| format!("'{a}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!("{tool}: `{k}` must be one of {list} (got '{s}')."));
+            }
+        }
+        if let (Some(min), Some(n)) = (spec.get("minimum").and_then(|m| m.as_i64()), v.as_i64()) {
+            if n < min {
+                return Err(format!("{tool}: `{k}` must be at least {min} (got {n})."));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// "Arguments: path (string, required), limit (integer)." for error messages.
+fn usage_line(tool: &str, schema: &Value) -> String {
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .collect();
+    let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+        return format!("{tool} takes no arguments.");
+    };
+    if props.is_empty() {
+        return format!("{tool} takes no arguments.");
+    }
+    let parts: Vec<String> = props
+        .iter()
+        .map(|(k, s)| {
+            let ty = s.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+            if required.contains(&k.as_str()) {
+                format!("{k} ({ty}, required)")
+            } else {
+                format!("{k} ({ty})")
+            }
+        })
+        .collect();
+    format!("Arguments: {}.", parts.join(", "))
+}
+
+fn article(ty: &str) -> String {
+    match ty {
+        "integer" | "array" | "object" => format!("an {ty}"),
+        _ => format!("a {ty}"),
+    }
+}
+
+fn json_kind(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(n) if n.is_i64() || n.is_u64() => "an integer",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
 fn obj(props: Value, required: &[&str]) -> Value {
     json!({"type":"object","properties":props,"required":required})
 }
@@ -188,14 +349,20 @@ pub fn base_catalog() -> Vec<ToolSpec> {
             category: "tag",
             description: "Every tag in the vault with its usage count.",
             when: "To see the existing taxonomy before adding a new tag.",
-            input_schema: obj(j!({}), &[]),
+            input_schema: obj(
+                j!({"path": {"type":"string","description":"A note: only its tags (omit for every tag in the vault)"}}),
+                &[],
+            ),
         },
         ToolSpec {
             name: "search_by_tag",
             category: "tag",
             description: "Every note carrying a given tag.",
             when: "To collect notes that share a theme.",
-            input_schema: obj(j!({"tag": {"type":"string"}}), &["tag"]),
+            input_schema: obj(
+                j!({"tag": {"type":"string"}, "limit": {"type":"integer","default":50}}),
+                &["tag"],
+            ),
         },
         ToolSpec {
             name: "list_folders",
@@ -993,7 +1160,31 @@ impl McpServer {
                 if let Some(msg) = self.refusal(caller, name) {
                     return err(id, -32003, msg);
                 }
-                let result = if admin_catalog().iter().any(|t| t.name == name) {
+                let admin = admin_catalog();
+                let spec = admin
+                    .iter()
+                    .find(|t| t.name == name)
+                    .map(|t| (t.input_schema.clone(), true))
+                    .or_else(|| {
+                        catalog()
+                            .into_iter()
+                            .find(|t| t.name == name)
+                            .map(|t| (t.input_schema, false))
+                    });
+                let args = if args.is_null() { json!({}) } else { args };
+                let checked = match &spec {
+                    None => Err(format!(
+                        "unknown tool: {name}. Call tools/list to see the tools you can use."
+                    )),
+                    Some((schema, _)) => check_args(name, schema, &args),
+                };
+                let is_admin = spec.as_ref().is_some_and(|(_, a)| *a);
+                let result = if let Err(msg) = checked {
+                    // Logged as a failed call too, so the agent's mistake shows in Activity.
+                    activity::traced(caller, name, &args, activity_label(name, &args), || {
+                        Err(anyhow::anyhow!(msg))
+                    })
+                } else if is_admin {
                     activity::traced(caller, name, &args, activity_label(name, &args), || {
                         self.call_admin(caller, name, &args)
                     })
@@ -1005,10 +1196,18 @@ impl McpServer {
                         id,
                         json!({"content":[{"type":"text","text": v.to_string()}],"isError":false}),
                     ),
-                    Err(e) => ok(
-                        id,
-                        json!({"content":[{"type":"text","text": e.to_string()}],"isError":true}),
-                    ),
+                    Err(e) => {
+                        let msg = format!("{e:#}");
+                        tracing::warn!(
+                            tool = name,
+                            caller = caller.actor(),
+                            "MCP tool call failed: {msg}"
+                        );
+                        ok(
+                            id,
+                            json!({"content":[{"type":"text","text": msg}],"isError":true}),
+                        )
+                    }
                 }
             }
             "resources/list" => ok(
