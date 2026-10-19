@@ -208,15 +208,15 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "batch_create",
             "write",
-            "Create many notes in one call.",
+            "Create many notes in one call. Each item is {title (required), content, folder (default Memory)}; titles follow create_memory's rules. Items are checked first: when any is malformed (no title, a wrong type, an unknown key) nothing is created. Then each note is created on its own and the reply lists one result per item ({ok, path} or {ok:false, item, error}).",
             "For migrations or bulk imports.",
-            json!({"notes":{"type":"array","items":{"type":"object"}}}),
+            json!({"notes":{"type":"array","items":{"type":"object","properties":{"title":{"type":"string"},"content":{"type":"string"},"folder":{"type":"string","default":"Memory"}},"required":["title"],"additionalProperties":false}}}),
             &["notes"],
         ),
         spec(
             "duplicate_memory",
             "write",
-            "Duplicate a note as '<name>-copy' in the same folder.",
+            "Duplicate a note as '<name>-copy' in the same folder (a long name is shortened so the suffix fits the 80-character limit).",
             "To use a note as the starting point for a new one.",
             json!({"path":{"type":"string"}}),
             &["path"],
@@ -224,17 +224,17 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "merge_memory",
             "write",
-            "Merge several notes into one target note.",
+            "Merge notes into one target note: the body of each note in `paths` (without its frontmatter) is appended to `into` under a '## from <name>' heading, and its tags are added to the target's tags. `into` is created when missing ('.md' optional). The source notes are kept; delete them afterwards if you no longer need them.",
             "To consolidate notes whose content is scattered.",
-            json!({"paths":{"type":"array","items":{"type":"string"}},"into":{"type":"string"}}),
+            json!({"paths":{"type":"array","items":{"type":"string"},"description":"Existing notes to merge, each once, not including `into`"},"into":{"type":"string","description":"Target note path, e.g. 'Notes/All.md'"}}),
             &["paths", "into"],
         ),
         spec(
             "template_create",
             "write",
-            "Create a note from a file in Templates/ with {{var}} substitution.",
+            "Create a note from a template, a note in Templates/. {{name}} placeholders are filled from `variables`; {{title}} (the note title) and {{date}} (today, YYYY-MM-DD) are built in unless given.",
             "So new notes match the folder's format.",
-            json!({"template":{"type":"string"},"title":{"type":"string"},"folder":{"type":"string","default":"Root"},"variables":{"type":"object"}}),
+            json!({"template":{"type":"string","description":"Template name in Templates/, e.g. 'Meeting' or 'Meeting.md'"},"title":{"type":"string"},"folder":{"type":"string","default":"Root"},"variables":{"type":"object"}}),
             &["template", "title"],
         ),
         spec(
@@ -437,7 +437,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "validate_memory",
             "ux",
-            "Check a note: frontmatter, created date, tags, broken links.",
+            "Check a note: frontmatter (present and well formed), a valid 'created' date, tags, and broken links (named in the issue and in `broken_links`).",
             "Before treating a note as finished.",
             json!({"path":{"type":"string"}}),
             &["path"],
@@ -663,7 +663,7 @@ pub fn call_extra(
             }
 
             // ---------------- write ----------------
-            "batch_create" => json!(store.batch_create_impl(&arr("notes"))),
+            "batch_create" => json!(store.batch_create_impl(&arr("notes"))?),
             "duplicate_memory" => json!({
                 "ok": true,
                 "path": store.duplicate_memory_impl(&s("path"))?
@@ -677,19 +677,19 @@ pub fn call_extra(
                     .unwrap_or_else(Map::new);
                 let folder = {
                     let v = s("folder");
-                    if v.is_empty() {
+                    if v.trim().is_empty() {
                         "Root".to_string()
                     } else {
                         v
                     }
                 };
-                let created = store.template_create_impl(
-                    &s("template"),
-                    &s("title"),
-                    &folder,
-                    Some(&vars),
-                )?;
-                json!({"ok": true, "path": created})
+                let title = s("title");
+                if title.trim().is_empty() {
+                    anyhow::bail!("title is required");
+                }
+                let created =
+                    store.template_create_impl(&s("template"), &title, &folder, Some(&vars))?;
+                crate::with_title_notice(json!({"ok": true, "path": created}), &title, &created)
             }
             "bulk_replace" => store.bulk_replace_impl(
                 &s("find"),

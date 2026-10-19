@@ -276,13 +276,13 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
-| `list_memory` | R | none | Every note grouped by folder: `{folder: [{path, name, folder, mtime}]}`. |
-| `read_memory` | R | `path` (string, required) | Markdown body, frontmatter, tags and backlinks of one note. |
-| `create_memory` | W | `title` (string, required), `folder` (string, default `Memory`; `Root` or empty for the top level), `content` (string; default is a stub with `created` frontmatter and a heading) | Creates `<folder>/<title>.md` and returns `{ok, path}`. |
+| `list_memory` | R | none | Every note grouped by its folder, the full parent path (`Projects/Atlas`; `Root` for the top level): `{folder: [{path, name, folder, mtime}]}`. |
+| `read_memory` | R | `path` (string, required) | Markdown body, frontmatter, tags and backlinks of one note. A `\` in a path is read as `/`; replies echo the normalized path. |
+| `create_memory` | W | `title` (string, required), `folder` (string relative to the vault, default `Memory` when omitted or empty; `Root` for the top level), `content` (string; default is a stub with `created` frontmatter and a heading) | Creates `<folder>/<title>.md` and returns `{ok, path}`. A trailing `.md` in the title is dropped; `/` and `\` in a title, an absolute folder and a folder that is a note are refused. Characters other than letters, digits, spaces, `_` and `-` are removed and names are cut at 80 characters; the reply then adds `renamed_from` and a `note`. A note whose name differs only in case from an existing one is refused. |
 | `save_memory` | W | `path` (string, required), `content` (string, required) | Replaces the whole note. |
 | `patch_memory` | W | `path` (string, required), `ops` (array, required) | Partial edits. Each op is an object: `{op:"append", text}`, `{op:"prepend", text}`, `{op:"replace", find, with}`, `{op:"set_field", field, value}`, `{op:"add_tag", tag}`, `{op:"remove_tag", tag}`. |
-| `delete_memory` | W | `path` (string, required) | Deletes a note (recoverable from git history). |
-| `move_memory` | W | `path` (string, required), `folder` (string, required) | Moves a note into another folder. Wikilinks resolve by note name, so they keep working. |
+| `delete_memory` | W | `path` (string, required) | Deletes a note permanently. `soft_delete` moves it to `.Trash` instead, where `restore_trash` can bring it back; only a vault that is a git repository keeps deleted notes in its history. |
+| `move_memory` | W | `path` (string, required), `folder` (string, required; relative to the vault, `Root` for the top level) | Moves a note into another folder. Wikilinks resolve by note name, so they keep working. |
 | `rename_memory` | W | `path` (string, required), `new_name` (string, required) | Renames a note in its folder. |
 
 ### Search (`search`)
@@ -356,10 +356,10 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
-| `batch_create` | W | `notes` (array, required) of `{title, folder (default Root), content}` | Creates many notes in one call. |
-| `duplicate_memory` | W | `path` (string, required) | Copies a note as `<name>-copy` in the same folder. |
-| `merge_memory` | W | `paths` (array of strings, required), `into` (string, required) | Merges several notes into one target note. |
-| `template_create` | W | `template` (string, required), `title` (string, required), `folder` (string, default `Root`), `variables` (object) | Creates a note from a file in `Templates/` with `{{var}}` substitution. |
+| `batch_create` | W | `notes` (array, required) of `{title (required), folder (default `Memory`), content}` | Creates many notes in one call; titles and folders follow `create_memory`. Every item is checked first and nothing is created when one is malformed (missing title, wrong type, unknown key). The reply has one result per item: `{ok, path}` or `{ok: false, item, title, error}`. |
+| `duplicate_memory` | W | `path` (string, required) | Copies a note as `<name>-copy` in the same folder (a long name is shortened so the suffix fits in 80 characters). |
+| `merge_memory` | W | `paths` (array of strings, required: existing notes, each once, not `into`), `into` (string, required; `.md` optional) | Appends the body of each source, without its frontmatter, to `into` under `## from <name>`, and adds the sources' tags to the target's tags. `into` is created when missing. The sources are kept. Returns `{ok, into, created, merged, sources, tags_added}`. |
+| `template_create` | W | `template` (string, required; a note in `Templates/`, as `Meeting` or `Meeting.md`), `title` (string, required), `folder` (string, default `Root`), `variables` (object) | Creates a note from a template with `{{var}}` substitution. `{{title}}` (the note title) and `{{date}}` (today, `YYYY-MM-DD`) are built in unless given in `variables`. Only notes in `Templates/` can be templates. |
 | `bulk_replace` | W | `find` (string, required), `replace` (string, required), `folder` (string), `regex` (boolean, default false), `dry_run` (boolean, default false) | Find and replace across notes. Needs `write` even with `dry_run`. |
 | `bulk_delete` | W | `paths` (array of strings), `folder` (string) | Deletes many notes by list or by folder. |
 
@@ -410,7 +410,7 @@ Tools never read or write anywhere else on the server's disk.
 |---|---|---|---|
 | `get_todos` | R | `path` (string) | Open checklist items (`- [ ]`) in one note or the whole vault. |
 | `follow_ups` | R | none | Notes whose status is still awaiting action. |
-| `validate_memory` | R | `path` (string, required) | Checks frontmatter, created date, tags and links of a note. |
+| `validate_memory` | R | `path` (string, required) | Checks a note: frontmatter present and well formed, a valid `created` date, tags, and broken links (named in the issue and listed in `broken_links`). |
 | `list_pins` | R | none | The owner's pinned notes and folders in sidebar order: `{count, pins:[{kind, path, position, missing}]}`. `missing` is true when the path no longer exists (renamed or deleted outside Memora). |
 | `pin` | W | `path` (string, required), `kind` (`note` or `folder`; default: what the path is on disk), `position` (integer from 0; default: the end) | Pins an existing note or folder, or moves its pin. A note path may leave out `.md`. At most 200 pins. Returns the list. |
 | `unpin` | W | `path` (string, required), `kind` | Removes a pin; the note or folder is not touched. Returns the list with `removed`. |

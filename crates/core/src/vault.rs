@@ -2036,6 +2036,9 @@ impl MemoryStore {
     }
 
     pub fn read_note_impl(&self, path: &str) -> MResult<Value> {
+        // `Notes\Ideas.md` is `Notes/Ideas.md`: echo and compare the stored form.
+        let path = norm_note_path(path);
+        let path = path.as_str();
         let ap = self.resolve(path)?;
         if !ap.is_file() {
             return err(format!("not found: {path}"));
@@ -2249,20 +2252,78 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
+    /// A destination folder from a caller: `\` read as `/`, surrounding `/` and
+    /// spaces dropped; `""` (also for `Root` or blank) is the top level. Refuses an
+    /// absolute folder and a folder path that runs through a note.
+    fn dest_folder(&self, folder: &str) -> MResult<String> {
+        if is_absolute_input(folder) {
+            return err(format!(
+                "folder must be relative to the vault (got `{folder}`); use 'Root' for the top level"
+            ));
+        }
+        let f = folder.trim().replace('\\', "/");
+        let f = f.trim_matches('/').trim();
+        if f.is_empty() || f == "Root" {
+            return Ok(String::new());
+        }
+        let mut prefix = String::new();
+        for seg in f.split('/') {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            if self.resolve(&prefix)?.is_file() {
+                return err(format!("folder `{prefix}` is a note, not a folder"));
+            }
+        }
+        Ok(f.to_string())
+    }
+
+    /// Refuse `rel` (at `ap`) as a new note path when it, or a name in its folder
+    /// that differs only in case, is taken (`except` is the note being renamed or
+    /// moved itself). A twin hidden from the caller answers like a missing path.
+    fn ensure_free(&self, ap: &Path, rel: &str, except: Option<&Path>) -> MResult<()> {
+        if ap.exists() && Some(ap) != except {
+            return err(format!("already exists: {rel}"));
+        }
+        let (Some(dir), Some(name)) = (ap.parent(), ap.file_name()) else {
+            return Ok(());
+        };
+        let want = name.to_string_lossy().to_lowercase();
+        for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let n = e.file_name();
+            if n == name || n.to_string_lossy().to_lowercase() != want {
+                continue;
+            }
+            let twin = e.path();
+            if Some(twin.as_path()) == except {
+                continue;
+            }
+            let twin_rel = self.rel_of(&twin);
+            if !self.visible(&twin_rel) {
+                return err(format!("not found: {rel}"));
+            }
+            return err(format!(
+                "already exists (names are compared without case): {twin_rel}"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn create_impl(&self, title: &str, folder: &str, content: Option<&str>) -> MResult<String> {
-        let fn_ = safe_filename(title)?;
-        let rel = if folder.is_empty() || folder == "Root" {
+        let name = note_filename(title)?;
+        let fn_ = &name.file;
+        let folder = self.dest_folder(folder)?;
+        let rel = if folder.is_empty() {
             format!("{fn_}.md")
         } else {
             format!("{folder}/{fn_}.md")
         };
         let ap = self.resolve(&rel)?;
-        if ap.exists() {
-            return err(format!("already exists: {rel}"));
-        }
+        self.ensure_free(&ap, &rel, None)?;
         let body = match content {
             Some(c) => c.to_string(),
-            None => format!("---\ncreated: {}\n---\n\n# {title}\n\n", now_iso()),
+            None => format!("---\ncreated: {}\n---\n\n# {}\n\n", now_iso(), name.title),
         };
         if let Some(parent) = ap.parent() {
             fs::create_dir_all(parent).ok();
@@ -2274,6 +2335,7 @@ impl MemoryStore {
     }
 
     pub fn save_impl(&self, rel_path: &str, content: &str) -> MResult<()> {
+        let rel_path = &norm_note_path(rel_path);
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
             return err(format!("not found: {rel_path}"));
@@ -2285,11 +2347,12 @@ impl MemoryStore {
     }
 
     pub fn rename_impl(&self, rel_path: &str, new_name: &str) -> MResult<String> {
+        let rel_path = &norm_note_path(rel_path);
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
             return err(format!("not found: {rel_path}"));
         }
-        let fn_ = safe_filename(new_name)?;
+        let fn_ = note_filename(new_name)?.file;
         let folder = Path::new(rel_path)
             .parent()
             .map(|p| p.to_string_lossy().to_string());
@@ -2298,9 +2361,7 @@ impl MemoryStore {
             _ => format!("{fn_}.md"),
         };
         let dap = self.resolve(&dest)?;
-        if dap != ap && dap.exists() {
-            return err(format!("already exists: {dest}"));
-        }
+        self.ensure_free(&dap, &dest, Some(&ap))?;
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
         self.path_event(PathEvent::Moved {
             from: rel_path.to_string(),
@@ -2313,6 +2374,7 @@ impl MemoryStore {
     }
 
     pub fn move_impl(&self, rel_path: &str, dest_folder: &str) -> MResult<String> {
+        let rel_path = &norm_note_path(rel_path);
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
             return err(format!("not found: {rel_path}"));
@@ -2321,15 +2383,14 @@ impl MemoryStore {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        let dest = if dest_folder.is_empty() || dest_folder == "Root" {
+        let dest_folder = self.dest_folder(dest_folder)?;
+        let dest = if dest_folder.is_empty() {
             fn_
         } else {
             format!("{dest_folder}/{fn_}")
         };
         let dap = self.resolve(&dest)?;
-        if dap != ap && dap.exists() {
-            return err(format!("already exists: {dest}"));
-        }
+        self.ensure_free(&dap, &dest, Some(&ap))?;
         if let Some(p) = dap.parent() {
             fs::create_dir_all(p).ok();
         }
@@ -2634,30 +2695,100 @@ impl MemoryStore {
     }
 
     pub fn duplicate_memory_impl(&self, path: &str) -> MResult<String> {
-        let ap = self.resolve(path)?;
+        let path = norm_note_path(path);
+        let ap = self.resolve(&path)?;
         if !ap.is_file() {
             return err(format!("not found: {path}"));
         }
-        let base = Self::base_name(path);
+        // Keep the suffix inside the 80-character file name limit.
+        const SUFFIX: &str = "-copy";
+        let base: String = Self::base_name(&path)
+            .chars()
+            .take(80 - SUFFIX.len())
+            .collect();
         let content = self.read_raw(&ap).unwrap_or_default();
-        self.create_impl(&format!("{base}-copy"), &folder_of(path), Some(&content))
+        self.create_impl(
+            &format!("{base}{SUFFIX}"),
+            parent_folder(&path),
+            Some(&content),
+        )
     }
 
-    pub fn batch_create_impl(&self, notes: &[Value]) -> Vec<Value> {
-        let mut out = Vec::new();
-        for n in notes {
-            let title = n
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Untitled");
-            let folder = n.get("folder").and_then(|v| v.as_str()).unwrap_or("Root");
-            let content = n.get("content").and_then(|v| v.as_str());
-            match self.create_impl(title, folder, content) {
-                Ok(rel) => out.push(json!({"ok": true, "path": rel})),
-                Err(e) => out.push(json!({"ok": false, "title": title, "error": e.0})),
+    /// Create every note of `notes` (`{title, content?, folder?}`; `folder`
+    /// defaults to `Memory` like `create_memory`). Items are checked first and
+    /// nothing is created when one is malformed; then each note is created on its
+    /// own and the reply has one result per item.
+    pub fn batch_create_impl(&self, notes: &[Value]) -> MResult<Vec<Value>> {
+        const KEYS: [&str; 3] = ["title", "content", "folder"];
+        if notes.is_empty() {
+            return err("notes is required: a list of {title, content, folder} objects");
+        }
+        let mut problems = Vec::new();
+        for (i, n) in notes.iter().enumerate() {
+            let k = i + 1;
+            let Some(o) = n.as_object() else {
+                problems.push(format!(
+                    "item {k}: must be an object {{title, content, folder}}"
+                ));
+                continue;
+            };
+            for key in o.keys().filter(|key| !KEYS.contains(&key.as_str())) {
+                problems.push(format!(
+                    "item {k}: unknown key `{key}` (allowed: title, content, folder)"
+                ));
+            }
+            match o.get("title") {
+                Some(Value::String(t)) if !t.trim().is_empty() => {
+                    if let Err(e) = note_filename(t) {
+                        problems.push(format!("item {k}: {e}"));
+                    }
+                }
+                None | Some(Value::Null) | Some(Value::String(_)) => {
+                    problems.push(format!("item {k}: title is required"))
+                }
+                Some(_) => problems.push(format!("item {k}: title must be a string")),
+            }
+            for key in ["content", "folder"] {
+                match o.get(key) {
+                    None | Some(Value::Null) | Some(Value::String(_)) => {}
+                    Some(_) => problems.push(format!("item {k}: {key} must be a string")),
+                }
+            }
+            if let Some(Value::String(f)) = o.get("folder") {
+                if let Err(e) = self.dest_folder(f) {
+                    problems.push(format!("item {k}: {e}"));
+                }
             }
         }
-        out
+        if !problems.is_empty() {
+            return err(format!(
+                "nothing was created; fix these items: {}",
+                problems.join("; ")
+            ));
+        }
+        let mut out = Vec::new();
+        for (i, n) in notes.iter().enumerate() {
+            let title = n.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let folder = match n.get("folder").and_then(|v| v.as_str()) {
+                Some(f) if !f.trim().is_empty() => f,
+                _ => "Memory",
+            };
+            let content = n.get("content").and_then(|v| v.as_str());
+            match self.create_impl(title, folder, content) {
+                Ok(rel) => {
+                    let mut r = json!({"ok": true, "path": rel});
+                    if let Some((from, note)) = title_notice(title, &rel) {
+                        r["renamed_from"] = json!(from);
+                        r["note"] = json!(note);
+                    }
+                    out.push(r);
+                }
+                Err(e) => {
+                    out.push(json!({"ok": false, "item": i + 1, "title": title, "error": e.0}))
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn bulk_replace_impl(
@@ -2739,31 +2870,134 @@ impl MemoryStore {
         Ok(json!({"ok": true, "count": deleted.len(), "deleted": deleted}))
     }
 
+    /// Append the bodies of the notes `paths` (frontmatter stripped) to the note
+    /// `into`, each under a `## from <name>` heading, and add their frontmatter
+    /// tags to it. `into` is created when missing; the sources are kept.
     pub fn merge_memory_impl(&self, paths: &[Value], into: &str) -> MResult<Value> {
-        let mut body = String::new();
-        let mut n = 0usize;
+        if is_absolute_input(into) {
+            return err(format!(
+                "into must be a note path relative to the vault (got `{into}`)"
+            ));
+        }
+        let mut into = norm_note_path(into);
+        if into.is_empty() {
+            return err("into is required: the note to merge into, e.g. `Notes/All.md`");
+        }
+        let has_md = into.len() > 3
+            && into.is_char_boundary(into.len() - 3)
+            && into[into.len() - 3..].eq_ignore_ascii_case(".md");
+        if self.resolve(&into)?.is_dir() {
+            return err(format!(
+                "into `{into}` is a folder; give a note path such as `{into}/Merged.md`"
+            ));
+        }
+        if !has_md {
+            into.push_str(".md");
+        }
+        let dst = self.resolve(&into)?;
+        if dst.is_dir() {
+            return err(format!("into `{into}` is a folder, not a note"));
+        }
+        if paths.is_empty() {
+            return err("paths is required: the notes to merge into `into`");
+        }
+        // Every source must be an existing note, named once, and not the target.
+        let mut sources: Vec<(String, PathBuf)> = Vec::new();
+        let mut missing = Vec::new();
         for p in paths {
-            let Some(ps) = p.as_str() else { continue };
-            let ap = self.resolve(ps)?;
-            if ap.is_file() {
-                let nm = Self::base_name(ps);
-                body.push_str(&format!(
-                    "\n\n## from {nm}\n\n{}",
-                    self.read_raw(&ap).unwrap_or_default()
-                ));
-                n += 1;
+            let Some(ps) = p.as_str() else {
+                return err(format!("paths must be note paths (strings); got {p}"));
+            };
+            let ps = norm_note_path(ps);
+            if ps.is_empty() {
+                return err("paths contains an empty path");
             }
+            let ap = match self.resolve(&ps) {
+                Ok(ap) => ap,
+                Err(e) if e.0.starts_with("not found") => {
+                    missing.push(ps);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            if ap.is_dir() {
+                return err(format!("`{ps}` is a folder, not a note"));
+            }
+            if !ap.is_file() {
+                missing.push(ps);
+                continue;
+            }
+            if ap == dst {
+                return err(format!(
+                    "`{ps}` is the target; a note cannot be merged into itself"
+                ));
+            }
+            if sources.iter().any(|(_, a)| *a == ap) {
+                return err(format!("`{ps}` is listed more than once"));
+            }
+            sources.push((ps, ap));
         }
-        let dst = self.resolve(into)?;
-        if dst.is_file() {
-            let cur = self.read_raw(&dst).unwrap_or_default();
-            self.save_impl(into, &format!("{cur}{body}"))?;
+        if !missing.is_empty() {
+            return err(format!(
+                "not found: {} (nothing was merged)",
+                missing.join(", ")
+            ));
+        }
+        let mut body = String::new();
+        let mut tags: Vec<String> = Vec::new();
+        for (ps, ap) in &sources {
+            let raw = self.read_raw(ap).unwrap_or_default();
+            let (fm, text) = if frontmatter_problem(&raw).is_none() {
+                split_frontmatter(&raw)
+            } else {
+                (String::new(), raw.clone())
+            };
+            for t in FmLines::parse(&fm).list("tags") {
+                let t = t
+                    .trim_matches(['"', '\''])
+                    .trim_start_matches('#')
+                    .to_string();
+                if !t.is_empty() && !tags.contains(&t) {
+                    tags.push(t);
+                }
+            }
+            body.push_str(&format!(
+                "\n\n## from {}\n\n{}",
+                Self::base_name(ps),
+                text.trim_matches('\n')
+            ));
+        }
+        let created = !dst.is_file();
+        let into = if created {
+            self.create_impl(
+                &Self::base_name(&into),
+                parent_folder(&into),
+                Some(body.trim_start_matches('\n')),
+            )?
         } else {
-            self.create_impl(&Self::base_name(into), &folder_of(into), Some(&body))?;
+            let cur = self.read_raw(&dst).unwrap_or_default();
+            self.save_impl(&into, &format!("{}{body}\n", cur.trim_end_matches('\n')))?;
+            into
+        };
+        if !tags.is_empty() {
+            let ops: Vec<Value> = tags
+                .iter()
+                .map(|t| json!({"op": "add_tag", "tag": t}))
+                .collect();
+            self.patch_memory_impl(&into, &ops)?;
         }
-        Ok(json!({"ok": true, "into": into, "merged": n}))
+        let merged: Vec<&str> = sources.iter().map(|(p, _)| p.as_str()).collect();
+        Ok(json!({
+            "ok": true, "into": into, "created": created, "merged": merged.len(),
+            "sources": merged, "tags_added": tags,
+            "note": "the source notes are kept; delete them if you no longer need them",
+        }))
     }
 
+    /// Create a note from a template in `Templates/` (`Meeting`, `Meeting.md` or
+    /// `Templates/Meeting.md`). `{{name}}` placeholders take `variables`;
+    /// `{{title}}` (the note title) and `{{date}}` (today, `YYYY-MM-DD`) are
+    /// built in unless given.
     pub fn template_create_impl(
         &self,
         template: &str,
@@ -2771,24 +3005,50 @@ impl MemoryStore {
         folder: &str,
         variables: Option<&Map<String, Value>>,
     ) -> MResult<String> {
-        let rel = if template.ends_with(".md") {
-            template.to_string()
-        } else {
-            format!("Templates/{template}.md")
-        };
-        let tap = self.resolve(&rel)?;
-        if !tap.is_file() {
-            return err(format!("template not found: {template}"));
+        let t = template.trim().replace('\\', "/");
+        if t.is_empty() {
+            return err("template is required: the name of a note in Templates/, e.g. `Meeting`");
         }
+        if is_absolute_input(&t) {
+            return err(format!(
+                "template must be the name of a note in Templates/ (e.g. `Meeting`), not `{template}`"
+            ));
+        }
+        let t = t.strip_prefix("Templates/").unwrap_or(&t);
+        let has_md = t.len() > 3
+            && t.is_char_boundary(t.len() - 3)
+            && t[t.len() - 3..].eq_ignore_ascii_case(".md");
+        let rel = if has_md {
+            format!("Templates/{t}")
+        } else {
+            format!("Templates/{t}.md")
+        };
+        // A template hidden from the caller answers exactly like a missing one.
+        let missing = || {
+            MemoryErr(format!(
+                "template not found: {template} (templates are notes in Templates/)"
+            ))
+        };
+        let tap = match self.resolve(&rel) {
+            Ok(p) => p,
+            Err(e) if e.0.starts_with("not found") => return Err(missing()),
+            Err(e) => return Err(e),
+        };
+        if !tap.is_file() {
+            return Err(missing());
+        }
+        let name = note_filename(title)?;
+        let mut vars: Map<String, Value> = variables.cloned().unwrap_or_default();
+        vars.entry("title").or_insert_with(|| json!(name.title));
+        vars.entry("date")
+            .or_insert_with(|| json!(chrono::Local::now().format("%Y-%m-%d").to_string()));
         let mut content = self.read_raw(&tap).unwrap_or_default();
-        if let Some(vars) = variables {
-            for (k, v) in vars {
-                let val = match v {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                content = content.replace(&format!("{{{{{k}}}}}"), &val);
-            }
+        for (k, v) in &vars {
+            let val = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            content = content.replace(&format!("{{{{{k}}}}}"), &val);
         }
         self.create_impl(title, folder, Some(&content))
     }
@@ -3653,26 +3913,51 @@ impl MemoryStore {
     }
 
     pub fn validate_memory_impl(&self, path: &str) -> MResult<Value> {
-        let ap = self.resolve(path)?;
+        let path = norm_note_path(path);
+        let ap = self.resolve(&path)?;
         if !ap.is_file() {
             return err(format!("not found: {path}"));
         }
+        let raw = self.read_raw(&ap).unwrap_or_default();
         let (tags, fm) = self.note_tags_fm(&ap);
         let mut issues: Vec<String> = Vec::new();
-        if fm.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        let malformed = frontmatter_problem(&raw);
+        if let Some(why) = &malformed {
+            issues.push(format!("malformed frontmatter: {why}"));
+        } else if fm.as_object().map(|o| o.is_empty()).unwrap_or(true) {
             issues.push("no frontmatter".into());
-        } else if fm.get("created").is_none() {
-            issues.push("missing 'created'".into());
+        } else {
+            match fm.get("created") {
+                None => issues.push("missing 'created'".into()),
+                Some(v) => {
+                    let s = v
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| v.to_string());
+                    if !is_date_like(&s) {
+                        issues.push(format!(
+                            "'created' is not a valid date: `{s}` (use YYYY-MM-DD or an ISO 8601 date and time)"
+                        ));
+                    }
+                }
+            }
         }
-        if tags.is_empty() {
+        // Tags in malformed frontmatter cannot be read, so "no tags" would mislead.
+        if tags.is_empty() && malformed.is_none() {
             issues.push("no tags".into());
         }
-        if !self.broken_links(Some(path)).is_empty() {
-            issues.push("has broken link(s)".into());
+        let broken: Vec<String> = self
+            .broken_links(Some(&path))
+            .into_iter()
+            .map(|b| b.target)
+            .collect();
+        if !broken.is_empty() {
+            let names: Vec<String> = broken.iter().map(|t| format!("[[{t}]]")).collect();
+            issues.push(format!("broken link(s): {}", names.join(", ")));
         }
         Ok(
             json!({"path": path, "ok": issues.is_empty(), "issues": issues,
-                  "tags": tags, "frontmatter": fm}),
+                  "tags": tags, "frontmatter": fm, "broken_links": broken}),
         )
     }
 
@@ -4412,5 +4697,375 @@ mod image_render_tests {
         );
         assert!(h.contains("image not found: img/link.png"), "{h}");
         let _ = fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod note_ops_tests {
+    use super::*;
+    use crate::privacy::{lock_as, PathView};
+    use std::sync::{Arc, Mutex};
+
+    fn vault(tag: &str) -> (PathBuf, MemoryStore) {
+        let d = std::env::temp_dir().join(format!(
+            "memora-notes-{tag}-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        for f in ["Notes", "Templates", "Private", "Projects/Atlas"] {
+            fs::create_dir_all(d.join(f)).unwrap();
+        }
+        fs::write(d.join("Notes/Ideas.md"), "# Ideas\n").unwrap();
+        fs::write(d.join("Private/Secret.md"), "secret {{title}}").unwrap();
+        fs::write(
+            d.join("Templates/Meeting.md"),
+            "# {{title}} on {{date}} with {{who}}",
+        )
+        .unwrap();
+        let s = MemoryStore::new(&d);
+        (d, s)
+    }
+
+    fn msg<T: std::fmt::Debug>(r: MResult<T>) -> String {
+        r.unwrap_err().0
+    }
+
+    /// Hides `Private/` and `Templates/Hidden.md`.
+    struct View;
+    impl PathView for View {
+        fn visible(&self, rel: &str) -> bool {
+            let l = rel.trim_start_matches('/').to_lowercase();
+            !(l == "private" || l.starts_with("private/") || l == "templates/hidden.md")
+        }
+        fn mentions_hidden(&self, text: &str) -> bool {
+            text.to_lowercase().contains("private/")
+        }
+    }
+
+    #[test]
+    fn templates_come_only_from_the_templates_folder() {
+        let (d, s) = vault("tpl");
+        let e = msg(s.template_create_impl("Private/Secret.md", "x", "Root", None));
+        assert!(e.starts_with("template not found"), "{e}");
+        assert!(!d.join("x.md").exists());
+        assert_eq!(
+            msg(s.template_create_impl("", "x", "Root", None))
+                .split(':')
+                .next(),
+            Some("template is required")
+        );
+        assert!(
+            msg(s.template_create_impl("/etc/passwd", "x", "Root", None)).contains("Templates/")
+        );
+        let vars: Map<String, Value> = [("who".to_string(), json!("Ana"))].into_iter().collect();
+        for (i, name) in ["Meeting", "Meeting.md", "Templates/Meeting.md"]
+            .iter()
+            .enumerate()
+        {
+            let title = format!("Sync {i}");
+            let p = s
+                .template_create_impl(name, &title, "Notes", Some(&vars))
+                .unwrap();
+            let body = fs::read_to_string(d.join(&p)).unwrap();
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            assert_eq!(body, format!("# Sync {i} on {today} with Ana"));
+        }
+        // A given variable wins over the built-in.
+        let vars: Map<String, Value> = [("title".to_string(), json!("T"))].into_iter().collect();
+        let p = s
+            .template_create_impl("Meeting", "Other", "Notes", Some(&vars))
+            .unwrap();
+        assert!(fs::read_to_string(d.join(p)).unwrap().starts_with("# T on"));
+        // A template hidden from the caller answers exactly like a missing one.
+        fs::write(d.join("Templates/Hidden.md"), "h").unwrap();
+        let m = Mutex::new(s);
+        let v = lock_as(&m, Some(Arc::new(View)));
+        let hidden = msg(v.template_create_impl("Hidden", "a", "Root", None));
+        let missing = msg(v.template_create_impl("Nope", "a", "Root", None));
+        assert_eq!(hidden.replace("Hidden", "X"), missing.replace("Nope", "X"));
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn create_refuses_unsafe_folders_and_titles() {
+        let (d, s) = vault("create");
+        for f in ["/etc", "\\etc", "C:/x"] {
+            let e = msg(s.create_impl("evil", f, None));
+            assert!(e.contains("folder must be relative to the vault"), "{e}");
+        }
+        assert!(!d.join("etc/evil.md").exists());
+        // Blank folder is the top level (callers choose the default first).
+        assert_eq!(s.create_impl("Top", "   ", None).unwrap(), "Top.md");
+        assert!(!d.join("   ").exists());
+        assert_eq!(
+            msg(s.create_impl("x", "Notes/Ideas.md", None)),
+            "folder `Notes/Ideas.md` is a note, not a folder"
+        );
+        assert_eq!(
+            s.create_impl("Plan.md", "Notes", None).unwrap(),
+            "Notes/Plan.md"
+        );
+        for t in ["a/b", "a\\b", "../evil", "..evil"] {
+            assert!(s.create_impl(t, "Notes", None).is_err(), "{t:?} accepted");
+        }
+        assert!(title_notice("Plan", "Notes/Plan.md").is_none());
+        assert!(title_notice("My Plan", "Notes/My_Plan.md").is_none());
+        assert!(title_notice("Plan 🚀", "Notes/Plan.md").is_some());
+        assert!(title_notice(&"x".repeat(300), "x").is_some());
+        // Names differing only in case are one name.
+        let e = msg(s.create_impl("ideas", "Notes", None));
+        assert_eq!(
+            e,
+            "already exists (names are compared without case): Notes/Ideas.md"
+        );
+        // The stub heading uses the title without `.md`.
+        let stub = fs::read_to_string(d.join("Notes/Plan.md")).unwrap();
+        assert!(stub.contains("# Plan\n"), "{stub}");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn rename_move_and_duplicate_check_targets() {
+        let (d, s) = vault("move");
+        fs::write(d.join("Notes/Other.md"), "o").unwrap();
+        let e = msg(s.rename_impl("Notes/Other.md", "IDEAS"));
+        assert!(e.contains("names are compared without case"), "{e}");
+        // A case-only rename of the note itself is fine.
+        assert_eq!(
+            s.rename_impl("Notes/Other.md", "other").unwrap(),
+            "Notes/other.md"
+        );
+        assert!(msg(s.move_impl("Notes/other.md", "/etc")).contains("relative to the vault"));
+        assert_eq!(
+            msg(s.move_impl("Notes/other.md", "Notes/Ideas.md")),
+            "folder `Notes/Ideas.md` is a note, not a folder"
+        );
+        fs::write(d.join("Projects/ideas.md"), "dup").unwrap();
+        assert!(msg(s.move_impl("Projects/ideas.md", "Notes")).contains("without case"));
+        assert_eq!(s.move_impl("Notes\\other.md", "Root").unwrap(), "other.md");
+        // Duplicate: backslash paths, nested folders, long names.
+        assert_eq!(
+            s.duplicate_memory_impl("Notes\\Ideas.md").unwrap(),
+            "Notes/Ideas-copy.md"
+        );
+        fs::write(d.join("Projects/Atlas/Overview.md"), "o").unwrap();
+        assert_eq!(
+            s.duplicate_memory_impl("Projects/Atlas/Overview.md")
+                .unwrap(),
+            "Projects/Atlas/Overview-copy.md"
+        );
+        let long = "L".repeat(80);
+        fs::write(d.join(format!("Notes/{long}.md")), "l").unwrap();
+        let copy = s
+            .duplicate_memory_impl(&format!("Notes/{long}.md"))
+            .unwrap();
+        assert_eq!(copy, format!("Notes/{}-copy.md", "L".repeat(75)));
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn read_and_save_normalize_backslashes() {
+        let (d, s) = vault("norm");
+        fs::write(d.join("Notes/Link.md"), "see [[Ideas]]").unwrap();
+        let v = s.read_note_impl("Notes\\Ideas.md").unwrap();
+        assert_eq!(v["path"], "Notes/Ideas.md");
+        assert_eq!(v["backlinks"][0]["path"], "Notes/Link.md");
+        s.save_impl("Notes\\Ideas.md", "new").unwrap();
+        assert_eq!(fs::read_to_string(d.join("Notes/Ideas.md")).unwrap(), "new");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn batch_create_checks_every_item_first() {
+        let (d, s) = vault("batch");
+        let e = msg(s.batch_create_impl(&[
+            json!({"title": "Good"}),
+            json!("str"),
+            json!({"contnet": "x"}),
+            json!({"title": "T", "content": 5}),
+            json!({"title": "U", "folder": "/etc"}),
+        ]));
+        assert!(e.starts_with("nothing was created"), "{e}");
+        for part in [
+            "item 2: must be an object",
+            "item 3: unknown key `contnet`",
+            "item 3: title is required",
+            "item 4: content must be a string",
+            "item 5: folder must be relative",
+        ] {
+            assert!(e.contains(part), "{part} missing in {e}");
+        }
+        assert!(!d.join("Memory/Good.md").exists() && !d.join("Untitled.md").exists());
+        assert!(s.batch_create_impl(&[]).is_err());
+        let r = s
+            .batch_create_impl(&[
+                json!({"title": "Good"}),
+                json!({"title": "Two", "folder": "Notes", "content": "c"}),
+                json!({"title": "ideas", "folder": "Notes"}),
+                json!({"title": "Bad 🚀"}),
+            ])
+            .unwrap();
+        assert_eq!(r[0]["path"], "Memory/Good.md");
+        assert_eq!(r[1]["path"], "Notes/Two.md");
+        assert_eq!(r[2]["ok"], false);
+        assert_eq!(r[2]["item"], 3);
+        assert_eq!(r[3]["renamed_from"], "Bad 🚀");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn merge_validates_sources_and_target() {
+        let (d, s) = vault("merge");
+        fs::write(
+            d.join("Notes/A.md"),
+            "---\ntags: [alpha, shared]\ncreated: 2026-01-01\n---\n\nbody A\n",
+        )
+        .unwrap();
+        fs::write(d.join("Notes/B.md"), "---\ntags:\n  - beta\n---\nbody B").unwrap();
+        fs::create_dir_all(d.join("QM")).unwrap();
+        let a = || json!("Notes/A.md");
+        assert!(msg(s.merge_memory_impl(&[a()], "")).starts_with("into is required"));
+        assert!(msg(s.merge_memory_impl(&[a()], "/tmp/x.md")).contains("relative to the vault"));
+        assert!(msg(s.merge_memory_impl(&[a()], "QM")).contains("is a folder"));
+        assert!(msg(s.merge_memory_impl(&[], "Out.md")).starts_with("paths is required"));
+        assert!(msg(s.merge_memory_impl(&[json!("")], "Out.md")).contains("empty path"));
+        assert!(msg(s.merge_memory_impl(&[json!(5)], "Out.md")).contains("strings"));
+        assert!(msg(s.merge_memory_impl(&[json!("Notes")], "Out.md")).contains("is a folder"));
+        assert_eq!(
+            msg(s.merge_memory_impl(&[a(), json!("Nope.md")], "Out.md")),
+            "not found: Nope.md (nothing was merged)"
+        );
+        assert!(msg(s.merge_memory_impl(&[a(), a()], "Out.md")).contains("more than once"));
+        assert!(msg(s.merge_memory_impl(&[a()], "Notes/A")).contains("into itself"));
+        assert!(!d.join("Out.md").exists() && !d.join("QM.md").exists());
+        // A target without `.md` that exists is appended to.
+        fs::write(d.join("QM/MT.md"), "---\ntags: [old]\n---\n# MT\n").unwrap();
+        let r = s
+            .merge_memory_impl(&[a(), json!("Notes/B.md")], "QM/MT")
+            .unwrap();
+        assert_eq!(r["into"], "QM/MT.md");
+        assert_eq!(r["merged"], 2);
+        assert_eq!(r["created"], false);
+        let out = fs::read_to_string(d.join("QM/MT.md")).unwrap();
+        assert!(
+            out.contains("## from A\n\nbody A") && out.contains("## from B\n\nbody B"),
+            "{out}"
+        );
+        assert_eq!(
+            out.matches("---").count(),
+            2,
+            "source frontmatter pasted: {out}"
+        );
+        let tags = s.get_note_tags_impl("QM/MT.md").unwrap();
+        for t in ["old", "alpha", "shared", "beta"] {
+            assert!(
+                tags["frontmatter_tags"].to_string().contains(t),
+                "{t}: {tags}"
+            );
+        }
+        // Sources are kept; a new target is created.
+        assert!(d.join("Notes/A.md").exists());
+        let r = s.merge_memory_impl(&[a()], "QM/New").unwrap();
+        assert_eq!(
+            (r["into"].as_str(), r["created"].as_bool()),
+            (Some("QM/New.md"), Some(true))
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn validate_flags_dates_malformed_frontmatter_and_names_links() {
+        let (d, s) = vault("validate");
+        let check = |body: &str| {
+            fs::write(d.join("Notes/V.md"), body).unwrap();
+            s.validate_memory_impl("Notes\\V.md").unwrap()
+        };
+        for bad in ["notadate", "2026-13-45"] {
+            let v = check(&format!("---\ncreated: {bad}\ntags: [a]\n---\nx"));
+            assert!(
+                v["issues"][0]
+                    .as_str()
+                    .unwrap()
+                    .contains("not a valid date"),
+                "{v}"
+            );
+        }
+        for good in [
+            "2026-01-02",
+            "2026-01-02T10:00:00+07:00",
+            "2026-01-02 10:00",
+        ] {
+            let v = check(&format!("---\ncreated: {good}\ntags: [a]\n---\nx"));
+            assert_eq!(v["ok"], true, "{good}: {v}");
+        }
+        let v = check("---\ncreated: 2026-01-01\ntags: [a]\nx");
+        assert_eq!(
+            v["issues"],
+            json!(["malformed frontmatter: no closing `---` line"])
+        );
+        let v = check("---\njust words\n---\nx");
+        assert!(
+            v["issues"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("malformed frontmatter"),
+            "{v}"
+        );
+        let v = check("---\ncreated: 2026-01-01\ntags: [a]\n---\nsee [[Nowhere]] and [[Ideas]]");
+        assert_eq!(v["issues"], json!(["broken link(s): [[Nowhere]]"]));
+        assert_eq!(v["broken_links"], json!(["Nowhere"]));
+        assert_eq!(v["path"], "Notes/V.md");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn export_refuses_missing_paths_and_import_reports_each_entry() {
+        use std::io::Write;
+        let (d, s) = vault("zip");
+        assert_eq!(
+            msg(s.export_zip_impl(&[json!("Notes/Ideas.md"), json!("Nope.md")])),
+            "not found: Nope.md (nothing was exported)"
+        );
+        // A note inside an exported folder is written once.
+        let z = s
+            .export_zip_impl(&[json!("Notes"), json!("Notes\\Ideas.md")])
+            .unwrap();
+        assert_eq!(
+            zip::ZipArchive::new(std::io::Cursor::new(z)).unwrap().len(),
+            1
+        );
+
+        assert!(msg(s.import_zip_impl(b"not a zip", false)).starts_with("not a valid zip file"));
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let o = zip::write::SimpleFileOptions::default();
+            for (name, body) in [
+                ("Notes/Ideas.md", "replaced"),
+                ("Notes/New.md", "new"),
+                ("../evil.md", "x"),
+                ("/abs.md", "x"),
+                (".git/x.md", "x"),
+            ] {
+                zw.start_file(name, o).unwrap();
+                zw.write_all(body.as_bytes()).unwrap();
+            }
+            zw.finish().unwrap();
+        }
+        let r = s.import_zip_impl(&buf, false).unwrap();
+        assert_eq!(r["added"], json!(["Notes/New.md"]));
+        assert_eq!(r["skipped"], json!(["Notes/Ideas.md"]));
+        assert_eq!(r["overwritten"], json!([]));
+        assert_eq!(r["unsafe"].as_array().unwrap().len(), 3, "{r}");
+        assert_eq!(r["unsafe"][0]["reason"], "path leaves the vault");
+        assert_eq!(r["unsafe"][1]["reason"], "absolute path");
+        assert!(!d.join("abs.md").exists());
+        let r = s.import_zip_impl(&buf, true).unwrap();
+        assert_eq!(r["overwritten"], json!(["Notes/Ideas.md", "Notes/New.md"]));
+        assert_eq!(
+            fs::read_to_string(d.join("Notes/Ideas.md")).unwrap(),
+            "replaced"
+        );
+        fs::remove_dir_all(&d).ok();
     }
 }

@@ -235,7 +235,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "list_memory",
             category: "note",
-            description: "Every note grouped by folder, most recently modified first.",
+            description: "Every note grouped by its folder (the full path, e.g. 'Projects/Atlas'; 'Root' = top level), most recently modified first.",
             when: "To see the vault structure or browse without a keyword.",
             input_schema: obj(j!({}), &[]),
         },
@@ -252,12 +252,12 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "create_memory",
             category: "note",
-            description: "Create a new note in a folder.",
+            description: "Create a new note in a folder. The title is also the file name: a trailing '.md' is dropped, '/' and '\\' are refused, other characters than letters, digits, spaces, '_' and '-' are removed and names are cut at 80 characters (the reply then has `renamed_from` and a `note`). Refused when a note of the same name exists, compared without case.",
             when: "To store new information.",
             input_schema: obj(
                 j!({
                     "title": {"type":"string","description":"Note title; also the file name"},
-                    "folder": {"type":"string","description":"Folder path, e.g. 'Tech' ('Root' = top level)","default":"Memory"},
+                    "folder": {"type":"string","description":"Folder path relative to the vault, e.g. 'Tech' ('Root' = top level; omitted or empty = Memory)","default":"Memory"},
                     "content": {"type":"string","description":"Markdown body (omit for a stub with frontmatter)"}
                 }),
                 &["title"],
@@ -286,17 +286,17 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "delete_memory",
             category: "note",
-            description: "Delete a note (recoverable from git history).",
+            description: "Delete a note permanently. Use soft_delete instead to move it to .Trash, where restore_trash can bring it back. Only when the vault is a git repository can a deleted note be recovered from its history.",
             when: "To discard a note you no longer need.",
             input_schema: obj(j!({"path": {"type":"string"}}), &["path"]),
         },
         ToolSpec {
             name: "move_memory",
             category: "note",
-            description: "Move a note into another folder.",
+            description: "Move a note into another folder (created when missing).",
             when: "To tidy the vault; wikilinks survive because they resolve by note name.",
             input_schema: obj(
-                j!({"path": {"type":"string"}, "folder": {"type":"string"}}),
+                j!({"path": {"type":"string"}, "folder": {"type":"string","description":"Destination folder relative to the vault, e.g. 'Work/Plans'; 'Root' = top level"}}),
                 &["path", "folder"],
             ),
         },
@@ -1377,17 +1377,23 @@ impl McpServer {
             }
             "get_stats" => serde_json::to_value(store.stats())?,
             "list_memory" => {
-                // Shape: {folder: [{path, name, folder, mtime}, ...]}.
-                let tree = store.tree();
+                // Shape: {folder: [{path, name, folder, mtime}, ...]}, keyed by the
+                // full parent folder (`Projects/Atlas`); `Root` is the top level.
+                // (The web UI's /api/tree still groups by top-level folder.)
+                let mut groups: std::collections::BTreeMap<String, Vec<Value>> = Default::default();
+                for n in store.tree().into_values().flatten() {
+                    let folder = match memora_core::vault::parent_folder(&n.path) {
+                        "" => "Root".to_string(),
+                        f => f.to_string(),
+                    };
+                    groups.entry(folder.clone()).or_default().push(
+                        json!({"path": n.path, "name": n.name, "folder": folder, "mtime": n.mtime}),
+                    );
+                }
                 let mut obj = serde_json::Map::new();
-                for (folder, notes) in tree {
-                    let arr: Vec<Value> = notes
-                        .iter()
-                        .map(|n| {
-                            json!({"path": n.path, "name": n.name, "folder": n.folder, "mtime": n.mtime})
-                        })
-                        .collect();
-                    obj.insert(folder, json!(arr));
+                for (folder, mut notes) in groups {
+                    notes.sort_by_key(|n| std::cmp::Reverse(n["mtime"].as_i64().unwrap_or(0)));
+                    obj.insert(folder, json!(notes));
                 }
                 Value::Object(obj)
             }
@@ -1395,12 +1401,12 @@ impl McpServer {
             "create_memory" => {
                 let title = s("title");
                 let content = args.get("content").and_then(|v| v.as_str());
-                if title.is_empty() {
+                if title.trim().is_empty() {
                     anyhow::bail!("title is required");
                 }
                 let folder = {
                     let f = s("folder");
-                    if f.is_empty() {
+                    if f.trim().is_empty() {
                         "Memory".to_string()
                     } else {
                         f
@@ -1408,12 +1414,13 @@ impl McpServer {
                 };
                 let path = store.create_impl(&title, &folder, content)?;
                 publish_node("node_created", actor, &store, &path);
-                json!({"ok": true, "path": path})
+                with_title_notice(json!({"ok": true, "path": path}), &title, &path)
             }
             "save_memory" => {
-                store.save_impl(&s("path"), &s("content"))?;
-                publish_node("node_updated", actor, &store, &s("path"));
-                json!({"ok": true, "path": s("path")})
+                let path = memora_core::vault::norm_note_path(&s("path"));
+                store.save_impl(&path, &s("content"))?;
+                publish_node("node_updated", actor, &store, &path);
+                json!({"ok": true, "path": path})
             }
             "delete_memory" => {
                 let path = s("path");
@@ -1427,8 +1434,14 @@ impl McpServer {
                 json!({"ok": true, "path": path})
             }
             "move_memory" => {
-                let from = s("path");
-                let to = store.move_impl(&from, &s("folder"))?;
+                let from = memora_core::vault::norm_note_path(&s("path"));
+                let folder = s("folder");
+                if folder.trim().is_empty() {
+                    anyhow::bail!(
+                        "folder is required: the destination folder ('Root' = top level)"
+                    );
+                }
+                let to = store.move_impl(&from, &folder)?;
                 memora_core::events::hub().publish(json!({
                     "type": "node_renamed", "actor": actor,
                     "old_path": from, "node": store.node_payload(&to),
@@ -1574,6 +1587,16 @@ pub(crate) fn publish_node(ty: &str, actor: &str, store: &MemoryStore, path: &st
         "actor": actor,
         "node": store.node_payload(path),
     }));
+}
+
+/// Add `renamed_from` and `note` to a create reply when the title had to change
+/// to make the file name, so the agent learns the note's real path.
+pub(crate) fn with_title_notice(mut v: Value, title: &str, path: &str) -> Value {
+    if let Some((from, note)) = memora_core::vault::title_notice(title, path) {
+        v["renamed_from"] = json!(from);
+        v["note"] = json!(note);
+    }
+    v
 }
 
 pub const GUIDE: &str = r#"# Memora: agent guide
