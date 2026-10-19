@@ -280,10 +280,17 @@ mod tests {
         assert!(s.soft_delete_impl("Notes/secret.md").is_err());
         assert!(s.get_note_at_impl("Notes/secret.md", "HEAD").is_err());
         assert!(s.vault_image_file("Private/x.png").is_err());
-        let r = s
+        // A hidden note is refused exactly like a missing one.
+        let hidden = s
             .bulk_delete_impl(Some(&[json!("Notes/secret.md")]), None)
-            .unwrap();
-        assert_eq!(r["count"], 0);
+            .unwrap_err();
+        let missing = s
+            .bulk_delete_impl(Some(&[json!("Notes/nope.md")]), None)
+            .unwrap_err();
+        assert_eq!(
+            hidden.0.replace("secret", "X"),
+            missing.0.replace("nope", "X")
+        );
         drop(s);
         assert!(d.join("Private/plan.md").is_file());
         assert!(d.join("Notes/secret.md").is_file());
@@ -354,6 +361,27 @@ mod tests {
                 path: "Private".into()
             }
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_trash_list_skips_hidden_origins() {
+        let d = vault("trashlist");
+        let m = Mutex::new(MemoryStore::new(&d));
+        {
+            let s = m.lock().unwrap();
+            s.soft_delete_impl("Private/plan.md").unwrap();
+            s.soft_delete_impl("Public/hub.md").unwrap();
+            assert_eq!(s.list_trash_impl().len(), 2);
+        }
+        let s = lock_as(&m, view());
+        let names: Vec<Value> = s
+            .list_trash_impl()
+            .into_iter()
+            .map(|e| e["name"].clone())
+            .collect();
+        assert_eq!(names, [json!("hub.md")]);
+        drop(s);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

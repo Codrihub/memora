@@ -248,6 +248,7 @@ fn catalog_covers_all_expected_tools() {
         "list_memory",
         "list_pins",
         "list_tags",
+        "list_trash",
         "lock_node",
         "mention_agent",
         "merge_memory",

@@ -59,6 +59,7 @@ const READ_ONLY: &[&str] = &[
     "get_history",
     "get_note_at",
     "diff",
+    "list_trash",
     "get_locks",
     "get_assignments",
     "get_events",
@@ -83,6 +84,7 @@ const READ_ONLY: &[&str] = &[
 /// so no result paths are taken from them.
 const NO_RESULT_PATHS: &[&str] = &[
     "get_stats",
+    "list_trash",
     "list_memory",
     "get_graph",
     "broken_links",

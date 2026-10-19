@@ -449,14 +449,15 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
         let (err, text) = mcp(&mut e, c, tool, args).await;
         assert!(err, "{tool}: {text}");
     }
-    let (_, r) = mcp(
+    // A hidden note is refused exactly like a missing one (the whole call is refused).
+    let (err, r) = mcp(
         &mut e,
         c,
         "bulk_delete",
         json!({"paths": ["Private/plan.md"]}),
     )
     .await;
-    assert!(r.contains("\"count\":0"), "{r}");
+    assert!(err && r.contains("Private/plan.md (not found)"), "{r}");
     let (_, r) = mcp(
         &mut e,
         c,

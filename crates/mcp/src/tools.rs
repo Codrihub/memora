@@ -151,23 +151,23 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_history",
             "version",
-            "Git revision history of a note.",
+            "Git revision history of a note, newest first, as an array of {rev, date, author, message} (plus `path` for commits made under an earlier name: the history follows renames). `author` is the agent or user whose call made the change; changes made outside Memora show the vault's git user. Needs version history on (the vault is a git repository); otherwise it says how to turn it on.",
             "Before restoring or comparing an older version.",
-            json!({"path":{"type":"string"},"limit":{"type":"integer","default":20}}),
+            json!({"path":{"type":"string"},"limit":{"type":"integer","default":20,"minimum":1}}),
             &["path"],
         ),
         spec(
             "get_note_at",
             "version",
-            "Read a note as it was at a specific revision.",
+            "Read a note as it was at a specific revision. `rev` is one revision: a `rev` from get_history, a snapshot tag (`snap-<label>`), `HEAD~1`, or `HEAD@{2026-01-31}` (the last commit at or before that date). A renamed note is found under its old name.",
             "To see what the note looked like previously.",
-            json!({"path":{"type":"string"},"rev":{"type":"string"}}),
+            json!({"path":{"type":"string"},"rev":{"type":"string","description":"A revision from get_history, snap-<label>, HEAD~1 or HEAD@{<date>}"}}),
             &["path", "rev"],
         ),
         spec(
             "diff",
             "version",
-            "Diff a note between two revisions (or a revision against the working tree).",
+            "Unified diff of a note between two revisions, or `rev_a` against the current note when `rev_b` is left out. Each of `rev_a` / `rev_b` is one revision (no `a..b` ranges); an unknown revision is an error. `changed` is false when there is no difference.",
             "To see what changed before restoring.",
             json!({"path":{"type":"string"},"rev_a":{"type":"string"},"rev_b":{"type":"string"}}),
             &["path", "rev_a"],
@@ -175,7 +175,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "restore_memory",
             "version",
-            "Restore a note to an older revision.",
+            "Restore a note to an older revision (the restore is a new commit, so it can be undone too). Give the note's current path: its older content is found even under a previous name. Restoring the old path of a renamed note is refused and names the current path.",
             "To undo an unwanted change.",
             json!({"path":{"type":"string"},"rev":{"type":"string"}}),
             &["path", "rev"],
@@ -183,15 +183,15 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "snapshot",
             "version",
-            "Tag the whole vault at a point in time (git tag).",
+            "Snapshot the whole vault: commits pending changes, then tags the last commit as `snap-<label>`. Use `snap-<label>` as `rev` in get_note_at, diff and restore_memory. The label uses letters, digits, '.', '_' and '-' (spaces become '-'), at most 40 characters, and must not exist yet. Needs version history on.",
             "Before a large or risky change.",
-            json!({"label":{"type":"string"}}),
+            json!({"label":{"type":"string","maxLength":40}}),
             &["label"],
         ),
         spec(
             "soft_delete",
             "version",
-            "Move a note to .Trash (still recoverable).",
+            "Move a note to .Trash (still recoverable with restore_trash; list_trash shows the trash). The trash remembers where the note came from. A name already taken in the trash gets a suffix (Plan-1.md).",
             "When you are not ready to delete permanently.",
             json!({"path":{"type":"string"}}),
             &["path"],
@@ -199,10 +199,18 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "restore_trash",
             "version",
-            "Restore a note from .Trash into a folder.",
+            "Restore a note from .Trash. `name` is the trash name as list_trash shows it (`.md` optional). By default the note goes back to the path it was deleted from, under its original name; `into` puts it in that folder instead (`Root` = the top level). Refused when the target path is taken.",
             "To bring back a note deleted by mistake.",
-            json!({"name":{"type":"string"},"into":{"type":"string","default":"Root"}}),
+            json!({"name":{"type":"string"},"into":{"type":"string","description":"Folder to restore into; default: where the note was deleted from"}}),
             &["name"],
+        ),
+        spec(
+            "list_trash",
+            "version",
+            "Notes in .Trash, newest first: {name, path, original, deleted}. `name` is what restore_trash takes, `original` the path it was deleted from, `deleted` when (both null for notes trashed by older versions).",
+            "Before restore_trash, to find a deleted note.",
+            json!({}),
+            &[],
         ),
         // ---- write ----
         spec(
@@ -240,7 +248,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "bulk_replace",
             "write",
-            "Find and replace across many notes; supports regex and dry-run.",
+            "Find and replace across many notes; supports regex and dry-run. `find` must not be empty (with regex it must not match an empty string). `folder` limits it to that folder and all its subfolders (`Root` = top-level notes only); a missing folder is an error. With `regex`, `replace` may use $1 or ${name} for groups (write ${1} when letters or digits follow, $$ for a literal $); naming a group the pattern lacks is an error. Without regex, `replace` is literal.",
             "For safe bulk text edits (dry-run first).",
             json!({"find":{"type":"string"},"replace":{"type":"string"},"folder":{"type":"string"},"regex":{"type":"boolean","default":false},"dry_run":{"type":"boolean","default":false}}),
             &["find", "replace"],
@@ -248,7 +256,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "bulk_delete",
             "write",
-            "Delete many notes at once, by path list or folder.",
+            "Move many notes to .Trash at once (recoverable with restore_trash), by path list and / or folder; `folder` includes all its subfolders (`Root` = top-level notes only). Every path is checked first: if any is missing, outside the vault, a folder or not a note, nothing is deleted and the error lists them. `.md` may be left out. Returns the trash name of each note.",
             "To clear a batch of notes in a single step.",
             json!({"paths":{"type":"array","items":{"type":"string"}},"folder":{"type":"string"}}),
             &[],
@@ -632,14 +640,14 @@ pub fn call_extra(
 
             // ---------------- versioning ----------------
             "get_history" => {
-                // Returns a list; a single entry is unwrapped to a bare object.
-                let h = store.get_history_impl(&s("path"), i("limit", 20));
-                let arr: Vec<Value> = h.into_iter().collect();
-                if arr.len() == 1 {
-                    arr.into_iter().next().unwrap_or(json!({}))
-                } else {
-                    Value::Array(arr)
-                }
+                let limit = match args.get("limit") {
+                    None | Some(Value::Null) => 20,
+                    Some(v) => match v.as_i64() {
+                        Some(n) if n >= 1 => n as usize,
+                        _ => anyhow::bail!("limit must be a whole number of at least 1"),
+                    },
+                };
+                json!(store.get_history_impl(&s("path"), limit)?)
             }
             "get_note_at" => {
                 // Shape: {ok, path, rev, content}.
@@ -648,30 +656,24 @@ pub fn call_extra(
                 json!({"ok": true, "path": p, "rev": r,
                        "content": store.get_note_at_impl(&p, &r)?})
             }
-            "diff" => json!(store.diff_impl(&s("path"), &s("rev_a"), &s("rev_b"))),
+            "diff" => store.diff_impl(&s("path"), &s("rev_a"), &s("rev_b"))?,
             "restore_memory" => {
                 let p = s("path");
                 let v = store.restore_impl(&p, &s("rev"))?;
                 crate::publish_node("node_updated", actor, store, &p);
                 v
             }
-            "snapshot" => store.snapshot_impl(&s("label")),
+            "snapshot" => store.snapshot_impl(&s("label"))?,
             "soft_delete" => {
                 let p = s("path");
                 let r = store.soft_delete_impl(&p)?;
                 crate::publish_node("node_deleted", actor, store, &p);
                 r
             }
+            "list_trash" => json!(store.list_trash_impl()),
             "restore_trash" => {
-                let into = {
-                    let v = s("into");
-                    if v.is_empty() {
-                        "Root".to_string()
-                    } else {
-                        v
-                    }
-                };
-                let r = store.restore_trash_impl(&s("name"), &into)?;
+                // No `into`: back to where the note was deleted from.
+                let r = store.restore_trash_impl(&s("name"), &s("into"))?;
                 if let Some(p) = r.get("path").and_then(|v| v.as_str()) {
                     let p = p.to_string();
                     crate::publish_node("node_created", actor, store, &p);
@@ -716,7 +718,11 @@ pub fn call_extra(
                 b("dry_run", false),
             )?,
             "bulk_delete" => {
-                let paths = args.get("paths").and_then(|v| v.as_array()).cloned();
+                let paths = match args.get("paths") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::Array(a)) => Some(a.clone()),
+                    Some(_) => anyhow::bail!("paths must be an array of strings"),
+                };
                 store.bulk_delete_impl(paths.as_deref(), opt("folder").as_deref())?
             }
 

@@ -1480,6 +1480,8 @@ impl McpServer {
                 anyhow::bail!("{why}");
             }
         }
+        // Vault commits made by this call name the caller as their author.
+        let _author = memora_core::vault::CommitAuthor::set(actor);
         let s = |k: &str| {
             args.get(k)
                 .and_then(|v| v.as_str())

@@ -1156,6 +1156,60 @@ fn render_body(text: &str, ctx: &RenderCtx) -> String {
     out.join("\n")
 }
 
+/// Refuse a regex replacement naming a group the pattern does not define (the
+/// regex crate would expand it to nothing). `$$` is a literal `$`; `$1a` names
+/// the group `1a`, so `${1}a` is needed there.
+fn replace_groups_ok(pat: &Regex, replace: &str) -> MResult<()> {
+    let names: HashSet<&str> = pat.capture_names().flatten().collect();
+    let groups = pat.captures_len();
+    let b = replace.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'$' {
+            i += 1;
+            continue;
+        }
+        if b.get(i + 1) == Some(&b'$') {
+            i += 2;
+            continue;
+        }
+        let (name, next) = if b.get(i + 1) == Some(&b'{') {
+            match replace[i + 2..].find('}') {
+                Some(end) => (&replace[i + 2..i + 2 + end], i + 3 + end),
+                None => (&replace[0..0], i + 1),
+            }
+        } else {
+            let mut j = i + 1;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                j += 1;
+            }
+            (&replace[i + 1..j], j)
+        };
+        let known = match name.parse::<usize>() {
+            Ok(n) => n < groups,
+            Err(_) => name.is_empty() || names.contains(name),
+        };
+        if !known {
+            let mut have = if groups > 1 {
+                format!("$0-${}", groups - 1)
+            } else {
+                "only $0".to_string()
+            };
+            if !names.is_empty() {
+                let mut ns: Vec<&str> = names.iter().copied().collect();
+                ns.sort_unstable();
+                have.push_str(&format!(" and names {}", ns.join(", ")));
+            }
+            return err(format!(
+                "replace refers to group `{name}`, which find does not define (it has {have}); \
+                 write ${{1}} when letters or digits follow a group, and $$ for a literal $"
+            ));
+        }
+        i = next;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Path resolution (a resolved path may never escape the vault)
 // ---------------------------------------------------------------------------
@@ -2843,6 +2897,45 @@ impl MemoryStore {
         Ok(out)
     }
 
+    /// A note path as the other tools take it: `.md` may be left out. A folder (or
+    /// another existing file) keeps its name, so the caller can say what it is.
+    fn md_path_or_folder(&self, path: &str) -> String {
+        let p = path.trim();
+        if p.to_lowercase().ends_with(".md") || self.resolve(p).is_ok_and(|ap| ap.exists()) {
+            return p.to_string();
+        }
+        format!("{p}.md")
+    }
+
+    /// The `folder` filter of the bulk tools: the folder and every subfolder below
+    /// it (`None` = the whole vault, `Some("")` = notes at the top level, `Root`).
+    fn bulk_folder(&self, folder: Option<&str>) -> MResult<Option<String>> {
+        let Some(f) = folder else { return Ok(None) };
+        let f = f.trim().replace('\\', "/");
+        let f = f.trim_matches('/');
+        if f.is_empty() {
+            return Ok(None);
+        }
+        if f == "Root" {
+            return Ok(Some(String::new()));
+        }
+        // A hidden folder answers exactly like a missing one.
+        match self.resolve(f) {
+            Ok(dir) if dir.is_dir() && !f.starts_with(".Trash") => Ok(Some(f.to_string())),
+            Ok(_) => err(format!("folder not found: {f}")),
+            Err(e) if e.0.starts_with("not found") => err(format!("folder not found: {f}")),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn in_bulk_folder(rel: &str, folder: &Option<String>) -> bool {
+        match folder {
+            None => true,
+            Some(f) if f.is_empty() => !rel.contains('/'),
+            Some(f) => rel.starts_with(&format!("{f}/")),
+        }
+    }
+
     pub fn bulk_replace_impl(
         &self,
         find: &str,
@@ -2851,30 +2944,51 @@ impl MemoryStore {
         regex: bool,
         dry_run: bool,
     ) -> MResult<Value> {
+        if find.is_empty() {
+            return err(
+                "find is required: an empty find would insert the replacement between every character",
+            );
+        }
         let pat = if regex {
-            Some(Regex::new(find).map_err(|e| MemoryErr(e.to_string()))?)
+            let p = Regex::new(find)
+                .map_err(|e| MemoryErr(format!("find is not a valid regex: {e}")))?;
+            if p.is_match("") {
+                return err("find matches the empty string, which would insert the replacement between every character; make the pattern match at least one character (e.g. `a+` instead of `a*`)");
+            }
+            replace_groups_ok(&p, replace)?;
+            Some(p)
         } else {
             None
         };
-        let mut changed = Vec::new();
+        let folder = self.bulk_folder(folder)?;
+        // Every edit is worked out before anything is written.
+        let mut edits = Vec::new();
         for (rel, _name, fp) in self.walk() {
-            if let Some(f) = folder {
-                if !f.is_empty() && folder_of(&rel) != f {
-                    continue;
-                }
+            if !Self::in_bulk_folder(&rel, &folder) {
+                continue;
             }
             let Some(c) = self.read_raw(&fp) else {
                 continue;
             };
             let nc = match &pat {
-                Some(p) => p.replace_all(&c, replace).to_string(),
+                Some(p) => {
+                    // `\b` or `(?m)^` match nowhere in "" but between characters elsewhere.
+                    if p.find_iter(&c).any(|m| m.as_str().is_empty()) {
+                        return err(format!("find matches an empty string (in {rel}), which would insert the replacement between characters; make the pattern match at least one character"));
+                    }
+                    p.replace_all(&c, replace).to_string()
+                }
                 None => c.replace(find, replace),
             };
             if nc != c {
-                changed.push(rel.clone());
-                if !dry_run {
-                    fs::write(self.resolve(&rel)?, nc).ok();
-                }
+                edits.push((rel, nc));
+            }
+        }
+        edits.sort_by(|a, b| a.0.cmp(&b.0));
+        let changed: Vec<String> = edits.iter().map(|(rel, _)| rel.clone()).collect();
+        if !dry_run {
+            for (rel, nc) in edits {
+                fs::write(self.resolve(&rel)?, nc).ok();
             }
         }
         if !changed.is_empty() && !dry_run {
@@ -2884,42 +2998,92 @@ impl MemoryStore {
         Ok(json!({"ok": true, "count": changed.len(), "changed": changed, "dry_run": dry_run}))
     }
 
+    /// Why a path given to `bulk_delete` cannot go to the trash (`Err`), or the
+    /// note's vault path (`Ok`).
+    fn bulk_delete_target(&self, path: &str) -> Result<String, String> {
+        if path.trim().is_empty() {
+            return Err("empty path".into());
+        }
+        let rel = self.md_path_or_folder(path);
+        let ap = match self.resolve(&rel) {
+            Ok(ap) => ap,
+            Err(e) if e.0.starts_with("not found") => return Err("not found".into()),
+            Err(e) if e.0.starts_with("path escapes") => return Err("outside the vault".into()),
+            Err(e) => return Err(e.0),
+        };
+        if ap.is_dir() {
+            return Err("a folder; use delete_folder".into());
+        }
+        if !ap.is_file() {
+            return Err("not found".into());
+        }
+        let rel = self.rel_of(&ap);
+        if rel.starts_with(".Trash/") {
+            return Err("already in the trash".into());
+        }
+        if !rel.to_lowercase().ends_with(".md") {
+            return Err("not a note".into());
+        }
+        Ok(rel)
+    }
+
+    /// Move notes to `.Trash` (like `soft_delete`), by path list and / or folder.
+    /// Every listed path is checked first: one bad path refuses the whole call.
     pub fn bulk_delete_impl(
         &self,
         paths: Option<&[Value]>,
         folder: Option<&str>,
     ) -> MResult<Value> {
+        let paths = paths.unwrap_or(&[]);
+        let by_folder = folder.is_some_and(|f| !f.trim().is_empty());
+        if paths.is_empty() && !by_folder {
+            return err("give `paths` (a list of notes) or `folder`");
+        }
         let mut targets: BTreeSet<String> = BTreeSet::new();
-        if let Some(ps) = paths {
-            for p in ps {
-                if let Some(s) = p.as_str() {
-                    targets.insert(s.to_string());
+        let mut bad = Vec::new();
+        for (i, p) in paths.iter().enumerate() {
+            let Some(s) = p.as_str() else {
+                return err(format!("paths[{i}] must be a string, got {p}"));
+            };
+            match self.bulk_delete_target(s) {
+                Ok(rel) => {
+                    targets.insert(rel);
                 }
+                Err(why) => bad.push(format!("{s} ({why})")),
             }
         }
-        if let Some(f) = folder {
-            if !f.is_empty() {
-                for (rel, _, _) in self.walk() {
-                    if folder_of(&rel) == f {
-                        targets.insert(rel);
-                    }
+        if !bad.is_empty() {
+            return err(format!(
+                "nothing was deleted; fix or drop these paths: {}",
+                bad.join(", ")
+            ));
+        }
+        if by_folder {
+            let folder = self.bulk_folder(folder)?;
+            for (rel, _, _) in self.walk() {
+                if Self::in_bulk_folder(&rel, &folder) {
+                    targets.insert(rel);
                 }
             }
         }
         let mut deleted = Vec::new();
+        let mut trashed = Vec::new();
         for rel in targets {
-            if let Ok(ap) = self.resolve(&rel) {
-                if ap.is_file() && fs::remove_file(&ap).is_ok() {
-                    self.path_event(PathEvent::Deleted { path: rel.clone() });
-                    deleted.push(rel);
-                }
-            }
+            let to = self.move_to_trash(&rel)?;
+            trashed.push(json!({"path": rel, "to": to}));
+            deleted.push(rel);
         }
         if !deleted.is_empty() {
             let _ = self.reindex();
-            self.git_commit(&format!("bulk delete ({} notes)", deleted.len()));
+            self.git_commit(&format!(
+                "bulk delete ({} notes moved to .Trash)",
+                deleted.len()
+            ));
         }
-        Ok(json!({"ok": true, "count": deleted.len(), "deleted": deleted}))
+        Ok(
+            json!({"ok": true, "count": deleted.len(), "deleted": deleted, "trashed": trashed,
+                  "note": "moved to .Trash: list_trash shows them, restore_trash brings one back"}),
+        )
     }
 
     /// Append the bodies of the notes `paths` (frontmatter stripped) to the note
@@ -3105,27 +3269,97 @@ impl MemoryStore {
         self.create_impl(title, folder, Some(&content))
     }
 
-    pub fn snapshot_impl(&self, label: &str) -> Value {
-        let re = Regex::new(r"[^\w.-]").unwrap();
-        let raw = if label.is_empty() { "snap" } else { label };
-        let safe: String = re.replace_all(raw, "-").chars().take(40).collect();
-        let safe = if safe.is_empty() {
-            "snap".to_string()
-        } else {
-            safe
-        };
-        let tag = format!("snap-{safe}");
-        let ok = self.git(&["tag", &tag]).0;
-        json!({"ok": ok, "tag": tag})
+    /// Tag the last commit as `snap-<label>`, after committing what is not yet
+    /// committed, so the snapshot holds the vault as it is now.
+    pub fn snapshot_impl(&self, label: &str) -> MResult<Value> {
+        self.history_on()?;
+        let label = label.split_whitespace().collect::<Vec<_>>().join("-");
+        if label.is_empty() {
+            return err(
+                "label is required (letters, digits, '.', '_' or '-', at most 40 characters)",
+            );
+        }
+        let n = label.chars().count();
+        if n > 40 {
+            return err(format!(
+                "label is too long ({n} characters); use at most 40"
+            ));
+        }
+        if let Some(c) = label
+            .chars()
+            .find(|c| !(c.is_alphanumeric() || matches!(c, '.' | '_' | '-')))
+        {
+            return err(format!(
+                "label may only use letters, digits, '.', '_' and '-' (spaces become '-'), not {c:?}"
+            ));
+        }
+        let tag = format!("snap-{label}");
+        if label.contains("..")
+            || label.ends_with('.')
+            || label.ends_with(".lock")
+            || !self
+                .git(&["check-ref-format", &format!("refs/tags/{tag}")])
+                .0
+        {
+            return err(format!(
+                "label {label} is not a valid git tag name (no '..', and no '.' or '.lock' at the end)"
+            ));
+        }
+        if self
+            .git(&[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/tags/{tag}"),
+            ])
+            .0
+        {
+            return err(format!(
+                "snapshot {label} already exists (tag {tag}); choose another label"
+            ));
+        }
+        self.git_commit(&format!("snapshot: {label}"));
+        let (ok, head) = self.git(&["rev-parse", "--short", "--verify", "--quiet", "HEAD"]);
+        if !ok {
+            return err("nothing to snapshot yet: the vault repository has no commits");
+        }
+        let (ok, _, stderr) = self.git_run(&["tag", &tag], &[]);
+        if !ok {
+            return err(format!("could not create tag {tag}: {}", stderr.trim()));
+        }
+        Ok(json!({"ok": true, "tag": tag, "rev": head.trim(),
+                  "hint": format!("pass \"{tag}\" as rev to get_note_at, diff or restore_memory")}))
     }
 
     // ---- trash ----
-    pub fn soft_delete_impl(&self, path: &str) -> MResult<Value> {
-        let ap = self.resolve(path)?;
-        if !ap.is_file() {
-            return err(format!("not found: {path}"));
+    /// `.Trash/.index.json`: trash file name -> `{path, deleted}` (where the note
+    /// lived and when it was trashed), so a restore puts it back where it was.
+    fn trash_index_path(&self) -> PathBuf {
+        self.root().join(".Trash").join(".index.json")
+    }
+
+    fn trash_index(&self) -> Map<String, Value> {
+        fs::read_to_string(self.trash_index_path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_trash_index(&self, index: &Map<String, Value>) {
+        let p = self.trash_index_path();
+        if let Some(dir) = p.parent() {
+            fs::create_dir_all(dir).ok();
         }
-        let base = Path::new(path)
+        if let Ok(s) = serde_json::to_string_pretty(index) {
+            fs::write(p, s).ok();
+        }
+    }
+
+    /// Move one checked note into `.Trash` under a free name and remember where it
+    /// came from. No reindex, no commit (the caller does both once).
+    fn move_to_trash(&self, rel: &str) -> MResult<String> {
+        let ap = self.resolve(rel)?;
+        let base = Path::new(rel)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -3148,38 +3382,128 @@ impl MemoryStore {
             i += 1;
         }
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
+        let to = self.rel_of(&dap);
         // In the trash the note keeps the protection of the folder it left.
         self.path_event(PathEvent::Moved {
-            from: path.to_string(),
-            to: self.rel_of(&dap),
+            from: rel.to_string(),
+            to: to.clone(),
             carry: true,
         });
-        let _ = self.reindex();
-        Ok(json!({"ok": true, "trashed": path, "to": self.rel_of(&dap)}))
+        let mut index = self.trash_index();
+        let name = to.trim_start_matches(".Trash/").to_string();
+        index.insert(name, json!({"path": rel, "deleted": now_iso()}));
+        self.save_trash_index(&index);
+        Ok(to)
     }
 
-    pub fn restore_trash_impl(&self, name: &str, into: &str) -> MResult<Value> {
-        let base = Path::new(name)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| name.to_string());
-        let rel = if name.starts_with(".Trash") {
-            name.to_string()
-        } else {
-            format!(".Trash/{base}")
-        };
-        let tap = self.resolve(&rel)?;
-        if !tap.is_file() {
-            return err(format!("not in trash: {base}"));
+    pub fn soft_delete_impl(&self, path: &str) -> MResult<Value> {
+        let ap = self.resolve(path)?;
+        if !ap.is_file() {
+            return err(format!("not found: {path}"));
         }
-        let dest = if into.is_empty() || into == "Root" {
-            base.clone()
-        } else {
-            format!("{into}/{base}")
+        let rel = self.rel_of(&ap);
+        if rel.starts_with(".Trash/") {
+            return err(format!("already in the trash: {path}"));
+        }
+        let to = self.move_to_trash(&rel)?;
+        let _ = self.reindex();
+        self.git_commit(&format!("trash: {rel} -> {to}"));
+        Ok(json!({"ok": true, "trashed": path, "to": to}))
+    }
+
+    /// Notes in `.Trash` the caller may see: `{name, path, original, deleted}`,
+    /// newest first. `original` / `deleted` are null for notes trashed before the
+    /// trash remembered them.
+    pub fn list_trash_impl(&self) -> Vec<Value> {
+        let index = self.trash_index();
+        let mut out: Vec<Value> = Vec::new();
+        let Ok(dir) = fs::read_dir(self.root().join(".Trash")) else {
+            return out;
+        };
+        for entry in dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !entry.path().is_file() {
+                continue;
+            }
+            let path = format!(".Trash/{name}");
+            let meta = index.get(&name);
+            let original = meta.and_then(|m| m.get("path")).and_then(|v| v.as_str());
+            if !self.visible(&path) || original.is_some_and(|o| !self.visible(o)) {
+                continue;
+            }
+            let deleted = meta.and_then(|m| m.get("deleted")).cloned();
+            out.push(json!({"name": name, "path": path, "original": original,
+                            "deleted": deleted.unwrap_or(Value::Null)}));
+        }
+        out.sort_by(|a, b| {
+            let d = |v: &Value| v["deleted"].as_str().unwrap_or("").to_string();
+            d(b).cmp(&d(a))
+                .then_with(|| a["name"].as_str().cmp(&b["name"].as_str()))
+        });
+        out
+    }
+
+    /// Bring a note back from `.Trash`: to the path it was trashed from (under its
+    /// original name), or into the folder `into` (`Root` = the top level).
+    pub fn restore_trash_impl(&self, name: &str, into: &str) -> MResult<Value> {
+        let raw = name.trim().replace('\\', "/");
+        let raw = raw.trim_start_matches('/');
+        let base = raw.strip_prefix(".Trash/").unwrap_or(raw);
+        if base.is_empty() || base.contains('/') || base.starts_with('.') {
+            return err(format!(
+                "give the name of a note in the trash as list_trash shows it (e.g. Plan.md), not {name}"
+            ));
+        }
+        let not_in = || {
+            err(format!(
+                "not in trash: {base} (list_trash shows what is there)"
+            ))
+        };
+        // `.md` may be left out.
+        let mut base = base.to_string();
+        let mut found = None;
+        for cand in [base.clone(), format!("{base}.md")] {
+            // A hidden trash entry answers exactly like a missing one.
+            match self.resolve(&format!(".Trash/{cand}")) {
+                Ok(p) if p.is_file() => {
+                    found = Some(p);
+                    base = cand;
+                    break;
+                }
+                Ok(_) => {}
+                Err(e) if e.0.starts_with("not found") => {}
+                Err(e) => return Err(e),
+            }
+            if base.to_lowercase().ends_with(".md") {
+                break;
+            }
+        }
+        let Some(tap) = found else { return not_in() };
+        let rel = format!(".Trash/{base}");
+        let mut index = self.trash_index();
+        let original = index
+            .get(&base)
+            .and_then(|m| m.get("path"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let file = original
+            .as_deref()
+            .and_then(|o| o.rsplit('/').next())
+            .unwrap_or(&base)
+            .to_string();
+        let into = into.trim().trim_matches('/');
+        let dest = match (into, &original) {
+            ("", Some(o)) => o.clone(),
+            ("", None) | ("Root", _) => file,
+            (f, _) => format!("{f}/{file}"),
         };
         let dap = self.resolve(&dest)?;
         if dap.exists() {
-            return err(format!("already exists: {dest}"));
+            return err(if into.is_empty() {
+                format!("already exists: {dest}; pass `into` to restore it into another folder")
+            } else {
+                format!("already exists: {dest}; pass another `into` folder")
+            });
         }
         if let Some(p) = dap.parent() {
             fs::create_dir_all(p).ok();
@@ -3190,8 +3514,12 @@ impl MemoryStore {
             to: dest.clone(),
             carry: false,
         });
+        if index.remove(&base).is_some() {
+            self.save_trash_index(&index);
+        }
         let _ = self.reindex();
-        Ok(json!({"ok": true, "restored": dest}))
+        self.git_commit(&format!("restore from trash: {rel} -> {dest}"));
+        Ok(json!({"ok": true, "restored": dest, "path": dest, "from": rel}))
     }
 }
 
@@ -3199,30 +3527,119 @@ impl MemoryStore {
 // Git time machine
 // ---------------------------------------------------------------------------
 
+/// What the versioning tools answer while the vault is not a git repository.
+pub const HISTORY_OFF: &str = "version history is off: the vault is not a git repository; \
+     run `git init` in the vault folder to turn it on (see docs/CONFIGURATION.md, \"Version history\")";
+
+thread_local! {
+    static COMMIT_AUTHOR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// While alive, vault commits made on this thread name `name` (the calling agent)
+/// as their author. The previous author comes back when it drops.
+pub struct CommitAuthor(Option<String>);
+
+impl CommitAuthor {
+    pub fn set(name: &str) -> Self {
+        let clean: String = name
+            .chars()
+            .filter(|c| !c.is_control() && !matches!(c, '<' | '>'))
+            .collect();
+        let clean = clean.trim();
+        let next = (!clean.is_empty()).then(|| clean.to_string());
+        CommitAuthor(COMMIT_AUTHOR.with(|a| a.replace(next)))
+    }
+}
+
+impl Drop for CommitAuthor {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        COMMIT_AUTHOR.with(|a| *a.borrow_mut() = prev);
+    }
+}
+
+/// One commit of a note's history (see [`MemoryStore::note_log`]).
+struct LogEntry {
+    id: String,
+    short: String,
+    date: String,
+    author: String,
+    subject: String,
+    /// The note's path in this commit (differs from today's after a rename).
+    path: String,
+}
+
 impl MemoryStore {
-    /// Run git in the vault, returning `(success, stdout)`. Only a vault that is its own repository (has `.git`)
-    /// is versioned: git must never climb into an enclosing repository.
-    pub fn git(&self, args: &[&str]) -> (bool, String) {
+    /// Run git in the vault, returning `(success, stdout, stderr)`. Only a vault that is its own
+    /// repository (has `.git`) is versioned: git must never climb into an enclosing repository.
+    fn git_run(&self, args: &[&str], envs: &[(&str, String)]) -> (bool, String, String) {
         let root = self.root();
-        if !root.join(".git").exists() {
-            return (false, String::new());
+        if !self.history_enabled() {
+            return (false, String::new(), String::new());
         }
         let mut cmd = Command::new("git");
         if let Some(parent) = root.parent() {
             cmd.env("GIT_CEILING_DIRECTORIES", parent);
         }
-        match cmd.args(args).current_dir(root).output() {
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        match cmd
+            .args(["-c", "core.quotePath=false"])
+            .args(args)
+            .current_dir(root)
+            .output()
+        {
             Ok(o) => (
                 o.status.success(),
                 String::from_utf8_lossy(&o.stdout).to_string(),
+                String::from_utf8_lossy(&o.stderr).to_string(),
             ),
-            Err(_) => (false, String::new()),
+            Err(_) => (false, String::new(), String::new()),
         }
     }
 
+    /// Run git in the vault, returning `(success, stdout)` (see [`MemoryStore::git_run`]).
+    pub fn git(&self, args: &[&str]) -> (bool, String) {
+        let (ok, out, _) = self.git_run(args, &[]);
+        (ok, out)
+    }
+
+    /// Whether the vault keeps a history (it is a git repository of its own).
+    pub fn history_enabled(&self) -> bool {
+        self.root().join(".git").exists()
+    }
+
+    fn history_on(&self) -> MResult<()> {
+        if self.history_enabled() {
+            Ok(())
+        } else {
+            err(HISTORY_OFF)
+        }
+    }
+
+    /// Commit everything, authored by the [`CommitAuthor`] of this call when set.
     pub fn git_commit(&self, message: &str) {
+        if !self.history_enabled() {
+            return;
+        }
         self.git(&["add", "-A"]);
-        let _ = self.git(&["commit", "-q", "-m", message]);
+        let mut args: Vec<&str> = Vec::new();
+        // git refuses to commit without an identity; a fresh `git init` has none.
+        if !self.git(&["config", "user.email"]).0 {
+            args.extend([
+                "-c",
+                "user.name=Memora",
+                "-c",
+                "user.email=memora@localhost",
+            ]);
+        }
+        args.extend(["commit", "-q", "-m", message]);
+        let envs: Vec<(&str, String)> = COMMIT_AUTHOR
+            .with(|a| a.borrow().clone())
+            .map(|n| vec![("GIT_AUTHOR_NAME", n)])
+            .unwrap_or_default();
+        let _ = self.git_run(&args, &envs);
     }
 
     /// For a restricted caller, git history is only available for one visible note
@@ -3248,81 +3665,255 @@ impl MemoryStore {
             && !rev.chars().any(|c| c.is_control() || c.is_whitespace())
     }
 
-    pub fn get_history_impl(&self, path: &str, limit: usize) -> Vec<Value> {
-        if !self.history_path_ok(path) {
-            return Vec::new();
+    /// Resolve one revision to its full commit id, with a clear refusal otherwise.
+    fn resolve_rev(&self, rev: &str) -> MResult<String> {
+        let rev = rev.trim();
+        if rev.is_empty() {
+            return err("rev is required: a revision from get_history, a snapshot tag (snap-<label>), HEAD~1, or HEAD@{<date>}");
         }
-        let (ok, out) = self.git(&[
-            "--literal-pathspecs",
-            "log",
-            &format!("-{limit}"),
-            "--format=%h|%ai|%an|%s",
-            "--",
-            path,
-        ]);
+        if rev.contains("..") {
+            return err(format!("give one revision, not a range: {rev}"));
+        }
+        let unknown = || {
+            err(format!(
+                "unknown revision {rev}; use get_history to list revisions"
+            ))
+        };
+        if !Self::rev_ok(rev) {
+            return unknown();
+        }
+        let (ok, out, stderr) = self.git_run(
+            &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+            &[],
+        );
+        if !ok || out.trim().is_empty() {
+            return unknown();
+        }
+        // `@{<date>}` before the first entry quietly answers the oldest one.
+        if rev.contains("@{") && stderr.contains("only goes back to") {
+            return err(format!("no revision at or before that date: {rev}"));
+        }
+        Ok(out.trim().to_string())
+    }
+
+    /// Validate the `path` of a versioning call: required, `.md` optional, and
+    /// either in the vault now or in its history (a hidden path is "not found").
+    fn history_target(&self, path: &str) -> MResult<String> {
+        if path.trim().is_empty() {
+            return err("path is required");
+        }
+        self.history_on()?;
+        let p = self.md_path_or_folder(path);
+        let exists = self.resolve(&p).is_ok_and(|ap| ap.exists());
+        if !self.history_path_ok(&p) || (!exists && self.note_log(&p, Some(1)).is_empty()) {
+            return err(format!("not found: {}", path.trim()));
+        }
+        Ok(p)
+    }
+
+    /// Commits touching `path`, newest first. A single note's history follows
+    /// renames (`git log --follow`).
+    fn note_log(&self, path: &str, limit: Option<usize>) -> Vec<LogEntry> {
+        let n = limit.map(|l| format!("-{l}"));
+        let mut args = vec!["--literal-pathspecs", "log"];
+        let follow = path.to_lowercase().ends_with(".md");
+        if follow {
+            args.extend(["--follow", "--name-only"]);
+        }
+        if let Some(n) = &n {
+            args.push(n);
+        }
+        args.extend(["--format=%x1e%H|%h|%ai|%an|%s", "--", path]);
+        let (ok, out) = self.git(&args);
         if !ok {
             return Vec::new();
         }
-        out.trim()
-            .split('\n')
-            .filter(|l| !l.is_empty())
-            .filter_map(|line| {
-                let p: Vec<&str> = line.splitn(4, '|').collect();
-                if p.len() == 4 {
-                    // Commit messages name paths; hide those naming hidden ones.
-                    let msg = if self.mentions_hidden(p[3]) {
-                        "(hidden)"
-                    } else {
-                        p[3]
-                    };
-                    Some(json!({"rev": p[0], "date": p[1], "author": p[2], "message": msg}))
-                } else {
-                    None
+        out.split('\x1e')
+            .filter_map(|rec| {
+                let mut lines = rec.lines();
+                let p: Vec<&str> = lines.next()?.splitn(5, '|').collect();
+                if p.len() != 5 {
+                    return None;
                 }
+                let name = if follow {
+                    lines.map(str::trim).find(|l| !l.is_empty()).unwrap_or(path)
+                } else {
+                    path
+                };
+                Some(LogEntry {
+                    id: p[0].into(),
+                    short: p[1].into(),
+                    date: p[2].into(),
+                    author: p[3].into(),
+                    subject: p[4].into(),
+                    path: name.into(),
+                })
             })
             .collect()
     }
 
-    pub fn get_note_at_impl(&self, path: &str, rev: &str) -> MResult<String> {
-        if !self.history_path_ok(path) || !Self::rev_ok(rev) {
-            return err(format!("no such revision for {path}"));
+    pub fn get_history_impl(&self, path: &str, limit: usize) -> MResult<Vec<Value>> {
+        if limit < 1 {
+            return err("limit must be at least 1");
         }
-        let (ok, out) = self.git(&["show", &format!("{rev}:{path}")]);
+        let p = self.history_target(path)?;
+        Ok(self
+            .note_log(&p, Some(limit))
+            .into_iter()
+            .map(|e| {
+                // Commit messages name paths; hide those naming hidden ones.
+                let msg = if self.mentions_hidden(&e.subject) {
+                    "(hidden)"
+                } else {
+                    e.subject.as_str()
+                };
+                let mut v =
+                    json!({"rev": e.short, "date": e.date, "author": e.author, "message": msg});
+                if e.path != p && self.visible(&e.path) {
+                    v["path"] = json!(e.path);
+                }
+                v
+            })
+            .collect())
+    }
+
+    /// The path `path` had at commit `id`, following renames (None: not there).
+    fn path_at(&self, path: &str, id: &str) -> Option<String> {
+        let log = self.note_log(path, None);
+        if log.is_empty() {
+            return None;
+        }
+        let (ok, out) = self.git(&["rev-list", id]);
         if !ok {
-            return err(format!("no such revision for {path}"));
+            return None;
         }
-        Ok(out)
+        let ancestors: HashSet<&str> = out.lines().collect();
+        log.into_iter()
+            .find(|e| ancestors.contains(e.id.as_str()))
+            .map(|e| e.path)
+    }
+
+    /// A note's content at commit `id`, under the name it had then.
+    fn content_at(&self, path: &str, id: &str, rev: &str) -> MResult<String> {
+        let (ok, out) = self.git(&["show", &format!("{id}:{path}")]);
+        if ok {
+            return Ok(out);
+        }
+        if let Some(old) = self.path_at(path, id) {
+            if old != path && self.visible(&old) {
+                let (ok, out) = self.git(&["show", &format!("{id}:{old}")]);
+                if ok {
+                    return Ok(out);
+                }
+            }
+        }
+        err(format!(
+            "{path} did not exist at {rev}; use get_history to list its revisions"
+        ))
+    }
+
+    pub fn get_note_at_impl(&self, path: &str, rev: &str) -> MResult<String> {
+        let p = self.history_target(path)?;
+        let id = self.resolve_rev(rev)?;
+        self.content_at(&p, &id, rev.trim())
+    }
+
+    /// Where a note that is gone from `path` lives now, if it was renamed or moved
+    /// (following a chain of renames): `(today's path, commit of the first rename)`.
+    fn renamed_away(&self, path: &str) -> Option<(String, String)> {
+        let (ok, out) = self.git(&[
+            "log",
+            "-M",
+            "--diff-filter=R",
+            "--name-status",
+            "--format=%x1e%h",
+        ]);
+        if !ok {
+            return None;
+        }
+        let renames: Vec<(String, String, String)> = out
+            .split('\x1e')
+            .flat_map(|rec| {
+                let mut lines = rec.lines();
+                let short = lines.next().unwrap_or("").trim().to_string();
+                lines
+                    .filter_map(|l| {
+                        let f: Vec<&str> = l.split('\t').collect();
+                        (f.len() == 3 && f[0].starts_with('R'))
+                            .then(|| (short.clone(), f[1].to_string(), f[2].to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let mut cur = path.to_string();
+        let mut first = None;
+        for _ in 0..16 {
+            let Some((at, _, to)) = renames.iter().find(|(_, from, _)| *from == cur) else {
+                break;
+            };
+            first.get_or_insert_with(|| at.clone());
+            cur = to.clone();
+            if self.root().join(&cur).is_file() {
+                break;
+            }
+        }
+        (cur != path && self.root().join(&cur).is_file() && self.visible(&cur))
+            .then(|| (cur, first.unwrap_or_default()))
     }
 
     pub fn restore_impl(&self, path: &str, rev: &str) -> MResult<Value> {
-        let content = self.get_note_at_impl(path, rev)?;
-        let ap = self.resolve(path)?;
-        if let Some(p) = ap.parent() {
-            fs::create_dir_all(p).ok();
+        let p = self.history_target(path)?;
+        let id = self.resolve_rev(rev)?;
+        let ap = self.resolve(&p)?;
+        if ap.is_dir() {
+            return err(format!("{p} is a folder; restore one note at a time"));
+        }
+        if !ap.exists() {
+            // Restoring the old name of a renamed note would make a silent duplicate.
+            if let Some((now, at)) = self.renamed_away(&p) {
+                if let Some(name) = now.strip_prefix(".Trash/") {
+                    return err(format!(
+                        "{p} was moved to the trash at {at}; use restore_trash with name {name}"
+                    ));
+                }
+                return err(format!(
+                    "{p} was renamed to {now} at {at}; restore {now} instead (its history follows the rename)"
+                ));
+            }
+        }
+        let content = self.content_at(&p, &id, rev.trim())?;
+        if let Some(parent) = ap.parent() {
+            fs::create_dir_all(parent).ok();
         }
         fs::write(&ap, content).map_err(|e| MemoryErr(e.to_string()))?;
         let _ = self.reindex();
-        self.git_commit(&format!("restore: {path}@{rev}"));
-        Ok(json!({"ok": true, "path": path, "rev": rev}))
+        self.git_commit(&format!("restore: {p}@{}", rev.trim()));
+        Ok(json!({"ok": true, "path": p, "rev": rev.trim()}))
     }
 
-    pub fn diff_impl(&self, path: &str, rev_a: &str, rev_b: &str) -> Value {
-        let range = if rev_b.is_empty() {
-            rev_a.to_string()
+    pub fn diff_impl(&self, path: &str, rev_a: &str, rev_b: &str) -> MResult<Value> {
+        let p = self.history_target(path)?;
+        if rev_a.trim().is_empty() {
+            return err("rev_a is required");
+        }
+        let a = self.resolve_rev(rev_a)?;
+        let b = if rev_b.trim().is_empty() {
+            None
         } else {
-            format!("{rev_a}..{rev_b}")
+            Some(self.resolve_rev(rev_b)?)
         };
-        let allowed = self.history_path_ok(path)
-            && Self::rev_ok(rev_a)
-            && (rev_b.is_empty() || Self::rev_ok(rev_b));
-        let (ok, out) = if allowed {
-            self.git(&["--literal-pathspecs", "diff", &range, "--", path])
-        } else {
-            (false, String::new())
-        };
-        let txt = if ok { out } else { String::new() };
-        json!({"path": path, "from": rev_a,
-               "to": if rev_b.is_empty() { "working" } else { rev_b }, "diff": txt})
+        let mut args = vec!["--literal-pathspecs", "diff", a.as_str()];
+        if let Some(b) = &b {
+            args.push(b);
+        }
+        args.extend(["--", p.as_str()]);
+        let (ok, out, stderr) = self.git_run(&args, &[]);
+        if !ok {
+            return err(format!("diff failed: {}", stderr.trim()));
+        }
+        Ok(json!({"path": p, "from": rev_a.trim(),
+                  "to": if b.is_none() { "working" } else { rev_b.trim() },
+                  "changed": !out.is_empty(), "diff": out}))
     }
 }
 
