@@ -1207,6 +1207,26 @@ impl MemoryStore {
         Ok(full)
     }
 
+    /// [`Self::resolve`] for a path about to be created: an existing target hidden
+    /// from the caller answers "already exists" (as a visible one does) rather than
+    /// "not found", which would wrongly suggest that creating it can succeed.
+    fn resolve_new(&self, rel_path: &str) -> MResult<PathBuf> {
+        self.resolve(rel_path).or_else(|e| {
+            let clean = rel_path.replace('\\', "/");
+            let clean = clean.trim_start_matches('/');
+            let plain = !clean
+                .split('/')
+                .any(|seg| seg == ".." || seg.starts_with('.'));
+            if plain
+                && !self.visible(clean)
+                && fs::symlink_metadata(self.root().join(clean)).is_ok()
+            {
+                return err(format!("already exists: {rel_path}"));
+            }
+            Err(e)
+        })
+    }
+
     pub fn rel_of(&self, full: &Path) -> String {
         full.strip_prefix(self.root())
             .unwrap_or(full)
@@ -2320,7 +2340,7 @@ impl MemoryStore {
             }
             let twin_rel = self.rel_of(&twin);
             if !self.visible(&twin_rel) {
-                return err(format!("not found: {rel}"));
+                return err(format!("already exists: {rel}"));
             }
             return err(format!(
                 "already exists (names are compared without case): {twin_rel}"
@@ -2338,7 +2358,7 @@ impl MemoryStore {
         } else {
             format!("{folder}/{fn_}.md")
         };
-        let ap = self.resolve(&rel)?;
+        let ap = self.resolve_new(&rel)?;
         self.ensure_free(&ap, &rel, None)?;
         let body = match content {
             Some(c) => c.to_string(),
@@ -2442,7 +2462,7 @@ impl MemoryStore {
     /// cleaned like a note title. Returns the cleaned path.
     pub fn create_folder_impl(&self, name: &str) -> MResult<String> {
         let path = clean_folder_path(name)?;
-        let dir = self.resolve(&path)?;
+        let dir = self.resolve_new(&path)?;
         fs::create_dir_all(&dir).ok();
         let index = self.resolve(&format!("{path}/Index.md"))?;
         if !index.exists() {

@@ -227,7 +227,8 @@ pub fn set_rule(
     })
 }
 
-/// Remove the rule on `(kind, path)` and log it; returns [`describe`].
+/// Remove the rule on `(kind, path)` and log it; returns [`describe`] plus `removed`
+/// (whether there was a rule to remove).
 pub fn clear_rule(
     db: &Db,
     kind: Kind,
@@ -248,7 +249,11 @@ pub fn clear_rule(
             };
             memora_state::activity::log(tx, &ev, memora_state::now())?;
         }
-        describe(tx, &p, kind)
+        let mut out = describe(tx, &p, kind)?;
+        if let Some(o) = out.as_object_mut() {
+            o.insert("removed".into(), json!(n > 0));
+        }
+        Ok(out)
     })
 }
 

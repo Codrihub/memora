@@ -975,7 +975,24 @@ impl McpServer {
                 self.call_privacy(caller, name, args)
             }
             "admin_set_tool" => {
-                let tool = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let tool = args
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if tool.is_empty() {
+                    anyhow::bail!(
+                        "name is required: the tool to switch; admin_list_tools lists them"
+                    );
+                }
+                if admin_catalog().iter().any(|t| t.name == tool) {
+                    anyhow::bail!(
+                        "admin tools cannot be switched off ({tool} is one); admin_list_tools lists the tools you can switch"
+                    );
+                }
+                if !is_catalog_tool(tool) {
+                    anyhow::bail!("unknown tool: {tool}; admin_list_tools lists the tool names");
+                }
                 let Some(enabled) = args.get("enabled").and_then(|v| v.as_bool()) else {
                     anyhow::bail!("enabled (boolean) is required");
                 };
@@ -999,31 +1016,58 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim();
-        // Kind: as given, else what the path is on disk (a folder, or a note).
-        let kind = || -> anyhow::Result<Kind> {
-            if let Some(k) = args.get("kind").and_then(|v| v.as_str()) {
-                return Ok(k.parse()?);
-            }
-            let norm = memora_state::privacy::normalize_path(path)?;
-            let root = self
-                .store
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .root()
-                .to_path_buf();
-            Ok(if root.join(&norm).is_dir() {
-                Kind::Folder
+        let root = self
+            .store
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .root()
+            .to_path_buf();
+        // What the path is on disk: a folder, a note (`.md` optional), or nothing yet.
+        let on_disk = |norm: &str| -> Option<Kind> {
+            let full = root.join(norm);
+            if full.is_dir() {
+                Some(Kind::Folder)
+            } else if full.is_file() || root.join(format!("{norm}.md")).is_file() {
+                Some(Kind::Node)
             } else {
-                Kind::Node
-            })
+                None
+            }
+        };
+        if name == "privacy_list" && path.is_empty() {
+            return Ok(self.db.read(privacy::list_json)?);
+        }
+        if path.is_empty() {
+            anyhow::bail!("path is required: a note (with .md) or a folder in the vault");
+        }
+        if path.starts_with('/') || path.starts_with('\\') || path.get(1..2) == Some(":") {
+            anyhow::bail!(
+                "path must be relative to the vault (like Private or Notes/Secret.md), not an absolute path: {path}"
+            );
+        }
+        let norm = memora_state::privacy::normalize_path(path)?;
+        if norm.eq_ignore_ascii_case("root") && on_disk(&norm).is_none() {
+            anyhow::bail!("the vault root cannot be private; name a note or a folder inside it");
+        }
+        let disk = on_disk(&norm);
+        // Kind: as given (it must match what the path is on disk), else what it is on disk.
+        let kind = match args.get("kind").and_then(|v| v.as_str()) {
+            Some(k) => {
+                let k: Kind = k.parse()?;
+                match disk {
+                    Some(d) if d != k => anyhow::bail!(
+                        "{path} is a {} on disk, not a {}; use kind \"{}\" or leave kind out",
+                        d.as_str(),
+                        k.as_str(),
+                        d.as_str()
+                    ),
+                    _ => k,
+                }
+            }
+            None => disk.unwrap_or(Kind::Node),
         };
         let actor = caller.log_name();
         match name {
-            "privacy_list" if path.is_empty() => Ok(self.db.read(privacy::list_json)?),
-            "privacy_list" => {
-                let k = kind()?;
-                Ok(self.db.read(|c| privacy::describe(c, path, k))?)
-            }
+            "privacy_list" => Ok(self.db.read(|c| privacy::describe(c, path, kind))?),
             "privacy_set" => {
                 let mode: Mode = args
                     .get("mode")
@@ -1038,26 +1082,57 @@ impl McpServer {
                     Some(Value::String(s)) => s.split(',').map(str::to_string).collect(),
                     _ => Vec::new(),
                 };
-                let k = kind()?;
-                Ok(privacy::set_rule(
+                let named = agents.iter().any(|a| !a.trim().is_empty());
+                // A deny rule without agents hides nothing: setting one used to remove
+                // the existing rule without a word, so a typo could expose a folder.
+                if mode == Mode::Deny && !named {
+                    anyhow::bail!(
+                        "agents is empty: name the agents to hide {path} from (key names or ids); use privacy_clear to remove the rule"
+                    );
+                }
+                let mut out = privacy::set_rule(
                     &self.db,
-                    k,
+                    kind,
                     path,
                     mode,
                     &agents,
                     Some(&actor),
                     caller.ip.as_deref(),
-                )?)
+                )?;
+                let mut warnings: Vec<String> = Vec::new();
+                if mode == Mode::AllowOnly && !named {
+                    warnings.push(format!(
+                        "allow_only with no agents hides {path} from every agent (the owner still sees it)"
+                    ));
+                }
+                if disk.is_none() {
+                    warnings.push(format!(
+                        "{path} does not exist yet; the rule applies once a {} with this path is created",
+                        kind.as_str()
+                    ));
+                }
+                if !warnings.is_empty() {
+                    if let Some(o) = out.as_object_mut() {
+                        o.insert("warning".into(), json!(warnings.join("; ")));
+                    }
+                }
+                Ok(out)
             }
             _ => {
-                let k = kind()?;
-                Ok(privacy::clear_rule(
-                    &self.db,
-                    k,
-                    path,
-                    Some(&actor),
-                    caller.ip.as_deref(),
-                )?)
+                let mut out =
+                    privacy::clear_rule(&self.db, kind, path, Some(&actor), caller.ip.as_deref())?;
+                if out.get("removed") == Some(&json!(false)) {
+                    if let Some(o) = out.as_object_mut() {
+                        o.insert(
+                            "note".into(),
+                            json!(format!(
+                                "no rule to remove: {path} has no {} rule of its own",
+                                kind.as_str()
+                            )),
+                        );
+                    }
+                }
+                Ok(out)
             }
         }
     }
