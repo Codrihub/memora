@@ -8,17 +8,16 @@ Memora ships as two binaries plus a folder of web UI assets:
 | `memora-cli` | The operator console. Run it with no arguments for slash commands (`/guide`, `/web`, `/config`, ...) |
 | `assets/` | Web UI files, found through `MEMORA_ASSETS` |
 
-There are two supported ways to run it as a service: **native** (systemd, via
-`install.sh`) and **Docker** (Compose). On Linux it can also be installed with
-**npm**, which is handy for trying it or running it under your own user. All
-end the same way: open the console, type `/web`, and finish setup in the
-browser.
+It runs on Linux (x86_64, aarch64) and Windows 10/11 (x64). Install it with
+**npm** (Linux and Windows, runs as you), **Docker**, the **native** installer
+(a systemd service on Linux), the **Windows zip** or from source. All end the
+same way: run `memora-cli setup`, open the link it prints and enter the code.
 
 **Fastest path** (pick one, in this order of ease), then open the link the
 setup command prints and enter the code:
 
 ```bash
-# npm (Linux x86_64 / arm64, Node 18+)
+# npm (Linux x86_64 / arm64, Windows x64; Node 18+)
 npm install -g @codrihub/memora && memora
 memora-cli setup --minutes 15            # in a second terminal
 
@@ -38,6 +37,7 @@ sudo memora-cli setup --minutes 15
 - [npm](#npm)
 - [Windows zip](#windows-zip)
 - [Start, stop and restart](#start-stop-and-restart)
+- [Uninstall with memora-cli](#uninstall-with-memora-cli)
 - [Reverse proxy](#reverse-proxy)
 - [Backups](#backups)
 - [Automation: `--check` and `--upgrade`](#automation---check-and---upgrade)
@@ -288,6 +288,9 @@ sudo /usr/local/share/memora/install.sh --uninstall           # keeps /var/lib/m
 sudo /usr/local/share/memora/install.sh --uninstall --purge   # also deletes notes, account, keys, and the user
 ```
 
+Or run `memora-cli uninstall`, which asks what to keep (see
+[Uninstall with memora-cli](#uninstall-with-memora-cli)).
+
 ### Firewall
 
 Open only the Memora port, and only when clients connect directly:
@@ -423,11 +426,15 @@ it runs as you with no service; keep the folder under your user profile.
 
 ## Start, stop and restart
 
-| Install | Start | Stop | Restart |
-|---|---|---|---|
-| Native (systemd) | `sudo systemctl start memora` | `sudo systemctl stop memora` | `sudo systemctl restart memora` |
-| Docker | `docker start memora` | `docker stop memora` | `docker restart memora` |
-| npm, Windows zip, source | `memora` (keep it running) | Ctrl+C in its terminal | stop, then start |
+`memora-cli start`, `stop` and `restart` (or `/start`, `/shutdown` and
+`/restart` in the console) work out how this install runs and do the right
+thing:
+
+| Install | What `memora-cli start / stop / restart` does | By hand |
+|---|---|---|
+| Native (systemd) | runs `systemctl start / stop / restart memora` (as root) | `sudo systemctl start memora` |
+| npm, Windows zip, source | runs the server in the background, with `memora.pid` and `memora.log` in the state folder; `stop` asks it to end and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
+| Docker | prints the host commands (a container cannot stop itself) | `docker start / stop / restart memora` |
 
 From the browser, the owner can shut the server down in Settings, Server, Shut
 down: the server answers, then stops gracefully and exits with status 0, the
@@ -435,6 +442,35 @@ same as Ctrl+C or `systemctl stop`. A supervisor that restarts a cleanly exited
 process starts it again (systemd `Restart=always`, Docker
 `--restart unless-stopped`); the installer's unit uses `Restart=on-failure`, so
 it stays stopped. API keys cannot shut the server down.
+
+## Uninstall with memora-cli
+
+```bash
+memora-cli uninstall                 # or /uninstall in the console
+```
+
+It explains what it removes for this install (the service and program
+files, or the npm package, or the container), then shows a checklist; press
+space to select and Enter to continue:
+
+- **Settings and accounts** (the state folder: database, keys, sessions)
+- **Vault notes** (your vault folder)
+
+Both are **unticked**, so by default your settings and notes are kept and a
+later install picks them up again. Deleting the vault asks you to type its
+folder name. Before the state folder is deleted, a final database backup is
+offered. System folders, your home folder and the program's own folder are
+never deleted.
+
+| Install | What uninstall does |
+|---|---|
+| Native (systemd) | runs the installed `install.sh --uninstall` (adds `--purge` only when both folders are the installer's own) |
+| npm | stops the server, deletes what you ticked, then tells you to run `npm uninstall -g @codrihub/memora` |
+| Windows zip, source | stops the server, deletes what you ticked; delete the program folder yourself |
+| Docker | prints `docker rm -f memora` and, for what you ticked, `docker volume rm memora-state` / `docker volume rm memora-data` |
+
+Without a terminal it needs `--yes` and deletes only what the flags say:
+`memora-cli uninstall --yes [--delete-config] [--delete-vault]`.
 
 ## Reverse proxy
 

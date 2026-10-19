@@ -289,11 +289,19 @@ plain `cp` of the live file). See [docs/INSTALL.md](docs/INSTALL.md#backups).
 
 ### Start, stop and restart
 
-| Install | Start | Stop | Restart |
-|---|---|---|---|
-| Native (systemd) | `sudo systemctl start memora` | `sudo systemctl stop memora` | `sudo systemctl restart memora` |
-| Docker | `docker start memora` | `docker stop memora` | `docker restart memora` |
-| npm, Windows zip, source | `memora` (keep it running) | Ctrl+C in its terminal | stop, then start |
+```bash
+memora-cli start          # or /start in the console
+memora-cli stop           # or /shutdown
+memora-cli restart        # or /restart
+memora-cli uninstall      # or /uninstall
+```
+
+They work out how this install runs: a systemd service is driven with
+`systemctl`, an npm, zip or source install runs in the background (pid and
+log in the state folder), and inside Docker the console prints the host
+commands (`docker start / stop / restart memora`). Uninstall asks, with a
+checklist, whether to also delete your settings and your vault; both are kept
+unless you tick them. Details: [docs/INSTALL.md](docs/INSTALL.md#uninstall-with-memora-cli).
 
 The owner can also **shut the server down from the browser**: Settings, Server,
 Shut down. Every browser and agent is disconnected until it is started again on
