@@ -12,7 +12,7 @@ catalog.
 | Auth | API key in `Authorization: Bearer <key>` or `X-API-Key: <key>`, or an OAuth 2.1 access token |
 | Discovery card | `GET /.well-known/mcp.json` (public) |
 | Readable catalog | `GET /tools` (HTML page, public) |
-| Catalog size | 74 tools, plus 5 admin tools for keys with the `admin` scope |
+| Catalog size | 75 tools, plus 5 admin tools for keys with the `admin` scope |
 
 `initialize` answers with the protocol version the client asks for when it is
 one of the three above, and with `2025-06-18` otherwise.
@@ -344,13 +344,18 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
-| `get_history` | R | `path` (string, required), `limit` (integer, default 20) | Git history of a note. A single entry is returned as an object, several as an array. |
-| `get_note_at` | R | `path` (string, required), `rev` (string, required) | `{ok, path, rev, content}` at a revision. |
-| `diff` | R | `path` (string, required), `rev_a` (string, required), `rev_b` (string) | Diff between two revisions, or `rev_a` against the working tree. |
-| `restore_memory` | W | `path` (string, required), `rev` (string, required) | Restores a note to a revision. |
-| `snapshot` | W | `label` (string, required) | Tags the whole vault (git tag). |
-| `soft_delete` | W | `path` (string, required) | Moves a note to `.Trash`. |
-| `restore_trash` | W | `name` (string, required), `into` (string, default `Root`) | Restores a note from `.Trash` into a folder. |
+| `get_history` | R | `path` (string, required), `limit` (integer, default 20, at least 1) | Git history of a note, always an array of `{rev, date, author, message}` (plus `path` for commits under an earlier name: the history follows renames). `author` is the agent or user whose call made the change. |
+| `get_note_at` | R | `path` (string, required), `rev` (string, required) | `{ok, path, rev, content}` at a revision. `rev` is one revision: a `rev` from `get_history`, `snap-<label>`, `HEAD~1` or `HEAD@{<date>}`. Unknown revisions, dates before the history and empty `rev` are errors. |
+| `diff` | R | `path` (string, required), `rev_a` (string, required), `rev_b` (string) | `{path, from, to, changed, diff}` between two revisions, or `rev_a` against the current note. Ranges (`a..b`) and unknown revisions are errors. |
+| `restore_memory` | W | `path` (string, required), `rev` (string, required) | Restores a note to a revision (a new commit). Give the current path; content under an earlier name is found. Restoring the old path of a renamed note is refused and names the current one. |
+| `snapshot` | W | `label` (string, required) | Commits pending changes and tags the last commit `snap-<label>` (letters, digits, `.`, `_`, `-`; spaces become `-`; at most 40 characters; must be new). Use the tag as `rev`. |
+| `soft_delete` | W | `path` (string, required) | Moves a note to `.Trash` and remembers where it came from. |
+| `list_trash` | R | none | Notes in `.Trash`, newest first: `{name, path, original, deleted}`. |
+| `restore_trash` | W | `name` (string, required; `.md` optional), `into` (string) | Restores a note from `.Trash` to the path it was deleted from, or into the folder `into` (`Root` = top level). |
+
+All versioning tools except `soft_delete`, `list_trash` and `restore_trash`
+need version history on (see [CONFIGURATION.md](CONFIGURATION.md#version-history));
+otherwise they answer "version history is off".
 
 ### Bulk writes (`write`)
 
@@ -360,8 +365,8 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 | `duplicate_memory` | W | `path` (string, required) | Copies a note as `<name>-copy` in the same folder (a long name is shortened so the suffix fits in 80 characters). |
 | `merge_memory` | W | `paths` (array of strings, required: existing notes, each once, not `into`), `into` (string, required; `.md` optional) | Appends the body of each source, without its frontmatter, to `into` under `## from <name>`, and adds the sources' tags to the target's tags. `into` is created when missing. The sources are kept. Returns `{ok, into, created, merged, sources, tags_added}`. |
 | `template_create` | W | `template` (string, required; a note in `Templates/`, as `Meeting` or `Meeting.md`), `title` (string, required), `folder` (string, default `Root`), `variables` (object) | Creates a note from a template with `{{var}}` substitution. `{{title}}` (the note title) and `{{date}}` (today, `YYYY-MM-DD`) are built in unless given in `variables`. Only notes in `Templates/` can be templates. |
-| `bulk_replace` | W | `find` (string, required), `replace` (string, required), `folder` (string), `regex` (boolean, default false), `dry_run` (boolean, default false) | Find and replace across notes. Needs `write` even with `dry_run`. |
-| `bulk_delete` | W | `paths` (array of strings), `folder` (string) | Deletes many notes by list or by folder. |
+| `bulk_replace` | W | `find` (string, required), `replace` (string, required), `folder` (string), `regex` (boolean, default false), `dry_run` (boolean, default false) | Find and replace across notes. `find` must not be empty or (with `regex`) match an empty string. `folder` includes its subfolders (`Root` = top level only); a missing folder is an error. With `regex`, `replace` expands `$1` / `${name}` (`$$` is a literal `$`); unknown groups are errors. Needs `write` even with `dry_run`. |
+| `bulk_delete` | W | `paths` (array of strings), `folder` (string) | Moves many notes to `.Trash` (recoverable with `restore_trash`), by list and / or folder (with subfolders). Any invalid path (missing, outside the vault, a folder, not a note) refuses the whole call and is listed. |
 
 ### Collaboration (`collab`)
 

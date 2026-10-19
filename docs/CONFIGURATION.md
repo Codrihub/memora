@@ -128,4 +128,30 @@ The vault holds the markdown notes plus derived and metadata files. See
 [ARCHITECTURE.md](ARCHITECTURE.md#vault-markdown-portable) for the full list.
 The important ones for operations are `.git/` (history), `.events.jsonl`
 (event log), and `.Trash/`
-(soft-deleted notes).
+(soft-deleted notes; `.Trash/.index.json` remembers where each one came from,
+so `restore_trash` puts it back there).
+
+## Version history
+
+Version history (`get_history`, `get_note_at`, `diff`, `restore_memory`,
+`snapshot`) is on when the vault folder is a git repository of its own, that is
+when it has a `.git/` directory. Memora does not create one, so a new vault has
+no history and these tools answer "version history is off". To turn it on,
+install `git` and run, once:
+
+```sh
+git -C /path/to/vault init
+git -C /path/to/vault add -A
+git -C /path/to/vault commit -m "start history"
+```
+
+(In Docker, the vault is the host directory mounted at `/data`.) From then on
+every change made through Memora is committed automatically. Each commit's
+author is the agent or user whose call made the change; the committer is the
+vault's git identity (`git config user.name` / `user.email`), or `Memora
+<memora@localhost>` when none is set. Git never searches above the vault, so a
+vault inside another repository still needs its own `git init`.
+
+A snapshot (`snapshot` tool) commits pending changes and tags the last commit
+as `snap-<label>`; pass that tag as `rev` to `get_note_at`, `diff` or
+`restore_memory`.
