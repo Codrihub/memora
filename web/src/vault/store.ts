@@ -5,10 +5,10 @@
 // is rebuilt here from each note's path, so `Projects/Web/x.md` shows up under
 // Projects > Web.
 
-import { on } from '../bus';
-import { hashColor } from '../format';
+import { on, type PinsChange } from '../bus';
+import { hashColor, noteName } from '../format';
 import { api, apiGet, apiPost } from '../api';
-import { clearLegacyPins, legacyPins } from '../storage';
+import { activityToastAllowed, clearLegacyPins, legacyPins } from '../storage';
 import { toast } from '../toast';
 import { allNotes, state } from '../state';
 import type { NoteRef, WsEvent } from '../types';
@@ -220,9 +220,63 @@ function pinsSynced(): void {
 
 const samePin = (a: PinItem, b: PinItem): boolean => a.kind === b.kind && a.key === b.key;
 
+/** A pin's id, as the tree keys its row (`pin:<id>`). */
+export const pinId = (p: { kind: string; key: string }): string => p.kind + ':' + p.key;
+
+/** How long a new pin row shows its arrival (slide in, accent highlight). */
+export const PIN_FX_MS = 1400;
+/** Pins that just arrived: id -> when (performance.now()). */
+const pinFresh = new Map<string, number>();
+
+function markFresh(it: PinItem): void {
+  const now = performance.now();
+  for (const [k, at] of pinFresh) if (now - at > PIN_FX_MS) pinFresh.delete(k);
+  pinFresh.set(pinId(it), now);
+}
+
+/** Milliseconds since the pin arrived while its arrival still shows, else -1. */
+export function pinFreshAge(it: PinItem): number {
+  const at = pinFresh.get(pinId(it));
+  if (at == null) return -1;
+  const age = performance.now() - at;
+  return age < PIN_FX_MS ? age : -1;
+}
+
+/** Who changed the pins over MCP (from `pins_changed`), until the reload lands. */
+let pinsBy: (PinsChange & { at: number }) | null = null;
+/** The first server list fills the sidebar without any arrival effect. */
+let pinsLoaded = false;
+
+const pinLabel = (p: PinItem): string => (p.kind === 'note' ? noteName(p.key) : baseName(p.key));
+
+/** "agent1 pinned Plan" / "agent1 unpinned Plan", under the activity toast settings. */
+function toastAgentPins(by: PinsChange, added: PinItem[], removed: PinItem[]): void {
+  if (by.kind !== 'agent' || state.editing || state.page === 'brain') return;
+  if (!activityToastAllowed(by.actorId)) return;
+  const say = (verb: string, list: PinItem[]): void => {
+    if (!list.length) return;
+    const what = list.length === 1 ? pinLabel(list[0]) : `${list.length} items`;
+    toast(`${by.actor} ${verb} ${what}`, 'ok', 3200);
+  };
+  say('pinned', added);
+  say('unpinned', removed);
+}
+
 function applyPins(r: PinsReply | null): void {
   if (!r || !Array.isArray(r.pins)) return;
+  const before = pinList;
   pinList = r.pins.map((p) => ({ kind: p.kind, key: p.path, missing: !!p.missing }));
+  const by = pinsBy && performance.now() - pinsBy.at < 10_000 ? pinsBy : null;
+  pinsBy = null;
+  if (pinsLoaded) {
+    // What arrived from elsewhere (an agent, another browser) shows its arrival;
+    // a bulk change (vault switch, Settings) just appears.
+    const added = pinList.filter((p) => !before.some((b) => samePin(b, p)));
+    const removed = before.filter((b) => !pinList.some((p) => samePin(b, p)));
+    if (added.length <= 6) added.forEach(markFresh);
+    if (by) toastAgentPins(by, added, removed);
+  }
+  pinsLoaded = true;
   pinsSynced();
 }
 
@@ -294,6 +348,8 @@ export function pinAt(item: PinItem, index?: number): void {
   const at = index == null ? order.length : Math.max(0, Math.min(order.length, index));
   order.splice(at, 0, { kind: item.kind, key: item.key, missing: had ? had.missing : false });
   pinList = order;
+  // Pinned here: it shows at once, with the same arrival as a pin from elsewhere.
+  if (!had) markFresh(item);
   pinsSynced();
   if (had) {
     // A reorder: send the whole list.
@@ -487,7 +543,10 @@ export function wireBus(): void {
   if (wired) return;
   wired = true;
   firstPinLoad();
-  on('pins', () => void loadPins());
+  on('pins', (by) => {
+    if (by) pinsBy = { ...by, at: performance.now() };
+    void loadPins();
+  });
   // Back online: events may have been missed. A returning tab catches paths
   // changed outside Memora (shown as missing).
   on('connection', (c) => {

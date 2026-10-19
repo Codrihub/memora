@@ -26,6 +26,16 @@ export interface AgentActivity {
   kind?: string;
 }
 
+/** Who changed the pins over MCP (`pins_changed` carries no paths). */
+export interface PinsChange {
+  /** Display name: the API key's name, or the user name. */
+  actor: string;
+  /** API key id (or user name). */
+  actorId: string;
+  /** `agent` (API key) or `user` (browser session over MCP). */
+  kind: 'agent' | 'user';
+}
+
 export interface BusEvents {
   /** An agent or user action (from `ai_activity`). */
   activity: AgentActivity;
@@ -35,8 +45,9 @@ export interface BusEvents {
   connection: 'on' | 'connecting' | 'off';
   /** Number of browsers connected to the server. */
   presence: number;
-  /** The owner's pins changed on the server (`pins_changed`); reload them. */
-  pins: null;
+  /** The owner's pins changed on the server (`pins_changed`); reload them. Names
+   * the actor when the change came over MCP. */
+  pins: PinsChange | null;
 }
 
 type Handler<K extends keyof BusEvents> = (payload: BusEvents[K]) => void;

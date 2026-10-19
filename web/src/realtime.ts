@@ -24,6 +24,8 @@ import { apiGet } from './api';
 import { AGENT_COLORS_EVENT, setAgentColors } from './control/agents';
 
 const MUTATIONS = new Set(['node_created', 'node_updated', 'node_deleted', 'node_renamed']);
+/** Tools whose success toasts from the pins list instead of the activity event. */
+const PIN_TOOLS = new Set(['pin', 'unpin']);
 /** An agent counts as active while a call is open or for this long after one. */
 const ACTIVE_MS = 5_000;
 /** Agents seen within this window are listed in the popover. */
@@ -337,7 +339,17 @@ export const RT = {
       return;
     }
     if (t === 'pins_changed') {
-      emit('pins', null);
+      const actor = typeof d.actor === 'string' ? d.actor : '';
+      emit(
+        'pins',
+        actor
+          ? {
+              actor,
+              actorId: typeof d.actor_id === 'string' ? d.actor_id : '',
+              kind: d.actor_kind === 'user' ? 'user' : 'agent',
+            }
+          : null,
+      );
       return;
     }
     if (t === 'folder_meta' || t === 'actor_alias') {
@@ -395,7 +407,14 @@ export const RT = {
       // The activity page refreshes; other pages toast, except the brain,
       // which shows activity itself.
       if (state.page === 'logs') hooks.refreshLogs?.();
-      else if (state.page !== 'brain' && !state.editing && kind === 'agent' && activityToastAllowed(keyOf(aid, actor))) {
+      // Pin changes toast once the list reloads ("agent1 pinned Plan", see vault/store).
+      else if (
+        state.page !== 'brain' &&
+        !state.editing &&
+        kind === 'agent' &&
+        !PIN_TOOLS.has(ev.action) &&
+        activityToastAllowed(keyOf(aid, actor))
+      ) {
         toast(actor + ' · ' + trunc(ev.label, 70), 'ok', 2600);
       }
     } else if (

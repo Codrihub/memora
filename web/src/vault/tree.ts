@@ -26,7 +26,9 @@ import {
   isInside,
   onPinsSynced,
   openFolders,
+  PIN_FX_MS,
   pinAt,
+  pinFreshAge,
   pinnedItems,
   prefs,
   saveOpen,
@@ -177,7 +179,8 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !before.size) return;
   const rows = visibleRows(host);
   const now = new Set(rows.map((r) => r.dataset.key!));
-  const added = rows.filter((r) => !before.has(r.dataset.key!));
+  // New pins have their own arrival (see pinArrivals).
+  const added = rows.filter((r) => !before.has(r.dataset.key!) && !r.dataset.key!.startsWith('pin:'));
   const gone = Array.from(before.entries()).filter(([k]) => !now.has(k));
   if (added.length > 12 || gone.length > 12) return;
   // Shifted rows glide from their old place.
@@ -225,6 +228,57 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
     );
     a.onfinish = () => ghost.remove();
   }
+}
+
+// Pin arrivals -----------------------------------------------------------------
+//
+// A pin that just arrived (pinned here, by an agent over MCP, or in another
+// browser) drops into the Pinned list: the row slides down into place under a
+// short accent highlight with an accent edge, its icon lands like a pushpin and
+// the count ticks up. A redraw meanwhile picks the effect up where it was (the
+// age comes from the store). Reduced motion keeps only the highlight.
+
+const pinGlow = (pct: number): string => `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
+const PIN_EDGE = 'inset 3px 0 0 var(--accent)';
+
+function pinArrival(row: HTMLElement, age: number, still: boolean): void {
+  const glow: Keyframe[] = still
+    ? [
+        { backgroundColor: pinGlow(20), boxShadow: PIN_EDGE },
+        { backgroundColor: pinGlow(14), boxShadow: PIN_EDGE, offset: 0.6 },
+      ]
+    : [
+        { opacity: 0, transform: 'translateY(-8px) scale(.97)', backgroundColor: pinGlow(26), boxShadow: PIN_EDGE },
+        { opacity: 1, transform: 'none', backgroundColor: pinGlow(22), boxShadow: PIN_EDGE, offset: 0.2 },
+        { backgroundColor: pinGlow(14), boxShadow: PIN_EDGE, offset: 0.62 },
+      ];
+  // The last frame is left out: the row eases back to its own look (hover, active).
+  row.animate(glow, { duration: PIN_FX_MS, easing: EASE }).currentTime = age;
+  if (still) return;
+  const ico = row.querySelector<HTMLElement>('.vx-pin-ico');
+  if (!ico) return;
+  ico.animate(
+    [
+      { opacity: 0, transform: 'translateY(-9px) rotate(-28deg) scale(.6)' },
+      { opacity: 0, transform: 'translateY(-9px) rotate(-28deg) scale(.6)', offset: 0.15 },
+      { opacity: 1, transform: 'translateY(1px) rotate(6deg) scale(1.12)', offset: 0.6 },
+      { opacity: 1, transform: 'none' },
+    ],
+    { duration: 700, easing: 'cubic-bezier(.3,1.4,.5,1)' },
+  ).currentTime = Math.min(age, 700);
+}
+
+/** Bump the Pinned count when it grows. */
+function bumpCount(host: HTMLElement): void {
+  const n = host.querySelector<HTMLElement>('.vx-pins .vx-sec-count');
+  n?.animate(
+    [
+      { transform: 'none' },
+      { transform: 'scale(1.35)', color: 'var(--accent)', offset: 0.35 },
+      { transform: 'none' },
+    ],
+    { duration: 520, easing: EASE },
+  );
 }
 
 /** While a branch opens or closes, redraws wait so the animation plays out. */
@@ -276,7 +330,9 @@ export class TreeView {
     if (this.opts.showPins) this.host.appendChild(this.pinSection());
     this.host.appendChild(this.folderSection());
     this.host.scrollTop = scroll;
+    if (before && this.opts.showPins) this.pinDepartures(before);
     if (before) animateChanges(this.host, before);
+    if (this.opts.showPins) this.pinArrivals();
     this.drawn = true;
     // Keep keyboard focus across redraws.
     const keyed = this.focusKey
@@ -287,6 +343,71 @@ export class TreeView {
   }
 
   // ---------------------------------------------------------------- pins
+
+  /** Pins shown last draw (the count bumps when it grows). */
+  private pinCount = -1;
+
+  /** Pin rows on their way out, kept in the list across redraws until they finish. */
+  private pinGhosts: { el: HTMLElement; at: number }[] = [];
+
+  /**
+   * Pins that went away fade and slide out where they stood, then fold shut, so the
+   * rows under them close the gap smoothly (instead of the row-motion ghost, which
+   * floats over the drop slot). Takes them out of `before`.
+   */
+  private pinDepartures(before: Map<string, Was>): void {
+    const list = this.host.querySelector<HTMLElement>('.vx-pin-list');
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (const [k, was] of Array.from(before)) {
+      if (!k.startsWith('pin:')) continue;
+      if (this.host.querySelector(`[data-key="${CSS.escape(k)}"]`)) continue;
+      before.delete(k);
+      if (still || !list || this.pinGhosts.length >= 6) continue;
+      const g = was.el;
+      const at = g.parentElement ? Array.from(g.parentElement.children).indexOf(g) : -1;
+      g.removeAttribute('data-key');
+      g.removeAttribute('role');
+      g.setAttribute('aria-hidden', 'true');
+      g.inert = true;
+      g.classList.remove('active');
+      Object.assign(g.style, { overflow: 'hidden', pointerEvents: 'none' });
+      const h = was.height + 'px';
+      const ghost = { el: g, at: at < 0 ? 1e9 : at };
+      this.pinGhosts.push(ghost);
+      const a = g.animate(
+        [
+          { opacity: 1, transform: 'none', height: h, minHeight: h },
+          { opacity: 0, transform: 'translateX(-14px)', height: h, minHeight: h, offset: 0.55 },
+          { opacity: 0, transform: 'translateX(-14px)', height: '0px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px' },
+        ],
+        { duration: 420, easing: 'ease-in-out', fill: 'forwards' },
+      );
+      a.onfinish = () => {
+        g.remove();
+        this.pinGhosts = this.pinGhosts.filter((x) => x !== ghost);
+      };
+    }
+    // Ghosts still running (from this or an earlier redraw) go back where they stood.
+    if (!list) return;
+    for (const gh of this.pinGhosts.slice().sort((x, y) => x.at - y.at)) {
+      list.insertBefore(gh.el, list.children[gh.at] || null);
+    }
+  }
+
+  /** Play (or keep playing) the arrival of pins that just came in. */
+  private pinArrivals(): void {
+    const items = pinnedItems();
+    const grew = this.pinCount >= 0 && items.length > this.pinCount;
+    this.pinCount = items.length;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (grew && !still) bumpCount(this.host);
+    for (const it of items) {
+      const age = pinFreshAge(it);
+      if (age < 0) continue;
+      const row = this.host.querySelector<HTMLElement>(`.vx-pin[data-key="${CSS.escape('pin:' + it.kind + ':' + it.key)}"]`);
+      if (row) pinArrival(row, age, still);
+    }
+  }
 
   private pinSection(): HTMLElement {
     const items = pinnedItems();
