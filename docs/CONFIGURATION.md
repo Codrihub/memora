@@ -126,6 +126,6 @@ Inside the container the image sets `MEMORA_VAULT=/data`,
 
 The vault holds the markdown notes plus derived and metadata files. See
 [ARCHITECTURE.md](ARCHITECTURE.md#vault-markdown-portable) for the full list.
-The important ones for operations are `.git/` (history), `.fts.db`
-(rebuildable search index), `.events.jsonl` (event log), and `.Trash/`
+The important ones for operations are `.git/` (history), `.events.jsonl`
+(event log), and `.Trash/`
 (soft-deleted notes).

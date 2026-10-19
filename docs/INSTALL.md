@@ -324,8 +324,8 @@ and `linux/arm64`. The compose file pins the release it ships with; set
 
 Both must be persistent (the Compose file bind-mounts `./data` and `./state`):
 
-- `/data` is the vault: your notes, their git history, the search index, and
-  the event log. Lose it and the notes are gone.
+- `/data` is the vault: your notes, their git history, and the event
+  log. Lose it and the notes are gone.
 - `/state` holds `memora.db` (owner account, password hash, API key hashes,
   sessions, settings, setup/lock state, activity log). Lose it and
   every agent key stops working, the instance falls back to first-run setup,

@@ -4,7 +4,8 @@
 //!   * `folder_of`    -> first path segment, else "Root"
 //!   * `walk`         -> skip dot-entries (`.git`, `.Trash`, ...), only `*.md`
 //!   * `link_targets` -> strip `{{placeholder}}` and code spans, then take `[[...]]`
-//!   * `search`       -> word-based, rank (phrase, -hits, -name_hits, len(name))
+//!   * `search`       -> word-based, rank (phrase, -hits, -name_hits, len(name)), over the
+//!     in-memory note cache (no on-disk index; always matches the files on disk)
 
 pub mod events;
 pub mod privacy;
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use walkdir::WalkDir;
 
 pub const DEFAULT_COLOR: &str = "#8a9098";
@@ -47,6 +48,18 @@ pub fn re_code_span() -> &'static Regex {
 pub fn re_tag() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     cached(&RE, || Regex::new(r"#(\w[\w/-]*)").unwrap())
+}
+/// Words for similarity: 4+ lowercase letters or digits.
+fn re_word() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    cached(&RE, || Regex::new(r"[a-z0-9]{4,}").unwrap())
+}
+/// A checklist item: `- [ ] text` / `* [x] text`.
+fn re_todo() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    cached(&RE, || {
+        Regex::new(r"^\s*[-*]\s+\[( |x|X)\]\s+(.+)").unwrap()
+    })
 }
 /// `tags: [a, b]` in frontmatter.
 pub fn re_fm_tags() -> &'static Regex {
@@ -153,10 +166,9 @@ pub fn color_of(rel_path: &str) -> String {
 
 pub struct MemoryStore {
     root: PathBuf,
-    fts_db: PathBuf,
-    /// Parsed wikilink targets per note, validated by (mtime, size). Rebuilt
+    /// Parsed facts per note ([`NoteMeta`]), validated by (mtime, size). Rebuilt
     /// from the current walk on every use, so deleted notes drop out and the
-    /// map never outgrows the vault.
+    /// map never outgrows the vault. This is the search index too.
     link_cache: std::sync::Mutex<HashMap<PathBuf, LinkCacheEntry>>,
     /// Paths the current caller may see (`None` = the owner, everything). Set only for
     /// the length of one locked call by [`privacy::lock_as`].
@@ -168,17 +180,14 @@ pub struct MemoryStore {
 struct LinkCacheEntry {
     mtime: Option<std::time::SystemTime>,
     len: u64,
-    targets: std::sync::Arc<Vec<String>>,
-    tags: std::sync::Arc<Vec<String>>,
+    meta: Arc<NoteMeta>,
 }
 
 impl MemoryStore {
     pub fn new<P: AsRef<Path>>(root: P) -> Self {
         let root = root.as_ref().to_path_buf();
-        let fts_db = root.join(".fts.db");
         Self {
             root,
-            fts_db,
             link_cache: std::sync::Mutex::new(HashMap::new()),
             view: None,
             hook: None,
@@ -256,26 +265,14 @@ impl MemoryStore {
         fs::read_to_string(p).ok()
     }
 
-    /// Wikilink targets for every walked note (same order as `walk`).
+    /// Parsed facts for every walked note (same order as `files`).
     ///
     /// Only notes whose mtime or size changed since the last call are read and
-    /// parsed again; the rest costs one `stat`. This keeps `/api/graph` and
-    /// `/api/stats` from re-reading and regex-scanning the whole vault on every
-    /// request.
-    pub(crate) fn link_targets_all(
-        &self,
-        files: &[(String, String, PathBuf)],
-    ) -> Vec<std::sync::Arc<Vec<String>>> {
-        self.scan_all(files).into_iter().map(|(l, _)| l).collect()
-    }
-
-    /// `(wikilink targets, tags)` for every walked note (same order as `walk`),
-    /// cached per file on mtime + size like [`MemoryStore::link_targets_all`].
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn scan_all(
-        &self,
-        files: &[(String, String, PathBuf)],
-    ) -> Vec<(std::sync::Arc<Vec<String>>, std::sync::Arc<Vec<String>>)> {
+    /// parsed again; the rest costs one `stat`. Every read-only tool (graph,
+    /// search, query, similarity, todos) goes through here, so notes changed
+    /// outside Memora (Obsidian, git pull, a copied file) show up on the next
+    /// call and nothing re-reads the whole vault per request.
+    pub(crate) fn scan(&self, files: &[(String, String, PathBuf)]) -> Vec<Arc<NoteMeta>> {
         let mut cache = self.link_cache.lock().unwrap_or_else(|e| e.into_inner());
         let mut fresh: HashMap<PathBuf, LinkCacheEntry> = HashMap::with_capacity(files.len());
         let mut out = Vec::with_capacity(files.len());
@@ -285,21 +282,73 @@ impl MemoryStore {
             let len = md.as_ref().map(|m| m.len()).unwrap_or(0);
             let entry = match cache.remove(fp) {
                 Some(e) if md.is_some() && e.mtime == mtime && e.len == len => e,
-                _ => {
-                    let content = self.read(fp).unwrap_or_default();
-                    LinkCacheEntry {
-                        mtime,
-                        len,
-                        targets: std::sync::Arc::new(self.link_targets(&content)),
-                        tags: std::sync::Arc::new(crate::vault::note_tags(&content)),
-                    }
-                }
+                _ => LinkCacheEntry {
+                    mtime,
+                    len,
+                    meta: Arc::new(self.note_meta(&self.read(fp).unwrap_or_default())),
+                },
             };
-            out.push((entry.targets.clone(), entry.tags.clone()));
+            out.push(entry.meta.clone());
             fresh.insert(fp.clone(), entry);
         }
-        *cache = fresh;
+        if self.restricted() {
+            // A restricted walk skips hidden notes: keep their entries.
+            cache.extend(fresh);
+        } else {
+            // The full walk: notes deleted on disk drop out.
+            *cache = fresh;
+        }
         out
+    }
+
+    /// Parse one note's content into a [`NoteMeta`].
+    fn note_meta(&self, content: &str) -> NoteMeta {
+        let (fm_text, _) = crate::vault::split_frontmatter(content);
+        let mut fm = serde_json::Map::new();
+        for (k, v) in crate::vault::parse_frontmatter(&fm_text) {
+            fm.insert(k, v);
+        }
+        let mut body = content.to_string();
+        if body.starts_with("---") {
+            let parts: Vec<&str> = body.splitn(3, "---").collect();
+            if parts.len() >= 3 {
+                body = parts[2].to_string();
+            }
+        }
+        if body.len() > 50000 {
+            let mut cut = 50000;
+            while !body.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            body.truncate(cut);
+        }
+        let lower = content.to_lowercase();
+        let words = re_word()
+            .find_iter(&lower)
+            .map(|m| m.as_str().to_string())
+            .collect();
+        let todos = content
+            .split('\n')
+            .enumerate()
+            .filter_map(|(i, line)| {
+                let c = re_todo().captures(line)?;
+                let text = c[2].trim();
+                // `- [ ]` with nothing after it is not a task.
+                (!text.is_empty())
+                    .then(|| (i + 1, c[1].eq_ignore_ascii_case("x"), text.to_string()))
+            })
+            .collect();
+        let tags = crate::vault::note_tags(content);
+        NoteMeta {
+            targets: self.link_targets(content),
+            search_tags: tags.iter().map(|t| t.to_lowercase()).collect(),
+            tags,
+            fm: serde_json::Value::Object(fm),
+            body_l: body.to_lowercase(),
+            body,
+            words,
+            todos,
+        }
     }
 
     /// Strip `{{...}}` and code spans, then collect wikilink targets.
@@ -324,20 +373,71 @@ impl MemoryStore {
         t.trim().to_string()
     }
 
-    pub fn stats(&self) -> Stats {
-        let mut notes = 0usize;
-        let mut links = 0usize;
-        let mut folders: BTreeSet<String> = BTreeSet::new();
+    /// Resolved wikilinks between the notes the caller can see. See [`LinkIndex`]
+    /// for what counts as a link.
+    pub fn link_index(&self) -> LinkIndex {
         let files = self.walk();
-        let all = self.link_targets_all(&files);
-        for ((rel, _name, _fp), targets) in files.iter().zip(&all) {
-            notes += 1;
-            folders.insert(folder_of(rel));
-            links += targets.len();
+        let metas = self.scan(&files);
+        self.link_index_of(&files, &metas)
+    }
+
+    pub(crate) fn link_index_of(
+        &self,
+        files: &[(String, String, PathBuf)],
+        metas: &[Arc<NoteMeta>],
+    ) -> LinkIndex {
+        let mut idx = LinkIndex::default();
+        let mut lower: HashMap<String, String> = HashMap::new();
+        for (rel, name, _) in files {
+            idx.names.insert(name.clone(), rel.clone());
+            lower
+                .entry(name.to_lowercase())
+                .or_insert_with(|| name.clone());
         }
+        for ((_, name, _), meta) in files.iter().zip(metas) {
+            idx.out.entry(name.clone()).or_default();
+            for raw in &meta.targets {
+                let tgt = Self::norm_target(raw);
+                if tgt.is_empty() {
+                    continue;
+                }
+                let hit = if idx.names.contains_key(&tgt) {
+                    Some(tgt.clone())
+                } else {
+                    lower.get(&tgt.to_lowercase()).cloned()
+                };
+                match hit {
+                    Some(t) if t == *name => {}
+                    Some(t) => {
+                        for k in [name, &t] {
+                            if !idx.first_seen.contains_key(k) {
+                                idx.first_seen.insert(k.clone(), idx.first_seen.len());
+                            }
+                        }
+                        idx.incoming
+                            .entry(t.clone())
+                            .or_default()
+                            .insert(name.clone());
+                        idx.out.entry(name.clone()).or_default().insert(t);
+                    }
+                    None => {
+                        idx.broken.entry(name.clone()).or_default().insert(tgt);
+                    }
+                }
+            }
+        }
+        idx
+    }
+
+    /// `links` counts unique resolved links between two different notes (A->B once,
+    /// see [`LinkIndex`]).
+    pub fn stats(&self) -> Stats {
+        let files = self.walk();
+        let idx = self.link_index();
+        let folders: BTreeSet<String> = files.iter().map(|(rel, _, _)| folder_of(rel)).collect();
         Stats {
-            notes,
-            links,
+            notes: files.len(),
+            links: idx.link_count(),
             folders: folders.len(),
         }
     }
@@ -366,38 +466,34 @@ impl MemoryStore {
         t
     }
 
-    /// One node per note; an edge is emitted only when the target note exists.
+    /// One node per note; one edge per resolved link (see [`LinkIndex`]). A node's
+    /// `degree` is its number of distinct linked notes, in either direction.
     pub fn graph(&self) -> Graph {
         let files = self.walk();
-        let names: BTreeSet<String> = files.iter().map(|(_, n, _)| n.clone()).collect();
-        let mut links: Vec<GraphLink> = Vec::new();
-        let mut nodes: Vec<GraphNode> = Vec::new();
-        let all = self.scan_all(&files);
-
-        for ((rel, name, _fp), (raws, tags)) in files.iter().zip(&all) {
-            let mut degree = 0usize;
-            for raw in raws.iter() {
-                let tgt = Self::norm_target(raw);
-                if !tgt.is_empty() && tgt != *name {
-                    degree += 1;
-                    if names.contains(&tgt) {
-                        links.push(GraphLink {
-                            source: name.clone(),
-                            target: tgt,
-                        });
-                    }
-                }
-            }
-            nodes.push(GraphNode {
+        let metas = self.scan(&files);
+        let idx = self.link_index_of(&files, &metas);
+        let nodes = files
+            .iter()
+            .zip(&metas)
+            .map(|((rel, name, _), meta)| GraphNode {
                 id: name.clone(),
                 path: rel.clone(),
                 folder: folder_of(rel),
                 color: DEFAULT_COLOR.to_string(),
-                degree,
-                tags: tags.as_ref().clone(),
-            });
-        }
-        links.sort();
+                degree: idx.degree(name),
+                tags: meta.tags.clone(),
+            })
+            .collect();
+        let links = idx
+            .out
+            .iter()
+            .flat_map(|(s, ts)| {
+                ts.iter().map(move |t| GraphLink {
+                    source: s.clone(),
+                    target: t.clone(),
+                })
+            })
+            .collect();
         Graph { nodes, links }
     }
 
@@ -438,9 +534,13 @@ impl MemoryStore {
     // -----------------------------------------------------------------------
 
     /// Case-insensitive infix matching, ranked by (phrase, -hits, -name_hits, len(name)).
+    ///
+    /// Each distinct query word counts once. A query with no word characters at all
+    /// (`.*[(`, an emoji) is matched literally. Snippets are HTML-escaped text with the
+    /// first match wrapped in `<b>...</b>`, the only markup they contain.
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchHit> {
         let q = query.trim().to_lowercase();
-        if q.is_empty() {
+        if q.is_empty() || limit == 0 {
             return Vec::new();
         }
         // tag:foo / #foo -> tag filter
@@ -452,48 +552,50 @@ impl MemoryStore {
         let q_stripped = tag_re.replace_all(&q, " ").trim().to_string();
 
         let word_re = Regex::new(r"[^\w/-]+").unwrap();
-        let words: Vec<String> = word_re
-            .split(&q_stripped)
-            .filter(|w| !w.is_empty())
-            .map(|w| w.to_string())
-            .collect();
+        let mut words: Vec<String> = Vec::new();
+        for w in word_re.split(&q_stripped).filter(|w| !w.is_empty()) {
+            if !words.iter().any(|x| x == w) {
+                words.push(w.to_string());
+            }
+        }
+        if words.is_empty() && !q_stripped.is_empty() {
+            // Only symbols: look for the text itself.
+            words.push(q_stripped.clone());
+        }
 
         if words.is_empty() && tag_filters.is_empty() {
             return Vec::new();
         }
 
-        let docs = self.load_docs();
+        let files = self.walk();
+        let metas = self.scan(&files);
         let mut scored: Vec<((u8, i64, i64, usize), SearchHit)> = Vec::new();
 
-        for d in &docs {
-            if !self.visible(&d.path) {
-                continue;
-            }
+        for ((rel, name, _), d) in files.iter().zip(&metas) {
             if !tag_filters.is_empty() {
-                let dt: BTreeSet<&str> = d.tags.split_whitespace().collect();
-                if !tag_filters.iter().all(|t| dt.contains(t.as_str())) {
+                if !tag_filters.iter().all(|t| d.search_tags.contains(t)) {
                     continue;
                 }
                 if words.is_empty() {
                     scored.push((
-                        (1, 0, 0, d.name.len()),
+                        (1, 0, 0, name.len()),
                         SearchHit {
-                            path: d.path.clone(),
-                            name: d.name.clone(),
-                            folder: d.folder.clone(),
+                            path: rel.clone(),
+                            name: name.clone(),
+                            folder: folder_of(rel),
                             score: 1,
-                            snippet: format!("#{}", tag_filters.join(" #")),
+                            snippet: html_escape(&format!("#{}", tag_filters.join(" #"))),
                         },
                     ));
                     continue;
                 }
             }
 
-            let name_l = d.name.to_lowercase();
-            let body_l = d.body.to_lowercase();
+            let name_l = name.to_lowercase();
+            let body_l = &d.body_l;
             let mut hits = 0usize;
             let mut name_hits = 0usize;
-            let mut first: Option<String> = None;
+            let mut first: Option<&str> = None;
             for w in &words {
                 let in_n = name_l.contains(w.as_str());
                 let in_b = body_l.contains(w.as_str());
@@ -502,8 +604,8 @@ impl MemoryStore {
                     if in_n {
                         name_hits += 1;
                     }
-                    if first.is_none() {
-                        first = Some(w.clone());
+                    if first.is_none() && in_b {
+                        first = Some(w);
                     }
                 }
             }
@@ -511,57 +613,21 @@ impl MemoryStore {
                 continue;
             }
             let phrase = name_l.contains(&q_stripped) || body_l.contains(&q_stripped);
-            let snippet = match &first {
-                Some(f) => match body_l.find(f.as_str()) {
-                    Some(pos) => {
-                        // The byte index returned by `find` can land inside a
-                        // multi-byte UTF-8 character (e.g. an em dash). Move it
-                        // back to the nearest character boundary.
-                        let mut start = pos.saturating_sub(40);
-                        while start > 0 && !d.body.is_char_boundary(start) {
-                            start -= 1;
-                        }
-                        let mut end = (pos + f.len() + 40).min(d.body.len());
-                        while end < d.body.len() && !d.body.is_char_boundary(end) {
-                            end += 1;
-                        }
-                        let frag = &d.body[start..end];
-                        let i = frag.to_lowercase().find(f.as_str()).unwrap_or(0);
-                        // Lowercasing can change byte lengths, so `i` may even
-                        // point past the end of `frag`.
-                        let mut hi = i.min(frag.len());
-                        while hi < frag.len() && !frag.is_char_boundary(hi) {
-                            hi += 1;
-                        }
-                        let mut he = (i + f.len()).min(frag.len());
-                        while he < frag.len() && !frag.is_char_boundary(he) {
-                            he += 1;
-                        }
-                        format!(
-                            "{}{}<b>{}</b>{}{}",
-                            if start > 0 { "…" } else { "" },
-                            &frag[..hi],
-                            &frag[hi..he],
-                            &frag[he..],
-                            if end < d.body.len() { "…" } else { "" }
-                        )
-                    }
-                    None => String::new(),
-                },
-                None => String::new(),
-            };
+            let snippet = first
+                .and_then(|f| snippet_of(&d.body, body_l, f))
+                .unwrap_or_default();
             let rank = (
                 if phrase { 0u8 } else { 1u8 },
                 -(hits as i64),
                 -(name_hits as i64),
-                d.name.len(),
+                name.len(),
             );
             scored.push((
                 rank,
                 SearchHit {
-                    path: d.path.clone(),
-                    name: d.name.clone(),
-                    folder: d.folder.clone(),
+                    path: rel.clone(),
+                    name: name.clone(),
+                    folder: folder_of(rel),
                     score: hits,
                     snippet,
                 },
@@ -572,129 +638,134 @@ impl MemoryStore {
         scored.into_iter().take(limit).map(|(_, h)| h).collect()
     }
 
-    /// Load the `docs` rows from the SQLite search index.
-    fn load_docs(&self) -> Vec<DocRow> {
-        let Ok(conn) = rusqlite::Connection::open_with_flags(
-            &self.fts_db,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
-            return Vec::new();
-        };
-        let stmt = conn.prepare("SELECT path,name,folder,body,tags FROM docs");
-        let Ok(mut stmt) = stmt else {
-            return Vec::new();
-        };
-        let rows = stmt.query_map([], |r| {
-            Ok(DocRow {
-                path: r.get(0)?,
-                name: r.get(1)?,
-                folder: r.get(2)?,
-                body: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                tags: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            })
-        });
-        match rows {
-            Ok(it) => it.filter_map(Result::ok).collect(),
-            Err(_) => Vec::new(),
-        }
-    }
-
-    /// Build the full-text search index.
+    /// Refresh the in-memory index of every note (also those hidden from the current
+    /// caller) and return how many notes it holds. Search and the graph tools refresh
+    /// it themselves on every call (one `stat` per unchanged note), so this is only
+    /// a warm-up; it never needs to run for results to be correct.
     pub fn reindex(&self) -> anyhow::Result<usize> {
-        let conn = self.open_db_write()?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS docs (path TEXT PRIMARY KEY, name TEXT, folder TEXT, \
-             name_l TEXT, body TEXT, body_l TEXT, md5 TEXT, tags TEXT)",
-            [],
-        )?;
-        let mut n = 0usize;
-        let mut seen: BTreeSet<String> = BTreeSet::new();
-        // Every note, also those hidden from the caller that triggered the reindex.
-        for (rel, name, fp) in self.walk_all() {
-            let Some(c) = self.read(&fp) else { continue };
-            seen.insert(rel.clone());
-            let mut body = c.clone();
-            if body.starts_with("---") {
-                let parts: Vec<&str> = body.splitn(3, "---").collect();
-                if parts.len() >= 3 {
-                    body = parts[2].to_string();
-                }
+        let files = self.walk_all();
+        let metas = self.scan(&files);
+        // Older versions kept a copy of every note in `.fts.db`; it is no longer read.
+        for f in [".fts.db", ".fts.db-wal", ".fts.db-shm"] {
+            let p = self.root.join(f);
+            if p.is_file() {
+                let _ = fs::remove_file(p);
             }
-            if body.len() > 50000 {
-                let mut cut = 50000;
-                while !body.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                body.truncate(cut);
-            }
-            let mut tags: BTreeSet<String> = BTreeSet::new();
-            for cap in re_tag().captures_iter(&body) {
-                tags.insert(cap.get(1).unwrap().as_str().to_lowercase());
-            }
-            // tags from frontmatter (read from the raw content)
-            if let Some(cap) = re_fm_tags().captures(&c) {
-                for t in cap.get(1).unwrap().as_str().split(',') {
-                    let t = t
-                        .trim()
-                        .trim_matches(|ch| ch == '\'' || ch == '"')
-                        .trim_start_matches('#');
-                    if !t.is_empty() {
-                        tags.insert(t.to_lowercase());
-                    }
-                }
-            }
-            let md5 = format!("{:x}", md5_hex(c.as_bytes()));
-            conn.execute(
-                "INSERT OR REPLACE INTO docs (path,name,folder,name_l,body,body_l,md5,tags) \
-                 VALUES (?,?,?,?,?,?,?,?)",
-                rusqlite::params![
-                    rel,
-                    name,
-                    folder_of(&rel),
-                    name.to_lowercase(),
-                    body,
-                    body.to_lowercase(),
-                    md5,
-                    tags.into_iter().collect::<Vec<_>>().join(" ")
-                ],
-            )?;
-            n += 1;
         }
-        // Notes deleted, moved or renamed on disk leave no ghost rows behind
-        // (search would still find them while read says "not found").
-        let indexed: Vec<String> = {
-            let mut st = conn.prepare("SELECT path FROM docs")?;
-            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
-        let mut del = conn.prepare("DELETE FROM docs WHERE path = ?1")?;
-        for p in indexed.iter().filter(|p| !seen.contains(*p)) {
-            del.execute([p])?;
-        }
-        Ok(n)
-    }
-
-    /// Open the search index for writing, with hardening pragmas.
-    fn open_db_write(&self) -> anyhow::Result<rusqlite::Connection> {
-        let conn = rusqlite::Connection::open(&self.fts_db)?;
-        let _ = conn.pragma_update(None, "trusted_schema", "OFF");
-        let _ = conn.pragma_update(None, "foreign_keys", "ON");
-        let _ = conn.pragma_update(None, "journal_mode", "WAL");
-        let _ = conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true);
-        Ok(conn)
+        Ok(metas.len())
     }
 }
 
-#[derive(Debug, Clone)]
-struct DocRow {
-    path: String,
-    name: String,
-    folder: String,
-    body: String,
-    tags: String,
+/// Everything the read-only tools need from one note, parsed once per (mtime, size).
+pub(crate) struct NoteMeta {
+    /// Raw wikilink targets, in order (see [`MemoryStore::link_targets`]).
+    pub targets: Vec<String>,
+    /// Inline `#tags` + frontmatter `tags`, as the note view reports them.
+    pub tags: Vec<String>,
+    /// `tags`, lowercased (search and query filters ignore case).
+    pub search_tags: BTreeSet<String>,
+    /// Frontmatter as a JSON object.
+    pub fm: serde_json::Value,
+    /// Body without frontmatter (first 50000 bytes), and its lowercase form.
+    pub body: String,
+    pub body_l: String,
+    /// Lowercase words of 4+ letters or digits (similarity).
+    pub words: BTreeSet<String>,
+    /// Checklist items: `(line, done, text)`.
+    pub todos: Vec<(usize, bool, String)>,
 }
 
-/// Minimal MD5 (RFC 1321), stored in the search index as a content fingerprint.
+/// Wikilinks between notes, the one definition every graph tool uses: a link is a
+/// `[[target]]` that resolves (by note name, exact case first, then ignoring case)
+/// to a note other than the one it is written in, counted once per pair of notes
+/// and direction. Self-links do not count; targets that resolve to no note are
+/// `broken`. A note's degree is the number of distinct notes it links to or is
+/// linked from.
+#[derive(Debug, Default)]
+pub struct LinkIndex {
+    /// Note name -> relative path (the last one walked when names repeat).
+    pub names: BTreeMap<String, String>,
+    /// Note name -> names of the notes it links to.
+    pub out: BTreeMap<String, BTreeSet<String>>,
+    /// Note name -> names of the notes linking to it.
+    pub incoming: BTreeMap<String, BTreeSet<String>>,
+    /// Note name -> link targets that resolve to no note.
+    pub broken: BTreeMap<String, BTreeSet<String>>,
+    /// Order in which notes first took part in a link while walking (tie-breaks).
+    pub first_seen: BTreeMap<String, usize>,
+}
+
+impl LinkIndex {
+    /// Distinct notes linked to or from `name`.
+    pub fn neighbors(&self, name: &str) -> BTreeSet<String> {
+        let mut s = self.out.get(name).cloned().unwrap_or_default();
+        if let Some(i) = self.incoming.get(name) {
+            s.extend(i.iter().cloned());
+        }
+        s
+    }
+
+    pub fn degree(&self, name: &str) -> usize {
+        self.neighbors(name).len()
+    }
+
+    /// Total number of links.
+    pub fn link_count(&self) -> usize {
+        self.out.values().map(|s| s.len()).sum()
+    }
+}
+
+/// `body` around the first occurrence of `word` (lowercase) in `body_l`, escaped,
+/// with the match in `<b>`.
+fn snippet_of(body: &str, body_l: &str, word: &str) -> Option<String> {
+    let pos = body_l.find(word)?;
+    // Lowercasing can change byte lengths, so a position in `body_l` is only
+    // approximately one in `body`: clamp and move to character boundaries.
+    let mut start = pos.saturating_sub(40).min(body.len());
+    while start > 0 && !body.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (pos + word.len() + 40).min(body.len());
+    while end < body.len() && !body.is_char_boundary(end) {
+        end += 1;
+    }
+    let frag = &body[start..end];
+    let i = frag.to_lowercase().find(word).unwrap_or(0);
+    let mut hi = i.min(frag.len());
+    while hi < frag.len() && !frag.is_char_boundary(hi) {
+        hi += 1;
+    }
+    let mut he = (i + word.len()).min(frag.len());
+    while he < frag.len() && !frag.is_char_boundary(he) {
+        he += 1;
+    }
+    Some(format!(
+        "{}{}<b>{}</b>{}{}",
+        if start > 0 { "…" } else { "" },
+        html_escape(&frag[..hi]),
+        html_escape(&frag[hi..he]),
+        html_escape(&frag[he..]),
+        if end < body.len() { "…" } else { "" }
+    ))
+}
+
+/// Escape text for HTML (`& < > " '`).
+pub fn html_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '"' => o.push_str("&quot;"),
+            '\'' => o.push_str("&#39;"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+/// Minimal MD5 (RFC 1321), a content fingerprint.
 pub fn md5_hex(data: &[u8]) -> u128 {
     const S: [u32; 64] = [
         7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
@@ -988,12 +1059,13 @@ mod resource_tests {
         let g = s.graph();
         assert_eq!(g.nodes.len(), 2);
         assert_eq!(g.links.len(), 2); // a->b, b->a (c does not exist)
-        assert_eq!(s.stats().links, 3);
+                                      // The broken link to c does not count (see `LinkIndex`).
+        assert_eq!(s.stats().links, 2);
         assert_eq!(s.link_cache.lock().unwrap().len(), 2);
 
         // Edit (size changes) is picked up.
-        fs::write(d.join("a.md"), "now only [[b]] here, nothing else").unwrap();
-        assert_eq!(s.stats().links, 2);
+        fs::write(d.join("a.md"), "no links here any more, nothing else").unwrap();
+        assert_eq!(s.stats().links, 1);
         // Deleted notes leave the cache.
         fs::remove_file(d.join("Projects/b.md")).unwrap();
         let g = s.graph();
@@ -1483,6 +1555,132 @@ mod resource_tests {
         let hits = s.search("zebra", 10);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].snippet.contains("zebra"), "{:?}", hits[0].snippet);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn search_counts_terms_once_matches_symbols_and_escapes() {
+        let d = tmp_vault("srch");
+        fs::write(d.join("a.md"), "zebra and a regex .*[( here").unwrap();
+        fs::write(d.join("b.md"), "launch 🚀 <script>alert(1)</script> zebra").unwrap();
+        let s = MemoryStore::new(&d);
+        let q = vec!["zebra"; 200].join(" ");
+        let hits = s.search(&q, 10);
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|h| h.score == 1), "{hits:?}");
+        assert_eq!(s.search(".*[(", 10)[0].path, "a.md");
+        assert_eq!(s.search("🚀", 10)[0].path, "b.md");
+        assert!(s.search("zebra", 0).is_empty());
+        let snip = &s.search("alert", 10)[0].snippet;
+        assert!(
+            snip.contains("&lt;script&gt;<b>alert</b>(1)&lt;/script&gt;"),
+            "{snip}"
+        );
+        assert!(!snip.contains("<script"), "{snip}");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn subgraph_keeps_direction_both_ways_and_max_nodes() {
+        let d = tmp_vault("sub");
+        fs::write(d.join("A.md"), "[[B]]").unwrap();
+        fs::write(d.join("B.md"), "[[A]]").unwrap();
+        fs::write(d.join("F.md"), "[[A]]").unwrap();
+        let s = MemoryStore::new(&d);
+        let g = s.get_subgraph_impl("A", 1, 60).unwrap();
+        let mut links: Vec<String> = g["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                format!(
+                    "{}->{}",
+                    l["source"].as_str().unwrap(),
+                    l["target"].as_str().unwrap()
+                )
+            })
+            .collect();
+        links.sort();
+        assert_eq!(links, ["A->B", "B->A", "F->A"]);
+        let g = s.get_subgraph_impl("A.md", 1, 2).unwrap();
+        assert_eq!(g["nodes"].as_array().unwrap().len(), 2);
+        assert_eq!(g["truncated"], true);
+        let g = s.get_subgraph_impl("A", 1, 0).unwrap();
+        assert!(g["nodes"].as_array().unwrap().is_empty());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn link_stats_resolves_like_the_other_graph_tools() {
+        let d = tmp_vault("ls");
+        fs::write(d.join("Projects/A.md"), "[[B]] [[b]] [[A]] [[Gone]]").unwrap();
+        fs::write(d.join("Projects/B.md"), "[[A]]").unwrap();
+        let s = MemoryStore::new(&d);
+        for p in ["Projects/A.md", "Projects/A", "A"] {
+            let v = s.link_stats_impl(p).unwrap();
+            assert_eq!(v["outgoing"], 1, "{p}: {v}");
+            assert_eq!(v["incoming"], 1, "{p}: {v}");
+            assert_eq!(v["unresolved"], serde_json::json!(["Gone"]));
+        }
+        assert!(s
+            .link_stats_impl("Nope.md")
+            .unwrap_err()
+            .0
+            .starts_with("not found"));
+        assert!(s.link_stats_impl("").unwrap_err().0.contains("empty"));
+        assert!(s.link_stats_impl("/etc/passwd").is_err());
+        assert!(s
+            .link_stats_impl("Projects")
+            .unwrap_err()
+            .0
+            .contains("folder"));
+        assert!(s
+            .link_stats_impl("Projects/")
+            .unwrap_err()
+            .0
+            .contains("folder"));
+        assert!(s.link_stats_impl("../x").unwrap_err().0.contains("escapes"));
+        let e = s.find_path_impl("Nope", "A").unwrap_err().0;
+        assert_eq!(e, "source not found: Nope");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn folder_filters_match_nested_folders() {
+        let d = tmp_vault("qf");
+        fs::create_dir_all(d.join("Projects/Atlas/Deep")).unwrap();
+        fs::write(
+            d.join("Projects/Atlas/Deep/x.md"),
+            "---\ntags: [Big]\n---\n",
+        )
+        .unwrap();
+        fs::write(d.join("Projects/y.md"), "y").unwrap();
+        fs::write(d.join("top.md"), "t").unwrap();
+        let s = MemoryStore::new(&d);
+        let q = |f: &str| {
+            s.query_memory_impl(Some(f), None, None, None, None, 50)
+                .len()
+        };
+        assert_eq!(q("Projects/Atlas"), 1);
+        assert_eq!(q("Projects/"), 2);
+        assert_eq!(q("Projects/At"), 0, "prefix of a name is not a folder");
+        assert_eq!(q("Root"), 1);
+        assert_eq!(
+            s.query_memory_impl(None, Some("#big"), None, None, None, 50)
+                .len(),
+            1
+        );
+        fs::write(
+            d.join(".events.jsonl"),
+            "{\"type\":\"node_updated\",\"actor\":\"a\",\"_ts\":1,\"node\":{\"id\":\"x\",\"path\":\"Projects/Atlas/Deep/x.md\"}}\n\
+             {\"type\":\"node_updated\",\"actor\":\"a\",\"_ts\":2,\"node\":{\"id\":\"y\",\"path\":\"Projects/y.md\"}}\n",
+        )
+        .unwrap();
+        let dg = s.digest_impl(Some("Projects/Atlas"), None, 50);
+        assert_eq!(dg["events"], 1, "{dg}");
+        let dg = s.digest_impl(Some("Projects"), None, 1);
+        assert_eq!(dg["events"], 2, "{dg}");
+        assert_eq!(dg["truncated"], true);
         fs::remove_dir_all(&d).ok();
     }
 }

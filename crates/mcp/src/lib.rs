@@ -228,7 +228,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "get_stats",
             category: "search",
-            description: "Counts of notes, links, and folders in the vault.",
+            description: "Counts of notes, links, and folders in the vault. `links` = unique resolved wikilinks between two different notes (A->B counted once; self-links and broken links do not count).",
             when: "First call to size up the vault before exploring.",
             input_schema: obj(j!({}), &[]),
         },
@@ -313,27 +313,27 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "search_memory",
             category: "search",
-            description: "Search notes by words in the title or body; supports `tag:x` and `#x`.",
+            description: "Search notes by words in the title or body; supports `tag:x` and `#x` (case-insensitive). `score` = number of distinct query words found. A query of only symbols is matched literally. `snippet` is HTML-escaped text with the match in <b>...</b>.",
             when: "Main entry point for finding information.",
             input_schema: obj(
-                j!({"q": {"type":"string"}, "limit": {"type":"integer","default":12}}),
+                j!({"q": {"type":"string"}, "limit": {"type":"integer","default":12,"minimum":0}}),
                 &["q"],
             ),
         },
         ToolSpec {
             name: "get_graph",
             category: "graph",
-            description: "The whole memory graph: nodes (notes) and resolved wikilink edges.",
+            description: "The whole memory graph: nodes (notes) and resolved wikilink edges (source -> target, once per pair and direction, no self-links). A node's `degree` = number of distinct other notes linked to or from it.",
             when: "To understand how notes relate to each other.",
             input_schema: obj(j!({}), &[]),
         },
         ToolSpec {
             name: "get_neighbors",
             category: "graph",
-            description: "Notes within N hops of a given note.",
+            description: "Notes within N hops of a given note, following links in either direction.",
             when: "To explore the context around one topic.",
             input_schema: obj(
-                j!({"path": {"type":"string"}, "depth": {"type":"integer","default":1}}),
+                j!({"path": {"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"}, "depth": {"type":"integer","default":1,"minimum":0}}),
                 &["path"],
             ),
         },

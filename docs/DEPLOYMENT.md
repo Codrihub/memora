@@ -256,8 +256,8 @@ git:
 git -C /var/lib/memora/vault bundle create /var/backups/memora-vault-$(date +%F).bundle --all
 ```
 
-`.fts.db` is a rebuildable index and can be left out. `.events.jsonl` is the
-event log.
+`.events.jsonl` is the event log. (`.fts.db`, the search index of older
+versions, is no longer used and is removed automatically.)
 
 With Docker Compose, both live in the host directories, so an archive taken
 with the container stopped covers everything:
@@ -275,8 +275,7 @@ verifies the file and keeps the replaced database in `state/backups/`), put
 back `key-seal.bin` and the vault, then start the service again.
 
 If you restore only the vault and start with an empty state directory, Memora
-has no account and expects a new first-run setup; the notes are intact and the
-search index is rebuilt.
+has no account and expects a new first-run setup; the notes are intact.
 
 ## Upgrades
 

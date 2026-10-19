@@ -36,25 +36,25 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_subgraph",
             "graph",
-            "Subgraph around one note up to `depth` hops, capped at `max_nodes`.",
+            "Subgraph around one note: the notes within `depth` hops (nearest first, the note itself included), at most `max_nodes` of them (`truncated` says whether more were in reach), and every link between them as a directed edge source -> target (a two-way link is two edges).",
             "To see local context without pulling the whole graph.",
-            json!({"path":{"type":"string"},"depth":{"type":"integer","default":1},"max_nodes":{"type":"integer","default":60}}),
+            json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"},"depth":{"type":"integer","default":1,"minimum":0},"max_nodes":{"type":"integer","default":60,"minimum":1}}),
             &["path"],
         ),
         spec(
             "find_path",
             "graph",
-            "Shortest wikilink path between two notes.",
+            "Shortest wikilink path between two notes, following links in either direction.",
             "To learn how two topics connect.",
-            json!({"source":{"type":"string"},"target":{"type":"string"}}),
+            json!({"source":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"},"target":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"}}),
             &["source", "target"],
         ),
         spec(
             "get_hubs",
             "graph",
-            "Most connected notes, the vault hubs.",
+            "Most connected notes, the vault hubs. `degree` = number of distinct other notes linked to or from the note (resolved wikilinks only; self-links and broken links do not count), the same as get_graph and link_stats.",
             "To find the most central notes in the vault.",
-            json!({"limit":{"type":"integer","default":10}}),
+            json!({"limit":{"type":"integer","default":10,"minimum":0}}),
             &[],
         ),
         spec(
@@ -68,18 +68,18 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "link_stats",
             "graph",
-            "Link degree of one note: outgoing, incoming, and unresolved targets.",
+            "Links of one note: `links_to` / `outgoing` (notes it links to), `linked_from` / `incoming` (notes linking to it), `degree` (distinct notes in either direction) and `unresolved` (link targets matching no note). Only resolved links between two different notes count, each once.",
             "Before cleaning up the links of a note.",
-            json!({"path":{"type":"string"}}),
+            json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"}}),
             &["path"],
         ),
         // ---- query ----
         spec(
             "query_memory",
             "query",
-            "Filter notes by frontmatter: folder, tag, author, type, status.",
+            "Filter notes by folder, tags and frontmatter author, type, status. All given filters must match.",
             "When you need a metadata-based list rather than a full-text search.",
-            json!({"folder":{"type":"string"},"tags":{"type":"string"},"author":{"type":"string"},"type":{"type":"string"},"status":{"type":"string"},"limit":{"type":"integer","default":50}}),
+            json!({"folder":{"type":"string","description":"Folder path, e.g. 'Projects/Atlas'; includes its subfolders; case-sensitive like paths; 'Root' = top level"},"tags":{"type":"string","description":"Comma-separated; every tag required; case-insensitive, leading # optional"},"author":{"type":"string","description":"Case-insensitive"},"type":{"type":"string","description":"Case-insensitive"},"status":{"type":"string","description":"Case-insensitive"},"limit":{"type":"integer","default":50,"minimum":0,"description":"0 returns nothing"}}),
             &[],
         ),
         spec(
@@ -87,7 +87,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "query",
             "Notes most similar to a given note (shared tags and words).",
             "For deduplication or finding notes worth merging.",
-            json!({"path":{"type":"string"},"limit":{"type":"integer","default":8}}),
+            json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"},"limit":{"type":"integer","default":8,"minimum":0}}),
             &["path"],
         ),
         spec(
@@ -95,7 +95,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "query",
             "Similar notes that are NOT yet linked from this one.",
             "To add useful wikilinks.",
-            json!({"path":{"type":"string"},"limit":{"type":"integer","default":8}}),
+            json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"},"limit":{"type":"integer","default":8,"minimum":0}}),
             &["path"],
         ),
         spec(
@@ -330,9 +330,9 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "digest",
             "ops",
-            "Activity summary: event counts per actor and per type.",
+            "Activity summary over the newest logged events: event counts per actor and per type, and the notes touched (at most `limit`; `truncated` says whether more were).",
             "For a daily report or a handover between agents.",
-            json!({"folder":{"type":"string"},"since":{"type":"number"}}),
+            json!({"folder":{"type":"string","description":"Folder path; includes its subfolders"},"since":{"type":"number","description":"Only events after this time, in Unix seconds"},"limit":{"type":"integer","default":50,"minimum":0,"description":"Most notes_touched to list"}}),
             &[],
         ),
         spec(
@@ -356,7 +356,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "ops",
             "Notes untouched for more than `days` days.",
             "Candidates for archiving or review.",
-            json!({"days":{"type":"integer","default":30}}),
+            json!({"days":{"type":"integer","default":30,"minimum":0}}),
             &[],
         ),
         spec(
@@ -421,17 +421,17 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_todos",
             "ux",
-            "Extract checklist items ('- [ ]') from one note or the whole vault.",
+            "Extract checklist items ('- [ ] text', '- [x] text') from one note or the whole vault; empty items are skipped.",
             "To see outstanding work.",
-            json!({"path":{"type":"string"}}),
+            json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name; omit for the whole vault"}}),
             &[],
         ),
         spec(
             "follow_ups",
             "ux",
-            "Notes whose status is still awaiting action.",
+            "Notes whose frontmatter status is still awaiting action: pending, open, todo, in-progress, waiting or blocked (case-insensitive; '_' or a space works for '-'). Returns {notes, count, truncated}.",
             "To chase pending items.",
-            json!({}),
+            json!({"limit":{"type":"integer","default":50,"minimum":0}}),
             &[],
         ),
         spec(
@@ -765,6 +765,7 @@ pub fn call_extra(
             "digest" => store.digest_impl(
                 opt("folder").as_deref(),
                 args.get("since").and_then(|v| v.as_f64()),
+                i("limit", 50),
             ),
             "healthcheck" => store.healthcheck_impl(),
             "folder_stats" => store.folder_stats_impl(&s("folder")),
@@ -862,8 +863,8 @@ pub fn call_extra(
             }
 
             // ---------------- ux ----------------
-            "get_todos" => json!(store.get_todos_impl(opt("path").as_deref())),
-            "follow_ups" => json!(store.follow_ups_impl()),
+            "get_todos" => json!(store.get_todos_impl(opt("path").as_deref())?),
+            "follow_ups" => store.follow_ups_impl(i("limit", 50)),
             "validate_memory" => store.validate_memory_impl(&s("path"))?,
 
             // ---------------- misc ----------------

@@ -263,6 +263,14 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     // every route that would read it closed until a folder is chosen, and the
     // store is then replaced in place (MCP shares this same Arc).
     let store = Arc::new(Mutex::new(MemoryStore::new(vault.as_deref().unwrap_or(""))));
+    if vault.is_some() {
+        // Warm the note index in the background so the first search is quick (it
+        // would build it itself otherwise).
+        let warm = store.clone();
+        std::thread::spawn(move || {
+            let _ = warm.lock().unwrap_or_else(|e| e.into_inner()).reindex();
+        });
+    }
 
     // Realtime hub: the `.events.jsonl` write point plus the WebSocket fan-out.
     if let Some(v) = &vault {

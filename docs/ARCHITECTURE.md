@@ -12,7 +12,7 @@ Memora is a Cargo workspace with six crates. The web UI is a TypeScript app in
 
 | Crate | Binary | Owns |
 |---|---|---|
-| `memora-core` | (library) | The vault: walking notes, parsing wikilinks and frontmatter, the SQLite search index, search, the graph, git versioning, per-caller path visibility, and the `*_impl` methods that every interface calls. Also the realtime event hub. |
+| `memora-core` | (library) | The vault: walking notes, parsing wikilinks and frontmatter, the in-memory note index, search, the graph, git versioning, per-caller path visibility, and the `*_impl` methods that every interface calls. Also the realtime event hub. |
 | `memora-gateway` | (library) | Auth primitives: argon2id password hashing, API key generation and hashing, OAuth token and PKCE helpers, setup codes, the access stack evaluator, host and lock allow lists, scopes and per-key tool permissions, and reading the provisioning environment. No state of its own. |
 | `memora-state` | (library) | The state database `memora.db` (SQLite, WAL): opening, migrations, change detection, and one typed repository per table group (owner, settings, `server_config`, keys, tools, usage, sessions, arm window, access rules, activity, control requests, OAuth, privacy rules, UI layouts, retention), plus the one-time import of JSON state files. No SQL lives outside this crate. |
 | `memora-mcp` | (library) | The MCP server: the tool catalog, JSON-RPC 2.0 handling, the discovery card, client detection, `ai_activity` events, and the privacy view applied to agent callers. |
@@ -36,8 +36,10 @@ through the UI and one made through an agent take the same code path.
   directories. Walk order is stable, so tools that depend on first-hit order
   behave deterministically.
 - Parsing: wikilinks, inline tags, frontmatter tags, and frontmatter fields.
-- The search index: a SQLite database at `<vault>/.fts.db`. It is derived data
-  and is rebuilt when missing.
+- The note index: parsed facts per note (links, tags, frontmatter, text,
+  checklist items) kept in memory and checked against each file's mtime and
+  size on every call, so notes changed outside Memora are seen at once. Nothing
+  is stored on disk.
 - `search()` blends word matching over name and body with `tag:` and `#tag`
   filters, scored by hits, name hits, phrase, and position.
 - The graph: nodes are notes, links are resolved wikilinks.
@@ -251,7 +253,6 @@ suggestion) and stored in the `settings` table.
 - Wikilinks use `[[Note Name]]` and resolve by name, so moving or renaming a
   note does not break links.
 - `.git/` is the vault history. Changes commit automatically.
-- `.fts.db` is the SQLite search index. It is derived data and can be rebuilt.
 - `.events.jsonl` is the append-only event log.
 - `.folders.json` stores folder color, icon, and description.
 - `.locks.json` stores soft locks used for collaboration.

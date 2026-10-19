@@ -43,6 +43,31 @@ pub fn err<T>(m: impl Into<String>) -> MResult<T> {
 // Util
 // ---------------------------------------------------------------------------
 
+/// Frontmatter `status` values that `follow_ups` reports (still awaiting action).
+pub const FOLLOW_UP_STATUSES: &[&str] = &[
+    "pending",
+    "open",
+    "todo",
+    "in-progress",
+    "waiting",
+    "blocked",
+];
+
+/// Whether note `rel` is in `folder` or one of its subfolders. Case-sensitive, like
+/// vault paths; slashes around `folder` are ignored; `Root` means the top level;
+/// an empty folder matches every note.
+pub fn in_folder(rel: &str, folder: &str) -> bool {
+    let f = folder.trim().trim_matches('/');
+    if f.is_empty() {
+        return true;
+    }
+    if f == "Root" && !rel.contains('/') {
+        return true;
+    }
+    rel.strip_prefix(f)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 pub fn now_secs() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1306,15 +1331,6 @@ impl MemoryStore {
         move |t: &str| self.resolve_wikilink(t)
     }
 
-    /// Unique name -> relative path (used for adjacency lookups).
-    fn names_map(&self) -> BTreeMap<String, String> {
-        let mut m = BTreeMap::new();
-        for (rel, name, _) in self.walk() {
-            m.insert(name, rel);
-        }
-        m
-    }
-
     fn base_name(path: &str) -> String {
         Path::new(path)
             .file_stem()
@@ -1557,120 +1573,136 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
-    /// `(names -> rel path, undirected adjacency)`.
+    /// `(names -> rel path, undirected adjacency)` over resolved links (see
+    /// [`crate::LinkIndex`]); notes without links have no entry.
     pub fn adjacency(&self) -> (BTreeMap<String, String>, BTreeMap<String, BTreeSet<String>>) {
-        let names = self.names_map();
+        let idx = self.link_index();
         let mut adj: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        // Link targets come from the (mtime, size)-validated cache, so only
-        // changed notes are re-read and re-parsed.
-        let files = self.walk();
-        let all = self.link_targets_all(&files);
-        for ((_rel, name, _fp), raws) in files.into_iter().zip(all) {
-            for raw in raws.iter() {
-                let tgt = raw
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(raw)
-                    .replace(".md", "")
-                    .trim()
-                    .to_string();
-                if names.contains_key(&tgt) && tgt != name {
-                    adj.entry(name.clone()).or_default().insert(tgt.clone());
-                    adj.entry(tgt).or_default().insert(name.clone());
-                }
+        for n in idx.names.keys() {
+            let nb = idx.neighbors(n);
+            if !nb.is_empty() {
+                adj.insert(n.clone(), nb);
             }
         }
-        (names, adj)
+        (idx.names, adj)
     }
 
-    pub fn get_neighbors_impl(&self, path: &str, depth: usize) -> MResult<Vec<Value>> {
-        let (names, adj) = self.adjacency();
-        let start = Self::base_name(path);
-        if !names.contains_key(&start) {
-            return err(format!("not found: {path}"));
+    /// The note a tool argument names, as `(note name, relative path)`: a vault path
+    /// with or without `.md` (`Graph/B.md`, `Graph/B`) or a bare note name (`B`,
+    /// resolved like a wikilink, ignoring case). Empty, out-of-vault, folder and
+    /// missing paths are refused; a hidden path answers like a missing one.
+    pub fn note_of(&self, path: &str) -> MResult<(String, String)> {
+        let p = path.trim();
+        if p.is_empty() {
+            return err("path is empty: give a note path such as 'Folder/Note.md' or a note name");
         }
-        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
-        seen.insert(start.clone(), 0);
-        let mut q: Vec<String> = vec![start.clone()];
+        let not_found = || MemoryErr(format!("not found: {path}"));
+        let probe = self.resolve(p).map_err(|e| {
+            if e.0.starts_with("not found") {
+                not_found()
+            } else {
+                e
+            }
+        })?;
+        let stem = p.strip_suffix(".md").unwrap_or(p);
+        let full = if stem.ends_with('/') {
+            None
+        } else {
+            self.resolve(&format!("{stem}.md")).ok()
+        };
+        if let Some(full) = full.filter(|f| f.is_file()) {
+            let rel = self.rel_of(&full);
+            // Notes inside hidden folders (the trash) are not part of the graph.
+            if self.walk_has(&rel) {
+                return Ok((Self::base_name(&rel), rel));
+            }
+            return Err(not_found());
+        }
+        if probe.is_dir() {
+            return err(format!("{path} is a folder, not a note: give a note path"));
+        }
+        if !stem.contains('/') {
+            if let Some(rel) = self.resolve_wikilink(stem) {
+                return Ok((Self::base_name(&rel), rel));
+            }
+        }
+        Err(not_found())
+    }
+
+    /// Whether `rel` is a note [`MemoryStore::walk`] lists (no hidden segment).
+    fn walk_has(&self, rel: &str) -> bool {
+        rel.ends_with(".md") && !rel.split('/').any(|s| s.starts_with('.'))
+    }
+
+    /// Breadth-first walk over undirected links: `(name, hops)`, the start first,
+    /// nearer notes before farther ones.
+    fn bfs(idx: &crate::LinkIndex, start: &str, depth: usize) -> Vec<(String, usize)> {
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        seen.insert(start.to_string());
+        let mut q: Vec<(String, usize)> = vec![(start.to_string(), 0)];
         let mut i = 0usize;
         while i < q.len() {
-            let cur = q[i].clone();
+            let (cur, d) = q[i].clone();
             i += 1;
-            let d = seen[&cur];
             if d >= depth {
                 continue;
             }
-            if let Some(nbs) = adj.get(&cur) {
-                for nb in nbs.iter() {
-                    if !seen.contains_key(nb) {
-                        seen.insert(nb.clone(), d + 1);
-                        q.push(nb.clone());
-                    }
+            for nb in idx.neighbors(&cur) {
+                if seen.insert(nb.clone()) {
+                    q.push((nb, d + 1));
                 }
             }
         }
-        let mut out = Vec::new();
-        for nm in &q {
-            if nm == &start {
-                continue;
-            }
-            let rel = names[nm].clone();
-            out.push(json!({
-                "name": nm, "path": rel, "folder": folder_of(&rel), "hops": seen[nm],
-            }));
-        }
-        Ok(out)
+        q
     }
 
+    pub fn get_neighbors_impl(&self, path: &str, depth: usize) -> MResult<Vec<Value>> {
+        let idx = self.link_index();
+        let (start, _) = self.note_of(path)?;
+        Ok(Self::bfs(&idx, &start, depth)
+            .into_iter()
+            .skip(1)
+            .map(|(nm, hops)| {
+                let rel = idx.names[&nm].clone();
+                json!({"name": nm, "path": rel, "folder": folder_of(&rel), "hops": hops})
+            })
+            .collect())
+    }
+
+    /// The notes within `depth` hops of `path` (nearest first, the note itself
+    /// included), at most `max_nodes` of them, with every link between them in its
+    /// real direction (a two-way link is two edges).
     pub fn get_subgraph_impl(&self, path: &str, depth: usize, max_nodes: usize) -> MResult<Value> {
-        let (names, adj) = self.adjacency();
-        let start = Self::base_name(path);
-        if !names.contains_key(&start) {
-            return err(format!("not found: {path}"));
-        }
-        let nbrs = self.get_neighbors_impl(path, depth)?;
-        let mut keep: BTreeSet<String> = BTreeSet::new();
-        keep.insert(start.clone());
-        for n in nbrs.iter().take(max_nodes) {
-            if let Some(nm) = n.get("name").and_then(|v| v.as_str()) {
-                keep.insert(nm.to_string());
-            }
-        }
+        let idx = self.link_index();
+        let (start, _) = self.note_of(path)?;
+        let order = Self::bfs(&idx, &start, depth);
+        let truncated = order.len() > max_nodes;
+        let keep: BTreeSet<String> = order.into_iter().take(max_nodes).map(|x| x.0).collect();
         let nodes: Vec<Value> = keep
             .iter()
             .map(|n| {
-                json!({"name": n, "path": names.get(n), "folder": names.get(n).map(|p| folder_of(p))})
+                json!({"name": n, "path": idx.names.get(n), "folder": idx.names.get(n).map(|p| folder_of(p))})
             })
             .collect();
         let mut links = Vec::new();
-        let mut done: HashSet<(String, String)> = HashSet::new();
         for a in &keep {
-            if let Some(nbs) = adj.get(a) {
-                for b in nbs {
-                    if !keep.contains(b) {
-                        continue;
-                    }
-                    let key = if a < b {
-                        (a.clone(), b.clone())
-                    } else {
-                        (b.clone(), a.clone())
-                    };
-                    if done.insert(key) {
-                        links.push(json!({"source": a, "target": b}));
-                    }
+            for b in idx.out.get(a).into_iter().flatten() {
+                if keep.contains(b) {
+                    links.push(json!({"source": a, "target": b}));
                 }
             }
         }
-        Ok(json!({"nodes": nodes, "links": links}))
+        Ok(json!({"nodes": nodes, "links": links, "truncated": truncated}))
     }
 
     pub fn find_path_impl(&self, src: &str, dst: &str) -> MResult<Value> {
-        let (names, adj) = self.adjacency();
-        let a = Self::base_name(src);
-        let b = Self::base_name(dst);
-        if !names.contains_key(&a) || !names.contains_key(&b) {
-            return err("source or target not found");
-        }
+        let idx = self.link_index();
+        let (a, _) = self
+            .note_of(src)
+            .map_err(|e| MemoryErr(format!("source {}", e.0)))?;
+        let (b, _) = self
+            .note_of(dst)
+            .map_err(|e| MemoryErr(format!("target {}", e.0)))?;
         let mut prev: HashMap<String, Option<String>> = HashMap::new();
         prev.insert(a.clone(), None);
         let mut q: Vec<String> = vec![a.clone()];
@@ -1681,12 +1713,10 @@ impl MemoryStore {
             if cur == b {
                 break;
             }
-            if let Some(nbs) = adj.get(&cur) {
-                for nb in nbs {
-                    if !prev.contains_key(nb) {
-                        prev.insert(nb.clone(), Some(cur.clone()));
-                        q.push(nb.clone());
-                    }
+            for nb in idx.neighbors(&cur) {
+                if !prev.contains_key(&nb) {
+                    prev.insert(nb.clone(), Some(cur.clone()));
+                    q.push(nb);
                 }
             }
         }
@@ -1702,89 +1732,71 @@ impl MemoryStore {
         chain.reverse();
         let path: Vec<Value> = chain
             .iter()
-            .map(|n| json!({"name": n, "path": names.get(n)}))
+            .map(|n| json!({"name": n, "path": idx.names.get(n)}))
             .collect();
         Ok(json!({"found": true, "hops": chain.len() - 1, "path": path}))
     }
 
+    /// Notes with the highest degree (see [`crate::LinkIndex`]); notes without links
+    /// are left out.
     pub fn get_hubs_impl(&self, limit: usize) -> Vec<Value> {
-        let (names, adj) = self.adjacency();
-        // Stable ordering: for equal degrees, preserve the order in which nodes
-        // were first touched during the walk.
-        let mut first_seen: BTreeMap<String, usize> = BTreeMap::new();
-        let mut rank = 0usize;
-        // Link targets come from the (mtime, size)-validated cache, so only
-        // changed notes are re-read and re-parsed.
-        let files = self.walk();
-        let all = self.link_targets_all(&files);
-        for ((_rel, name, _fp), raws) in files.into_iter().zip(all) {
-            for raw in raws.iter() {
-                let tgt = raw
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(raw)
-                    .replace(".md", "")
-                    .trim()
-                    .to_string();
-                if names.contains_key(&tgt) && tgt != name {
-                    for k in [name.clone(), tgt] {
-                        if let std::collections::btree_map::Entry::Vacant(e) = first_seen.entry(k) {
-                            e.insert(rank);
-                            rank += 1;
-                        }
-                    }
-                }
-            }
-        }
-        let mut ranked: Vec<(&String, &BTreeSet<String>)> = adj.iter().collect();
+        let idx = self.link_index();
+        let mut ranked: Vec<(&String, usize)> = idx
+            .names
+            .keys()
+            .map(|n| (n, idx.degree(n)))
+            .filter(|x| x.1 > 0)
+            .collect();
+        // Stable ordering: for equal degrees, the order in which notes first took
+        // part in a link during the walk.
         ranked.sort_by(|a, b| {
-            b.1.len().cmp(&a.1.len()).then_with(|| {
-                first_seen
+            b.1.cmp(&a.1).then_with(|| {
+                idx.first_seen
                     .get(a.0)
                     .unwrap_or(&usize::MAX)
-                    .cmp(first_seen.get(b.0).unwrap_or(&usize::MAX))
+                    .cmp(idx.first_seen.get(b.0).unwrap_or(&usize::MAX))
                     .then_with(|| a.0.cmp(b.0))
             })
         });
         ranked
             .into_iter()
             .take(limit)
-            .map(|(n, s)| {
-                json!({"name": n, "path": names.get(n),
-                       "folder": names.get(n).map(|p| folder_of(p)), "degree": s.len()})
+            .map(|(n, d)| {
+                json!({"name": n, "path": idx.names.get(n),
+                       "folder": idx.names.get(n).map(|p| folder_of(p)), "degree": d})
             })
             .collect()
     }
 
     pub fn get_isolated_impl(&self) -> Vec<Value> {
-        let (names, adj) = self.adjacency();
-        names
+        let idx = self.link_index();
+        idx.names
             .iter()
-            .filter(|(n, _)| adj.get(*n).map(|s| s.is_empty()).unwrap_or(true))
+            .filter(|(n, _)| idx.degree(n) == 0)
             .map(|(n, rel)| json!({"name": n, "path": rel, "folder": folder_of(rel)}))
             .collect()
     }
 
+    /// Links of one note (see [`crate::LinkIndex`]): the notes it links to, the
+    /// notes linking to it, and its link targets that resolve to no note.
     pub fn link_stats_impl(&self, path: &str) -> MResult<Value> {
-        let name = Self::base_name(path);
-        let (_names, adj) = self.adjacency();
-        let c = self.read_raw(&self.resolve(path)?).unwrap_or_default();
-        let out: BTreeSet<String> = self
-            .link_targets(&c)
-            .iter()
-            .map(|t| {
-                t.rsplit('/')
-                    .next()
-                    .unwrap_or(t)
-                    .replace(".md", "")
-                    .trim()
-                    .to_string()
-            })
-            .collect();
+        let idx = self.link_index();
+        let (name, rel) = self.note_of(path)?;
+        let names = |m: &BTreeMap<String, BTreeSet<String>>| -> Vec<String> {
+            m.get(&name)
+                .map(|s| s.iter().cloned().collect())
+                .unwrap_or_default()
+        };
+        let (out, inc, broken) = (names(&idx.out), names(&idx.incoming), names(&idx.broken));
         Ok(json!({
-            "path": path,
-            "degree": adj.get(&name).map(|s| s.len()).unwrap_or(0),
+            "path": rel,
+            "name": name,
+            "degree": idx.degree(&name),
             "outgoing": out.len(),
+            "incoming": inc.len(),
+            "links_to": out,
+            "linked_from": inc,
+            "unresolved": broken,
         }))
     }
 }
@@ -1981,6 +1993,10 @@ impl FmLines {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
+    /// Notes matching every given filter: `folder` (that folder and its subfolders,
+    /// case-sensitive like paths; `Root` = top level), `tags` (comma-separated, all
+    /// required, case-insensitive, a leading `#` ignored) and the frontmatter fields
+    /// `author`, `type`, `status` (case-insensitive). At most `limit` notes (0 = none).
     pub fn query_memory_impl(
         &self,
         folder: Option<&str>,
@@ -1993,20 +2009,23 @@ impl MemoryStore {
         let tag_list: Vec<String> = tags
             .unwrap_or("")
             .split(',')
-            .map(|t| t.trim().to_string())
+            .map(|t| t.trim().trim_start_matches('#').to_lowercase())
             .filter(|t| !t.is_empty())
             .collect();
         let mut out = Vec::new();
-        for (rel, name, fp) in self.walk() {
-            if let Some(f) = folder {
-                if !f.is_empty() && folder_of(&rel) != f {
-                    continue;
-                }
-            }
-            let (ntags, fm) = self.note_tags_fm(&fp);
-            if !tag_list.is_empty() && !tag_list.iter().all(|t| ntags.contains(t)) {
+        if limit == 0 {
+            return out;
+        }
+        let files = self.walk();
+        let metas = self.scan(&files);
+        for ((rel, name, _), meta) in files.into_iter().zip(metas) {
+            if !in_folder(&rel, folder.unwrap_or("")) {
                 continue;
             }
+            if !tag_list.iter().all(|t| meta.search_tags.contains(t)) {
+                continue;
+            }
+            let fm = &meta.fm;
             let field_eq = |key: &str, want: &str| -> bool {
                 if want.is_empty() {
                     return true;
@@ -2026,7 +2045,7 @@ impl MemoryStore {
             }
             out.push(json!({
                 "path": rel, "name": name, "folder": folder_of(&rel),
-                "tags": ntags, "frontmatter": fm,
+                "tags": meta.tags, "frontmatter": fm,
             }));
             if out.len() >= limit {
                 break;
@@ -3584,8 +3603,22 @@ impl MemoryStore {
         seen.into_values().collect()
     }
 
-    pub fn digest_impl(&self, folder: Option<&str>, since: Option<f64>) -> Value {
-        let evs = self.get_events_impl(since, folder, None, 500);
+    /// Activity summary over the newest logged events (the log keeps the newest
+    /// 2000): counts per actor and per type, and up to `limit` touched notes
+    /// (`truncated` says whether more were touched). `folder` matches that folder and
+    /// its subfolders (see [`in_folder`]); `since` is Unix seconds.
+    pub fn digest_impl(&self, folder: Option<&str>, since: Option<f64>, limit: usize) -> Value {
+        let mut evs = self.get_events_impl(since, None, None, usize::MAX);
+        if let Some(f) = folder.filter(|f| !f.is_empty()) {
+            evs.retain(|e| {
+                let node = e.get("node");
+                let p = e
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| node.and_then(|n| n.get("path")).and_then(|v| v.as_str()));
+                p.is_some_and(|p| in_folder(p, f))
+            });
+        }
         let mut by_actor: BTreeMap<String, usize> = BTreeMap::new();
         let mut by_type: BTreeMap<String, usize> = BTreeMap::new();
         let mut touched: BTreeSet<String> = BTreeSet::new();
@@ -3610,9 +3643,11 @@ impl MemoryStore {
                 touched.insert(id.to_string());
             }
         }
+        let truncated = touched.len() > limit;
         json!({"folder": folder, "events": evs.len(), "by_actor": by_actor,
                "by_type": by_type,
-               "notes_touched": touched.into_iter().take(50).collect::<Vec<_>>()})
+               "notes_touched": touched.into_iter().take(limit).collect::<Vec<_>>(),
+               "truncated": truncated})
     }
 
     // ---- activity log (get_logs / search_logs) ----
@@ -3801,51 +3836,49 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
-    fn note_terms(&self, fp: &Path) -> (BTreeSet<String>, BTreeSet<String>) {
-        let c = self.read_raw(fp).unwrap_or_default().to_lowercase();
-        let (tags, _) = self.note_tags_fm(fp);
-        let tagset: BTreeSet<String> = tags.into_iter().collect();
-        let word_re = Regex::new(r"[a-z0-9]{4,}").unwrap();
-        let words: BTreeSet<String> = word_re
-            .find_iter(&c)
-            .map(|m| m.as_str().to_string())
-            .collect();
-        (tagset, words)
-    }
-
-    pub fn find_similar_impl(&self, path: &str, limit: usize) -> MResult<Vec<Value>> {
-        let ap = self.resolve(path)?;
-        if !ap.is_file() {
+    /// Every other note scored against `path` (shared tags x5 + shared words), best
+    /// first: `(score, rel, name)`, plus the note's own path and link targets.
+    #[allow(clippy::type_complexity)]
+    fn similar_ranked(
+        &self,
+        path: &str,
+    ) -> MResult<(Vec<(usize, String, String)>, String, Vec<String>)> {
+        let (_, base) = self.note_of(path)?;
+        let files = self.walk();
+        let metas = self.scan(&files);
+        let Some(bi) = files.iter().position(|(rel, _, _)| *rel == base) else {
             return err(format!("not found: {path}"));
-        }
-        let base = Self::base_name(path);
-        let (bt, bw) = self.note_terms(&ap);
-        let mut scored: Vec<(usize, Value)> = Vec::new();
-        for (rel, name, fp) in self.walk() {
-            if name == base {
+        };
+        let bm = metas[bi].clone();
+        let mut scored: Vec<(usize, String, String)> = Vec::new();
+        for ((rel, name, _), m) in files.into_iter().zip(&metas) {
+            if rel == base {
                 continue;
             }
-            let (t, w) = self.note_terms(&fp);
-            let score = bt.intersection(&t).count() * 5 + bw.intersection(&w).count();
+            let score = bm.search_tags.intersection(&m.search_tags).count() * 5
+                + bm.words.intersection(&m.words).count();
             if score > 0 {
-                scored.push((
-                    score,
-                    json!({"path": rel, "name": name, "folder": folder_of(&rel), "score": score}),
-                ));
+                scored.push((score, rel, name));
             }
         }
         scored.sort_by_key(|a| std::cmp::Reverse(a.0));
-        Ok(scored.into_iter().take(limit).map(|x| x.1).collect())
+        Ok((scored, base, bm.targets.clone()))
+    }
+
+    pub fn find_similar_impl(&self, path: &str, limit: usize) -> MResult<Vec<Value>> {
+        let (scored, _, _) = self.similar_ranked(path)?;
+        Ok(scored
+            .into_iter()
+            .take(limit)
+            .map(|(score, rel, name)| {
+                json!({"path": rel, "name": name, "folder": folder_of(&rel), "score": score})
+            })
+            .collect())
     }
 
     pub fn suggest_links_impl(&self, path: &str, limit: usize) -> MResult<Vec<Value>> {
-        let ap = self.resolve(path)?;
-        if !ap.is_file() {
-            return err(format!("not found: {path}"));
-        }
-        let c = self.read_raw(&ap).unwrap_or_default();
-        let linked: BTreeSet<String> = self
-            .link_targets(&c)
+        let (scored, base, targets) = self.similar_ranked(path)?;
+        let linked: BTreeSet<String> = targets
             .iter()
             .map(|t| {
                 t.rsplit('/')
@@ -3856,21 +3889,20 @@ impl MemoryStore {
                     .to_lowercase()
             })
             .collect();
-        let base = Self::base_name(path);
-        Ok(self
-            .find_similar_impl(path, limit * 3)?
+        let base_name = Self::base_name(&base);
+        Ok(scored
             .into_iter()
-            .filter(|s| {
-                let n = s.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                !linked.contains(&n.to_lowercase()) && n != base
-            })
+            .filter(|(_, _, n)| !linked.contains(&n.to_lowercase()) && *n != base_name)
             .take(limit)
+            .map(|(score, rel, name)| {
+                json!({"path": rel, "name": name, "folder": folder_of(&rel), "score": score})
+            })
             .collect())
     }
 
     pub fn stale_detection_impl(&self, days: i64) -> Vec<Value> {
         let now = now_secs();
-        let cutoff = now - days as f64 * 86400.0;
+        let cutoff = now - days.max(0) as f64 * 86400.0;
         let mut out: Vec<Value> = self
             .walk()
             .into_iter()
@@ -3961,46 +3993,56 @@ impl MemoryStore {
         )
     }
 
-    pub fn get_todos_impl(&self, path: Option<&str>) -> Vec<Value> {
-        let re = Regex::new(r"^\s*[-*]\s+\[( |x|X)\]\s+(.+)").unwrap();
+    /// Checklist items (`- [ ] text`, `- [x] text`; empty items skipped) of one note
+    /// (`path` resolved like the graph tools) or of the whole vault.
+    pub fn get_todos_impl(&self, path: Option<&str>) -> MResult<Vec<Value>> {
+        let only = match path.filter(|p| !p.is_empty()) {
+            Some(p) => Some(self.note_of(p)?.1),
+            None => None,
+        };
+        let files = self.walk();
+        let metas = self.scan(&files);
         let mut out = Vec::new();
-        for (rel, _name, fp) in self.walk() {
-            if let Some(p) = path {
-                if !p.is_empty() && rel != p {
-                    continue;
-                }
+        for ((rel, _, _), meta) in files.iter().zip(&metas) {
+            if only.as_ref().is_some_and(|o| o != rel) {
+                continue;
             }
-            let content = self.read_raw(&fp).unwrap_or_default();
-            for (i, line) in content.split('\n').enumerate() {
-                if let Some(c) = re.captures(line) {
-                    out.push(json!({
-                        "path": rel,
-                        "done": c[1].to_lowercase() == "x",
-                        "text": c[2].trim(),
-                        "line": i + 1,
-                    }));
-                }
+            for (line, done, text) in &meta.todos {
+                out.push(json!({"path": rel, "done": done, "text": text, "line": line}));
             }
         }
-        out
+        Ok(out)
     }
 
-    pub fn follow_ups_impl(&self) -> Vec<Value> {
-        let mut seen: BTreeSet<String> = BTreeSet::new();
+    /// Notes whose frontmatter `status` is one of [`FOLLOW_UP_STATUSES`] (ignoring
+    /// case; `_` and spaces count as `-`), at most `limit` of them; `truncated` says
+    /// whether more matched.
+    pub fn follow_ups_impl(&self, limit: usize) -> Value {
+        let files = self.walk();
+        let metas = self.scan(&files);
         let mut out = Vec::new();
-        for st in ["pending", "open", "todo", "in-progress"] {
-            for r in self.query_memory_impl(None, None, None, None, Some(st), 50) {
-                let p = r
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if seen.insert(p) {
-                    out.push(r);
-                }
+        let mut total = 0usize;
+        for ((rel, name, _), meta) in files.into_iter().zip(metas) {
+            let st = meta
+                .fm
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase()
+                .replace(['_', ' '], "-");
+            if !FOLLOW_UP_STATUSES.contains(&st.as_str()) {
+                continue;
+            }
+            total += 1;
+            if out.len() < limit {
+                out.push(json!({
+                    "path": rel, "name": name, "folder": folder_of(&rel),
+                    "status": st, "tags": meta.tags, "frontmatter": meta.fm,
+                }));
             }
         }
-        out
+        json!({"notes": out, "count": total, "truncated": total > limit})
     }
 
     pub fn get_assignments_impl(&self, agent: Option<&str>) -> Vec<Value> {

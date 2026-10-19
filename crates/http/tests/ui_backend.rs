@@ -720,6 +720,35 @@ async fn folder_meta_accepts_only_hex_colors() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
 }
 
+/// `/api/search` finds notes already on disk when the server starts and notes added
+/// behind its back (no write through Memora, no reindex); snippets are escaped.
+#[tokio::test]
+async fn rest_search_sees_notes_on_disk_without_a_write() {
+    let mut e = env("search");
+    std::fs::write(
+        e.vault.join("Plan/Zebra.md"),
+        "striped zebra <script>x</script>\n",
+    )
+    .unwrap();
+    let sid = signed_in(&mut e).await;
+    let o = || Opts {
+        cookie: Some(&sid),
+        same_origin: true,
+        ..Default::default()
+    };
+    let r = call(&mut e, Method::GET, "/api/search?q=zebra", None, o()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["count"], 1, "{}", r.body);
+    let snip = r.body["hits"][0]["snippet"].as_str().unwrap();
+    assert!(
+        !snip.contains("<script>") && snip.contains("&lt;script&gt;"),
+        "{snip}"
+    );
+    std::fs::write(e.vault.join("Plan/Copied.md"), "a copied quagga note\n").unwrap();
+    let r = call(&mut e, Method::GET, "/api/search?q=quagga", None, o()).await;
+    assert_eq!(r.body["count"], 1, "{}", r.body);
+}
+
 /// S256 PKCE challenge of `verifier`.
 fn pkce_challenge(verifier: &str) -> String {
     let hex = memora_gateway::hash_api_key(verifier);
