@@ -14,7 +14,8 @@ import { noteName } from './format';
 import { hooks } from './hooks';
 import { CARET, ICO_GEO, ICO_MOVE, ICO_PIN, ICO_PIN_OFF, ICO_TRASH } from './icons';
 import { CONTENT_PAGES, PAGE_META, PAGES, onNavigate } from './router';
-import { pins, saveOpenFolders, savePins, saveUI, ui } from './storage';
+import { saveOpenFolders, saveUI, ui } from './storage';
+import { isPinned, pinnedItems, togglePin, unpin } from './vault/store';
 import { colorOfFolder, folderNames, state, type Page } from './state';
 import { DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import { icon } from './ui/icons';
@@ -597,13 +598,9 @@ function smallBtn(ico: string, title: string, fn: () => void): HTMLElement {
 }
 
 function pinBtn(kind: 'note' | 'folder', key: string): HTMLElement {
-  const list = kind === 'note' ? pins.notes : pins.folders;
-  const pinned = list.includes(key);
+  const pinned = isPinned(kind, key);
   const b = smallBtn(pinned ? ICO_PIN_OFF : ICO_PIN, pinned ? 'Unpin' : 'Pin', () => {
-    const i = list.indexOf(key);
-    if (i >= 0) list.splice(i, 1);
-    else list.push(key);
-    savePins();
+    togglePin({ kind, key });
     renderTree();
   });
   if (pinned) b.style.color = 'var(--warn)';
@@ -613,10 +610,7 @@ function pinBtn(kind: 'note' | 'folder', key: string): HTMLElement {
 function renderPinned(): void {
   const host = $('#pinnedList');
   host.innerHTML = '';
-  const items = [
-    ...pins.folders.map((f) => ({ kind: 'folder' as const, key: f, label: f })),
-    ...pins.notes.map((p) => ({ kind: 'note' as const, key: p, label: noteName(p) })),
-  ];
+  const items = pinnedItems().map((p) => ({ ...p, label: p.kind === 'note' ? noteName(p.key) : p.key }));
   $('#pinCount').textContent = String(items.length);
   if (!items.length) {
     host.appendChild(el('div', 'tree-empty', 'Pin notes or folders for quick access.'));
@@ -645,10 +639,7 @@ function renderPinned(): void {
     x.title = 'Unpin';
     x.setAttribute('aria-label', 'Unpin ' + it.label);
     x.onclick = () => {
-      const l = it.kind === 'note' ? pins.notes : pins.folders;
-      const i = l.indexOf(it.key);
-      if (i >= 0) l.splice(i, 1);
-      savePins();
+      unpin(it);
       renderTree();
     };
     row.appendChild(open);

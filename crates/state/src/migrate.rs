@@ -20,6 +20,7 @@ pub const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_oauth.sql"),
     include_str!("../migrations/0005_key_secret.sql"),
     include_str!("../migrations/0006_privacy.sql"),
+    include_str!("../migrations/0007_pins.sql"),
 ];
 
 /// The schema version this binary writes (`user_version` after all migrations).
@@ -200,6 +201,9 @@ mod tests {
                 |r| r.get(0),
             )?;
             assert_eq!(t, 1);
+            // Migration 7: the pins table, empty.
+            let pins: i64 = c.query_row("SELECT count(*) FROM pin", [], |r| r.get(0))?;
+            assert_eq!(pins, 0);
             let kept: i64 = c.query_row(
                 "SELECT count(*) FROM activity WHERE event = 'kept'",
                 [],

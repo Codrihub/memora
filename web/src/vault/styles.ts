@@ -80,18 +80,21 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-sec-acts{display:flex;gap:2px}
 .vx-sec-acts .vx-icon-btn{width:24px;height:24px}
 
-.vx-pins.vx-drop-zone{background:color-mix(in srgb,var(--accent) 9%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
 .vx-pin-list{display:flex;flex-direction:column;gap:1px;padding:0 2px}
 .vx-pin-empty{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:var(--muted);padding:9px 10px;
   border:1.5px dashed var(--line-strong);border-radius:9px;margin:4px 4px 2px;text-align:center;transition:border-color .15s,background .15s,color .15s}
 .vx-pin-empty.slim{padding:6px 10px;font-size:11px}
 .vx-pin-empty svg{width:13px;height:13px;flex:none}
-/* while something is dragged over Pinned, the slot lights up */
+/* while something is dragged over Pinned, only the slot lights up (the section
+   itself stays as it is; a drop anywhere on it still pins) */
 .vx-drop-zone .vx-pin-empty,body.vx-dragging .vx-pins .vx-pin-empty{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .vx-pin{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;cursor:pointer;position:relative;min-height:30px}
 .vx-pin:hover{background:var(--panel-2)}
 .vx-pin.active{background:color-mix(in srgb,var(--accent) 12%,transparent)}
-.vx-pin.missing{opacity:.5;text-decoration:line-through}
+.vx-pin.missing{cursor:default}
+.vx-pin.missing .vx-pin-ico,.vx-pin.missing .vx-pin-name{opacity:.5}
+.vx-pin.missing .vx-pin-x{opacity:1}
+.vx-pin-sub.vx-pin-miss{color:var(--warn);font-weight:600;max-width:none;flex:none}
 .vx-pin-ico{display:inline-flex}
 .vx-pin-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vx-pin-sub{font-size:10.5px;color:var(--muted);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

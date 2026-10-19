@@ -36,6 +36,7 @@ pub mod keys;
 pub mod legacy;
 pub mod oauth;
 pub mod owner;
+pub mod pins;
 pub mod privacy;
 pub mod retention;
 pub mod session;

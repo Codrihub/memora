@@ -10,7 +10,6 @@ import { hooks } from '../hooks';
 import { allNotes, state } from '../state';
 import { I } from './icons';
 import { renderList, resetListQuery } from './list';
-import { onPinChange } from './menus';
 import { nav } from './nav';
 import { flushEditor, noteShown, renderNote } from './note';
 import { createFolder, createNote, onRefresh, relocating } from './ops';
@@ -20,6 +19,7 @@ import {
   folderAt,
   folderColor,
   isInside,
+  onPinsSynced,
   onVaultChange,
   openFolders,
   prefs,
@@ -28,7 +28,7 @@ import {
   selection,
   wireBus,
 } from './store';
-import { TreeView, refreshTrees, onPinsChanged } from './tree';
+import { TreeView, refreshTrees } from './tree';
 import { promptName } from './ui';
 import { setSheetEditor } from './sheet';
 import { Modal } from '../modal';
@@ -484,15 +484,10 @@ onRefresh(() => {
   if (state.page === 'vault' && shell) void renderVault();
   else refreshTrees();
 });
-const pinRedraw = (): void => {
-  refreshTrees();
+// Pins changed (here, on the server, in another browser): the list marks
+// pinned nodes and has a Pinned filter. The trees redraw themselves.
+onPinsSynced(() => {
   if (state.page === 'vault' && shell) drawList();
-  hooks.refreshTree();
-};
-onPinChange(pinRedraw);
-onPinsChanged(() => {
-  if (state.page === 'vault' && shell) drawList();
-  hooks.refreshTree();
 });
 let activityTimer = 0;
 onVaultChange(() => {

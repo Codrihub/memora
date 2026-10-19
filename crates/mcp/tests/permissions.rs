@@ -353,3 +353,135 @@ fn export_needs_paths_and_returns_only_the_file_name() {
     let _ = std::fs::remove_file(std::env::temp_dir().join("memora-exchange").join(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn pin_tools_follow_scopes_grants_and_privacy() {
+    let dir = scratch("pins");
+    let srv = server(&dir);
+    std::fs::create_dir_all(dir.join("vault/Secret")).unwrap();
+    std::fs::write(dir.join("vault/Secret/s.md"), "# S\n").unwrap();
+    let text = |r: &Value| -> Value {
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let rw = key(&["mcp", "read", "write"], ToolGrant::All);
+    let ro = key(&["mcp", "read"], ToolGrant::All);
+
+    // Scopes: list_pins is read-only, pin and unpin need `write`.
+    assert_eq!(memora_mcp::required_scope("list_pins"), None);
+    for name in ["pin", "unpin"] {
+        assert_eq!(memora_mcp::required_scope(name), Some("write"), "{name}");
+        let r = rpc(
+            &srv,
+            &ro,
+            "tools/call",
+            json!({"name": name, "arguments": {"path": "Plan/Index.md"}}),
+        );
+        assert_eq!(r["error"]["code"], -32003, "{name}: {r}");
+        assert_eq!(
+            r["error"]["message"],
+            format!("API key lacks the 'write' scope for tool: {name}")
+        );
+    }
+    let l = names(&rpc(&srv, &ro, "tools/list", json!({})));
+    assert!(l.contains(&"list_pins".to_string()));
+    assert!(!l.contains(&"pin".to_string()) && !l.contains(&"unpin".to_string()));
+    assert!(srv.db().read(memora_state::pins::list).unwrap().is_empty());
+
+    // A write key pins (kind from disk, `.md` optional) and lists.
+    let v = text(&rpc(
+        &srv,
+        &rw,
+        "tools/call",
+        json!({"name":"pin","arguments":{"path":"Plan/Index"}}),
+    ));
+    assert_eq!(v["pins"][0]["path"], "Plan/Index.md");
+    assert_eq!(v["pins"][0]["kind"], "note");
+    let v = text(&rpc(
+        &srv,
+        &rw,
+        "tools/call",
+        json!({"name":"pin","arguments":{"path":"Secret","position":0}}),
+    ));
+    assert_eq!(v["pins"][0]["path"], "Secret");
+    assert_eq!(v["pins"][0]["kind"], "folder");
+    assert_eq!(v["count"], 2);
+    let v = text(&rpc(&srv, &ro, "tools/call", json!({"name":"list_pins"})));
+    assert_eq!(v["count"], 2);
+    assert_eq!(v["pins"][1]["missing"], false);
+
+    // Paths outside the vault, hidden or missing are refused.
+    for bad in ["../etc/passwd", "/etc", ".Trash/x.md", "Nope.md"] {
+        let r = rpc(
+            &srv,
+            &rw,
+            "tools/call",
+            json!({"name":"pin","arguments":{"path": bad}}),
+        );
+        assert_eq!(r["result"]["isError"], true, "{bad}: {r}");
+    }
+
+    // A tool grant without `pin` refuses it even with the write scope.
+    let only_list = key(
+        &["mcp", "read", "write"],
+        ToolGrant::Only(["list_pins".to_string()].into_iter().collect()),
+    );
+    let r = rpc(
+        &srv,
+        &only_list,
+        "tools/call",
+        json!({"name":"unpin","arguments":{"path":"Secret"}}),
+    );
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+
+    // A key whose privacy rules hide Secret neither sees nor changes that pin.
+    srv.db()
+        .write(|tx| {
+            memora_state::keys::create(
+                tx,
+                &memora_state::keys::NewApiKey {
+                    id: "k_test".into(),
+                    name: "test".into(),
+                    hash: format!("{:064x}", 9),
+                    prefix: "mem_t".into(),
+                    scopes: memora_state::keys::Scope::default_set(),
+                    tools: memora_state::keys::ToolGrant::All,
+                },
+                1,
+            )?;
+            memora_state::privacy::set(
+                tx,
+                memora_state::privacy::Kind::Folder,
+                "Secret",
+                memora_state::privacy::Mode::Deny,
+                &["k_test".to_string()].into(),
+                1,
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let v = text(&rpc(&srv, &rw, "tools/call", json!({"name":"list_pins"})));
+    assert_eq!(v["count"], 1, "{v}");
+    assert_eq!(v["pins"][0]["path"], "Plan/Index.md");
+    assert_eq!(v["pins"][0]["position"], 0);
+    let r = rpc(
+        &srv,
+        &rw,
+        "tools/call",
+        json!({"name":"unpin","arguments":{"path":"Secret","kind":"folder"}}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert_eq!(srv.db().read(memora_state::pins::list).unwrap().len(), 2);
+
+    // The owner (full access) still sees both and may unpin.
+    let owner = Caller::full("owner");
+    let v = text(&rpc(
+        &srv,
+        &owner,
+        "tools/call",
+        json!({"name":"unpin","arguments":{"path":"Secret"}}),
+    ));
+    assert_eq!(v["removed"], true);
+    assert_eq!(v["count"], 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

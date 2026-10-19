@@ -17,8 +17,9 @@ import { $, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
 import { icon } from '../ui/icons';
 import { Modal } from '../modal';
-import { clearTagIndex, pins, savePins, saveToastPrefs, saveUI, toastPrefs, ui } from '../storage';
+import { clearTagIndex, saveToastPrefs, saveUI, toastPrefs, ui } from '../storage';
 import { state, type Page } from '../state';
+import { clearPins, pinnedItems } from '../vault/store';
 import { renderTree } from '../sidebar';
 import { setThemePref, themePref, type ThemePref } from '../theme';
 import { toast } from '../toast';
@@ -536,7 +537,7 @@ export async function renderSettings(): Promise<void> {
         switchHTML('sCollapsed', !!ui.collapsed, 'Start with the sidebar collapsed', ' aria-labelledby="sCollapsedL"'),
         { ctl: 'end' },
       )}
-      ${row('Pinned nodes', 'Pins live in this browser. Removing them does not touch the nodes.', '<button class="btn" id="sClearPins" type="button">Remove all pins</button>', {
+      ${row('Pinned nodes', 'Pins are saved on the server and shared by every browser and device you sign in on. Removing them does not touch the nodes.', '<button class="btn" id="sClearPins" type="button">Remove all pins</button>', {
         ctl: 'end',
       })}
       ${row('Tag index', 'A cached index of tags; it is rebuilt the next time it is needed.', '<button class="btn" id="sClearIdx" type="button">Clear the cache</button>', {
@@ -1150,11 +1151,18 @@ export async function renderSettings(): Promise<void> {
     });
 
   host.querySelector<HTMLButtonElement>('#sClearPins')!.onclick = () => {
-    pins.folders = [];
-    pins.notes = [];
-    savePins();
-    renderTree();
-    toast('Pins removed', 'ok');
+    Modal.confirm(
+      'Remove all pins?',
+      'The Pinned list empties on every browser and device. The nodes and folders stay in the vault.',
+      'Remove all pins',
+      () => {
+        Modal.close();
+        void clearPins().then(() => {
+          renderTree();
+          if (!pinnedItems().length) toast('Pins removed', 'ok');
+        });
+      },
+    );
   };
   host.querySelector<HTMLButtonElement>('#sClearIdx')!.onclick = () => {
     clearTagIndex();

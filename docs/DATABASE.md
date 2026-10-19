@@ -90,13 +90,14 @@ Rust repositories validate first to return readable errors. The DDL is in
 | `activity` | Audit log: time, event name, IP, actor (username, key id, or `cli`), detail. |
 | `control_request` | Requests from `memora-cli` to the running server for state that lives in server memory (`limiter_reset`, `reload_all`), with an acknowledgement (`done_at`, `result`). |
 | `ui_layout` | One JSON document per web UI layout name (canvas positions, pinned graph positions), at most 512 KiB each. |
+| `pin` | The owner's pinned notes and folders in sidebar order (`position`): kind `note` or `folder`, vault-relative path. At most 200. Renames, moves and deletes done by Memora rewrite or drop them in the same transaction. |
 | `revision` | One counter per cache domain (`auth`, `keys`, `tools`, `access`, `settings`, `arm`), bumped by triggers. |
 
 Revision triggers (one per insert, update, and delete) map tables to domains:
 `owner` to `auth`; `api_key`, `api_key_scope`, `api_key_tool` to `keys`;
 `tool_disabled` to `tools`; `access_policy`, `access_rule` to `access`;
 `settings`, `server_config` to `settings`; `arm_state` to `arm`. Sessions,
-usage, events, activity, OAuth, privacy rules, and UI layouts have no revision
+usage, events, activity, OAuth, privacy rules, pins, and UI layouts have no revision
 and are read from the database when needed.
 
 ## Concurrency and change detection
@@ -157,6 +158,7 @@ restore the backup taken before upgrading.
 | 4 | `0004_oauth.sql` | `oauth_client`, `oauth_code`, `oauth_grant` |
 | 5 | `0005_key_secret.sql` | `api_key_secret` |
 | 6 | `0006_privacy.sql` | `privacy_rule`, `privacy_rule_key`, `privacy_trail` |
+| 7 | `0007_pins.sql` | `pin` |
 
 ### JSON state import
 

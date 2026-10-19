@@ -246,6 +246,7 @@ fn catalog_covers_all_expected_tools() {
         "link_stats",
         "list_actors",
         "list_memory",
+        "list_pins",
         "list_tags",
         "lock_node",
         "mention_agent",
@@ -253,6 +254,7 @@ fn catalog_covers_all_expected_tools() {
         "merge_tag",
         "move_memory",
         "patch_memory",
+        "pin",
         "presence",
         "query_memory",
         "read_memory",
@@ -274,6 +276,7 @@ fn catalog_covers_all_expected_tools() {
         "stale_detection",
         "suggest_links",
         "template_create",
+        "unpin",
         "validate_memory",
     ];
     let have: std::collections::BTreeSet<&str> = memora_mcp::all_tool_names().into_iter().collect();

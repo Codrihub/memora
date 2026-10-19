@@ -24,6 +24,7 @@ import {
   folderIcon,
   folderTree,
   isInside,
+  onPinsSynced,
   openFolders,
   pinAt,
   pinnedItems,
@@ -31,11 +32,12 @@ import {
   saveOpen,
   selection,
   agentsAt,
+  unpin,
   type FolderNode,
   type PinItem,
 } from './store';
 import { coinsHTML } from './coins';
-import { inlineEdit } from './ui';
+import { inlineEdit, undoToast } from './ui';
 
 export interface TreeOptions {
   /** List notes under their folder (sidebar). */
@@ -350,15 +352,15 @@ export class TreeView {
       } else {
         pinAt({ kind: 'folder', key: d.path }, at);
       }
-      refreshTrees();
-      pinListeners.forEach((fn) => fn());
     };
     return sec;
   }
 
   private pinRow(it: PinItem, i: number): HTMLElement {
     const isNote = it.kind === 'note';
-    const missing = isNote ? !noteExists(it.key) : !folderAt(it.key);
+    // The server says when a pinned path is gone (renamed or deleted outside
+    // Memora): the pin stays, dimmed, until it is removed.
+    const missing = !!it.missing;
     const row = el('div', 'vx-pin' + (missing ? ' missing' : ''));
     row.setAttribute('role', 'listitem');
     row.tabIndex = -1;
@@ -368,11 +370,17 @@ export class TreeView {
     const color = isNote ? folderColor(dirOf(it.key)) : folderColor(it.key);
     const active = isNote ? state.note === it.key : prefs.folder === it.key && state.page === 'vault' && !state.note;
     if (active) row.classList.add('active');
+    const label = isNote ? noteName(it.key) : baseName(it.key);
+    const sub = missing
+      ? `<span class="vx-pin-sub vx-pin-miss">Not found</span>`
+      : isNote
+        ? ''
+        : `<span class="vx-pin-sub">${esc(dirOf(it.key) || '')}</span>`;
     row.innerHTML = `<span class="vx-pin-ico" style="color:${attr(color)}">${
       isNote ? I.note : folderGlyph(folderIcon(it.key), false)
-    }</span><span class="vx-pin-name" title="${attr(it.key)}">${esc(isNote ? noteName(it.key) : baseName(it.key))}</span>${
-      isNote ? '' : `<span class="vx-pin-sub">${esc(dirOf(it.key) || '')}</span>`
-    }<button class="vx-pin-x" aria-label="Unpin ${attr(isNote ? noteName(it.key) : baseName(it.key))}" title="Unpin">${I.close}</button>`;
+    }</span><span class="vx-pin-name" title="${attr(missing ? it.key + ' (not found)' : it.key)}">${esc(label)}</span>${sub}<button class="vx-pin-x" aria-label="${
+      missing ? 'Remove pin' : 'Unpin'
+    } ${attr(label)}" title="${missing ? 'Remove pin' : 'Unpin'}">${I.close}</button>`;
     const open = (): void => {
       if (missing) return;
       if (isNote) nav.openNote(it.key);
@@ -382,11 +390,15 @@ export class TreeView {
       if ((e.target as HTMLElement).closest('.vx-pin-x')) return;
       open();
     };
-    const ask = (): void =>
-      confirmUnpin(it, () => {
-        refreshTrees();
-        pinListeners.forEach((fn) => fn());
-      });
+    // A missing pin goes at once (with undo): there is nothing left to keep.
+    const ask = (): void => {
+      if (!missing) {
+        confirmUnpin(it, () => {});
+        return;
+      }
+      unpin(it);
+      undoToast(`Removed the pin of "${label}"`, () => pinAt(it, i), 'info', 4000);
+    };
     row.querySelector<HTMLButtonElement>('.vx-pin-x')!.onclick = (e) => {
       e.stopPropagation();
       ask();
@@ -398,9 +410,8 @@ export class TreeView {
         // Alt+Up/Down reorders pins from the keyboard.
         e.preventDefault();
         e.stopPropagation();
-        pinAt(it, i + (e.key === 'ArrowUp' ? -1 : 1));
         this.focusKey = row.dataset.key || null;
-        refreshTrees();
+        pinAt(it, i + (e.key === 'ArrowUp' ? -1 : 1));
         this.host.querySelector<HTMLElement>(`[data-key="${CSS.escape(row.dataset.key || '')}"]`)?.focus();
       }
     };
@@ -856,17 +867,8 @@ export class TreeView {
   }
 }
 
-function noteExists(path: string): boolean {
-  const f = folderAt(dirOf(path));
-  return !!f && f.notes.some((n) => n.path === path);
-}
-
-const pinListeners = new Set<() => void>();
-/** Something outside the tree that shows pins (note header) wants to know. */
-export function onPinsChanged(fn: () => void): () => void {
-  pinListeners.add(fn);
-  return () => pinListeners.delete(fn);
-}
+// Pins changed (here, on the server, in another browser): redraw.
+onPinsSynced(() => refreshTrees());
 
 /** Mount a tree into any container (used by the shell sidebar). */
 export function mountTree(container: HTMLElement, opts: Partial<TreeOptions> = {}): TreeView {

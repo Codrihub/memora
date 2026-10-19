@@ -74,6 +74,7 @@ const READ_ONLY: &[&str] = &[
     "get_todos",
     "follow_ups",
     "validate_memory",
+    "list_pins",
     "admin_list_tools",
     "privacy_list",
 ];
@@ -103,6 +104,7 @@ const NO_RESULT_PATHS: &[&str] = &[
     "list_actors",
     "follow_ups",
     "export_memory",
+    "list_pins",
     "admin_list_tools",
     "admin_set_tool",
 ];

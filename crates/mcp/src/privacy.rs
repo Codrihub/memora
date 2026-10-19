@@ -2,12 +2,13 @@
 //!
 //! * [`view_for_key`]: the [`PathView`] an API-key caller works under. Any error reading
 //!   the rules yields a view that hides everything (fail closed).
-//! * [`path_hook`]: keeps rules attached to their notes and folders when the store renames,
-//!   moves or deletes them (installed by [`crate::McpServer::new`]).
+//! * [`apply_event`]: keeps rules attached to their notes and folders when the store
+//!   renames, moves or deletes them (run by [`crate::path_hook`], installed by
+//!   [`crate::McpServer::new`]).
 //! * The JSON shapes shared by the admin tools (`privacy_list`, `privacy_set`,
 //!   `privacy_clear`) and the HTTP management API (`/api/privacy`).
 
-use memora_core::privacy::{PathEvent, PathHook, PathView};
+use memora_core::privacy::{PathEvent, PathView};
 use memora_state::keys::ApiKey;
 use memora_state::privacy::{self as rules, KeyView, Kind, Mode, Rule};
 use memora_state::{Connection, Db, Transaction};
@@ -64,22 +65,6 @@ pub fn apply_event(tx: &Transaction<'_>, ev: &PathEvent) -> memora_state::Result
         }
         PathEvent::Deleted { path } => rules::forget(tx, path),
     }
-}
-
-/// The hook that keeps rules on their paths. A failed write is retried; the store
-/// lock is held meanwhile, so no other vault change can interleave.
-pub fn path_hook(db: Db) -> PathHook {
-    Arc::new(move |ev: &PathEvent| {
-        for attempt in 0..3 {
-            match db.write(|tx| apply_event(tx, ev)) {
-                Ok(_) => return,
-                Err(e) if attempt == 2 => {
-                    eprintln!("memora: privacy rules not updated for {ev:?}: {e}");
-                }
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
-            }
-        }
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +283,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let hook = path_hook(db.clone());
+        let hook = crate::path_hook(db.clone());
         hook(&PathEvent::Moved {
             from: "A/x.md".into(),
             to: "B/y.md".into(),

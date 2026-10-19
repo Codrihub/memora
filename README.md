@@ -45,8 +45,8 @@ Screenshots use a demo vault.
   `[[wikilinks]]`. Edit it with any tool; nothing is locked in a database.
 - **Git history.** Changes are committed, so any revision can be listed, diffed
   and restored (`get_history`, `diff`, `restore_memory`).
-- **MCP for agents.** 71 tools for notes, folders, search, tags, graph traversal,
-  history, locks, activity and import/export, plus admin tools, over the
+- **MCP for agents.** 74 tools for notes, folders, search, tags, graph traversal,
+  history, locks, activity, pins and import/export, plus admin tools, over the
   streamable HTTP transport.
 - **API keys or OAuth.** Give each agent its own key, or let MCP clients such as
   Claude or ChatGPT connect with OAuth after you approve them in the browser.

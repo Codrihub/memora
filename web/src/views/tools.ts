@@ -27,7 +27,7 @@ const CATEGORIES: Record<string, { label: string; desc: string }> = {
   ops: { label: 'Activity and upkeep', desc: 'Activity logs, health checks, stale notes, folder settings and folder moves.' },
   identity: { label: 'Identity', desc: 'How the agent itself shows up: its display name and colour.' },
   interop: { label: 'Import and export', desc: 'Bring notes in or take them out as a zip of markdown.' },
-  ux: { label: 'Tasks and checks', desc: 'To-dos, follow-ups and checks that a note is well formed.' },
+  ux: { label: 'Tasks, checks and pins', desc: 'To-dos, follow-ups, checks that a note is well formed, and the pinned notes and folders.' },
 };
 const CAT_ORDER = Object.keys(CATEGORIES);
 

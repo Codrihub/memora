@@ -35,6 +35,8 @@ export interface BusEvents {
   connection: 'on' | 'connecting' | 'off';
   /** Number of browsers connected to the server. */
   presence: number;
+  /** The owner's pins changed on the server (`pins_changed`); reload them. */
+  pins: null;
 }
 
 type Handler<K extends keyof BusEvents> = (payload: BusEvents[K]) => void;

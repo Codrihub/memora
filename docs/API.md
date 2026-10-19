@@ -320,6 +320,32 @@ serialized JSON of at most 512 KiB (`413` above); the request body limit is 600 
 Layouts are stored in the `ui_layout` table of `memora.db`. The web UI uses them for
 `canvas` (card positions and frames) and `graph` (pinned positions).
 
+## Pins
+
+The owner's pinned notes and folders (the sidebar's Pinned list), shared by every
+browser and device of the instance.
+
+| Method | Path | Auth | Returns |
+|---|---|---|---|
+| GET | `/api/pins` | Session only | `{count, pins:[{kind, path, position, missing}]}` in display order. |
+| PUT | `/api/pins` | Session only (+CSRF) | Same as GET. Body: `{pins:[{kind, path}]}`, the whole ordered list (reorder, remove). |
+| POST | `/api/pins/pin` | Session only (+CSRF) | Same as GET. Body: `{kind, path, position?}`. Pins an existing note or folder at `position` (default: the end), or moves its pin there; `404` if it does not exist. |
+| POST | `/api/pins/unpin` | Session only (+CSRF) | Same as GET plus `removed`. Body: `{kind, path}`. |
+
+`kind` is `note` or `folder`. `path` is vault-relative as the tree shows it (notes end in
+`.md`): absolute paths, `..`, empty or hidden segments, `\`, control characters and paths
+over 1024 characters get `400`, as do more than 200 pins. API keys get `403` (agents use
+the MCP tools `list_pins`, `pin` and `unpin`). Bodies are limited to 256 KiB for `PUT`
+and 8 KiB for `pin`/`unpin` (`413`). `missing` is true when the path no longer exists,
+for example after a rename outside Memora; such a pin is kept until it is removed.
+
+Renames, moves and deletes done by Memora (HTTP or MCP) rewrite or drop pins in the same
+database transaction, including pins on notes and folders inside a moved folder;
+moving an item to the trash or deleting it removes its pin, and deleting a folder
+removes every pin under it. Every change publishes a `pins_changed` realtime event with
+no other data; open browsers reload the list. Pins are stored in the `pin` table of
+`memora.db`.
+
 ## Status codes
 
 | Code | Meaning |

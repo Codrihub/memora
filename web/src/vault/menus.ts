@@ -32,11 +32,6 @@ import { LOCK_ICON, openPrivacy } from '../ui/privacy';
 
 type Anchor = { x: number; y: number } | HTMLElement;
 
-let pinChanged: () => void = () => {};
-/** The view registers a redraw for pin changes. */
-export function onPinChange(fn: () => void): void {
-  pinChanged = fn;
-}
 
 /** Ask before taking something off Pinned (the node or folder itself stays). */
 export function confirmUnpin(item: { kind: 'note' | 'folder'; key: string }, done: () => void): void {
@@ -56,20 +51,12 @@ export function confirmUnpin(item: { kind: 'note' | 'folder'; key: string }, don
 export function pinToggle(kind: 'note' | 'folder', key: string): void {
   if (isPinned(kind, key)) {
     confirmUnpin({ kind, key }, () => {
-      pinChanged();
-      undoToast('Unpinned', () => {
-        togglePin({ kind, key });
-        pinChanged();
-      }, 'info', 4000);
+      undoToast('Unpinned', () => void togglePin({ kind, key }), 'info', 4000);
     });
     return;
   }
   const now = togglePin({ kind, key });
-  pinChanged();
-  undoToast(now ? `Pinned "${kind === 'note' ? noteName(key) : baseName(key)}"` : 'Unpinned', () => {
-    togglePin({ kind, key });
-    pinChanged();
-  }, 'info', 4000);
+  undoToast(now ? `Pinned "${kind === 'note' ? noteName(key) : baseName(key)}"` : 'Unpinned', () => void togglePin({ kind, key }), 'info', 4000);
 }
 
 /** Ask, then move a folder into another folder. */

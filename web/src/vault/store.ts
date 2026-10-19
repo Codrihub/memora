@@ -7,7 +7,9 @@
 
 import { on } from '../bus';
 import { hashColor } from '../format';
-import { pins, savePins } from '../storage';
+import { api, apiGet, apiPost } from '../api';
+import { clearLegacyPins, legacyPins } from '../storage';
+import { toast } from '../toast';
 import { allNotes, state } from '../state';
 import type { NoteRef, WsEvent } from '../types';
 
@@ -36,7 +38,6 @@ interface Prefs {
 }
 
 const LS_PREFS = 'memora.vault.v1';
-const LS_PIN_ORDER = 'memora.pinorder.v1';
 const LS_OPEN = 'memora.vault.open.v1';
 
 function readLS<T>(key: string, fallback: T): T {
@@ -45,15 +46,6 @@ function readLS<T>(key: string, fallback: T): T {
     return raw ? ({ ...fallback, ...JSON.parse(raw) } as T) : fallback;
   } catch {
     return fallback;
-  }
-}
-function readArr(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    const v = raw ? JSON.parse(raw) : [];
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
   }
 }
 function writeLS(key: string, v: unknown): void {
@@ -187,53 +179,137 @@ export function folderIcon(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Pins: storage.ts keeps notes and folders as two arrays; the mixed display
-// order lives in its own key.
+// Pins: saved on the server (/api/pins) and shared by every browser and device.
+// Renames, moves and deletes done by Memora (here, in another browser or by an
+// agent) rewrite them there, and the server says `pins_changed` so this list
+// reloads. Changes made here show at once and are sent in order; the server's
+// answer replaces the list once nothing else is in flight.
 // ---------------------------------------------------------------------------
 
 export interface PinItem {
   kind: 'note' | 'folder';
   key: string;
+  /** The path no longer exists (renamed or deleted outside Memora). */
+  missing?: boolean;
 }
 
-let pinOrder: string[] = readArr(LS_PIN_ORDER);
+interface PinsReply {
+  pins: { kind: 'note' | 'folder'; path: string; missing: boolean }[];
+}
 
-const pinId = (p: PinItem): string => (p.kind === 'note' ? 'n:' : 'f:') + p.key;
+let pinList: PinItem[] = [];
+/** Requests queued or running; replies only land when this drops to zero. */
+let pinBusy = 0;
+let pinQueue: Promise<unknown> = Promise.resolve();
+const pinSubs = new Set<() => void>();
+
+/** Called whenever the pinned list changes (local edit or server reload). */
+export function onPinsSynced(fn: () => void): () => void {
+  pinSubs.add(fn);
+  return () => pinSubs.delete(fn);
+}
+function pinsSynced(): void {
+  pinSubs.forEach((fn) => {
+    try {
+      fn();
+    } catch (e) {
+      console.error(e);
+    }
+  });
+}
+
+const samePin = (a: PinItem, b: PinItem): boolean => a.kind === b.kind && a.key === b.key;
+
+function applyPins(r: PinsReply | null): void {
+  if (!r || !Array.isArray(r.pins)) return;
+  pinList = r.pins.map((p) => ({ kind: p.kind, key: p.path, missing: !!p.missing }));
+  pinsSynced();
+}
+
+/** Run a pin request after the ones before it; `quiet` failures only reload. */
+function pinRequest(run: () => Promise<PinsReply>, quiet = false): Promise<void> {
+  pinBusy++;
+  const job = pinQueue.then(run).then(
+    (r) => {
+      pinBusy--;
+      if (!pinBusy) applyPins(r);
+    },
+    (e: Error) => {
+      pinBusy--;
+      if (!quiet) {
+        toast('Could not save pins: ' + e.message, 'err');
+        void loadPins();
+      }
+    },
+  );
+  pinQueue = job;
+  return job;
+}
+
+/** Re-read the pins from the server (keeps the last list when offline). */
+export function loadPins(): Promise<void> {
+  return pinRequest(() => apiGet<PinsReply>('/api/pins'), true);
+}
+
+/** This browser's old pins that the server will take (it checks them again). */
+function legacyUpload(): { kind: 'note' | 'folder'; path: string }[] {
+  const ok = (p: { kind: string; path: string }): boolean =>
+    !!p.path &&
+    !p.path.split('/').some((seg) => !seg || seg.startsWith('.')) &&
+    (p.kind === 'folder' || p.path.endsWith('.md'));
+  return legacyPins().filter(ok).slice(0, 200);
+}
+
+/**
+ * First load: the server's list, after a one-time upload of this browser's old
+ * pins when the server has none yet. The local copy goes once the server has
+ * answered, so it can never come back over a list emptied later.
+ */
+function firstPinLoad(): void {
+  void pinRequest(async () => {
+    const r = await apiGet<PinsReply>('/api/pins');
+    const local = legacyUpload();
+    if (!r.pins.length && local.length) {
+      const up = await api<PinsReply>('/api/pins', { method: 'PUT', body: { pins: local } });
+      clearLegacyPins();
+      return up;
+    }
+    if (legacyPins().length) clearLegacyPins();
+    return r;
+  }, true);
+}
 
 export function pinnedItems(): PinItem[] {
-  const all: PinItem[] = [
-    ...pins.folders.map((key) => ({ kind: 'folder' as const, key })),
-    ...pins.notes.map((key) => ({ kind: 'note' as const, key })),
-  ];
-  const rank = new Map(pinOrder.map((id, i) => [id, i]));
-  return all.sort((a, b) => (rank.get(pinId(a)) ?? 1e9) - (rank.get(pinId(b)) ?? 1e9));
+  return pinList.slice();
 }
 
 export function isPinned(kind: 'note' | 'folder', key: string): boolean {
-  return (kind === 'note' ? pins.notes : pins.folders).includes(key);
-}
-
-function persistPins(order: PinItem[]): void {
-  pinOrder = order.map(pinId);
-  writeLS(LS_PIN_ORDER, pinOrder);
-  savePins();
+  return pinList.some((p) => p.kind === kind && p.key === key);
 }
 
 /** Pin (at `index`, default end) or move an existing pin to `index`. */
 export function pinAt(item: PinItem, index?: number): void {
-  const list = item.kind === 'note' ? pins.notes : pins.folders;
-  if (!list.includes(item.key)) list.push(item.key);
-  const order = pinnedItems().filter((p) => pinId(p) !== pinId(item));
+  const had = pinList.find((p) => samePin(p, item));
+  const order = pinList.filter((p) => !samePin(p, item));
   const at = index == null ? order.length : Math.max(0, Math.min(order.length, index));
-  order.splice(at, 0, item);
-  persistPins(order);
+  order.splice(at, 0, { kind: item.kind, key: item.key, missing: had ? had.missing : false });
+  pinList = order;
+  pinsSynced();
+  if (had) {
+    // A reorder: send the whole list.
+    const body = { pins: order.map((p) => ({ kind: p.kind, path: p.key })) };
+    void pinRequest(() => api<PinsReply>('/api/pins', { method: 'PUT', body }));
+  } else {
+    const body = { kind: item.kind, path: item.key, position: at };
+    void pinRequest(() => apiPost<PinsReply>('/api/pins/pin', body));
+  }
 }
 
 export function unpin(item: PinItem): void {
-  const list = item.kind === 'note' ? pins.notes : pins.folders;
-  const i = list.indexOf(item.key);
-  if (i >= 0) list.splice(i, 1);
-  persistPins(pinnedItems());
+  pinList = pinList.filter((p) => !samePin(p, item));
+  pinsSynced();
+  const body = { kind: item.kind, path: item.key };
+  void pinRequest(() => apiPost<PinsReply>('/api/pins/unpin', body));
 }
 
 export function togglePin(item: PinItem): boolean {
@@ -245,17 +321,18 @@ export function togglePin(item: PinItem): boolean {
   return true;
 }
 
-/** Rewrite pins, expansion and selection after a note moved or was renamed. */
+/** Remove every pin (Settings). */
+export function clearPins(): Promise<void> {
+  pinList = [];
+  pinsSynced();
+  return pinRequest(() => api<PinsReply>('/api/pins', { method: 'PUT', body: { pins: [] } }));
+}
+
+/**
+ * Rewrite expansion and selection after a note moved or was renamed. Pins are
+ * rewritten by the server, which then says `pins_changed`.
+ */
 export function notePathChanged(from: string, to: string | null): void {
-  const order = pinnedItems();
-  const i = pins.notes.indexOf(from);
-  if (i >= 0) {
-    if (to) pins.notes[i] = to;
-    else pins.notes.splice(i, 1);
-    const o = order.find((p) => p.kind === 'note' && p.key === from);
-    if (o && to) o.key = to;
-    persistPins(order.filter((p) => !(p.kind === 'note' && p.key === from && !to)));
-  }
   if (selection.delete(from) && to) selection.add(to);
   if (state.note === from) state.note = to;
   const t = touched.get(from);
@@ -265,14 +342,13 @@ export function notePathChanged(from: string, to: string | null): void {
   }
 }
 
-/** Rewrite folder pins, expansion and preferences after a folder moved. */
+/**
+ * Rewrite expansion and preferences after a folder moved. Pins (the folder's
+ * and those of everything inside it) are rewritten by the server.
+ */
 export function folderPathChanged(from: string, to: string | null): void {
   const remap = (p: string): string | null =>
     p === from || p.startsWith(from + '/') ? (to == null ? null : to + p.slice(from.length)) : p;
-  const order = pinnedItems();
-  pins.folders = pins.folders.map(remap).filter((x): x is string => x != null);
-  for (const o of order) if (o.kind === 'folder') o.key = remap(o.key) ?? '';
-  persistPins(order.filter((o) => o.key !== ''));
   for (const p of Array.from(openFolders)) {
     const r = remap(p);
     openFolders.delete(p);
@@ -399,11 +475,27 @@ export function mutationInfo(ev: WsEvent): MutationInfo {
   };
 }
 
+let pinReload = 0;
+function schedulePinReload(): void {
+  clearTimeout(pinReload);
+  pinReload = window.setTimeout(() => void loadPins(), 400);
+}
+
 let wired = false;
 /** Subscribe once to the bus; the sidebar tree is always on screen. */
 export function wireBus(): void {
   if (wired) return;
   wired = true;
+  firstPinLoad();
+  on('pins', () => void loadPins());
+  // Back online: events may have been missed. A returning tab catches paths
+  // changed outside Memora (shown as missing).
+  on('connection', (c) => {
+    if (c === 'on') void loadPins();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void loadPins();
+  });
   on('activity', (a) => {
     if (!a || !a.paths || !a.paths.length) return;
     for (const p of a.paths) {
@@ -417,6 +509,8 @@ export function wireBus(): void {
     if (m.type === 'node_renamed' && m.oldPath && m.path) notePathChanged(m.oldPath, m.path);
     if (m.type === 'node_deleted' && m.path) notePathChanged(m.path, null);
     if (m.path && m.type !== 'node_deleted') touch(m.path, m.actor, m.type.replace('node_', ''));
+    // A note came back or went away: its pin's "Not found" mark may change.
+    if (m.type === 'node_created' || m.type === 'node_deleted') schedulePinReload();
     notify();
   });
 }

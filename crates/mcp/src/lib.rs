@@ -20,6 +20,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, RwLock};
 
 pub mod activity;
+pub mod pins;
 pub mod privacy;
 pub mod tools;
 
@@ -547,6 +548,32 @@ pub fn sync_catalog(db: &Db) -> memora_state::Result<memora_state::tools::Catalo
     db.write(|tx| memora_state::tools::sync_catalog(tx, &names))
 }
 
+/// The store's path hook: privacy rules ([`privacy::apply_event`]) and pins
+/// ([`pins::apply_event`]) follow every rename, move and delete in one transaction. A
+/// failed write is retried; the store lock is held meanwhile, so no other vault change
+/// can interleave. Browsers hear `pins_changed` when a pin moved or went.
+pub fn path_hook(db: Db) -> memora_core::privacy::PathHook {
+    Arc::new(move |ev: &memora_core::privacy::PathEvent| {
+        for attempt in 0..3 {
+            match db.write(|tx| {
+                privacy::apply_event(tx, ev)?;
+                pins::apply_event(tx, ev)
+            }) {
+                Ok(n) => {
+                    if n > 0 {
+                        pins::publish_changed();
+                    }
+                    return;
+                }
+                Err(e) if attempt == 2 => {
+                    eprintln!("memora: privacy rules and pins not updated for {ev:?}: {e}");
+                }
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            }
+        }
+    })
+}
+
 pub struct McpServer {
     store: Arc<Mutex<MemoryStore>>,
     aliases: Arc<Mutex<Vec<AliasRecord>>>,
@@ -567,11 +594,12 @@ impl McpServer {
             db,
             disabled: RwLock::new(BTreeSet::new()),
         };
-        // Privacy rules follow notes and folders through renames, moves and deletes.
+        // Privacy rules and pins follow notes and folders through renames, moves and
+        // deletes.
         srv.store
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .set_path_hook(Some(privacy::path_hook(srv.db.clone())));
+            .set_path_hook(Some(path_hook(srv.db.clone())));
         srv.reload_tools();
         srv
     }
@@ -952,8 +980,37 @@ impl McpServer {
             if name == "set_my_color" {
                 return self.set_my_color(caller, args);
             }
+            if matches!(name, "list_pins" | "pin" | "unpin") {
+                return self.call_pins(caller, name, args);
+            }
             self.exec_tool(name, args, caller.actor(), self.view_for(caller))
         })
+    }
+
+    /// `list_pins`, `pin`, `unpin`: the owner's pinned notes and folders, under the
+    /// caller's privacy view (hidden pins are neither listed nor changed).
+    fn call_pins(&self, caller: &Caller, name: &str, args: &Value) -> anyhow::Result<Value> {
+        let store = memora_core::privacy::lock_as(&self.store, self.view_for(caller));
+        if name == "list_pins" {
+            return Ok(pins::list_json(&self.db, &store)?);
+        }
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if path.trim().is_empty() {
+            anyhow::bail!("path is required");
+        }
+        let (kind, path) =
+            pins::resolve_item(&store, path, args.get("kind").and_then(|v| v.as_str()))?;
+        if name == "unpin" {
+            return Ok(pins::unpin(&self.db, &store, kind, &path)?);
+        }
+        let position = match args.get("position") {
+            None | Some(Value::Null) => None,
+            Some(v) => match v.as_u64() {
+                Some(n) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
+                None => anyhow::bail!("position must be a whole number from 0"),
+            },
+        };
+        Ok(pins::pin(&self.db, &store, kind, &path, position)?)
     }
 
     /// `set_my_color`: the calling API key's display color.

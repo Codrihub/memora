@@ -38,6 +38,7 @@ mod assets;
 pub mod cache;
 pub mod guard;
 pub mod oauth;
+pub mod pins;
 pub mod privacy;
 pub mod release;
 pub mod secrets;
@@ -1531,6 +1532,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/api/aliases", get(h_aliases))
         .merge(api::api_router())
         .merge(privacy::router())
+        .merge(pins::router())
         .merge(oauth::router())
         .fallback(h_notfound)
         .layer(middleware::from_fn_with_state(st.clone(), mw_vault))

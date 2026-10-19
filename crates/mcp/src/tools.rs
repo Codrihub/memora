@@ -442,6 +442,31 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             json!({"path":{"type":"string"}}),
             &["path"],
         ),
+        // ---- pins (handled in `McpServer::call_pins`: they live in the state database) ----
+        spec(
+            "list_pins",
+            "ux",
+            "The owner's pinned notes and folders, in the order the sidebar shows them. Each pin has kind (note or folder), path, position and missing (true when the path no longer exists, e.g. renamed outside Memora).",
+            "To find the notes and folders the owner keeps at hand, or before pinning or unpinning.",
+            json!({}),
+            &[],
+        ),
+        spec(
+            "pin",
+            "ux",
+            "Pin an existing note or folder to the owner's Pinned list (shared by every browser), or move a pin to another position. Pins follow their note or folder through renames and moves; deleting the item removes its pin. At most 200 pins.",
+            "When the owner asks to keep a note or folder at hand in the sidebar.",
+            json!({"path":{"type":"string","description":"Vault path of a note (e.g. 'Work/Plan.md') or folder (e.g. 'Work')"},"kind":{"type":"string","enum":["note","folder"],"description":"Default: what the path is on disk"},"position":{"type":"integer","minimum":0,"description":"0 = top; default: the end"}}),
+            &["path"],
+        ),
+        spec(
+            "unpin",
+            "ux",
+            "Remove a note or folder from the owner's Pinned list. The note or folder itself is not touched.",
+            "When the owner no longer wants an item pinned, or a pin is missing.",
+            json!({"path":{"type":"string"},"kind":{"type":"string","enum":["note","folder"]}}),
+            &["path"],
+        ),
         spec(
             "rename_folder",
             "ops",
@@ -767,6 +792,8 @@ pub fn call_extra(
             }
             // Needs the caller's key: handled in `McpServer::call_tool_by`.
             "set_my_color" => anyhow::bail!("set_my_color needs an API key caller"),
+            // Need the state database: handled in `McpServer::call_pins`.
+            "list_pins" | "pin" | "unpin" => anyhow::bail!("{name} is handled by the server"),
             "list_actors" => {
                 let r = store.list_actors_impl();
                 let aliases = r.get("aliases").cloned().unwrap_or(json!({}));

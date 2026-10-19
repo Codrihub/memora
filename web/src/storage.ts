@@ -1,17 +1,20 @@
 // localStorage and sessionStorage access. The `memora.` key names are part of
-// the stored format: renaming one would drop users' pins, the sidebar
-// preference or folder expansion state.
+// the stored format: renaming one would drop users' preferences or folder
+// expansion state.
 
+/** Pins as kept by releases before 1.2.2 (now on the server; read once to upload). */
 const LS_PINS = 'memora.pins.v3';
+/** Display order of those pins (`n:<path>` / `f:<path>`). */
+const LS_PIN_ORDER = 'memora.pinorder.v1';
 const LS_UI = 'memora.ui.v3';
 const LS_OPEN = 'memora.openfolders.v3';
 const LS_UPDATE = 'memora.updateNotice';
 const LS_TOASTS = 'memora.toasts.v1';
 const SS_TAGIDX = 'memora.tagidx';
 
-export interface Pins {
-  folders: string[];
-  notes: string[];
+export interface LegacyPin {
+  kind: 'note' | 'folder';
+  path: string;
 }
 
 interface UiPrefs {
@@ -51,8 +54,6 @@ function field(v: unknown, k: string): unknown {
   return v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined;
 }
 
-const storedPins = read('local', LS_PINS);
-export const pins: Pins = { folders: strings(field(storedPins, 'folders')), notes: strings(field(storedPins, 'notes')) };
 export const ui: UiPrefs = { collapsed: field(read('local', LS_UI), 'collapsed') === true };
 
 /** Activity toasts: `off` silences every one; `muted` lists API key ids. */
@@ -80,8 +81,25 @@ export function activityToastAllowed(keyId: string): boolean {
   return !keyId || !toastPrefs.muted.includes(keyId);
 }
 
-export function savePins(): void {
-  write('local', LS_PINS, pins);
+/** This browser's pre-1.2.2 pins in their display order (empty when there are none). */
+export function legacyPins(): LegacyPin[] {
+  const stored = read('local', LS_PINS);
+  const rank = new Map(strings(read('local', LS_PIN_ORDER)).map((id, i) => [id, i]));
+  const id = (p: LegacyPin): string => (p.kind === 'note' ? 'n:' : 'f:') + p.path;
+  return [
+    ...strings(field(stored, 'folders')).map((path) => ({ kind: 'folder' as const, path })),
+    ...strings(field(stored, 'notes')).map((path) => ({ kind: 'note' as const, path })),
+  ].sort((a, b) => (rank.get(id(a)) ?? 1e9) - (rank.get(id(b)) ?? 1e9));
+}
+
+/** Forget the pre-1.2.2 pins once the server holds the list. */
+export function clearLegacyPins(): void {
+  try {
+    localStorage.removeItem(LS_PINS);
+    localStorage.removeItem(LS_PIN_ORDER);
+  } catch {
+    /* blocked storage: nothing to clear */
+  }
 }
 
 export function saveUI(): void {

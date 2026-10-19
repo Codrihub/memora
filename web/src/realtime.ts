@@ -315,6 +315,10 @@ export const RT = {
       window.dispatchEvent(new Event('memora:privacy'));
       return;
     }
+    if (t === 'pins_changed') {
+      emit('pins', null);
+      return;
+    }
     if (t === 'folder_meta' || t === 'actor_alias') {
       if (!state.editing) void loadCore().then(() => hooks.refreshTree());
     }

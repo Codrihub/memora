@@ -12,7 +12,7 @@ catalog.
 | Auth | API key in `Authorization: Bearer <key>` or `X-API-Key: <key>`, or an OAuth 2.1 access token |
 | Discovery card | `GET /.well-known/mcp.json` (public) |
 | Readable catalog | `GET /tools` (HTML page, public) |
-| Catalog size | 71 tools, plus 5 admin tools for keys with the `admin` scope |
+| Catalog size | 74 tools, plus 5 admin tools for keys with the `admin` scope |
 
 `initialize` answers with the protocol version the client asks for when it is
 one of the three above, and with `2025-06-18` otherwise.
@@ -391,13 +391,22 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 The exchange folder is `memora-exchange` in the server's temporary directory.
 Tools never read or write anywhere else on the server's disk.
 
-### Checks and to-dos (`ux`)
+### Checks, to-dos and pins (`ux`)
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
 | `get_todos` | R | `path` (string) | Open checklist items (`- [ ]`) in one note or the whole vault. |
 | `follow_ups` | R | none | Notes whose status is still awaiting action. |
 | `validate_memory` | R | `path` (string, required) | Checks frontmatter, created date, tags and links of a note. |
+| `list_pins` | R | none | The owner's pinned notes and folders in sidebar order: `{count, pins:[{kind, path, position, missing}]}`. `missing` is true when the path no longer exists (renamed or deleted outside Memora). |
+| `pin` | W | `path` (string, required), `kind` (`note` or `folder`; default: what the path is on disk), `position` (integer from 0; default: the end) | Pins an existing note or folder, or moves its pin. A note path may leave out `.md`. At most 200 pins. Returns the list. |
+| `unpin` | W | `path` (string, required), `kind` | Removes a pin; the note or folder is not touched. Returns the list with `removed`. |
+
+Pins are shared by every browser of the owner (`/api/pins`). They follow their note or
+folder through renames and moves done by Memora (over MCP or HTTP, including notes inside
+a moved folder) and are removed when the item is deleted or moved to the trash; deleting a
+folder removes every pin under it. A key whose privacy rules hide a path neither lists
+nor changes its pin, and `position` counts only the pins the key can see.
 
 ### Admin tools (`admin`)
 
