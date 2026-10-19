@@ -2655,12 +2655,20 @@ impl MemoryStore {
     /// that differs only in case, is taken (`except` is the note being renamed or
     /// moved itself). A twin hidden from the caller answers like a missing path.
     fn ensure_free(&self, ap: &Path, rel: &str, except: Option<&Path>) -> MResult<()> {
-        if ap.exists() && Some(ap) != except {
-            return err(format!("already exists: {rel}"));
-        }
         let (Some(dir), Some(name)) = (ap.parent(), ap.file_name()) else {
             return Ok(());
         };
+        // On a case-insensitive filesystem (Windows, macOS) `exists` is also true
+        // for a twin that differs only in case, so only an entry with exactly this
+        // name counts here; twins are handled below.
+        let exact = fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| e.file_name() == name);
+        if exact && Some(ap) != except {
+            return err(format!("already exists: {rel}"));
+        }
         let want = name.to_string_lossy().to_lowercase();
         for e in fs::read_dir(dir).into_iter().flatten().flatten() {
             let n = e.file_name();
@@ -6224,7 +6232,12 @@ mod note_ops_tests {
         assert!(!d.join("etc/evil.md").exists());
         // Blank folder is the top level (callers choose the default first).
         assert_eq!(s.create_impl("Top", "   ", None).unwrap(), "Top.md");
-        assert!(!d.join("   ").exists());
+        // Windows drops trailing spaces from a path, so look for the entry itself.
+        assert!(!fs::read_dir(&d).unwrap().flatten().any(|e| e
+            .file_name()
+            .to_string_lossy()
+            .trim()
+            .is_empty()));
         assert_eq!(
             msg(s.create_impl("x", "Notes/Ideas.md", None)),
             "folder `Notes/Ideas.md` is a note, not a folder"
