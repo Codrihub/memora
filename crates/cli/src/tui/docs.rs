@@ -409,18 +409,18 @@ fn getting_started(base: &str) -> Vec<Block> {
         p("Memora is one server on your machine: a vault of Markdown notes that your AI \
            agents read and write over MCP. Four steps get you from nothing to a connected agent."),
         h("1. Install"),
-        p("Native (Linux with systemd): the installer sets up the `memora` service and this console."),
-        code("curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh"),
-        p("Docker: clone the repository, then start it and open the console inside the container."),
-        code("git clone https://github.com/Codrihub/memora.git && cd memora\n\
-              mkdir -p data state && sudo chown -R 1000:1000 data state\n\
-              docker compose up -d\n\
-              docker compose exec -it gateway memora-cli"),
-        p("npm (Linux x86_64 or arm64, Node 18+): installs `memora` and this console for your \
-           user, with no service. Start the server, then open the console in a second terminal."),
+        p("npm (Linux x86_64 or arm64, Node 18+), the quickest: installs `memora` and this \
+           console for your user, with no service. Start the server, then open the console in \
+           a second terminal."),
         code("npm install -g @codrihub/memora\n\
               MEMORA_VAULT=./vault MEMORA_STATE=./state memora\n\
               MEMORA_STATE=./state memora-cli"),
+        p("Docker (any OS): one container, notes and state in named volumes."),
+        code("docker run -d --name memora --restart unless-stopped -p 8400:8400 \\\n\
+              -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest\n\
+              docker exec -it memora memora-cli"),
+        p("Native (Linux with systemd): the installer sets up the `memora` service and this console."),
+        code("curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh"),
         h("2. Create the owner with a one-time code"),
         li("Type `/web` here (or run `memora-cli setup`). It opens a setup window, 5 minutes by \
             default (1-60), and prints a one-time code."),

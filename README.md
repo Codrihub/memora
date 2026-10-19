@@ -69,26 +69,26 @@ Screenshots use a demo vault.
 
 Three steps, about two minutes.
 
-**1. Install** (pick one)
+**1. Install** (pick one, in this order of ease)
 
 ```bash
-# Linux server with systemd (x86_64 or aarch64)
-curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
+# npm (Linux x86_64 / arm64, Node 18+): install, then keep it running
+npm install -g @codrihub/memora && memora
 
-# or anywhere with Docker
+# Docker (any OS with Docker)
 docker run -d --name memora --restart unless-stopped -p 8400:8400 \
   -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
 
-# or with npm (Linux x86_64 / arm64, Node 18+), then keep it running
-npm install -g @codrihub/memora && memora
+# Native installer (Linux server with systemd, x86_64 or aarch64)
+curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
 ```
 
 **2. Get a one-time setup code**
 
 ```bash
-sudo memora-cli setup --minutes 15                    # native
-docker exec -it memora memora-cli setup --minutes 15  # Docker
 memora-cli setup --minutes 15                         # npm, in a second terminal
+docker exec -it memora memora-cli setup --minutes 15  # Docker
+sudo memora-cli setup --minutes 15                    # native
 ```
 
 **3. Open the link it prints** (`http://<your-server>:8400/login`), enter the code
@@ -97,14 +97,41 @@ shows how to connect your first agent.
 
 That is all. The sections below cover every other option.
 
-### Docker Compose
+### npm (Linux x86_64 / arm64)
+
+```bash
+npm install -g @codrihub/memora
+mkdir -p ~/memora && cd ~/memora
+MEMORA_VAULT=./vault MEMORA_STATE=./state memora
+# in a second terminal, same folder:
+MEMORA_STATE=./state memora-cli setup --minutes 15
+```
+
+The package carries the prebuilt release binaries and the web UI (no install
+script, nothing downloaded at install time) and needs Node 18 or newer. It is
+handy for trying Memora or running it under your own user; for a server, the
+native installer adds the systemd service. On macOS and Windows use Docker or
+build from source. Update with `npm install -g @codrihub/memora@latest`.
+
+### Docker (any OS)
+
+One container, notes and state in named volumes (no clone, no folder
+permissions):
+
+```bash
+docker run -d --name memora --restart unless-stopped -p 8400:8400 \
+  -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
+docker exec -it memora memora-cli setup --minutes 15
+```
+
+With Docker Compose from the repository instead:
 
 ```bash
 git clone https://github.com/Codrihub/memora.git && cd memora
 cp .env.example .env                     # optional, every value has a default
 mkdir -p data state && sudo chown -R 1000:1000 data state
 docker compose up -d
-docker compose exec -it gateway memora-cli   # then type /web
+docker compose exec -it gateway memora-cli setup --minutes 15
 ```
 
 The image is `ghcr.io/codrihub/memora` (linux/amd64 and linux/arm64). See
@@ -133,22 +160,6 @@ release `SHA256SUMS`, creates a `memora` system user, and installs a hardened
 `sh install.sh --help` for every option, and see
 [docs/INSTALL.md](docs/INSTALL.md) for details.
 
-### npm (Linux x86_64 / arm64)
-
-```bash
-npm install -g @codrihub/memora
-mkdir -p ~/memora && cd ~/memora
-MEMORA_VAULT=./vault MEMORA_STATE=./state memora
-# in a second terminal, same folder:
-MEMORA_STATE=./state memora-cli          # then type /web
-```
-
-The package carries the prebuilt release binaries and the web UI (no install
-script, nothing downloaded at install time) and needs Node 18 or newer. It is
-handy for trying Memora or running it under your own user; for a server, the
-native installer adds the systemd service. On macOS and Windows use Docker or
-build from source. Update with `npm install -g @codrihub/memora@latest`.
-
 ### From source
 
 ```bash
@@ -165,11 +176,12 @@ service: `sudo ./scripts/install.sh --from-source`. The web UI is built from
 
 ### First run
 
-1. In the console, type `/web`. It prints a one-time setup code.
+1. Run `memora-cli setup` (or type `/web` in the `memora-cli` console). It
+   prints a one-time setup code and the link to open.
 2. Open `http://<host>:8400/login`, enter the code and create the owner account.
 3. Choose the vault folder (`/var/lib/memora/vault` natively, `/data` in Docker).
-4. Create an API key for an agent (web UI or `/keys` in the console) and
-   connect it over MCP (`/mcp` in the console prints a ready-made config).
+4. Add an agent: Agents, then New agent. Pick the app and paste the config it
+   shows. One agent per app or device.
 
 If a setup window expires unused, the instance locks until you run
 `memora-cli setup` or `memora-cli unlock` on the server.
