@@ -491,6 +491,54 @@ fn detach(cmd: &mut Command) {
     cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
+/// Spawn the detached server. Unix: a plain spawn.
+#[cfg(unix)]
+fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    cmd.spawn()
+}
+
+/// Windows: a child inherits every inheritable handle of this process,
+/// including the stdin/stdout/stderr this console got from its caller. The
+/// server would then hold the caller's pipe open for as long as it runs, so a
+/// script, wrapper or CI step reading `memora-cli start` would wait until the
+/// server exits. Those three handles are made non-inheritable for the spawn
+/// (the server gets its log file and NUL explicitly) and restored afterwards.
+#[cfg(windows)]
+fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut c_void;
+        fn GetHandleInformation(h: *mut c_void, flags: *mut u32) -> i32;
+        fn SetHandleInformation(h: *mut c_void, mask: u32, flags: u32) -> i32;
+    }
+    /// STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE ((DWORD)-10, -11, -12).
+    const STD: [u32; 3] = [0xFFFF_FFF6, 0xFFFF_FFF5, 0xFFFF_FFF4];
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    let mut saved = Vec::new();
+    for which in STD {
+        // SAFETY: GetStdHandle has no preconditions; null and INVALID_HANDLE_VALUE
+        // (-1) are skipped, and the flags are only read and set on a valid handle.
+        unsafe {
+            let h = GetStdHandle(which);
+            if h.is_null() || h as isize == -1 {
+                continue;
+            }
+            let mut flags = 0;
+            if GetHandleInformation(h, &mut flags) != 0 && flags & HANDLE_FLAG_INHERIT != 0 {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+                saved.push(h);
+            }
+        }
+    }
+    let child = cmd.spawn();
+    for h in saved {
+        // SAFETY: restores the flag on the same valid handle.
+        unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+    }
+    child
+}
+
 /// The `memora` server binary next to this `memora-cli` (native install, npm
 /// platform package, release zip and `cargo build` all put them together).
 fn server_binary() -> Result<PathBuf> {
@@ -704,9 +752,7 @@ fn proc_start(ctx: &Ctx, npm: bool) -> Result<i32> {
         }
     }
     detach(&mut cmd);
-    let child = cmd
-        .spawn()
-        .with_context(|| format!("starting {}", bin.display()))?;
+    let child = spawn_detached(&mut cmd).with_context(|| format!("starting {}", bin.display()))?;
     let pid = child.id();
     // not waited for: it runs on after this process; is_memora reaps it
     drop(child);
