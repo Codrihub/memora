@@ -217,9 +217,15 @@ function placeMenu(menu: HTMLElement, anchor: HTMLElement): void {
     st.bottom = Math.max(10, window.innerHeight - r.bottom) + 'px';
     st.maxHeight = Math.max(240, r.bottom - 12) + 'px';
   } else {
-    // Exactly the chip's width (the sidebar minus its padding), just above it.
-    st.left = r.left + 'px';
-    st.width = r.width + 'px';
+    // As wide as the sidebar's content (its width minus the footer's side
+    // padding, the same inset as the rows above), just above the chip.
+    const foot = anchor.closest<HTMLElement>('.side-foot');
+    const box = (foot || anchor).getBoundingClientRect();
+    const cs = foot ? getComputedStyle(foot) : null;
+    const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+    const padR = cs ? parseFloat(cs.paddingRight) || 0 : 0;
+    st.left = box.left + padL + 'px';
+    st.width = Math.max(200, box.width - padL - padR) + 'px';
     st.bottom = window.innerHeight - r.top + 8 + 'px';
     st.maxHeight = Math.max(240, r.top - 20) + 'px';
   }

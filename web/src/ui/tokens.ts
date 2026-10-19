@@ -46,7 +46,7 @@ export const TOKENS_CSS = `
   --ease:cubic-bezier(.22,.61,.36,1); --ease-out:cubic-bezier(.16,1,.3,1); --ease-spring:cubic-bezier(.34,1.4,.64,1);
   --dur-1:.12s; --dur-2:.2s; --dur-3:.32s;
   /* layout */
-  --sb:264px; --rail:68px; --topbar:58px; --tabbar:64px; --peek:420px;
+  --sb:288px; --rail:68px; --topbar:58px; --tabbar:64px; --peek:420px;
   --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
 }
 :root[data-theme=light]{

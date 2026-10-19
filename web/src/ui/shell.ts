@@ -181,15 +181,15 @@ export const SHELL_CSS = `
 @media (prefers-reduced-motion:reduce){.pb-stats,.pb-live{transition:none}}
 .pb-chev{width:16px;height:16px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-out)}
 .profile-btn[aria-expanded=true] .pb-chev{transform:rotate(180deg)}
-/* Profile menu (account.ts): a panel the chip's width rising from the chip,
-   a popover beside the rail, or a bottom sheet on phones and portrait
-   tablets. Solid surface, one level above the sidebar. */
+/* Profile menu (account.ts): a panel as wide as the sidebar's content rising
+   from the chip, a sidebar-wide popover beside the rail, or a bottom sheet on
+   phones and portrait tablets. Solid surface, one level above the sidebar. */
 .pm-scrim{position:fixed;inset:0;z-index:74}
 .pm-scrim.dim{background:rgba(3,5,9,.55);opacity:0;transition:opacity var(--dur-3) var(--ease-out)}
 :root[data-theme=light] .pm-scrim.dim{background:rgba(15,23,42,.34)}
 .pm-scrim.dim.on{opacity:1}
 .pmenu{--pm-bg:var(--surface-2);--pm-track:var(--surface-0);--pm-thumb:var(--surface-3);
-  position:fixed;z-index:75;width:288px;overflow:auto;overscroll-behavior:contain;padding:6px 6px 6px;
+  position:fixed;z-index:75;width:var(--sb);overflow:auto;overscroll-behavior:contain;padding:6px 6px 6px;
   background:var(--pm-bg);border:1px solid var(--line-strong);border-radius:14px;
   box-shadow:0 26px 60px -18px rgba(0,0,0,.75),0 2px 8px rgba(0,0,0,.3);
   opacity:0;transform:translateY(12px);transition:opacity .18s var(--ease-out),transform .18s var(--ease-out)}
