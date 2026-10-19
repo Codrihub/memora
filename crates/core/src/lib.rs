@@ -821,9 +821,9 @@ mod resource_tests {
 
     fn tmp_vault(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!(
-            "memora-core-{tag}-{}-{:?}",
+            "memora-core-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
+            std::time::UNIX_EPOCH.elapsed().unwrap().as_nanos()
         ));
         fs::create_dir_all(d.join("Projects")).unwrap();
         d

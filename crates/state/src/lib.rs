@@ -170,6 +170,12 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Whether `p` is an absolute folder path as `settings.vault_path` stores it: `/...`
+/// everywhere, plus `C:\...` and `\\server\share` on Windows.
+pub fn is_absolute_path(p: &str) -> bool {
+    p.starts_with('/') || std::path::Path::new(p).is_absolute()
+}
+
 /// Constant-time byte comparison for hash checks done in Rust (setup codes).
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

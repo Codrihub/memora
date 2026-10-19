@@ -122,7 +122,7 @@ pub fn configured_vault(conn: &Connection) -> Result<Option<String>> {
 pub fn set_vault(tx: &Transaction<'_>, path: Option<&str>, now: i64) -> Result<()> {
     let path = path.map(str::trim).filter(|p| !p.is_empty());
     if let Some(p) = path {
-        if !p.starts_with('/') {
+        if !crate::is_absolute_path(p) {
             return Err(Error::invalid(
                 "vault_path",
                 format!("{p} is not an absolute path"),

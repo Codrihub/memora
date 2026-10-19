@@ -1871,7 +1871,11 @@ pub(crate) fn validate_vault_path(
     }
     let p = Path::new(raw);
     if !p.is_absolute() {
-        return Err("use an absolute path, starting with /".into());
+        return Err(if cfg!(windows) {
+            "use an absolute path, such as C:\\Users\\you\\memora".into()
+        } else {
+            "use an absolute path, starting with /".into()
+        });
     }
     if p.components().any(|c| c == Component::ParentDir) {
         return Err("the path must not contain '..'".into());
@@ -1893,7 +1897,7 @@ pub(crate) fn validate_vault_path(
             ));
         }
         // Checked before anything is created, so a refused path leaves nothing behind.
-        if let (Ok(real_parent), Some(name)) = (parent.canonicalize(), p.file_name()) {
+        if let (Ok(real_parent), Some(name)) = (canonical(parent), p.file_name()) {
             reserved_vault_path(&real_parent.join(name), state_dir)?;
         }
         fs::create_dir(p).map_err(|e| format!("cannot create {raw}: {e}"))?;
@@ -1906,23 +1910,50 @@ pub(crate) fn validate_vault_path(
     if !memora_gateway::dir_writable(p) {
         return Err(format!("{raw} is not writable by the server"));
     }
-    let abs = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let abs = canonical(p).unwrap_or_else(|_| p.to_path_buf());
     reserved_vault_path(&abs, state_dir)?;
     Ok((abs, created))
+}
+
+/// `canonicalize`, but on Windows without the `\\?\` prefix it adds to local
+/// drive paths, so stored paths stay readable and usable by other tools (git).
+fn canonical(p: &Path) -> std::io::Result<PathBuf> {
+    let c = p.canonicalize()?;
+    #[cfg(windows)]
+    if let Some(s) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        if !s.starts_with(r"UNC\") {
+            return Ok(PathBuf::from(s));
+        }
+    }
+    Ok(c)
 }
 
 /// Refuse a vault (symlinks already resolved in `abs`) that is, contains or sits
 /// inside the state folder, or lies in a system folder.
 fn reserved_vault_path(abs: &Path, state_dir: &Path) -> Result<(), String> {
-    if let Ok(state) = state_dir.canonicalize() {
+    if let Ok(state) = canonical(state_dir) {
         if state.starts_with(abs) || abs.starts_with(&state) {
             return Err("the vault cannot be, contain or sit inside the state folder".into());
         }
     }
+    #[cfg(unix)]
     const SYSTEM: &[&str] = &[
         "/proc", "/sys", "/dev", "/boot", "/etc", "/bin", "/sbin", "/usr", "/lib", "/lib64",
     ];
-    if abs.parent().is_none() || SYSTEM.iter().any(|d| abs.starts_with(d)) {
+    #[cfg(windows)]
+    let system: Vec<PathBuf> = [
+        "SystemRoot",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramData",
+    ]
+    .iter()
+    .filter_map(std::env::var_os)
+    .map(PathBuf::from)
+    .collect();
+    #[cfg(unix)]
+    let system: Vec<PathBuf> = SYSTEM.iter().map(PathBuf::from).collect();
+    if abs.parent().is_none() || system.iter().any(|d| abs.starts_with(d)) {
         return Err("a system folder cannot be the vault".into());
     }
     Ok(())
@@ -2694,7 +2725,7 @@ mod tests {
     fn existing_writable_folder_is_accepted() {
         let d = scratch("ok");
         let (p, created) = validate_vault_path(d.to_str().unwrap(), false).unwrap();
-        assert_eq!(p, d.canonicalize().unwrap());
+        assert_eq!(p, super::canonical(&d).unwrap());
         assert!(!created);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -2716,6 +2747,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn system_state_and_control_paths_are_refused() {
         assert!(validate_vault_path("/proc/self", false).is_err());
         assert!(validate_vault_path("/etc", false).is_err());

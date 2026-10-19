@@ -720,7 +720,7 @@ fn import_vault(tx: &Transaction<'_>, c: &Value, now: i64, rep: &mut ImportRepor
         return Ok(());
     }
     let mut path = PathBuf::from(vault);
-    if path.is_relative() {
+    if !crate::is_absolute_path(vault) {
         // The old server resolved it against its working directory.
         path = std::env::current_dir()?.join(path);
         rep.skip("vault_path_made_absolute");

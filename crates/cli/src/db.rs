@@ -13,6 +13,7 @@
 //! sound because the CLI is single-threaded. `db shell` drops privileges
 //! in-process instead, right before it `exec`s `sqlite3`.
 
+use crate::sys::{self, MetadataExt, OpenOptionsExt};
 use crate::{fmt_secs, mark, store, Ctx};
 use anyhow::{anyhow, bail, Context, Result};
 use memora_state::{Connection, Db, APPLICATION_ID, DB_FILE, SCHEMA_VERSION};
@@ -20,7 +21,6 @@ use serde_json::{json, Value};
 #[cfg(unix)]
 use std::io::Read;
 use std::io::Write;
-use crate::sys::{self, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 /// Backups kept in `state/backups/` by default.

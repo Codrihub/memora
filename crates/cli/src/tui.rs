@@ -49,7 +49,7 @@ extern "C" fn on_sigint(_: libc::c_int) {
 #[cfg(windows)]
 fn install_sigint_guard() {
     extern "system" fn on_ctrl(_: u32) -> i32 {
-        eprint!("\x1b[?25h\n");
+        eprintln!("\x1b[?25h");
         std::process::exit(130);
     }
     #[link(name = "kernel32")]
@@ -1061,7 +1061,9 @@ fn validate_setting(key: &str, v: &str) -> std::result::Result<(), String> {
         "MEMORA_BASE_URL" if !(v.starts_with("http://") || v.starts_with("https://")) => {
             return Err("starts with http:// or https://".into())
         }
-        "MEMORA_VAULT" if !v.starts_with('/') => return Err("an absolute path".into()),
+        "MEMORA_VAULT" if !memora_state::is_absolute_path(v) => {
+            return Err("an absolute path".into())
+        }
         _ => {}
     }
     config::validate(key, v).map(|_| ()).map_err(|e| match e {

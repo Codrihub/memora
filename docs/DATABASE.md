@@ -159,6 +159,7 @@ restore the backup taken before upgrading.
 | 5 | `0005_key_secret.sql` | `api_key_secret` |
 | 6 | `0006_privacy.sql` | `privacy_rule`, `privacy_rule_key`, `privacy_trail` |
 | 7 | `0007_pins.sql` | `pin` |
+| 8 | `0008_windows_vault_path.sql` | `settings.vault_path` accepts Windows absolute paths (table rebuilt) |
 
 ### JSON state import
 

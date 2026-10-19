@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_key_secret.sql"),
     include_str!("../migrations/0006_privacy.sql"),
     include_str!("../migrations/0007_pins.sql"),
+    include_str!("../migrations/0008_windows_vault_path.sql"),
 ];
 
 /// The schema version this binary writes (`user_version` after all migrations).

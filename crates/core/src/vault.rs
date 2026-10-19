@@ -3966,9 +3966,9 @@ mod image_render_tests {
     #[test]
     fn vault_image_file_stays_inside_the_vault() {
         let base = std::env::temp_dir().join(format!(
-            "memora-imgfile-{}-{:?}",
+            "memora-imgfile-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
+            std::time::UNIX_EPOCH.elapsed().unwrap().as_nanos()
         ));
         let vault = base.join("vault");
         fs::create_dir_all(vault.join("img")).unwrap();

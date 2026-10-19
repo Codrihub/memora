@@ -953,6 +953,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn exchange_refuses_symlinks() {
         let name = format!("link-{}.zip", std::process::id());
         let path = exchange_file(&name).unwrap();
