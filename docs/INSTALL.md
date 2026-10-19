@@ -36,6 +36,7 @@ sudo memora-cli setup --minutes 15
 - [Native install](#native-install)
 - [Docker](#docker)
 - [npm](#npm)
+- [Windows zip](#windows-zip)
 - [Reverse proxy](#reverse-proxy)
 - [Backups](#backups)
 - [Automation: `--check` and `--upgrade`](#automation---check-and---upgrade)
@@ -399,6 +400,25 @@ or service account to switch to. For a long-running server, prefer the
 Upgrade with `npm install -g @codrihub/memora@latest` (`memora-cli update`
 prints this too) and restart the server; the state database is migrated on
 start.
+
+## Windows zip
+
+Each GitHub release also carries `memora-<version>-x86_64-windows.zip`:
+`memora.exe`, `memora-cli.exe`, the web UI (`assets\`), `LICENSE` and this
+README. It needs no installer, Node or runtime (static C runtime), and
+`memora.exe` finds the `assets` folder next to it. Check the download against
+the release `SHA256SUMS` (`Get-FileHash memora-*.zip`), unzip it, then in
+PowerShell:
+
+```powershell
+cd memora-<version>-x86_64-windows
+$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; .\memora.exe
+# in a second window, same folder:
+$env:MEMORA_STATE = '.\state'; .\memora-cli.exe setup --minutes 15
+```
+
+Open `http://localhost:8400/login` and enter the code. Like the npm install,
+it runs as you with no service; keep the folder under your user profile.
 
 ## Reverse proxy
 

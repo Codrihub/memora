@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   10/11 (x64), and `npm install -g @codrihub/memora` installs the new
   `@codrihub/memora-win32-x64` package there. The release workflow builds it
   with a static C runtime.
+- A Windows zip on every GitHub release
+  (`memora-<version>-x86_64-windows.zip`, listed in `SHA256SUMS`) with
+  `memora.exe`, `memora-cli.exe` and the web UI: unzip and run, no installer
+  or Node needed.
 
 ### Changed
 
@@ -23,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `\\server\share`). Migration 8 rebuilds the `settings` table so the
   database accepts it; Unix paths are unchanged. On Windows, system folders
   (`%SystemRoot%`, `%ProgramFiles%`, `%ProgramData%`) are refused as vaults.
+- `memora` finds its web UI in an `assets` folder next to the executable
+  (an unpacked release zip or tarball) when `MEMORA_ASSETS` is not set.
+
+### Fixed
+
+- The Windows system-folder check compares paths without regard to case, so
+  `C:\Windows` is refused even when `%SystemRoot%` reads `C:\WINDOWS`.
 
 ## [1.2.3] - 2026-10-19
 

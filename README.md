@@ -72,7 +72,7 @@ Three steps, about two minutes.
 **1. Install** (pick one, in this order of ease)
 
 ```bash
-# npm (Linux x86_64 / arm64, Node 18+): install, then keep it running
+# npm (Linux x86_64 / arm64, Windows x64; Node 18+): install, then keep it running
 npm install -g @codrihub/memora && memora
 
 # Docker (any OS with Docker)
@@ -83,12 +83,17 @@ docker run -d --name memora --restart unless-stopped -p 8400:8400 \
 curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
 ```
 
+On Windows without Node, download `memora-<version>-x86_64-windows.zip` from
+[Releases](https://github.com/Codrihub/memora/releases/latest), unzip it and run
+`memora.exe` (see [Windows](#windows-zip-no-node)).
+
 **2. Get a one-time setup code**
 
 ```bash
 memora-cli setup --minutes 15                         # npm, in a second terminal
 docker exec -it memora memora-cli setup --minutes 15  # Docker
 sudo memora-cli setup --minutes 15                    # native
+.\memora-cli.exe setup --minutes 15                   # Windows zip, in the unzipped folder
 ```
 
 **3. Open the link it prints** (`http://<your-server>:8400/login`), enter the code
@@ -122,6 +127,22 @@ script, nothing downloaded at install time) and needs Node 18 or newer. It is
 handy for trying Memora or running it under your own user; for a server, the
 native installer adds the systemd service. On macOS use Docker or build from
 source. Update with `npm install -g @codrihub/memora@latest`.
+
+### Windows (zip, no Node)
+
+Each release has a `memora-<version>-x86_64-windows.zip` with `memora.exe`,
+`memora-cli.exe` and the web UI. Unzip it anywhere, then in PowerShell:
+
+```powershell
+cd memora-<version>-x86_64-windows
+$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; .\memora.exe
+# in a second PowerShell window, same folder:
+$env:MEMORA_STATE = '.\state'; .\memora-cli.exe setup --minutes 15
+```
+
+Open `http://localhost:8400/login` and enter the code. The binaries need no
+installer or runtime; check the zip against `SHA256SUMS` from the same release
+(`Get-FileHash memora-*.zip`).
 
 ### Docker (any OS)
 
