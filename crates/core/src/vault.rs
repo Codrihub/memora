@@ -106,7 +106,134 @@ pub fn clean_segment(name: &str) -> MResult<String> {
     if seg.is_empty() || seg.starts_with('.') {
         return err(format!("invalid folder name: {name}"));
     }
+    // The filesystem's limit per name; past it a folder cannot be created.
+    if seg.len() > MAX_SEGMENT_BYTES {
+        return err(format!(
+            "folder name is too long ({} bytes; at most {MAX_SEGMENT_BYTES} per folder name)",
+            seg.len()
+        ));
+    }
     Ok(seg)
+}
+
+/// Longest folder name (one path segment) in bytes.
+pub const MAX_SEGMENT_BYTES: usize = 255;
+
+/// Longest folder description (`desc` in folder metadata), in characters.
+pub const MAX_FOLDER_DESC: usize = 500;
+
+/// Folder icon names the web UI draws (`web/src/vault/icons.ts`, `FOLDER_ICONS`).
+#[rustfmt::skip]
+pub const FOLDER_ICONS: &[&str] = &[
+    "star", "book", "code", "brain", "flask", "briefcase", "archive", "inbox", "user", "users",
+    "calendar", "bulb", "heart", "credit-card", "wallet", "cpu", "key", "lock", "shield",
+    "server", "database", "terminal", "cloud", "globe", "home", "settings", "tag", "mail",
+    "chart", "dollar", "cart", "rocket", "wrench", "image", "music", "map", "school", "file",
+];
+
+/// Other names the web UI accepts for the same icons (`ICON_ALIASES` there).
+#[rustfmt::skip]
+const FOLDER_ICON_ALIASES: &[&str] = &[
+    "creditcard", "card", "billing", "payment", "money", "finance", "dollar-sign",
+    "circle-dollar-sign", "chip", "key-round", "shield-check", "hard-drive", "bar-chart",
+    "chart-bar", "line-chart", "shopping-cart", "gear", "cog", "house", "graduation-cap",
+    "lightbulb", "idea", "notebook", "book-open", "person", "people", "file-text", "photo",
+    "tool", "tools", "calendar-days", "work", "email", "world", "flask-conical", "beaker",
+];
+
+/// Whether `icon` is a folder icon: an icon name the web UI knows (any case, with or
+/// without a `lucide:`/`icon:` prefix, as the UI reads it) or a single emoji.
+pub fn is_folder_icon(icon: &str) -> bool {
+    let k = icon.trim().to_lowercase();
+    let k = k
+        .strip_prefix("lucide:")
+        .or_else(|| k.strip_prefix("lucide-"))
+        .or_else(|| k.strip_prefix("icon:"))
+        .or_else(|| k.strip_prefix("icon-"))
+        .unwrap_or(&k);
+    let k = k
+        .split([' ', '_'])
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if FOLDER_ICONS.contains(&k.as_str())
+        || FOLDER_ICON_ALIASES.contains(&k.as_str())
+        || FOLDER_ICON_ALIASES.contains(&k.replace('-', "").as_str())
+    {
+        return true;
+    }
+    // One emoji: a few code points (skin tones, ZWJ sequences, flags), no letters,
+    // digits or spaces, and at least one pictographic (non-ASCII) character.
+    let n = icon.chars().count();
+    (1..=10).contains(&n)
+        && icon.chars().any(|c| (c as u32) >= 0x2000)
+        && !icon
+            .chars()
+            .any(|c| c.is_alphanumeric() || c.is_whitespace() || c.is_ascii())
+}
+
+/// A folder path the caller names (a folder to act on or a destination), checked
+/// before any cleaning: relative to the vault, `/`-separated, no `.`, `..`, empty
+/// or hidden segment. Returns it trimmed, without a trailing `/`.
+pub fn folder_arg(path: &str) -> MResult<String> {
+    let p = path.trim();
+    if is_absolute_input(p) {
+        return err(format!(
+            "folder path must be relative to the vault (no leading /): {path}"
+        ));
+    }
+    if p.contains('\\') || p.chars().any(char::is_control) {
+        return err(format!(
+            "invalid folder path (use / between folders, no control characters): {path:?}"
+        ));
+    }
+    let p = p.trim_end_matches('/');
+    if p.is_empty() {
+        return Ok(String::new());
+    }
+    for seg in p.split('/') {
+        if seg.trim().is_empty() {
+            return err(format!("invalid folder path (empty folder name): {path}"));
+        }
+        if seg == "." || seg == ".." {
+            return err(format!(
+                "folder path must stay inside the vault (no '.' or '..'): {path}"
+            ));
+        }
+        if seg.trim().starts_with('.') {
+            return err(format!(
+                "invalid folder path (names starting with '.' are reserved): {path}"
+            ));
+        }
+    }
+    Ok(p.to_string())
+}
+
+/// Whether `path` names the top level: empty, or `Root` in any case.
+pub fn is_root_alias(path: &str) -> bool {
+    let p = path.trim();
+    p.is_empty() || p.eq_ignore_ascii_case("root")
+}
+
+/// Refuse a new folder path whose top-level name is `Root` (any case): `Root` means
+/// the top level of the vault, so such a folder could never be addressed.
+fn refuse_root_name(path: &str) -> MResult<()> {
+    let first = path.split('/').next().unwrap_or("");
+    if first.eq_ignore_ascii_case("root") {
+        return err("'Root' is reserved for the top level of the vault; pick another folder name");
+    }
+    Ok(())
+}
+
+/// What the caller is told when cleaning changed the folder name they asked for.
+fn renamed_note(asked: &str, got: &str) -> Option<String> {
+    let asked = asked.trim().trim_end_matches('/');
+    (asked != got).then(|| {
+        format!(
+            "'{asked}' was saved as '{got}' (spaces become _; characters other than \
+             letters, digits, _ and - are dropped)"
+        )
+    })
 }
 
 /// A folder path (`A/B/C`) with every segment cleaned by [`clean_segment`].
@@ -1211,6 +1338,151 @@ fn replace_groups_ok(pat: &Regex, replace: &str) -> MResult<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Wikilink resolution and rewriting
+// ---------------------------------------------------------------------------
+
+/// The note among `rels` (vault-relative `.md` paths) that `[[target]]`, written in
+/// a note of folder `from_dir`, points at (see [`MemoryStore::resolve_wikilink_from`]).
+fn pick_wikilink<I, S>(rels: I, target: &str, from_dir: &str) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let t = target.trim().trim_start_matches('/');
+    let t = t.strip_suffix(".md").unwrap_or(t).to_lowercase();
+    let name = t.rsplit('/').next().unwrap_or(&t).to_string();
+    let qualified = t.contains('/');
+    let suffix = format!("/{t}");
+    let mut best: Option<(u8, usize, String)> = None;
+    for rel in rels {
+        let rel = rel.as_ref();
+        let low = rel.to_lowercase();
+        let stem = low.strip_suffix(".md").unwrap_or(&low);
+        if stem.rsplit('/').next().unwrap_or(stem) != name {
+            continue;
+        }
+        let rank = if qualified {
+            if stem == t {
+                0
+            } else if stem.ends_with(&suffix) {
+                1
+            } else {
+                continue;
+            }
+        } else {
+            let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            if dir.eq_ignore_ascii_case(from_dir) {
+                0
+            } else {
+                2
+            }
+        };
+        let cand = (rank, rel.matches('/').count(), rel.to_string());
+        if best.as_ref().is_none_or(|b| cand < *b) {
+            best = Some(cand);
+        }
+    }
+    best.map(|b| b.2)
+}
+
+/// Note paths grouped by lowercase name, to resolve many wikilinks quickly.
+struct LinkIndex(HashMap<String, Vec<String>>);
+
+impl LinkIndex {
+    fn new<I: IntoIterator<Item = String>>(rels: I) -> Self {
+        let mut m: HashMap<String, Vec<String>> = HashMap::new();
+        for rel in rels {
+            let low = rel.to_lowercase();
+            let stem = low.strip_suffix(".md").unwrap_or(&low);
+            let name = stem.rsplit('/').next().unwrap_or(stem).to_string();
+            m.entry(name).or_default().push(rel);
+        }
+        Self(m)
+    }
+
+    fn resolve(&self, target: &str, from_dir: &str) -> Option<String> {
+        let t = target.trim().trim_start_matches('/');
+        let t = t.strip_suffix(".md").unwrap_or(t).to_lowercase();
+        let name = t.rsplit('/').next().unwrap_or(&t);
+        pick_wikilink(self.0.get(name)?, target, from_dir)
+    }
+}
+
+/// `content` with the target of every wikilink replaced by what `f` returns for it
+/// (`None` keeps it); aliases, `\|` escapes and brackets stay as they are. Links in
+/// `{{...}}` placeholders and code spans are skipped, as
+/// [`MemoryStore::link_targets`] skips them. `None` when nothing changed.
+fn rewrite_links_in(content: &str, mut f: impl FnMut(&str) -> Option<String>) -> Option<String> {
+    let blank = |s: &str, re: &Regex| {
+        let mut out = s.to_string();
+        for m in re.find_iter(s) {
+            out.replace_range(m.range(), &" ".repeat(m.len()));
+        }
+        out
+    };
+    let masked = blank(content, crate::re_placeholder());
+    let masked = blank(&masked, crate::re_code_span());
+    let mut out = String::with_capacity(content.len());
+    let mut last = 0;
+    for cap in re_wikilink().captures_iter(&masked) {
+        let Some(m) = cap.get(1) else { continue };
+        // Part of the link was masked: it is not a link `link_targets` sees.
+        if content[m.range()] != masked[m.range()] {
+            continue;
+        }
+        if let Some(new) = f(m.as_str()) {
+            out.push_str(&content[last..m.start()]);
+            out.push_str(&new);
+            last = m.end();
+        }
+    }
+    if last == 0 {
+        return None;
+    }
+    out.push_str(&content[last..]);
+    Some(out)
+}
+
+/// The new target text for wikilink target `raw` (written in a note that was in
+/// folder `old_dir` and is now in `new_dir`) after the notes in `moves` (old path ->
+/// new path) moved, or `None` when it still names the note it named before. A link
+/// keeps its form where it can: a bare name stays bare (renamed when its note was)
+/// unless that would name another note; otherwise it becomes the full path. `#heading`
+/// and a written `.md` are kept.
+fn relinked_target(
+    raw: &str,
+    old: &LinkIndex,
+    new: &LinkIndex,
+    moves: &HashMap<String, String>,
+    old_dir: &str,
+    new_dir: &str,
+) -> Option<String> {
+    let (target, anchor) = match raw.find('#') {
+        Some(i) => raw.split_at(i),
+        None => (raw, ""),
+    };
+    let target = target.trim();
+    if target.is_empty() || image_mime(target).is_some() {
+        return None;
+    }
+    let was = old.resolve(target, old_dir)?;
+    let want = moves.get(&was).cloned().unwrap_or(was);
+    if new.resolve(target, new_dir).as_deref() == Some(want.as_str()) {
+        return None;
+    }
+    let stem = want.strip_suffix(".md").unwrap_or(&want);
+    let base = stem.rsplit('/').next().unwrap_or(stem);
+    let bare_ok = !target.trim_start_matches('/').contains('/')
+        && new.resolve(base, new_dir).as_deref() == Some(want.as_str());
+    let mut out = if bare_ok { base } else { stem }.to_string();
+    if target.to_lowercase().ends_with(".md") {
+        out.push_str(".md");
+    }
+    out.push_str(anchor);
+    Some(out)
+}
+
+// ---------------------------------------------------------------------------
 // Path resolution (a resolved path may never escape the vault)
 // ---------------------------------------------------------------------------
 
@@ -1316,40 +1588,11 @@ impl MemoryStore {
     /// match that path (or end with it); a bare name prefers the linking
     /// note's own folder, then the shallowest path, then alphabetical order.
     pub fn resolve_wikilink_from(&self, target: &str, from_dir: &str) -> Option<String> {
-        let t = target.trim().trim_start_matches('/');
-        let t = t.strip_suffix(".md").unwrap_or(t).to_lowercase();
-        let name = t.rsplit('/').next().unwrap_or(&t).to_string();
-        let qualified = t.contains('/');
-        let suffix = format!("/{t}");
-        let mut best: Option<(u8, usize, String)> = None;
-        for (rel, nm, _) in self.walk() {
-            if nm.to_lowercase() != name {
-                continue;
-            }
-            let low = rel.to_lowercase();
-            let stem = low.strip_suffix(".md").unwrap_or(&low);
-            let rank = if qualified {
-                if stem == t {
-                    0
-                } else if stem.ends_with(&suffix) {
-                    1
-                } else {
-                    continue;
-                }
-            } else {
-                let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                if dir.eq_ignore_ascii_case(from_dir) {
-                    0
-                } else {
-                    2
-                }
-            };
-            let cand = (rank, rel.matches('/').count(), rel.clone());
-            if best.as_ref().is_none_or(|b| cand < *b) {
-                best = Some(cand);
-            }
-        }
-        best.map(|b| b.2)
+        pick_wikilink(
+            self.walk().into_iter().map(|(rel, _, _)| rel),
+            target,
+            from_dir,
+        )
     }
 
     /// Full path of a vault image for a vault-relative path, for the file
@@ -2416,6 +2659,51 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Every note path in the vault, hidden ones included (taken before a move, for
+    /// [`MemoryStore::rewrite_moved_links`]).
+    fn all_note_paths(&self) -> Vec<String> {
+        self.walk_all().into_iter().map(|(rel, _, _)| rel).collect()
+    }
+
+    /// After the notes in `moves` (old path -> new path) moved, rewrite every wikilink
+    /// in the vault that named one of them (or that now names another note because the
+    /// linking note itself moved) so it names the same note as before. `before`: every
+    /// note path before the move ([`MemoryStore::all_note_paths`]). Notes hidden from
+    /// the caller are rewritten too, so links stay correct for everyone, but only the
+    /// notes the caller may see are counted. Returns that count.
+    fn rewrite_moved_links(&self, before: &[String], moves: &HashMap<String, String>) -> usize {
+        if moves.iter().all(|(a, b)| a == b) {
+            return 0;
+        }
+        let old = LinkIndex::new(before.iter().cloned());
+        let after = self.walk_all();
+        let new = LinkIndex::new(after.iter().map(|(rel, _, _)| rel.clone()));
+        let back: HashMap<&str, &str> = moves
+            .iter()
+            .map(|(o, n)| (n.as_str(), o.as_str()))
+            .collect();
+        let mut changed = 0;
+        for (rel, _, fp) in &after {
+            let Some(content) = self.read_raw(fp) else {
+                continue;
+            };
+            if !content.contains("[[") {
+                continue;
+            }
+            let old_dir = parent_folder(back.get(rel.as_str()).copied().unwrap_or(rel));
+            let new_dir = parent_folder(rel);
+            let out = rewrite_links_in(&content, |raw| {
+                relinked_target(raw, &old, &new, moves, old_dir, new_dir)
+            });
+            if let Some(out) = out {
+                if fs::write(fp, out).is_ok() && self.visible(rel) {
+                    changed += 1;
+                }
+            }
+        }
+        changed
+    }
+
     pub fn create_impl(&self, title: &str, folder: &str, content: Option<&str>) -> MResult<String> {
         let name = note_filename(title)?;
         let fn_ = &name.file;
@@ -2453,6 +2741,13 @@ impl MemoryStore {
     }
 
     pub fn rename_impl(&self, rel_path: &str, new_name: &str) -> MResult<String> {
+        self.rename_note(rel_path, new_name).map(|(p, _)| p)
+    }
+
+    /// Rename a note in place and rewrite the wikilinks that named it (bare names
+    /// too); returns the new path and how many notes (that the caller may see) had
+    /// their links updated.
+    pub fn rename_note(&self, rel_path: &str, new_name: &str) -> MResult<(String, usize)> {
         let rel_path = &norm_note_path(rel_path);
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
@@ -2468,18 +2763,28 @@ impl MemoryStore {
         };
         let dap = self.resolve(&dest)?;
         self.ensure_free(&dap, &dest, Some(&ap))?;
+        let before = self.all_note_paths();
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
         self.path_event(PathEvent::Moved {
             from: rel_path.to_string(),
             to: dest.clone(),
             carry: false,
         });
+        let moves = HashMap::from([(self.rel_of(&ap), self.rel_of(&dap))]);
+        let links = self.rewrite_moved_links(&before, &moves);
         let _ = self.reindex();
         self.git_commit(&format!("rename: {rel_path} -> {dest}"));
-        Ok(dest)
+        Ok((dest, links))
     }
 
     pub fn move_impl(&self, rel_path: &str, dest_folder: &str) -> MResult<String> {
+        self.move_note(rel_path, dest_folder).map(|(p, _)| p)
+    }
+
+    /// Move a note into `dest_folder` (`""` or `Root` = top level) and rewrite the
+    /// wikilinks that named it by path; returns the new path and how many notes (that
+    /// the caller may see) had their links updated.
+    pub fn move_note(&self, rel_path: &str, dest_folder: &str) -> MResult<(String, usize)> {
         let rel_path = &norm_note_path(rel_path);
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
@@ -2489,26 +2794,30 @@ impl MemoryStore {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        let dest_folder = self.dest_folder(dest_folder)?;
-        let dest = if dest_folder.is_empty() {
+        let dest = if is_root_alias(dest_folder) {
             fn_
         } else {
-            format!("{dest_folder}/{fn_}")
+            let folder = folder_arg(&self.dest_folder(dest_folder)?)?;
+            refuse_root_name(&folder)?;
+            format!("{folder}/{fn_}")
         };
         let dap = self.resolve(&dest)?;
         self.ensure_free(&dap, &dest, Some(&ap))?;
         if let Some(p) = dap.parent() {
-            fs::create_dir_all(p).ok();
+            fs::create_dir_all(p).map_err(|e| MemoryErr(e.to_string()))?;
         }
+        let before = self.all_note_paths();
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
         self.path_event(PathEvent::Moved {
             from: rel_path.to_string(),
             to: dest.clone(),
             carry: false,
         });
+        let moves = HashMap::from([(self.rel_of(&ap), self.rel_of(&dap))]);
+        let links = self.rewrite_moved_links(&before, &moves);
         let _ = self.reindex();
         self.git_commit(&format!("move: {rel_path} -> {dest}"));
-        Ok(dest)
+        Ok((dest, links))
     }
 
     pub fn delete_impl(&self, rel_path: &str) -> MResult<()> {
@@ -2528,45 +2837,83 @@ impl MemoryStore {
     /// Create a folder; `name` may be a nested path (`Work/Plans`), each segment
     /// cleaned like a note title. Returns the cleaned path.
     pub fn create_folder_impl(&self, name: &str) -> MResult<String> {
-        let path = clean_folder_path(name)?;
-        let dir = self.resolve_new(&path)?;
-        fs::create_dir_all(&dir).ok();
-        let index = self.resolve(&format!("{path}/Index.md"))?;
-        if !index.exists() {
-            let title = path.rsplit('/').next().unwrap_or(&path).replace('_', " ");
-            fs::write(&index, format!("# {title}\n\n")).ok();
-        }
-        let _ = self.reindex();
-        self.git_commit(&format!("folder: {path}"));
-        Ok(path)
+        self.create_folder(name)
+            .map(|v| v["folder"].as_str().unwrap_or("").to_string())
     }
 
-    /// The directory of an existing folder path (not Root, not hidden).
-    fn folder_dir(&self, folder: &str) -> MResult<PathBuf> {
-        let f = folder.trim().trim_matches('/');
+    /// [`MemoryStore::create_folder_impl`] with the details: `{folder, existed, note?}`.
+    /// A new folder gets an `Index.md` note titled after it (so it shows in the tree);
+    /// an existing folder is left untouched (`existed: true`), whether or not the
+    /// caller may see it, so the answer never tells a hidden folder from a visible one. `note` says how the
+    /// name was cleaned when that changed it.
+    pub fn create_folder(&self, name: &str) -> MResult<Value> {
+        let asked = folder_arg(name)?;
+        if asked.is_empty() {
+            return err("a folder name is required");
+        }
+        let path = clean_folder_path(&asked)?;
+        refuse_root_name(&path)?;
+        let mut out = json!({"folder": path, "existed": true});
+        if let Some(n) = renamed_note(&asked, &path) {
+            out["note"] = json!(n);
+        }
+        let dir = match self.resolve_new(&path) {
+            Ok(dir) => dir,
+            // An existing folder hidden from the caller answers exactly like a visible
+            // existing one (existed: true) and is never touched.
+            Err(_) if self.hidden_dir(&path) => return Ok(out),
+            Err(e) => return Err(e),
+        };
+        if dir.is_dir() {
+            return Ok(out);
+        }
+        if dir.exists() {
+            return err(format!("already exists: {path}"));
+        }
+        out["existed"] = json!(false);
+        fs::create_dir_all(&dir)
+            .map_err(|e| MemoryErr(format!("could not create folder {path}: {e}")))?;
+        let index = self.resolve(&format!("{path}/Index.md"))?;
+        let title = path.rsplit('/').next().unwrap_or(&path).replace('_', " ");
+        fs::write(&index, format!("# {title}\n\n"))
+            .map_err(|e| MemoryErr(format!("could not write {path}/Index.md: {e}")))?;
+        let _ = self.reindex();
+        self.git_commit(&format!("folder: {path}"));
+        Ok(out)
+    }
+
+    /// Whether `path` (already checked by [`folder_arg`]) is an existing directory
+    /// hidden from the caller.
+    fn hidden_dir(&self, path: &str) -> bool {
+        !self.visible(path)
+            && fs::symlink_metadata(self.root().join(path)).is_ok_and(|m| m.is_dir())
+    }
+
+    /// The directory of an existing folder path (not Root, not hidden), and the path
+    /// as checked by [`folder_arg`].
+    fn folder_dir(&self, folder: &str) -> MResult<(String, PathBuf)> {
+        let f = folder_arg(folder)?;
         if f.is_empty() || f == "Root" {
-            return err("a folder is required (Root cannot be renamed or moved)");
+            return err(
+                "a folder is required (Root, the top level, cannot be renamed, moved or deleted)",
+            );
         }
-        if f.split('/')
-            .any(|seg| seg.starts_with('.') || seg.is_empty())
-        {
-            return err(format!("invalid folder: {folder}"));
-        }
-        if !self.visible(f) {
+        if !self.visible(&f) {
             return err(format!("folder not found: {folder}"));
         }
-        let dir = self.resolve(f)?;
+        let dir = self.resolve(&f)?;
         if !dir.is_dir() {
             return err(format!("folder not found: {folder}"));
         }
-        Ok(dir)
+        Ok((f, dir))
     }
 
     /// Move the folder directory `src` to the path `dest` (parents created), carrying
-    /// the folder metadata of `src` and every sub folder along.
+    /// the folder metadata of `src` and every sub folder along, and rewriting the
+    /// wikilinks that named its notes by path. The result says whether a parent of
+    /// `dest` had to be `created` and how many notes had `links_updated`.
     fn relocate_folder(&self, src: &str, dest: &str, what: &str) -> MResult<Value> {
-        let src = src.trim().trim_matches('/').to_string();
-        let sdir = self.folder_dir(&src)?;
+        let (src, sdir) = self.folder_dir(src)?;
         if dest == src {
             return err("the folder is already there");
         }
@@ -2580,13 +2927,27 @@ impl MemoryStore {
         if ddir.exists() {
             return err(format!("already exists: {dest}"));
         }
+        let mut created = false;
         if let Some(p) = ddir.parent() {
+            if let Some(f) = p.ancestors().find(|a| a.is_file()) {
+                return err(format!("{} is a note, not a folder", self.rel_of(f)));
+            }
+            created = !p.is_dir();
             fs::create_dir_all(p).map_err(|e| MemoryErr(e.to_string()))?;
         }
+        let before = self.all_note_paths();
+        let prefix = format!("{src}/");
+        let moves: HashMap<String, String> = before
+            .iter()
+            .filter_map(|rel| {
+                let rest = rel.strip_prefix(&prefix)?;
+                Some((rel.clone(), format!("{dest}/{rest}")))
+            })
+            .collect();
         let notes = self
             .walk()
             .iter()
-            .filter(|(rel, _, _)| rel.starts_with(&format!("{src}/")))
+            .filter(|(rel, _, _)| rel.starts_with(&prefix))
             .count();
         fs::rename(&sdir, &ddir).map_err(|e| MemoryErr(e.to_string()))?;
         self.path_event(PathEvent::Moved {
@@ -2595,9 +2956,31 @@ impl MemoryStore {
             carry: false,
         });
         self.rekey_folder_meta(&src, Some(dest));
+        let links = self.rewrite_moved_links(&before, &moves);
         let _ = self.reindex();
         self.git_commit(&format!("{what} folder: {src} -> {dest}"));
-        Ok(json!({"ok": true, "from": src, "to": dest, "notes": notes}))
+        Ok(json!({
+            "ok": true, "from": src, "to": dest, "notes": notes,
+            "created": created, "links_updated": links,
+        }))
+    }
+
+    /// A destination folder for a move (`into`): `None` for the top level (`""` or
+    /// `Root`), else the cleaned path and a note when cleaning changed it. Refuses
+    /// absolute paths, `..`, a note as destination and a top-level `Root` folder.
+    fn move_target(&self, into: &str) -> MResult<Option<(String, Option<String>)>> {
+        if is_root_alias(into) {
+            return Ok(None);
+        }
+        let asked = folder_arg(into)?;
+        if asked.to_lowercase().ends_with(".md") || self.resolve(&asked).is_ok_and(|p| p.is_file())
+        {
+            return err(format!("destination {asked} is a note, not a folder"));
+        }
+        let path = clean_folder_path(&asked)?;
+        refuse_root_name(&path)?;
+        let note = renamed_note(&asked, &path);
+        Ok(Some((path, note)))
     }
 
     /// Point folder metadata of `src` (and its sub folders) at `dest`; `None` drops it.
@@ -2639,40 +3022,58 @@ impl MemoryStore {
 
     /// Rename a folder in place (same parent). `name` is one path segment.
     pub fn rename_folder_impl(&self, folder: &str, name: &str) -> MResult<Value> {
-        let seg = clean_segment(name)?;
-        let src = folder.trim().trim_matches('/');
+        let asked = name.trim();
+        if asked.contains('/') || asked.contains('\\') {
+            return err(
+                "the new name is one folder name, without / or \\ (use move_folder to move it)",
+            );
+        }
+        if asked.starts_with('.') {
+            return err(format!(
+                "invalid folder name (names starting with '.' are reserved): {asked}"
+            ));
+        }
+        let seg = clean_segment(asked)?;
+        let src = folder_arg(folder)?;
         let dest = match src.rsplit_once('/') {
             Some((parent, _)) => format!("{parent}/{seg}"),
-            None => seg,
+            None => {
+                refuse_root_name(&seg)?;
+                seg.clone()
+            }
         };
-        self.relocate_folder(src, &dest, "rename")
+        let mut v = self.relocate_folder(&src, &dest, "rename")?;
+        if let Some(n) = renamed_note(asked, &seg) {
+            v["note"] = json!(n);
+        }
+        Ok(v)
     }
 
     /// Move a folder (with everything in it) into `into`; `""` or `Root` = top level.
+    /// A missing destination is created (`created: true` in the result).
     pub fn move_folder_impl(&self, folder: &str, into: &str) -> MResult<Value> {
-        let src = folder.trim().trim_matches('/');
-        let base = src.rsplit('/').next().unwrap_or(src).to_string();
-        let into = into.trim().trim_matches('/');
-        let dest = if into.is_empty() || into == "Root" {
-            base
-        } else {
-            let parent = clean_folder_path(into)?;
-            format!("{parent}/{base}")
+        let src = folder_arg(folder)?;
+        let base = src.rsplit('/').next().unwrap_or(&src).to_string();
+        let target = self.move_target(into)?;
+        let dest = match &target {
+            None => base,
+            Some((parent, _)) => format!("{parent}/{base}"),
         };
-        self.relocate_folder(src, &dest, "move")
+        let mut v = self.relocate_folder(&src, &dest, "move")?;
+        if let Some((_, Some(n))) = target {
+            v["note"] = json!(n);
+        }
+        Ok(v)
     }
 
     /// Move everything inside `folder` (notes and sub folders) into `into` (`""` =
     /// top level), then remove the emptied folder. Name clashes get a `-N` suffix.
+    /// When a move fails part way, what already moved stays moved and the error names
+    /// the item that failed and lists the moved ones.
     pub fn move_folder_contents_impl(&self, folder: &str, into: &str) -> MResult<Value> {
-        let src = folder.trim().trim_matches('/').to_string();
-        let sdir = self.folder_dir(&src)?;
-        let into = into.trim().trim_matches('/');
-        let dest = if into.is_empty() || into == "Root" {
-            String::new()
-        } else {
-            clean_folder_path(into)?
-        };
+        let (src, sdir) = self.folder_dir(folder)?;
+        let target = self.move_target(into)?;
+        let dest = target.as_ref().map(|t| t.0.clone()).unwrap_or_default();
         if dest == src || dest.starts_with(&format!("{src}/")) {
             return err("cannot move a folder's contents into itself");
         }
@@ -2684,12 +3085,19 @@ impl MemoryStore {
         if !self.subtree_visible(&sdir) {
             return err(PROTECTED_INSIDE);
         }
+        if let Some(f) = ddir.ancestors().find(|a| a.is_file()) {
+            return err(format!("{} is a note, not a folder", self.rel_of(f)));
+        }
+        let created = !ddir.is_dir();
         fs::create_dir_all(&ddir).map_err(|e| MemoryErr(e.to_string()))?;
         let entries: Vec<PathBuf> = fs::read_dir(&sdir)
             .map_err(|e| MemoryErr(e.to_string()))?
             .filter_map(|e| e.ok().map(|e| e.path()))
             .collect();
+        let before = self.all_note_paths();
+        let mut moves: HashMap<String, String> = HashMap::new();
         let mut moved = Vec::new();
+        let mut failed: Option<String> = None;
         for from in entries {
             let name = from
                 .file_name()
@@ -2708,96 +3116,177 @@ impl MemoryStore {
                 to = ddir.join(format!("{stem}-{i}{ext}"));
                 i += 1;
             }
-            if !self.visible(&self.rel_of(&to)) {
-                return err(format!("not found: {}", self.rel_of(&to)));
+            let old_rel = format!("{src}/{name}");
+            let new_rel = self.rel_of(&to);
+            if !self.visible(&new_rel) {
+                failed = Some(format!("not found: {new_rel}"));
+                break;
             }
-            fs::rename(&from, &to).map_err(|e| MemoryErr(e.to_string()))?;
+            if let Err(e) = fs::rename(&from, &to) {
+                failed = Some(format!("could not move {old_rel} to {new_rel}: {e}"));
+                break;
+            }
             self.path_event(PathEvent::Moved {
-                from: format!("{src}/{name}"),
-                to: self.rel_of(&to),
+                from: old_rel.clone(),
+                to: new_rel.clone(),
                 carry: false,
             });
             if to.is_dir() {
-                let new_rel = self.rel_of(&to);
-                self.rekey_folder_meta(&format!("{src}/{name}"), Some(&new_rel));
+                self.rekey_folder_meta(&old_rel, Some(&new_rel));
+                let prefix = format!("{old_rel}/");
+                for rel in &before {
+                    if let Some(rest) = rel.strip_prefix(&prefix) {
+                        moves.insert(rel.clone(), format!("{new_rel}/{rest}"));
+                    }
+                }
+            } else {
+                moves.insert(old_rel, new_rel.clone());
             }
-            moved.push(self.rel_of(&to));
+            moved.push(new_rel);
+        }
+        let links = self.rewrite_moved_links(&before, &moves);
+        let shown = if dest.is_empty() {
+            "Root"
+        } else {
+            dest.as_str()
+        };
+        if let Some(why) = failed {
+            let _ = self.reindex();
+            if !moved.is_empty() {
+                self.git_commit(&format!("move part of the contents of {src} -> {shown}"));
+            }
+            let done = if moved.is_empty() {
+                "nothing was moved".to_string()
+            } else {
+                format!("already moved: {}", moved.join(", "))
+            };
+            return err(format!("{why}; {done}; the rest is still in {src}"));
         }
         // Only hidden leftovers (if any) remain; the folder itself goes.
         fs::remove_dir_all(&sdir).ok();
         self.path_event(PathEvent::Deleted { path: src.clone() });
         self.rekey_folder_meta(&src, None);
         let _ = self.reindex();
-        let shown = if dest.is_empty() {
-            "Root"
-        } else {
-            dest.as_str()
-        };
         self.git_commit(&format!("move contents of {src} -> {shown}"));
-        Ok(json!({"ok": true, "from": src, "to": shown, "moved": moved}))
+        let mut v = json!({
+            "ok": true, "from": src, "to": shown, "moved": moved,
+            "created": created, "links_updated": links,
+        });
+        if let Some((_, Some(n))) = target {
+            v["note"] = json!(n);
+        }
+        Ok(v)
     }
 
-    /// Delete a folder; every note inside it (at any depth) moves to Root first.
+    /// Delete a folder. Every note inside it moves up to the folder's parent (Root for a
+    /// top-level folder), keeping the sub folder structure below it (`A/B/C/n.md` ->
+    /// `A/C/n.md` when `A/B` is deleted); a clashing name gets a `-N` suffix. Other
+    /// files in the folder are deleted with it.
     pub fn delete_folder_impl(&self, folder: &str) -> MResult<Value> {
-        let folder = folder.trim().trim_matches('/');
+        let folder = folder_arg(folder)?;
         if folder.is_empty() || folder == "Root" {
             return err("cannot delete Root");
         }
-        if !self.visible(folder) {
+        if !self.visible(&folder) {
             return err(format!("folder not found: {folder}"));
         }
-        let fdir = self.resolve(folder)?;
+        let fdir = self.resolve(&folder)?;
         if !fdir.is_dir() {
             return err(format!("folder not found: {folder}"));
         }
         if !self.subtree_visible(&fdir) {
             return err(PROTECTED_INSIDE);
         }
+        let parent = parent_folder(&folder).to_string();
         let prefix = format!("{folder}/");
+        let before = self.all_note_paths();
         let notes: Vec<String> = self
             .walk()
             .into_iter()
             .filter(|(rel, _, _)| rel.starts_with(&prefix))
             .map(|(rel, _, _)| rel)
             .collect();
+        let base = folder.rsplit('/').next().unwrap_or(&folder);
+        let mut moves: HashMap<String, String> = HashMap::new();
         let mut moved = Vec::new();
+        let mut failed = Vec::new();
         for rel in notes {
-            let base = Path::new(&rel)
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let mut dap = self.resolve(&base)?;
+            let mut rest = rel[prefix.len()..].to_string();
+            // A sub folder named like the deleted one (`A/A/x.md`, `A` deleted) would
+            // land back inside it: it becomes `A-1`.
+            if let Some(tail) = rest.strip_prefix(&format!("{base}/")) {
+                rest = format!("{base}-1/{tail}");
+            }
+            let up = if parent.is_empty() {
+                rest
+            } else {
+                format!("{parent}/{rest}")
+            };
+            let stem = up.strip_suffix(".md").unwrap_or(&up).to_string();
+            let mut dap = self.resolve(&up)?;
             let mut i = 1;
             while dap.exists() {
-                let stem = Path::new(&base)
-                    .file_stem()
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string();
                 dap = self.resolve(&format!("{stem}-{i}.md"))?;
                 i += 1;
             }
-            if fs::rename(self.resolve(&rel)?, &dap).is_ok() {
-                // Out of a deleted folder: the note keeps that folder's protection.
-                self.path_event(PathEvent::Moved {
-                    from: rel.clone(),
-                    to: self.rel_of(&dap),
-                    carry: true,
-                });
+            let ok = dap.parent().is_some_and(|p| fs::create_dir_all(p).is_ok())
+                && fs::rename(self.resolve(&rel)?, &dap).is_ok();
+            if !ok {
+                failed.push(rel);
+                continue;
             }
+            // Out of a deleted folder: the note keeps that folder's protection.
+            self.path_event(PathEvent::Moved {
+                from: rel.clone(),
+                to: self.rel_of(&dap),
+                carry: true,
+            });
+            moves.insert(rel, self.rel_of(&dap));
             moved.push(self.rel_of(&dap));
+        }
+        let shown = if parent.is_empty() {
+            "Root"
+        } else {
+            parent.as_str()
+        };
+        if !failed.is_empty() {
+            // Never delete notes that could not be moved out.
+            self.rewrite_moved_links(&before, &moves);
+            let _ = self.reindex();
+            self.git_commit(&format!(
+                "delete folder {folder}: moved {} notes",
+                moved.len()
+            ));
+            return err(format!(
+                "could not move {} out of {folder}, so the folder was kept; moved to {shown}: {}",
+                failed.join(", "),
+                if moved.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    moved.join(", ")
+                }
+            ));
         }
         fs::remove_dir_all(&fdir).ok();
         self.path_event(PathEvent::Deleted {
             path: folder.to_string(),
         });
-        self.rekey_folder_meta(folder, None);
+        self.rekey_folder_meta(&folder, None);
+        let links = self.rewrite_moved_links(&before, &moves);
         let _ = self.reindex();
         self.git_commit(&format!(
-            "delete folder {folder} (moved {} notes to Root)",
+            "delete folder {folder} (moved {} notes to {shown})",
             moved.len()
         ));
-        Ok(json!({"ok": true, "deleted_folder": folder, "moved_to_root": moved}))
+        let mut v = json!({
+            "ok": true, "deleted_folder": folder, "moved_to": shown,
+            "moved": moved, "links_updated": links,
+        });
+        // The name older clients read; only true when the notes went to Root.
+        if parent.is_empty() {
+            v["moved_to_root"] = v["moved"].clone();
+        }
+        Ok(v)
     }
 
     pub fn duplicate_memory_impl(&self, path: &str) -> MResult<String> {
@@ -3926,7 +4415,10 @@ impl MemoryStore {
         self.root().join(".folders.json")
     }
 
-    pub fn get_folder_meta_impl(&self, folder: Option<&str>) -> Value {
+    /// Folder metadata: every folder's without `folder`, else that folder's own (plus
+    /// an inherited color). `Root` has none (`{}`); a missing, hidden or invalid
+    /// folder is an error.
+    pub fn get_folder_meta_impl(&self, folder: Option<&str>) -> MResult<Value> {
         let mut meta: Map<String, Value> = fs::read_to_string(self.folders_path())
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -3934,28 +4426,29 @@ impl MemoryStore {
         if self.restricted() {
             meta.retain(|k, v| self.visible(k) && self.value_visible(v));
         }
-        match folder {
-            Some(f) if !f.is_empty() => {
-                let f = f.trim().trim_matches('/');
-                if !self.visible(f) {
-                    return json!({});
-                }
-                let mut own = meta.get(f).cloned().unwrap_or(json!({}));
-                // A sub folder without its own color shows its nearest parent's.
-                if own.get("color").is_none() {
-                    let mut p = f;
-                    while let Some((parent, _)) = p.rsplit_once('/') {
-                        if let Some(c) = meta.get(parent).and_then(|m| m.get("color")) {
-                            own["inherited"] = json!({"color": c, "from": parent});
-                            break;
-                        }
-                        p = parent;
-                    }
-                }
-                own
-            }
-            _ => Value::Object(meta),
+        let Some(f) = folder.filter(|f| !f.is_empty()) else {
+            return Ok(Value::Object(meta));
+        };
+        if f.trim().is_empty() {
+            return err("folder is blank; give a folder path, or omit it for every folder");
         }
+        if is_root_alias(f) {
+            return Ok(json!({}));
+        }
+        let (f, _) = self.folder_dir(f)?;
+        let mut own = meta.get(&f).cloned().unwrap_or(json!({}));
+        // A sub folder without its own color shows its nearest parent's.
+        if own.get("color").is_none() {
+            let mut p = f.as_str();
+            while let Some((parent, _)) = p.rsplit_once('/') {
+                if let Some(c) = meta.get(parent).and_then(|m| m.get("color")) {
+                    own["inherited"] = json!({"color": c, "from": parent});
+                    break;
+                }
+                p = parent;
+            }
+        }
+        Ok(own)
     }
 
     pub fn set_folder_meta_impl(
@@ -3965,12 +4458,15 @@ impl MemoryStore {
         icon: Option<&str>,
         desc: Option<&str>,
     ) -> MResult<Value> {
-        let folder = folder.trim().trim_matches('/');
-        if folder.is_empty() {
+        if folder.trim().is_empty() {
             return err("folder required");
         }
+        if is_root_alias(folder) {
+            return err("Root (the top level) has no folder metadata; pick a folder");
+        }
         // No metadata for folders that do not exist (no ghost entries).
-        self.folder_dir(folder)?;
+        let (folder, _) = self.folder_dir(folder)?;
+        let folder = folder.as_str();
         let mut meta: Map<String, Value> = fs::read_to_string(self.folders_path())
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -3994,15 +4490,23 @@ impl MemoryStore {
             let i = i.trim();
             if i.is_empty() {
                 m.remove("icon");
-            } else if i.chars().count() <= 40 {
+            } else if is_folder_icon(i) {
                 m.insert("icon".into(), json!(i));
             } else {
-                return err("icon must be at most 40 characters");
+                return err(format!(
+                    "icon must be one emoji or one of these icon names: {}",
+                    FOLDER_ICONS.join(", ")
+                ));
             }
         }
         if let Some(d) = desc {
             if d.trim().is_empty() {
                 m.remove("desc");
+            } else if d.chars().count() > MAX_FOLDER_DESC {
+                return err(format!(
+                    "desc must be at most {MAX_FOLDER_DESC} characters (got {})",
+                    d.chars().count()
+                ));
             } else {
                 m.insert("desc".into(), json!(d));
             }
@@ -4022,21 +4526,29 @@ impl MemoryStore {
     }
 
     /// Notes in `folder` and every sub folder (`Root` or empty: notes at the top level).
-    pub fn folder_stats_impl(&self, folder: &str) -> Value {
-        let trimmed = folder.trim_matches('/');
-        let n = if trimmed.is_empty() || trimmed == "Root" {
-            self.walk()
+    /// A missing, hidden or invalid folder is an error.
+    pub fn folder_stats_impl(&self, folder: &str) -> MResult<Value> {
+        if !folder.is_empty() && folder.trim().is_empty() {
+            return err("folder is blank; give a folder path ('Root' = the top level)");
+        }
+        let (n, meta) = if is_root_alias(folder) {
+            let n = self
+                .walk()
                 .iter()
                 .filter(|(rel, _, _)| !rel.contains('/'))
-                .count()
+                .count();
+            (n, json!({}))
         } else {
-            let prefix = format!("{trimmed}/");
-            self.walk()
+            let (f, _) = self.folder_dir(folder)?;
+            let prefix = format!("{f}/");
+            let n = self
+                .walk()
                 .iter()
                 .filter(|(rel, _, _)| rel.starts_with(&prefix))
-                .count()
+                .count();
+            (n, self.get_folder_meta_impl(Some(&f))?)
         };
-        json!({"folder": folder, "notes": n, "meta": self.get_folder_meta_impl(Some(folder))})
+        Ok(json!({"folder": folder, "notes": n, "meta": meta}))
     }
 
     // ---- locks ----
@@ -5955,6 +6467,401 @@ mod note_ops_tests {
             fs::read_to_string(d.join("Notes/Ideas.md")).unwrap(),
             "replaced"
         );
+        fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::*;
+
+    fn vault(tag: &str, files: &[(&str, &str)]) -> (PathBuf, MemoryStore) {
+        let d = std::env::temp_dir().join(format!(
+            "memora-folders-{tag}-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        for (rel, body) in files {
+            let p = d.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, body).unwrap();
+        }
+        fs::create_dir_all(&d).unwrap();
+        let s = MemoryStore::new(&d);
+        (d, s)
+    }
+
+    fn read(d: &Path, rel: &str) -> String {
+        fs::read_to_string(d.join(rel)).unwrap()
+    }
+
+    /// Hides everything under `Private/`.
+    struct HidePrivate;
+    impl crate::privacy::PathView for HidePrivate {
+        fn visible(&self, rel: &str) -> bool {
+            let l = rel.trim_start_matches('/').to_lowercase();
+            l != "private" && !l.starts_with("private/")
+        }
+        fn mentions_hidden(&self, text: &str) -> bool {
+            text.to_lowercase().contains("private/")
+        }
+    }
+
+    #[test]
+    fn moving_a_note_rewrites_path_links_in_every_form() {
+        let (d, s) = vault(
+            "move-links",
+            &[
+                ("Projects/Atlas/Overview.md", "# Overview\n"),
+                (
+                    "a.md",
+                    "[[Projects/Atlas/Overview]] [[Projects/Atlas/Overview|alias]] \
+                     [[Projects/Atlas/Overview#Goals]] [[Projects/Atlas/Overview.md]] \
+                     [[Atlas/Overview#Goals|g]] [[Overview]] `[[Projects/Atlas/Overview]]`\n\
+                     | a | [[Projects/Atlas/Overview\\|t]] |\n",
+                ),
+                ("b.md", "nothing to see [[Elsewhere/Overview]]\n"),
+                ("c.md", "no links\n"),
+            ],
+        );
+        let (to, n) = s
+            .move_note("Projects/Atlas/Overview.md", "Archive")
+            .unwrap();
+        assert_eq!(to, "Archive/Overview.md");
+        assert_eq!(n, 1, "only a.md changed");
+        assert_eq!(
+            read(&d, "a.md"),
+            "[[Archive/Overview]] [[Archive/Overview|alias]] [[Archive/Overview#Goals]] \
+             [[Archive/Overview.md]] [[Archive/Overview#Goals|g]] [[Overview]] \
+             `[[Projects/Atlas/Overview]]`\n| a | [[Archive/Overview\\|t]] |\n"
+        );
+        // A broken link stays as it was.
+        assert_eq!(read(&d, "b.md"), "nothing to see [[Elsewhere/Overview]]\n");
+        // Every rewritten link resolves to the moved note.
+        assert_eq!(
+            s.resolve_wikilink("Archive/Overview").as_deref(),
+            Some("Archive/Overview.md")
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn renaming_a_note_rewrites_bare_and_path_links_that_named_it() {
+        let (d, s) = vault(
+            "rename-links",
+            &[
+                ("Notes/Ideas.md", "# Ideas\n"),
+                ("Other/Ideas.md", "# Other ideas\n"),
+                ("Notes/near.md", "[[Ideas]] and [[ideas|mine]]\n"),
+                ("Other/far.md", "[[Ideas]] is the other one\n"),
+                ("top.md", "[[Ideas]] [[Notes/Ideas#H]] [[Other/Ideas]]\n"),
+            ],
+        );
+        let (to, n) = s.rename_note("Notes/Ideas.md", "Ideas2").unwrap();
+        assert_eq!(to, "Notes/Ideas2.md");
+        assert_eq!(n, 2);
+        assert_eq!(
+            read(&d, "Notes/near.md"),
+            "[[Ideas2]] and [[Ideas2|mine]]\n"
+        );
+        // It named Other/Ideas.md before and still does.
+        assert_eq!(read(&d, "Other/far.md"), "[[Ideas]] is the other one\n");
+        // From the top `[[Ideas]]` meant Notes/Ideas.md (alphabetical tie-break); left
+        // alone it would now name Other/Ideas.md.
+        assert_eq!(
+            read(&d, "top.md"),
+            "[[Ideas2]] [[Notes/Ideas2#H]] [[Other/Ideas]]\n"
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn a_bare_link_that_would_name_another_note_gets_its_path() {
+        let (d, s) = vault(
+            "shadow",
+            &[
+                ("A/Plan.md", "# A plan\n"),
+                ("B/Plan.md", "# B plan\n"),
+                ("B/x.md", "[[Plan]]\n"),
+                ("A/mover.md", "[[Plan]]\n"),
+            ],
+        );
+        // B/x.md links to B/Plan.md (own folder); moving A/Plan.md into B is refused
+        // (same name), so move the linking note instead: from A its `[[Plan]]` meant
+        // A/Plan.md, in B it would mean B/Plan.md.
+        let (_, n) = s.move_note("A/mover.md", "B").unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(read(&d, "B/mover.md"), "[[A/Plan]]\n");
+        assert_eq!(read(&d, "B/x.md"), "[[Plan]]\n");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn folder_renames_and_moves_rewrite_links_to_notes_inside() {
+        let (d, s) = vault(
+            "folder-links",
+            &[
+                (
+                    "Projects/Atlas/Overview.md",
+                    "see [[Projects/Atlas/Sub/Deep]]\n",
+                ),
+                ("Projects/Atlas/Sub/Deep.md", "deep\n"),
+                (
+                    "a.md",
+                    "[[Projects/Atlas/Overview]] [[Atlas/Overview#h|x]] [[Overview]]\n",
+                ),
+            ],
+        );
+        let v = s.rename_folder_impl("Projects/Atlas", "Atlas2").unwrap();
+        assert_eq!(v["links_updated"], 2, "{v}");
+        assert_eq!(
+            read(&d, "a.md"),
+            "[[Projects/Atlas2/Overview]] [[Projects/Atlas2/Overview#h|x]] [[Overview]]\n"
+        );
+        assert_eq!(
+            read(&d, "Projects/Atlas2/Overview.md"),
+            "see [[Projects/Atlas2/Sub/Deep]]\n"
+        );
+        let v = s.move_folder_impl("Projects/Atlas2", "Archive").unwrap();
+        assert_eq!(v["created"], true);
+        assert_eq!(v["links_updated"], 2);
+        assert!(read(&d, "a.md").starts_with("[[Archive/Atlas2/Overview]]"));
+        let v = s
+            .move_folder_contents_impl("Archive/Atlas2", "Done")
+            .unwrap();
+        assert_eq!(v["links_updated"], 2, "{v}");
+        assert!(read(&d, "a.md").starts_with("[[Done/Overview]]"));
+        assert_eq!(read(&d, "Done/Overview.md"), "see [[Done/Sub/Deep]]\n");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn hidden_notes_are_rewritten_but_never_counted() {
+        let (d, s) = vault(
+            "links-private",
+            &[
+                ("Notes/Plan.md", "plan\n"),
+                ("Private/secret.md", "[[Notes/Plan]]\n"),
+                ("open.md", "[[Notes/Plan]]\n"),
+            ],
+        );
+        let m = std::sync::Mutex::new(s);
+        let s = crate::privacy::lock_as(&m, Some(std::sync::Arc::new(HidePrivate)));
+        let (_, n) = s.move_note("Notes/Plan.md", "Work").unwrap();
+        assert_eq!(n, 1, "only the visible note is counted");
+        assert_eq!(read(&d, "Private/secret.md"), "[[Work/Plan]]\n");
+        assert_eq!(read(&d, "open.md"), "[[Work/Plan]]\n");
+        drop(s);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn deleting_a_folder_keeps_structure_and_links() {
+        let (d, s) = vault(
+            "delete-keep",
+            &[
+                ("A/B/one.md", "1"),
+                ("A/B/C/two.md", "2"),
+                ("A/B/B/three.md", "3"),
+                ("A/C/two.md", "clash"),
+                ("x.md", "[[A/B/C/two]] [[A/B/one|o]]"),
+            ],
+        );
+        let v = s.delete_folder_impl("A/B").unwrap();
+        assert_eq!(v["moved_to"], "A");
+        assert!(v.get("moved_to_root").is_none());
+        assert!(d.join("A/one.md").is_file());
+        assert!(d.join("A/C/two-1.md").is_file() && read(&d, "A/C/two.md") == "clash");
+        assert!(d.join("A/B-1/three.md").is_file(), "{v}");
+        assert!(!d.join("A/B").exists());
+        assert_eq!(read(&d, "x.md"), "[[A/C/two-1]] [[A/one|o]]");
+        assert_eq!(v["links_updated"], 1);
+        let v = s.delete_folder_impl("A").unwrap();
+        assert_eq!(v["moved_to"], "Root");
+        assert_eq!(v["moved_to_root"].as_array().unwrap().len(), 4, "{v}");
+        assert!(d.join("C/two.md").is_file() && d.join("one.md").is_file());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn create_folder_checks_names_and_never_touches_existing_folders() {
+        let (d, s) = vault("create", &[("Work/n.md", "n")]);
+        for bad in [
+            "Root", "root", "ROOT/Sub", "/etc", "../Out", "a\\b", "A/../B", ".git",
+        ] {
+            assert!(s.create_folder(bad).is_err(), "{bad}");
+        }
+        assert!(!d.join("Root").exists() && !d.join("root").exists());
+        let long = "x".repeat(300);
+        let e = s.create_folder(&long).unwrap_err().to_string();
+        assert!(e.contains("too long"), "{e}");
+        // Existing: nothing written.
+        let v = s.create_folder("Work").unwrap();
+        assert_eq!(v["existed"], true);
+        assert!(!d.join("Work/Index.md").exists());
+        // New: Index.md, and a note when the name was cleaned.
+        let v = s.create_folder("My Folder").unwrap();
+        assert_eq!(v["folder"], "My_Folder");
+        assert_eq!(v["existed"], false);
+        assert!(v["note"].as_str().unwrap().contains("My_Folder"));
+        assert!(d.join("My_Folder/Index.md").is_file());
+        // Nested Root below the top level is an ordinary name.
+        assert!(s.create_folder("Work/Root").is_ok());
+        // A hidden existing folder answers exactly like a visible one, untouched.
+        fs::create_dir_all(d.join("Private")).unwrap();
+        let m = std::sync::Mutex::new(s);
+        let v = crate::privacy::lock_as(&m, Some(std::sync::Arc::new(HidePrivate)));
+        let hidden = v.create_folder("Private").unwrap();
+        let visible = v.create_folder("Work").unwrap();
+        assert_eq!(hidden["existed"], visible["existed"]);
+        assert_eq!(
+            hidden.as_object().unwrap().len(),
+            visible.as_object().unwrap().len()
+        );
+        assert!(!d.join("Private/Index.md").exists());
+        drop(v);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn folder_moves_refuse_bad_names_and_destinations() {
+        let (d, s) = vault(
+            "move-checks",
+            &[("padded/n.md", "n"), ("Readme.md", "r"), ("Work/w.md", "w")],
+        );
+        for bad in ["a/b", "a\\b", "../Out", ".hidden"] {
+            assert!(s.rename_folder_impl("padded", bad).is_err(), "{bad}");
+        }
+        assert!(s.rename_folder_impl("padded", "Root").is_err());
+        let e = s
+            .rename_folder_impl("padded", &"y".repeat(300))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("too long"), "{e}");
+        let e = s
+            .move_folder_impl("padded", "Readme.md")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("is a note, not a folder"), "{e}");
+        assert!(!d.join("Readmemd").exists());
+        for bad in ["/etc", "../x", "Root/Sub"] {
+            assert!(s.move_folder_impl("padded", bad).is_err(), "{bad}");
+            assert!(s.move_folder_contents_impl("padded", bad).is_err(), "{bad}");
+        }
+        assert!(s.delete_folder_impl("/etc").is_err());
+        assert!(s.delete_folder_impl("/padded").is_err());
+        assert!(s.move_impl("Readme.md", "/etc").is_err());
+        assert!(s.move_impl("Readme.md", "Root/x").is_err());
+        assert!(d.join("padded/n.md").is_file() && !d.join("etc").exists());
+        // Cleaning that changes a name is reported.
+        let v = s.rename_folder_impl("padded", "My Pad").unwrap();
+        assert_eq!(v["to"], "My_Pad");
+        assert!(v["note"].is_string());
+        // `root` in any case is the top level for moves.
+        let v = s.move_folder_impl("Work", "Into").unwrap();
+        assert_eq!(v["created"], true);
+        let v = s.move_folder_impl("Into/Work", "root").unwrap();
+        assert_eq!(
+            (v["to"].as_str(), v["created"].as_bool()),
+            (Some("Work"), Some(false))
+        );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_contents_move_names_the_item_and_what_moved() {
+        use std::os::unix::fs::PermissionsExt;
+        let (d, s) = vault("partial", &[("Src/a.md", "a"), ("Src/Sub/b.md", "b")]);
+        fs::create_dir_all(d.join("Dest")).unwrap();
+        // A directory without write permission cannot change parents (its `..`).
+        fs::set_permissions(d.join("Src/Sub"), fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = fs::write(d.join("Src/Sub/probe"), "").is_ok();
+        let r = s.move_folder_contents_impl("Src", "Dest");
+        let _ = fs::set_permissions(d.join("Src/Sub"), fs::Permissions::from_mode(0o755));
+        if !probe {
+            let e = r.unwrap_err().to_string();
+            assert!(e.contains("could not move Src/Sub to Dest/Sub"), "{e}");
+            assert!(e.contains("the rest is still in Src"), "{e}");
+            if d.join("Dest/a.md").is_file() {
+                assert!(e.contains("already moved: Dest/a.md"), "{e}");
+            }
+            assert!(d.join("Src/Sub/b.md").is_file());
+        }
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn folder_stats_and_meta_refuse_missing_folders() {
+        let (d, s) = vault("stats", &[("Work/a.md", "a"), ("top.md", "t")]);
+        for bad in ["Nope", "../x", "/etc", "   "] {
+            assert!(s.folder_stats_impl(bad).is_err(), "{bad}");
+            assert!(s.get_folder_meta_impl(Some(bad)).is_err(), "{bad}");
+        }
+        assert_eq!(s.folder_stats_impl("Work").unwrap()["notes"], 1);
+        assert_eq!(s.folder_stats_impl("Root").unwrap()["notes"], 1);
+        assert_eq!(s.folder_stats_impl("Root").unwrap()["meta"], json!({}));
+        assert_eq!(s.get_folder_meta_impl(Some("Work")).unwrap(), json!({}));
+        // Hidden answers like missing.
+        let m = std::sync::Mutex::new(MemoryStore::new(&d));
+        fs::create_dir_all(d.join("Private")).unwrap();
+        fs::write(d.join("Private/p.md"), "p").unwrap();
+        let v = crate::privacy::lock_as(&m, Some(std::sync::Arc::new(HidePrivate)));
+        assert_eq!(
+            v.folder_stats_impl("Private").unwrap_err().to_string(),
+            v.folder_stats_impl("Nope2")
+                .unwrap_err()
+                .to_string()
+                .replace("Nope2", "Private")
+        );
+        drop(v);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn folder_meta_checks_root_icons_and_desc() {
+        let (d, s) = vault("meta", &[("Work/a.md", "a")]);
+        let e = s
+            .set_folder_meta_impl("Root", Some("#000000"), None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("Root (the top level) has no folder metadata"),
+            "{e}"
+        );
+        for ok in [
+            "rocket",
+            "Credit Card",
+            "lucide:flask",
+            "gear",
+            "🚀",
+            "👩‍💻",
+            "📁",
+        ] {
+            assert!(
+                s.set_folder_meta_impl("Work", None, Some(ok), None).is_ok(),
+                "{ok}"
+            );
+        }
+        for bad in ["not-an-icon", "rocket ship", "a", "🚀 go", "ab12"] {
+            let e = s
+                .set_folder_meta_impl("Work", None, Some(bad), None)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                e.contains("one emoji or one of these icon names"),
+                "{bad}: {e}"
+            );
+        }
+        let long = "d".repeat(501);
+        let e = s
+            .set_folder_meta_impl("Work", None, None, Some(&long))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("at most 500 characters"), "{e}");
+        assert!(s
+            .set_folder_meta_impl("Work", None, None, Some(&"d".repeat(500)))
+            .is_ok());
         fs::remove_dir_all(&d).ok();
     }
 }

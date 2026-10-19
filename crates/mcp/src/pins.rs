@@ -130,11 +130,16 @@ pub fn pin(
     if !exists(store, kind, path) {
         return Err(not_found(kind, path));
     }
+    let mut already = false;
     let all = db.write(|tx| {
+        let cur = pins::list(tx)?;
+        let existing = cur.iter().position(|p| p.kind == kind && p.path == path);
+        already = existing.is_some();
         // A position counts the pins the caller sees: it maps to the slot of the visible
         // pin there, so a restricted caller can neither see nor count hidden ones.
         let at = match position {
-            None => None,
+            // Pinning again without a position keeps the pin where it is.
+            None => existing,
             Some(want) => {
                 let cur: Vec<Pin> = pins::list(tx)?
                     .into_iter()
@@ -152,7 +157,58 @@ pub fn pin(
         pins::pin(tx, kind, path, at, memora_state::now())
     })?;
     publish_changed_by(by);
-    Ok(pins_json(store, &all))
+    let mut v = pins_json(store, &all);
+    v["already_pinned"] = json!(already);
+    Ok(v)
+}
+
+/// [`pin`] for an item the caller names ([`resolve_item`]); without `kind`, a path that
+/// is neither a note nor a folder answers "note or folder <path> not found".
+pub fn pin_item(
+    db: &Db,
+    store: &MemoryStore,
+    path: &str,
+    kind: Option<&str>,
+    position: Option<usize>,
+    by: Option<&crate::Caller>,
+) -> memora_state::Result<Value> {
+    let (k, p) = resolve_item(store, path, kind)?;
+    if kind_given(kind) || exists(store, k, &p) {
+        return pin(db, store, k, &p, position, by);
+    }
+    Err(memora_state::Error::NotFound(format!(
+        "note or folder {}",
+        path.trim().trim_end_matches('/')
+    )))
+}
+
+/// [`unpin`] for an item the caller names ([`resolve_item`]). Without `kind`, a path
+/// that no longer exists (renamed outside Memora, so the pin is `missing`) matches a
+/// pin on that path of either kind.
+pub fn unpin_item(
+    db: &Db,
+    store: &MemoryStore,
+    path: &str,
+    kind: Option<&str>,
+    by: Option<&crate::Caller>,
+) -> memora_state::Result<Value> {
+    let (k, p) = resolve_item(store, path, kind)?;
+    if !kind_given(kind) && !exists(store, k, &p) {
+        let raw = path.trim().trim_end_matches('/');
+        let all = db.read(pins::list)?;
+        let hit = all
+            .iter()
+            .find(|x| x.path == raw)
+            .or_else(|| all.iter().find(|x| x.kind == Kind::Note && x.path == p));
+        if let Some(x) = hit {
+            return unpin(db, store, x.kind, &x.path, by);
+        }
+    }
+    unpin(db, store, k, &p, by)
+}
+
+fn kind_given(kind: Option<&str>) -> bool {
+    kind.is_some_and(|k| !k.trim().is_empty())
 }
 
 /// Remove the pin on `(kind, path)` (a pin hidden from the caller answers "not found").
@@ -262,22 +318,62 @@ mod tests {
         );
 
         // Trash and delete drop pins; deleting a folder drops the folder pins under it,
-        // while a note inside moves to Root and its pin follows.
+        // while a note inside moves up to the parent folder and its pin follows.
         s.soft_delete_impl("top.md").unwrap();
         s.delete_impl("Archive/Projects/Roadmap.md").unwrap();
         s.delete_folder_impl("Archive/Projects/Sub").unwrap();
         let v = list_json(&db, &s).unwrap();
-        assert_eq!(listed(&v), ["note:deep.md"]);
+        assert_eq!(listed(&v), ["note:Archive/Projects/deep.md"]);
 
         // Renamed outside Memora: the pin stays, marked missing.
-        std::fs::rename(dir.join("deep.md"), dir.join("elsewhere.md")).unwrap();
+        std::fs::rename(
+            dir.join("Archive/Projects/deep.md"),
+            dir.join("Archive/Projects/elsewhere.md"),
+        )
+        .unwrap();
         assert_eq!(
             listed(&list_json(&db, &s).unwrap()),
-            ["note:deep.md (missing)"]
+            ["note:Archive/Projects/deep.md (missing)"]
         );
-        let v = unpin(&db, &s, Kind::Note, "deep.md", None).unwrap();
+        let v = unpin(&db, &s, Kind::Note, "Archive/Projects/deep.md", None).unwrap();
         assert_eq!(v["removed"], true);
         assert_eq!(v["count"], 0);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pin_and_unpin_by_name_without_kind() {
+        let (dir, store) = vault("by-name");
+        let db = Db::open_temp().unwrap();
+        let s = store.lock().unwrap();
+        pin_item(&db, &s, "Work/Sub", None, None, None).unwrap();
+        pin_item(&db, &s, "top", None, None, None).unwrap();
+        pin_item(&db, &s, "Work/Plan.md", None, None, None).unwrap();
+        // Pinning again without a position keeps the place, and says it was pinned.
+        let v = pin_item(&db, &s, "Work/Sub", None, None, None).unwrap();
+        assert_eq!(v["already_pinned"], true);
+        assert_eq!(
+            listed(&v),
+            ["folder:Work/Sub", "note:top.md", "note:Work/Plan.md"]
+        );
+        // With a position it moves.
+        let v = pin_item(&db, &s, "Work/Sub", None, Some(2), None).unwrap();
+        assert_eq!(listed(&v)[2], "folder:Work/Sub");
+        // Neither a note nor a folder.
+        let e = pin_item(&db, &s, "Nope", None, None, None)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(e, "note or folder Nope not found");
+        // A folder renamed outside Memora: its pin is missing, unpin finds it by path.
+        std::fs::rename(dir.join("Work/Sub"), dir.join("Work/Moved")).unwrap();
+        let v = unpin_item(&db, &s, "Work/Sub", None, None).unwrap();
+        assert_eq!(v["removed"], true);
+        // Same for a note named without .md.
+        std::fs::rename(dir.join("top.md"), dir.join("gone.md")).unwrap();
+        let v = unpin_item(&db, &s, "top", None, None).unwrap();
+        assert_eq!(v["removed"], true);
+        assert_eq!(listed(&v), ["note:Work/Plan.md"]);
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
     }

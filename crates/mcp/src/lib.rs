@@ -293,8 +293,11 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "move_memory",
             category: "note",
-            description: "Move a note into another folder (created when missing).",
-            when: "To tidy the vault; wikilinks survive because they resolve by note name.",
+            description: "Move a note into another folder ('Root' = top level; a missing folder \
+                is created). Wikilinks to the note that name its path ([[Folder/Note]], with \
+                |alias or #heading) are rewritten in every note; links_updated counts the notes \
+                changed.",
+            when: "To tidy the vault without breaking links to the note.",
             input_schema: obj(
                 j!({"path": {"type":"string"}, "folder": {"type":"string","description":"Destination folder relative to the vault, e.g. 'Work/Plans'; 'Root' = top level"}}),
                 &["path", "folder"],
@@ -303,7 +306,9 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "rename_memory",
             category: "note",
-            description: "Rename a note in place, keeping its folder.",
+            description: "Rename a note in place, keeping its folder. Wikilinks to it, by bare \
+                name ([[Ideas]]) or by path ([[Notes/Ideas]], with |alias or #heading), are \
+                rewritten in every note; links_updated counts the notes changed.",
             when: "To fix a title without moving the note.",
             input_schema: obj(
                 j!({"path": {"type":"string"}, "new_name": {"type":"string"}}),
@@ -367,16 +372,25 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "list_folders",
             category: "folder",
-            description: "Folders with their note counts and stored color/icon.",
+            description: "Top-level folders with their note counts (each count includes the \
+                notes in its sub folders) and color. Sub folders are not listed: see list_memory \
+                or folder_stats for them.",
             when: "Before creating or moving notes, to keep folders consistent.",
             input_schema: obj(j!({}), &[]),
         },
         ToolSpec {
             name: "create_folder",
             category: "folder",
-            description: "Create a new folder.",
+            description: "Create a new folder; name may be nested ('Work/Plans'). A new folder \
+                gets an Index.md note titled after it so it shows in the tree. An existing \
+                folder is left untouched (existed: true). Spaces become _ and characters other \
+                than letters, digits, _ and - are dropped (note says so); 'Root' is reserved \
+                for the top level; at most 255 bytes per folder name.",
             when: "To set up a home for a new topic.",
-            input_schema: obj(j!({"name": {"type":"string"}}), &["name"]),
+            input_schema: obj(
+                j!({"name": {"type":"string","description":"Folder path relative to the vault, e.g. 'Work/Plans'"}}),
+                &["name"],
+            ),
         },
     ]
 }
@@ -1382,10 +1396,15 @@ impl McpServer {
         if path.trim().is_empty() {
             anyhow::bail!("path is required");
         }
-        let (kind, path) =
-            pins::resolve_item(&store, path, args.get("kind").and_then(|v| v.as_str()))?;
+        let kind = args.get("kind").and_then(|v| v.as_str());
         if name == "unpin" {
-            return Ok(pins::unpin(&self.db, &store, kind, &path, Some(caller))?);
+            return Ok(pins::unpin_item(
+                &self.db,
+                &store,
+                path,
+                kind,
+                Some(caller),
+            )?);
         }
         let position = match args.get("position") {
             None | Some(Value::Null) => None,
@@ -1394,11 +1413,11 @@ impl McpServer {
                 None => anyhow::bail!("position must be a whole number from 0"),
             },
         };
-        Ok(pins::pin(
+        Ok(pins::pin_item(
             &self.db,
             &store,
+            path,
             kind,
-            &path,
             position,
             Some(caller),
         )?)
@@ -1573,21 +1592,21 @@ impl McpServer {
                         "folder is required: the destination folder ('Root' = top level)"
                     );
                 }
-                let to = store.move_impl(&from, &folder)?;
+                let (to, links) = store.move_note(&from, &folder)?;
                 memora_core::events::hub().publish(json!({
                     "type": "node_renamed", "actor": actor,
                     "old_path": from, "node": store.node_payload(&to),
                 }));
-                json!({"ok": true, "from": from, "to": to})
+                json!({"ok": true, "from": from, "to": to, "links_updated": links})
             }
             "rename_memory" => {
                 let from = s("path");
-                let to = store.rename_impl(&from, &s("new_name"))?;
+                let (to, links) = store.rename_note(&from, &s("new_name"))?;
                 memora_core::events::hub().publish(json!({
                     "type": "node_renamed", "actor": actor,
                     "old_path": from, "node": store.node_payload(&to),
                 }));
-                json!({"ok": true, "path": to})
+                json!({"ok": true, "path": to, "links_updated": links})
             }
             "search_memory" => {
                 // `q` per the schema; `query` is accepted too.
@@ -1645,10 +1664,11 @@ impl McpServer {
                     .collect();
                 json!({"count": folders.len(), "folders": folders})
             }
-            "create_folder" => json!({
-                "ok": true,
-                "folder": store.create_folder_impl(&s("name"))?
-            }),
+            "create_folder" => {
+                let mut v = store.create_folder(&s("name"))?;
+                v["ok"] = json!(true);
+                v
+            }
             "lock_node" => {
                 own_lock_name(caller, args)?;
                 let ttl = match args.get("ttl") {

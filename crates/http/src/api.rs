@@ -346,8 +346,10 @@ async fn h_api_vault_file(State(st): State<AppState>, req: Request) -> Response 
 async fn h_api_folder_meta(State(st): State<AppState>, req: Request) -> Response {
     let folder = super::query_value(req.uri(), "folder").filter(|f| !f.trim().is_empty());
     let key = req.extensions().get::<ApiKeyCaller>().cloned();
-    let meta = crate::store_as(&st, key.as_ref()).get_folder_meta_impl(folder.as_deref());
-    Json(meta).into_response()
+    match crate::store_as(&st, key.as_ref()).get_folder_meta_impl(folder.as_deref()) {
+        Ok(meta) => Json(meta).into_response(),
+        Err(e) => mem_err(e),
+    }
 }
 
 /// `GET /api/actors` -> `{actors:[{actor,alias,display,events,tools,last_ip,last_ts,seen_minutes_ago}]}`
@@ -826,7 +828,8 @@ async fn h_api_create(
     }
 }
 
-/// `POST /api/rename` `{path,name}` -> `{ok:true,path}`
+/// `POST /api/rename` `{path,name}` -> `{ok:true,path,links_updated}` (wikilinks to
+/// the note are rewritten)
 async fn h_api_rename(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -839,13 +842,16 @@ async fn h_api_rename(
     let (Some(path), Some(name)) = (body_str(&b, "path"), body_str(&b, "name")) else {
         return bad("path and name are required");
     };
-    match crate::store_as(&st, key.as_deref()).rename_impl(&path, &name) {
-        Ok(new_path) => Json(json!({"ok": true, "path": new_path})).into_response(),
+    match crate::store_as(&st, key.as_deref()).rename_note(&path, &name) {
+        Ok((new_path, links)) => {
+            Json(json!({"ok": true, "path": new_path, "links_updated": links})).into_response()
+        }
         Err(e) => mem_err(e),
     }
 }
 
-/// `POST /api/move` `{path,folder}` -> `{ok:true,path}`
+/// `POST /api/move` `{path,folder}` -> `{ok:true,path,links_updated}` (wikilinks to
+/// the note are rewritten)
 async fn h_api_move(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -859,8 +865,10 @@ async fn h_api_move(
         return bad("path is required");
     };
     let folder = body_str(&b, "folder").unwrap_or_default();
-    match crate::store_as(&st, key.as_deref()).move_impl(&path, &folder) {
-        Ok(new_path) => Json(json!({"ok": true, "path": new_path})).into_response(),
+    match crate::store_as(&st, key.as_deref()).move_note(&path, &folder) {
+        Ok((new_path, links)) => {
+            Json(json!({"ok": true, "path": new_path, "links_updated": links})).into_response()
+        }
         Err(e) => mem_err(e),
     }
 }
@@ -946,7 +954,7 @@ async fn h_api_folder_op(
     }
 }
 
-/// `POST /api/delete-folder` `{folder}` -> `{ok:true,moved_to_root?}`
+/// `POST /api/delete-folder` `{folder}` -> `{ok:true,moved_to,moved,links_updated,moved_to_root?}`
 async fn h_api_delete_folder(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,

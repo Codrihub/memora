@@ -310,7 +310,14 @@ fn folder_stats_counts_nested_folders() {
     assert_eq!(stats("Projects/Memora")["notes"], 3);
     assert_eq!(stats("Projects/Memora/")["notes"], 3);
     assert_eq!(stats("Projects/Memora/Deep")["notes"], 1);
-    assert_eq!(stats("Projects/Mem")["notes"], 0, "no prefix matches");
+    // No prefix matches: a folder that does not exist is an error, not zero notes.
+    let r = rpc(
+        &srv,
+        &Caller::full("owner"),
+        "tools/call",
+        json!({"name":"folder_stats","arguments":{"folder":"Projects/Mem"}}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
     assert_eq!(stats("Plan")["notes"], 1);
     assert_eq!(stats("Root")["notes"], 1);
     let _ = std::fs::remove_dir_all(&dir);

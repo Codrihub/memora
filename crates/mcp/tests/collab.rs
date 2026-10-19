@@ -511,7 +511,7 @@ fn admin_and_privacy_tools_refuse_silent_surprises() {
 }
 
 #[test]
-fn creating_over_a_hidden_item_says_already_exists() {
+fn creating_over_a_hidden_item_reveals_nothing_more() {
     let dir = scratch("create");
     let srv = server(&dir);
     ok(
@@ -526,8 +526,16 @@ fn creating_over_a_hidden_item_says_already_exists() {
         "privacy_set",
         json!({"path": "Notes/Ideas.md", "agents": ["other-agent"]}),
     );
-    let t = fails(&srv, &b(), "create_folder", json!({"name": "Private"}));
-    assert!(t.contains("already exists: Private"), "{t}");
+    // An existing folder, hidden or not, answers existed:true and is left untouched,
+    // so the answer never tells a hidden folder from a visible one.
+    let hidden = ok(&srv, &b(), "create_folder", json!({"name": "Private"}));
+    let visible = ok(&srv, &b(), "create_folder", json!({"name": "Notes"}));
+    assert_eq!(hidden["existed"], true, "{hidden}");
+    assert_eq!(
+        hidden.as_object().unwrap().keys().collect::<Vec<_>>(),
+        visible.as_object().unwrap().keys().collect::<Vec<_>>()
+    );
+    assert!(!dir.join("vault/Private/Index.md").exists());
     let t = fails(
         &srv,
         &b(),

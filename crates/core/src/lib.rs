@@ -995,16 +995,22 @@ mod resource_tests {
             .is_err());
         // Sub folders inherit the nearest parent's color.
         assert_eq!(
-            s.get_folder_meta_impl(Some("A/B/C"))["inherited"]["color"],
+            s.get_folder_meta_impl(Some("A/B/C")).unwrap()["inherited"]["color"],
             "#12ab34"
         );
         let r = s.rename_folder_impl("A/B", "Bee").unwrap();
         assert_eq!(r["to"], "A/Bee");
-        assert_eq!(s.get_folder_meta_impl(Some("A/Bee"))["icon"], "flask");
+        assert_eq!(
+            s.get_folder_meta_impl(Some("A/Bee")).unwrap()["icon"],
+            "flask"
+        );
         assert!(d.join("A/Bee/C/n.md").is_file());
         s.move_folder_impl("A/Bee", "").unwrap();
         assert!(d.join("Bee/C/n.md").is_file());
-        assert_eq!(s.get_folder_meta_impl(Some("Bee"))["color"], "#12ab34");
+        assert_eq!(
+            s.get_folder_meta_impl(Some("Bee")).unwrap()["color"],
+            "#12ab34"
+        );
         assert!(s.move_folder_impl("Bee", "Bee/C").is_err(), "into itself");
         s.move_folder_contents_impl("Bee", "A").unwrap();
         assert!(d.join("A/C/n.md").is_file() && !d.join("Bee").exists());
@@ -1012,7 +1018,7 @@ mod resource_tests {
         s.set_folder_meta_impl("A", Some("#000000"), None, None)
             .unwrap();
         s.set_folder_meta_impl("A", Some(""), None, None).unwrap();
-        assert!(s.get_folder_meta_impl(None).get("A").is_none());
+        assert!(s.get_folder_meta_impl(None).unwrap().get("A").is_none());
         fs::remove_dir_all(&d).ok();
     }
 
@@ -1101,10 +1107,11 @@ mod resource_tests {
         s.set_folder_meta_impl("A/B/C", Some("#123456"), None, None)
             .unwrap();
         let r = s.delete_folder_impl("A/B/").unwrap();
-        assert_eq!(r["moved_to_root"].as_array().unwrap().len(), 2, "{r}");
-        assert!(d.join("one.md").is_file() && d.join("two.md").is_file());
+        assert_eq!(r["moved"].as_array().unwrap().len(), 2, "{r}");
+        // Up to the parent, keeping the sub folder below.
+        assert!(d.join("A/one.md").is_file() && d.join("A/C/two.md").is_file());
         assert!(d.join("A/keep.md").is_file() && !d.join("A/B").exists());
-        assert!(s.get_folder_meta_impl(None).get("A/B/C").is_none());
+        assert!(s.get_folder_meta_impl(None).unwrap().get("A/B/C").is_none());
         fs::remove_dir_all(&d).ok();
     }
 
@@ -1430,11 +1437,11 @@ mod resource_tests {
         fs::write(d.join("Work/top.md"), "t").unwrap();
         let s = MemoryStore::new(&d);
         s.delete_folder_impl("Work/Plan").unwrap();
-        assert!(d.join("a.md").is_file() && d.join("b.md").is_file());
+        assert!(d.join("Work/a.md").is_file() && d.join("Work/Sub/b.md").is_file());
         assert!(d.join("Work/Planning/c.md").is_file() && d.join("Work/top.md").is_file());
-        // A top-level folder: every note at any depth survives in Root.
+        // A top-level folder: every note at any depth survives under Root.
         s.delete_folder_impl("Work").unwrap();
-        for n in ["a.md", "b.md", "c.md", "top.md"] {
+        for n in ["a.md", "Sub/b.md", "Planning/c.md", "top.md"] {
             assert!(d.join(n).is_file(), "{n} lost");
         }
         assert!(!d.join("Work").exists());

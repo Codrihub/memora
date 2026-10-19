@@ -356,7 +356,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "folder_stats",
             "ops",
-            "Note count and metadata for one folder.",
+            "Note count (sub folders included) and metadata for one folder ('Root' = notes at the top level). A missing folder is an error.",
             "To inspect a folder before adding notes to it.",
             json!({"folder":{"type":"string"}}),
             &["folder"],
@@ -372,7 +372,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "set_folder_meta",
             "ops",
-            "Set a folder's color, icon, and description.",
+            "Set a folder's color, icon, and description (at most 500 characters). An empty string clears a field. Root has no metadata.",
             "To control how the folder appears in the UI.",
             json!({"folder":{"type":"string"},"color":{"type":"string","description":"Hex color such as #22c55e."},"icon":{"type":"string","description":"One emoji, or an icon name: star, book, code, brain, flask, briefcase, archive, inbox, user, users, calendar, bulb, heart, credit-card, wallet, cpu, key, lock, shield, server, database, terminal, cloud, globe, home, settings, tag, mail, chart, dollar, cart, rocket, wrench, image, music, map, school, file."},"desc":{"type":"string"}}),
             &["folder"],
@@ -380,7 +380,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_folder_meta",
             "ops",
-            "Folder metadata (color/icon/description); no argument returns every folder.",
+            "Folder metadata (color/icon/description); no argument returns every folder. A missing folder is an error.",
             "To build the folder display in the UI.",
             json!({"folder":{"type":"string"}}),
             &[],
@@ -464,7 +464,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "pin",
             "ux",
-            "Pin an existing note or folder to the owner's Pinned list (shared by every browser), or move a pin to another position. Pins follow their note or folder through renames and moves; deleting the item removes its pin. At most 200 pins.",
+            "Pin an existing note or folder to the owner's Pinned list (shared by every browser), or move a pin to another position (an already pinned item without position keeps its place; already_pinned says so). Pins follow their note or folder through renames and moves; deleting the item removes its pin. At most 200 pins.",
             "When the owner asks to keep a note or folder at hand in the sidebar.",
             json!({"path":{"type":"string","description":"Vault path of a note (e.g. 'Work/Plan.md') or folder (e.g. 'Work')"},"kind":{"type":"string","enum":["note","folder"],"description":"Default: what the path is on disk"},"position":{"type":"integer","minimum":0,"description":"0 = top; default: the end"}}),
             &["path"],
@@ -472,7 +472,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "unpin",
             "ux",
-            "Remove a note or folder from the owner's Pinned list. The note or folder itself is not touched.",
+            "Remove a note or folder from the owner's Pinned list. The note or folder itself is not touched. Without kind, a path that no longer exists (a missing pin) matches a pin of either kind.",
             "When the owner no longer wants an item pinned, or a pin is missing.",
             json!({"path":{"type":"string"},"kind":{"type":"string","enum":["note","folder"]}}),
             &["path"],
@@ -480,7 +480,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "rename_folder",
             "ops",
-            "Rename a folder in place; its notes, sub folders, color and icon move along.",
+            "Rename a folder in place; its notes, sub folders, color and icon move along, and wikilinks naming its notes by path are rewritten (links_updated counts the notes changed). The name is one folder name (no / or \\); spaces become _ and characters other than letters, digits, _ and - are dropped (note says so). 'Root' is reserved.",
             "To fix or tidy a folder name.",
             json!({"folder":{"type":"string","description":"Folder path, e.g. 'Work/Plans'"},"name":{"type":"string","description":"New name (one segment)"}}),
             &["folder", "name"],
@@ -488,23 +488,23 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "move_folder",
             "ops",
-            "Move a folder with everything in it into another folder ('' or 'Root' = top level).",
+            "Move a folder with everything in it into another folder ('' or 'Root' = top level). A missing destination folder is created (created: true). Wikilinks naming its notes by path are rewritten (links_updated counts the notes changed).",
             "To nest a folder under another, or lift a sub folder out to the top.",
-            json!({"folder":{"type":"string"},"into":{"type":"string","description":"Destination parent folder; '' = top level"}}),
+            json!({"folder":{"type":"string"},"into":{"type":"string","description":"Destination parent folder, relative to the vault; '' or 'Root' = top level"}}),
             &["folder"],
         ),
         spec(
             "move_folder_contents",
             "ops",
-            "Move every note and sub folder inside a folder into another folder, then remove the emptied folder. Clashing names get a -N suffix.",
+            "Move every note and sub folder inside a folder into another folder, then remove the emptied folder. Clashing names get a -N suffix; a missing destination is created (created: true); wikilinks to the moved notes are rewritten (links_updated). If a move fails part way, the error names the item and lists what already moved.",
             "To merge one folder into another or flatten a folder.",
-            json!({"folder":{"type":"string"},"into":{"type":"string","description":"Destination folder; '' = top level"}}),
+            json!({"folder":{"type":"string"},"into":{"type":"string","description":"Destination folder, relative to the vault; '' or 'Root' = top level"}}),
             &["folder"],
         ),
         spec(
             "delete_folder",
             "ops",
-            "Delete a folder; its notes are moved to Root.",
+            "Delete a folder. Its notes (at any depth) move up to the folder's parent (Root for a top-level folder), keeping the sub folder structure below it: deleting A/B moves A/B/n.md to A/n.md and A/B/C/m.md to A/C/m.md. Clashing names get a -N suffix; other files in the folder are deleted; wikilinks to the moved notes are rewritten. The result lists moved (new paths) and moved_to.",
             "To clear folder structure you no longer use.",
             json!({"folder":{"type":"string"}}),
             &["folder"],
@@ -774,7 +774,7 @@ pub fn call_extra(
                 i("limit", 50),
             ),
             "healthcheck" => store.healthcheck_impl(),
-            "folder_stats" => store.folder_stats_impl(&s("folder")),
+            "folder_stats" => store.folder_stats_impl(&s("folder"))?,
             "stale_detection" => json!(store.stale_detection_impl(i("days", 30) as i64)),
             "set_folder_meta" => {
                 // A present but empty field clears it.
@@ -789,7 +789,7 @@ pub fn call_extra(
                     .publish(json!({"type": "folder_meta", "actor": actor, "folder": s("folder")}));
                 v
             }
-            "get_folder_meta" => store.get_folder_meta_impl(opt("folder").as_deref()),
+            "get_folder_meta" => store.get_folder_meta_impl(opt("folder").as_deref())?,
 
             // ---------------- identity ----------------
             // Needs the key list: handled in `McpServer::set_my_name`.
