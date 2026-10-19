@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-10-19
+
+### Added
+
+- Pins are saved on the server instead of in each browser. They follow a
+  note or folder when it is renamed, moved, trashed or deleted (including
+  everything inside a moved folder), show on every device, and update live
+  in open browsers. A pin whose item disappeared outside Memora stays
+  visible as "Not found" with a remove button. Existing browser pins are
+  uploaded once. Migration 7 adds the `pin` table.
+- Pins over HTTP (`GET`/`PUT /api/pins`, `POST /api/pins/pin`,
+  `POST /api/pins/unpin`, signed-in owner only) and over MCP: `list_pins`
+  (read), `pin` and `unpin` (write), under the usual key scopes, tool grants
+  and privacy rules.
+
+### Changed
+
+- Install in three steps: one command (the installer, a single
+  `docker run` with named volumes, or npm), `memora-cli setup` for a
+  one-time code, then the link it prints. README, the install guide and the
+  in-app Get started page lead with it.
+- The desktop sidebar is a little wider (288 px) and the profile menu fits
+  its width. While dragging onto Pinned, only the drop box is highlighted.
+
+### Fixed
+
+- `patch_memory`: an op missing a required field is an error instead of an
+  empty value. A `replace` without its replacement used to delete the
+  matched text; an empty `find` or one that matches nothing now fails too.
+  `replace` accepts `replace` as an alias of `with`, and the tool
+  description lists every op and its fields.
+- Wikilinks written as `[[target\|alias]]` (the escape used inside tables)
+  no longer count the backslash as part of the target, so the graph,
+  backlinks and broken-link checks see the right note.
+- `docker-compose.yml` pointed at an old image; it now follows the release.
+
 ## [1.2.2] - 2026-10-19
 
 ### Added
@@ -179,6 +215,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.2.3]: https://github.com/Codrihub/memora/releases/tag/v1.2.3
 [1.2.2]: https://github.com/Codrihub/memora/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Codrihub/memora/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Codrihub/memora/releases/tag/v1.2.0
