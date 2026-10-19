@@ -353,8 +353,8 @@ inside).
 
 ## npm
 
-Requirements: Linux on x86_64 or arm64, Node 18 or newer, and `git` (vault
-history uses it).
+Requirements: Linux on x86_64 or arm64, or Windows 10/11 on x64; Node 18 or
+newer; and `git` (vault history uses it).
 
 ```sh
 npm install -g @codrihub/memora
@@ -364,23 +364,36 @@ MEMORA_VAULT=./vault MEMORA_STATE=./state memora
 MEMORA_STATE=./state memora-cli                 # then /guide, or /web
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+npm install -g @codrihub/memora
+mkdir ~\memora; cd ~\memora
+$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; memora
+# in a second terminal, same folder:
+$env:MEMORA_STATE = '.\state'; memora-cli       # then /guide, or /web
+```
+
 `npx @codrihub/memora --version` runs it without a global install.
 
 `@codrihub/memora` holds the `memora` and `memora-cli` commands and the web UI
 (used unless `MEMORA_ASSETS` is set). The binaries come from
-`@codrihub/memora-linux-x64` or `@codrihub/memora-linux-arm64`, optional
-dependencies npm installs only on a matching machine. They are the static
-binaries of the GitHub release with the same version, so glibc and musl
-distributions both work. There is no install script and nothing is downloaded
-at install time, so it works with `--ignore-scripts` and from a registry
-mirror; it does not work with `--omit=optional`, which leaves the binaries
-out. On macOS and Windows the commands print where to go instead: use
-[Docker](#docker) or build from source (on Windows, WSL 2 works too).
+`@codrihub/memora-linux-x64`, `@codrihub/memora-linux-arm64` or
+`@codrihub/memora-win32-x64`, optional dependencies npm installs only on a
+matching machine. The Linux ones are the static binaries of the GitHub
+release with the same version, so glibc and musl distributions both work; the
+Windows one is built with a static C runtime and needs nothing else. There is
+no install script and nothing is downloaded at install time, so it works with
+`--ignore-scripts` and from a registry mirror; it does not work with
+`--omit=optional`, which leaves the binaries out. On macOS the commands print
+where to go instead: use [Docker](#docker) or build from source.
 
 The npm install sets up no service, user or data folder: the server runs as
 you, with `MEMORA_STATE` and `MEMORA_VAULT` where you point them (`./state`
-by default). Keep the state folder private (`chmod 700 state`), since it
-holds the owner account and key hashes. For a long-running server, prefer the
+by default). Keep the state folder private (`chmod 700 state`; on Windows,
+keep it under your user profile), since it holds the owner account and key
+hashes. On Windows, `memora-cli` runs every command as you: there is no root
+or service account to switch to. For a long-running server, prefer the
 [native install](#native-install).
 
 Upgrade with `npm install -g @codrihub/memora@latest` (`memora-cli update`

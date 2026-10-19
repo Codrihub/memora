@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Native Windows support: `memora` and `memora-cli` build and run on Windows
+  10/11 (x64), and `npm install -g @codrihub/memora` installs the new
+  `@codrihub/memora-win32-x64` package there. The release workflow builds it
+  with a static C runtime.
+
+### Changed
+
+- On Windows, `memora-cli` runs database work in-process (there is no root
+  privilege drop), reports state files as private, and finds `sqlite3.exe`
+  on `PATH` for `db shell`.
+- The vault folder may be a Windows absolute path (`C:\...` or
+  `\\server\share`). Migration 8 rebuilds the `settings` table so the
+  database accepts it; Unix paths are unchanged. On Windows, system folders
+  (`%SystemRoot%`, `%ProgramFiles%`, `%ProgramData%`) are refused as vaults.
+
 ## [1.2.3] - 2026-10-19
 
 ### Added

@@ -97,7 +97,7 @@ shows how to connect your first agent.
 
 That is all. The sections below cover every other option.
 
-### npm (Linux x86_64 / arm64)
+### npm (Linux x86_64 / arm64, Windows x64)
 
 ```bash
 npm install -g @codrihub/memora
@@ -107,11 +107,21 @@ MEMORA_VAULT=./vault MEMORA_STATE=./state memora
 MEMORA_STATE=./state memora-cli setup --minutes 15
 ```
 
+On Windows (PowerShell):
+
+```powershell
+npm install -g @codrihub/memora
+mkdir ~\memora; cd ~\memora
+$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; memora
+# in a second terminal, same folder:
+$env:MEMORA_STATE = '.\state'; memora-cli setup --minutes 15
+```
+
 The package carries the prebuilt release binaries and the web UI (no install
 script, nothing downloaded at install time) and needs Node 18 or newer. It is
 handy for trying Memora or running it under your own user; for a server, the
-native installer adds the systemd service. On macOS and Windows use Docker or
-build from source. Update with `npm install -g @codrihub/memora@latest`.
+native installer adds the systemd service. On macOS use Docker or build from
+source. Update with `npm install -g @codrihub/memora@latest`.
 
 ### Docker (any OS)
 
@@ -302,7 +312,8 @@ scripts/         installer and maintenance scripts
 
 Memora follows [Semantic Versioning](https://semver.org/). Each release is a
 `vX.Y.Z` tag with a [GitHub Release](https://github.com/Codrihub/memora/releases)
-(static Linux binaries for x86_64 and aarch64 plus `SHA256SUMS`) and a
+(static Linux binaries for x86_64 and aarch64 plus `SHA256SUMS`), npm
+packages for Linux and Windows, and a
 multi-arch image `ghcr.io/codrihub/memora:X.Y.Z`. Changes are listed in
 [CHANGELOG.md](CHANGELOG.md).
 

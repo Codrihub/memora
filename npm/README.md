@@ -24,13 +24,13 @@ or run it without installing:
 npx @codrihub/memora --version
 ```
 
-Supported: Linux on x86_64 and arm64 (static binaries, glibc or musl), Node 18
-or newer. npm picks the matching `@codrihub/memora-linux-*` package; nothing is
+Supported: Linux on x86_64 and arm64 (static binaries, glibc or musl) and
+Windows 10/11 on x64, Node 18 or newer. npm picks the matching
+`@codrihub/memora-linux-*` or `@codrihub/memora-win32-x64` package; nothing is
 downloaded by an install script, so it works offline from a registry mirror and
-with `--ignore-scripts`. On macOS and Windows use
+with `--ignore-scripts`. On macOS use
 [Docker](https://github.com/Codrihub/memora#docker-compose) or
-[build from source](https://github.com/Codrihub/memora#from-source); on Windows
-WSL 2 works too.
+[build from source](https://github.com/Codrihub/memora#from-source).
 
 ## Run
 
@@ -39,6 +39,15 @@ mkdir -p ~/memora && cd ~/memora
 MEMORA_VAULT=./vault MEMORA_STATE=./state memora
 # in a second terminal, same folder:
 MEMORA_STATE=./state memora-cli          # then type /web
+```
+
+On Windows (PowerShell):
+
+```powershell
+mkdir ~\memora; cd ~\memora
+$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; memora
+# in a second terminal, same folder:
+$env:MEMORA_STATE = '.\state'; memora-cli   # then type /web
 ```
 
 `/web` prints a one-time setup code. Open `http://127.0.0.1:8400/login`, enter
