@@ -16,7 +16,7 @@ use memora_gateway::{KeyPermissions, ToolDenial};
 use memora_state::Db;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub mod activity;
@@ -368,6 +368,23 @@ fn negotiate_version(params: &Value) -> &'static str {
         .unwrap_or(PROTOCOL_VERSIONS[0])
 }
 
+/// 64-bit FNV-1a: a tiny hash that stays the same across builds and restarts (unlike
+/// `DefaultHasher`), for the catalog epoch.
+struct Fnv64(u64);
+
+impl Fnv64 {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+}
+
 /// Who is calling the MCP server, and with which permissions.
 #[derive(Debug, Clone)]
 pub struct Caller {
@@ -582,7 +599,15 @@ pub struct McpServer {
     /// refreshed by [`McpServer::reload_tools`], which the HTTP server calls when the
     /// `tools` domain changes (another process, e.g. `memora-cli`, switched a tool).
     disabled: RwLock<BTreeSet<String>>,
+    /// Streamable HTTP sessions whose client was told of a newer catalog: session id
+    /// -> (epoch last sent, last use). In memory and bounded ([`SEEN_MAX`]); a session
+    /// not listed last saw the epoch its id carries. See [`McpServer::list_changed_due`].
+    seen: Mutex<HashMap<String, (String, u64)>>,
 }
+
+/// At most this many sessions are remembered in [`McpServer`]'s `seen` map; the least
+/// recently used eighth goes when it is full.
+const SEEN_MAX: usize = 4096;
 
 impl McpServer {
     /// MCP server over `store`; tool switches live in `db`. The catalog must already be
@@ -593,6 +618,7 @@ impl McpServer {
             aliases: Arc::new(Mutex::new(Vec::new())),
             db,
             disabled: RwLock::new(BTreeSet::new()),
+            seen: Mutex::new(HashMap::new()),
         };
         // Privacy rules and pins follow notes and folders through renames, moves and
         // deletes.
@@ -684,6 +710,66 @@ impl McpServer {
             v.extend(admin_catalog());
         }
         v
+    }
+
+    /// The caller's catalog epoch: 16 hex digits of an FNV-1a hash over the server
+    /// version and the names of the tools [`McpServer::visible_tools`] returns for
+    /// `caller`. It changes when the server is upgraded, a tool is switched on or off
+    /// globally, or the key's scopes or tool grant change, and is stable across
+    /// restarts, so no session state is stored.
+    pub fn catalog_epoch(&self, caller: &Caller) -> String {
+        let mut h = Fnv64::new();
+        h.write(SERVER_VERSION.as_bytes());
+        for t in self.visible_tools(caller) {
+            h.write(b"\n");
+            h.write(t.name.as_bytes());
+        }
+        format!("{:016x}", h.0)
+    }
+
+    /// A new `Mcp-Session-Id` for `caller`: `<epoch>.<32 random hex>` (visible ASCII).
+    pub fn new_session_id(&self, caller: &Caller) -> String {
+        let token = memora_gateway::random_token("s");
+        let rand = token.get(2..34).unwrap_or("0");
+        format!("{}.{rand}", self.catalog_epoch(caller))
+    }
+
+    /// The catalog epoch a well-formed session id (`<hex epoch>.<hex random>`) carries;
+    /// `None` for anything else (treated like no session at all).
+    pub fn session_epoch(session_id: &str) -> Option<&str> {
+        let (epoch, rand) = session_id.split_once('.')?;
+        let hex =
+            |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
+        (hex(epoch) && hex(rand)).then_some(epoch)
+    }
+
+    /// The caller's current epoch when the client behind `session_id` last saw another
+    /// one (so it should hear `notifications/tools/list_changed`), else `None`.
+    /// Malformed ids never are. Call [`McpServer::mark_seen`] once the notification is
+    /// on its way.
+    pub fn list_changed_due(&self, caller: &Caller, session_id: &str) -> Option<String> {
+        let issued = Self::session_epoch(session_id)?;
+        let current = self.catalog_epoch(caller);
+        let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let last = seen.get(session_id).map_or(issued, |(e, _)| e.as_str());
+        (last != current).then_some(current)
+    }
+
+    /// Remember that the client behind `session_id` was told about `epoch`.
+    pub fn mark_seen(&self, session_id: &str, epoch: &str) {
+        if Self::session_epoch(session_id).is_none() {
+            return;
+        }
+        static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tick = TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        if seen.len() >= SEEN_MAX && !seen.contains_key(session_id) {
+            let mut ticks: Vec<u64> = seen.values().map(|(_, t)| *t).collect();
+            ticks.sort_unstable();
+            let cut = ticks[SEEN_MAX / 8];
+            seen.retain(|_, (_, t)| *t > cut);
+        }
+        seen.insert(session_id.to_string(), (epoch.to_string(), tick));
     }
 
     /// Refusal for `tools/call`, if any. Unknown names return `None` and fall
@@ -869,12 +955,15 @@ impl McpServer {
                 if caller.perms.is_some() {
                     self.register_alias_named(caller.actor(), &caller.id, caller.name.as_deref());
                 }
+                // `listChanged`: a client whose session saw an older catalog hears
+                // `notifications/tools/list_changed` ahead of its next answer (the HTTP
+                // server streams it, see `list_changed_due`).
                 ok(
                     id,
                     json!({
                         "protocolVersion": negotiate_version(&req.params),
                         "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                        "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}}
+                        "capabilities": {"tools": {"listChanged": true}, "resources": {"listChanged": false}}
                     }),
                 )
             }
@@ -1001,7 +1090,7 @@ impl McpServer {
         let (kind, path) =
             pins::resolve_item(&store, path, args.get("kind").and_then(|v| v.as_str()))?;
         if name == "unpin" {
-            return Ok(pins::unpin(&self.db, &store, kind, &path)?);
+            return Ok(pins::unpin(&self.db, &store, kind, &path, Some(caller))?);
         }
         let position = match args.get("position") {
             None | Some(Value::Null) => None,
@@ -1010,7 +1099,14 @@ impl McpServer {
                 None => anyhow::bail!("position must be a whole number from 0"),
             },
         };
-        Ok(pins::pin(&self.db, &store, kind, &path, position)?)
+        Ok(pins::pin(
+            &self.db,
+            &store,
+            kind,
+            &path,
+            position,
+            Some(caller),
+        )?)
     }
 
     /// `set_my_color`: the calling API key's display color.

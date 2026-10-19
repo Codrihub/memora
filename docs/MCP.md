@@ -21,10 +21,21 @@ one of the three above, and with `2025-06-18` otherwise.
 
 - Requests are JSON-RPC 2.0 objects sent with `POST /mcp`. Batches (JSON
   arrays) are not supported.
-- Responses are plain JSON (`application/json`). The server does not open SSE
-  streams and does not issue an `Mcp-Session-Id`.
-- `GET` and `DELETE` on `/mcp` return `405 Method Not Allowed` with
-  `Allow: POST`.
+- Responses are plain JSON (`application/json`), with one exception below.
+- `initialize` returns an `Mcp-Session-Id` header (`<catalog epoch>.<random>`).
+  The epoch is a hash of the server version and the tools the caller may use, so
+  it changes when the server is upgraded, a tool is switched on or off, or the
+  key's scopes or tool grant change. No session id is ever refused: unknown or
+  old ids work, and malformed ones count as no session.
+- When a request carries a session id whose catalog has changed since that
+  session last heard, and its `Accept` header allows `text/event-stream`, the
+  answer is an SSE stream with two events: the notification
+  `notifications/tools/list_changed`, then the normal response. Each change is
+  sent once per session (remembered in memory; a restart forgets, and the
+  epoch in the id takes over). JSON-only clients always get plain JSON.
+- `GET /mcp` returns `405 Method Not Allowed` (there is no standalone server
+  stream). `DELETE /mcp` with a session id returns `204 No Content`; without
+  one it returns `405`.
 - A notification (a `notifications/*` method without an `id`) gets
   `202 Accepted` and no body.
 - `/mcp` needs a configured vault. Until one is chosen it returns
@@ -172,14 +183,15 @@ The card is the same for every caller. To see what a given key may call, use
 
 | Method | Purpose |
 |---|---|
-| `initialize` | Handshake. Returns `protocolVersion`, `serverInfo` (`{name, version}`) and `capabilities` (`tools` and `resources`, both with `listChanged: false`). |
+| `initialize` | Handshake. Returns `protocolVersion`, `serverInfo` (`{name, version}`) and `capabilities` (`tools` with `listChanged: true`, `resources` with `listChanged: false`). |
 | `notifications/initialized` | Client notification. Without an `id` it gets `202 Accepted`. |
 | `tools/list` | The tools the caller may use, each with `name`, `description` (what it does and when to use it), `inputSchema`, and `_meta.category`. |
 | `tools/call` | Runs one tool. Params are `{name, arguments}`. |
 | `resources/list` | Lists the three resources below. |
 | `resources/read` | Reads one resource. Params are `{uri}`. |
 
-There are no prompts, no pagination cursors and no change notifications.
+There are no prompts and no pagination cursors. The only notification the server
+sends is `notifications/tools/list_changed` (see Transport).
 
 ### Resources
 

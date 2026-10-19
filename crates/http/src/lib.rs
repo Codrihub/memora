@@ -663,6 +663,13 @@ fn inline_code(s: &str) -> String {
     out
 }
 
+/// The Streamable HTTP session header. `initialize` issues `<catalog epoch>.<random>`
+/// (see `McpServer::new_session_id`). An id is never refused: stale or unknown ids
+/// work, malformed ones count as no session. When the caller's catalog moved past
+/// the epoch the session last saw, the answer is streamed with
+/// `notifications/tools/list_changed` in front (see `h_mcp`).
+const MCP_SESSION: &str = "mcp-session-id";
+
 /// `/mcp` - MCP streamable HTTP: accepts JSON-RPC and replies with JSON-RPC.
 async fn h_mcp(
     State(st): State<AppState>,
@@ -671,8 +678,15 @@ async fn h_mcp(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    // Streamable HTTP: requests are POSTed; there is no server-initiated stream
-    // (GET) and no session to end (DELETE).
+    // Streamable HTTP: requests are POSTed; there is no standalone server stream
+    // (GET). Nothing is kept per session but the last catalog epoch it was told about
+    // (see `MCP_SESSION`), so ending one (DELETE with its id) always succeeds.
+    let session = headers
+        .get(MCP_SESSION)
+        .map(|v| v.to_str().unwrap_or("").to_string());
+    if method == axum::http::Method::DELETE && session.is_some() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
     if method != axum::http::Method::POST {
         return (
             StatusCode::METHOD_NOT_ALLOWED,
@@ -733,18 +747,52 @@ async fn h_mcp(
             c
         }
     };
+    let initialize = req.method == "initialize";
     // Notifications (no id) get no JSON-RPC answer, just 202 Accepted.
     if req.id.is_none() && req.method.starts_with("notifications/") {
         return StatusCode::ACCEPTED.into_response();
     }
     let resp = st.mcp.handle_as(&req, &caller);
+    if initialize && resp.error.is_none() {
+        let sid = st.mcp.new_session_id(&caller);
+        let mut out = Json(serde_json::to_value(resp).unwrap()).into_response();
+        if let Ok(v) = header::HeaderValue::from_str(&sid) {
+            out.headers_mut().insert(MCP_SESSION, v);
+        }
+        return out;
+    }
     // A key changed its own color: the key cache feeds /api/keys.
     if req.method == "tools/call"
         && req.params.get("name").and_then(|v| v.as_str()) == Some("set_my_color")
     {
         cache::reload(&st, memora_state::Domain::Keys);
     }
-    Json(serde_json::to_value(resp).unwrap()).into_response()
+    let body = serde_json::to_value(resp).unwrap();
+    // The catalog changed since this session last heard (server upgraded, a tool
+    // switched, the key's grant changed): a client that takes event streams gets
+    // `notifications/tools/list_changed` first, then the answer, once per change.
+    // JSON-only clients and requests without a (well-formed) session id get JSON.
+    let sse_ok = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.contains("text/event-stream"));
+    if let (Some(sid), true) = (&session, sse_ok) {
+        if let Some(epoch) = st.mcp.list_changed_due(&caller, sid) {
+            st.mcp.mark_seen(sid, &epoch);
+            let note = json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed"});
+            let stream =
+                format!("event: message\ndata: {note}\n\nevent: message\ndata: {body}\n\n");
+            return (
+                [
+                    (header::CONTENT_TYPE, "text/event-stream"),
+                    (header::CACHE_CONTROL, "no-cache"),
+                ],
+                stream,
+            )
+                .into_response();
+        }
+    }
+    Json(body).into_response()
 }
 
 /// `/api/stats` - note, link and folder counts for the web UI.

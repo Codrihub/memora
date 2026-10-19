@@ -24,10 +24,26 @@ pub fn apply_event(tx: &Transaction<'_>, ev: &PathEvent) -> memora_state::Result
     }
 }
 
-/// Tell signed-in browsers to reload their pins. Carries nothing else: the list is
-/// fetched from `/api/pins`.
+/// Tell signed-in browsers to reload their pins. Carries no paths: the list is fetched
+/// from `/api/pins`.
 pub fn publish_changed() {
-    memora_core::events::hub().publish(json!({"type": "pins_changed"}));
+    publish_changed_by(None);
+}
+
+/// [`publish_changed`] naming who changed the pins over MCP (`by`): the actor's display
+/// name, id and kind, as the `ai_activity` events of the same call already carry, so the
+/// web UI can say "agent1 pinned Plan". Still no paths.
+pub fn publish_changed_by(by: Option<&crate::Caller>) {
+    let ev = match by {
+        Some(c) => json!({
+            "type": "pins_changed",
+            "actor": c.actor(),
+            "actor_id": c.id,
+            "actor_kind": c.actor_kind(),
+        }),
+        None => json!({"type": "pins_changed"}),
+    };
+    memora_core::events::hub().publish(ev);
 }
 
 /// Whether the pinned item exists for this caller (hidden paths answer like missing ones).
@@ -100,13 +116,15 @@ fn not_found(kind: Kind, path: &str) -> memora_state::Error {
 }
 
 /// Pin an existing note or folder at `position` (among the pins the caller sees; default:
-/// the end), or move it there. Returns [`pins_json`].
+/// the end), or move it there. `by`: the MCP caller (named in `pins_changed`), `None`
+/// for the browser. Returns [`pins_json`].
 pub fn pin(
     db: &Db,
     store: &MemoryStore,
     kind: Kind,
     path: &str,
     position: Option<usize>,
+    by: Option<&crate::Caller>,
 ) -> memora_state::Result<Value> {
     pins::check_path(kind, path)?;
     if !exists(store, kind, path) {
@@ -133,20 +151,26 @@ pub fn pin(
         };
         pins::pin(tx, kind, path, at, memora_state::now())
     })?;
-    publish_changed();
+    publish_changed_by(by);
     Ok(pins_json(store, &all))
 }
 
 /// Remove the pin on `(kind, path)` (a pin hidden from the caller answers "not found").
 /// Returns [`pins_json`] with `removed`.
-pub fn unpin(db: &Db, store: &MemoryStore, kind: Kind, path: &str) -> memora_state::Result<Value> {
+pub fn unpin(
+    db: &Db,
+    store: &MemoryStore,
+    kind: Kind,
+    path: &str,
+    by: Option<&crate::Caller>,
+) -> memora_state::Result<Value> {
     pins::check_path(kind, path)?;
     if !store.visible(path) {
         return Err(not_found(kind, path));
     }
     let removed = db.write(|tx| pins::unpin(tx, kind, path))?;
     if removed {
-        publish_changed();
+        publish_changed_by(by);
     }
     let mut v = list_json(db, store)?;
     v["removed"] = json!(removed);
@@ -212,13 +236,13 @@ mod tests {
             .unwrap()
             .set_path_hook(Some(crate::path_hook(db.clone())));
         let s = store.lock().unwrap();
-        pin(&db, &s, Kind::Note, "Work/Plan.md", None).unwrap();
-        pin(&db, &s, Kind::Note, "Work/Sub/deep.md", None).unwrap();
-        pin(&db, &s, Kind::Folder, "Work/Sub", None).unwrap();
-        pin(&db, &s, Kind::Note, "top.md", Some(0)).unwrap();
+        pin(&db, &s, Kind::Note, "Work/Plan.md", None, None).unwrap();
+        pin(&db, &s, Kind::Note, "Work/Sub/deep.md", None, None).unwrap();
+        pin(&db, &s, Kind::Folder, "Work/Sub", None, None).unwrap();
+        pin(&db, &s, Kind::Note, "top.md", Some(0), None).unwrap();
         // Not on disk: refused.
         assert!(matches!(
-            pin(&db, &s, Kind::Note, "nope.md", None),
+            pin(&db, &s, Kind::Note, "nope.md", None, None),
             Err(memora_state::Error::NotFound(_))
         ));
 
@@ -251,7 +275,7 @@ mod tests {
             listed(&list_json(&db, &s).unwrap()),
             ["note:deep.md (missing)"]
         );
-        let v = unpin(&db, &s, Kind::Note, "deep.md").unwrap();
+        let v = unpin(&db, &s, Kind::Note, "deep.md", None).unwrap();
         assert_eq!(v["removed"], true);
         assert_eq!(v["count"], 0);
         drop(s);

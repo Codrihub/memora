@@ -11,7 +11,8 @@
 //!   `position` (default: the end) or moves it there. Same answer as GET.
 //! * `POST /api/pins/unpin` `{kind, path}` -> removes it; same answer plus `removed`.
 //!
-//! Every change publishes `pins_changed` (no data) so open browsers reload the list.
+//! Every change publishes `pins_changed` (no paths; MCP changes name their actor) so open
+//! browsers reload the list.
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -157,7 +158,7 @@ async fn h_pin(
     // The store stays locked while the pin is written: no rename can slip in between
     // the existence check and the row.
     let store = crate::store_as(&st, None);
-    match memora_mcp::pins::pin(&st.db, &store, kind, &path, position) {
+    match memora_mcp::pins::pin(&st.db, &store, kind, &path, position, None) {
         Ok(v) => Json(v).into_response(),
         Err(e) => db_err(e, "no such note or folder"),
     }
@@ -178,7 +179,7 @@ async fn h_unpin(
         Err(r) => return *r,
     };
     let store = crate::store_as(&st, None);
-    match memora_mcp::pins::unpin(&st.db, &store, kind, &path) {
+    match memora_mcp::pins::unpin(&st.db, &store, kind, &path, None) {
         Ok(v) => Json(v).into_response(),
         Err(e) => db_err(e, "not found"),
     }
