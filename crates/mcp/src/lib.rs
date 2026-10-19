@@ -943,7 +943,18 @@ impl McpServer {
     /// through to the normal "unknown tool" result.
     fn refusal(&self, caller: &Caller, name: &str) -> Option<String> {
         if admin_catalog().iter().any(|t| t.name == name) {
-            return (!caller.is_admin()).then(|| ToolDenial::NotAllowed.message(name));
+            if caller.is_admin() {
+                return None;
+            }
+            let lacks_admin = caller
+                .perms
+                .as_ref()
+                .is_some_and(|p| p.enabled && p.has_scope("mcp") && !p.has_scope("admin"));
+            return Some(if lacks_admin {
+                format!("API key lacks the 'admin' scope for tool: {name}")
+            } else {
+                ToolDenial::NotAllowed.message(name)
+            });
         }
         if !is_catalog_tool(name) {
             return None;
@@ -1197,7 +1208,14 @@ impl McpServer {
                         json!({"content":[{"type":"text","text": v.to_string()}],"isError":false}),
                     ),
                     Err(e) => {
-                        let msg = format!("{e:#}");
+                        // Every tool error names the tool, so an agent reading a batch of
+                        // results can tell which call failed.
+                        let raw = format!("{e:#}");
+                        let msg = if raw.starts_with(&format!("{name}:")) {
+                            raw
+                        } else {
+                            format!("{name}: {raw}")
+                        };
                         tracing::warn!(
                             tool = name,
                             caller = caller.actor(),

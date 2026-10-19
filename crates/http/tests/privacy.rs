@@ -350,9 +350,9 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
     assert!(stats.contains("\"notes\":4"), "{stats}");
     let (err, text) = mcp(&mut e, c, "read_memory", json!({"path": "Private/plan.md"})).await;
     assert!(err);
-    assert_eq!(text, "not found: Private/plan.md");
+    assert_eq!(text, "read_memory: not found: Private/plan.md");
     let (_, missing_text) = mcp(&mut e, c, "read_memory", json!({"path": "Nope/plan.md"})).await;
-    assert_eq!(missing_text, "not found: Nope/plan.md");
+    assert_eq!(missing_text, "read_memory: not found: Nope/plan.md");
     for (tool, args) in [
         (
             "get_note_at",
