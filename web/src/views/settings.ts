@@ -17,6 +17,7 @@ import { $, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
 import { icon } from '../ui/icons';
 import { Modal } from '../modal';
+import { RT } from '../realtime';
 import { clearTagIndex, saveToastPrefs, saveUI, toastPrefs, ui } from '../storage';
 import { state, type Page } from '../state';
 import { clearPins, pinnedItems } from '../vault/store';
@@ -412,6 +413,129 @@ function row(label: string, desc: string, control: string, opts: { id?: string; 
 
 const THEME_ICON: Record<ThemePref, string> = { dark: 'moon', light: 'sun', system: 'monitor' };
 
+/** What the server reports about its supervisor (GET /api/server/shutdown). */
+interface ShutdownInfo {
+  restarts?: 'systemd' | 'docker' | null;
+  unit?: string;
+  stop?: string;
+}
+
+/** Confirm, then stop the server; a supervisor that restarts it is said plainly. */
+async function askShutdown(): Promise<void> {
+  const info = await apiGet<ShutdownInfo>('/api/server/shutdown').catch(() => ({}) as ShutdownInfo);
+  const again =
+    info.restarts === 'systemd'
+      ? ` Note: systemd starts it again a few seconds later (Restart=always). To keep it stopped, run "${info.stop}" on the server instead.`
+      : info.restarts === 'docker'
+        ? ` Note: Docker may start the container again. To keep it stopped, run "${info.stop}" on the host instead.`
+        : '';
+  Modal.confirm(
+    'Shut down Memora?',
+    `You will be disconnected, and so will every other browser and agent. Memora stays off until it is started again on the server (memora-cli start, or its service).${again}`,
+    'Shut down',
+    () => {
+      Modal.close();
+      void apiPost<ShutdownInfo>('/api/server/shutdown', {})
+        .then((r) => shutDownScreen(r.restarts ?? info.restarts ?? null))
+        .catch((e: Error) => toast('Could not shut down: ' + e.message, 'err'));
+    },
+  );
+}
+
+/** The shut-down notice: a full-screen layer over the app, in the theme. */
+const OFF_CSS = `
+.st-off{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:24px 16px calc(24px + var(--safe-b,0px));
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  overflow:auto;outline:none;animation:st-off-in .2s var(--ease-out,ease-out)}
+.st-off-card{width:min(520px,100%);box-sizing:border-box;padding:28px 28px 24px;border-radius:var(--r-xl,20px);border:1px solid var(--line-strong);
+  background:var(--panel);color:var(--fg);box-shadow:var(--shadow-lg)}
+.st-off-i{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;margin-bottom:16px;
+  background:var(--danger-soft);color:var(--danger)}
+.st-off.back .st-off-i{background:var(--accent-soft);color:var(--accent)}
+.st-off-i .i{width:22px;height:22px}
+.st-off h1{margin:0 0 8px;font-size:21px;font-weight:720;letter-spacing:-.2px;line-height:1.3}
+.st-off p{margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--text-2,var(--muted))}
+.st-off ul{margin:0 0 16px;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.st-off code{display:inline-block;max-width:100%;overflow-wrap:anywhere;font:500 12.5px/1.5 var(--mono);padding:3px 8px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--fg)}
+.st-off-wait{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.st-off-spin{width:16px;height:16px;flex:none;border-radius:50%;border:2px solid var(--line-strong);border-top-color:var(--accent);
+  animation:st-off-spin .9s linear infinite}
+.st-off-acts{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.st-off-note{font-size:13px;color:var(--muted)}
+@keyframes st-off-spin{to{transform:rotate(360deg)}}
+@keyframes st-off-in{from{opacity:0}}
+@media (prefers-reduced-motion:reduce){.st-off{animation:none}.st-off-spin{animation-duration:2.4s}}
+@media (max-width:760px){.st-off-card{padding:22px 18px 18px}.st-off h1{font-size:19px}}
+`;
+
+/**
+ * Cover the app with a notice once the server is down. The app's DOM stays
+ * (background code keeps its elements) but goes inert, and live updates stop
+ * for good. With a supervisor that restarts it, reload when it is back.
+ */
+function shutDownScreen(restarts: ShutdownInfo['restarts']): void {
+  const back = !!restarts;
+  RT.stop();
+  Modal.close();
+  useStyles('st-off-css', OFF_CSS);
+  document.getElementById('stOff')?.remove();
+  const box = document.createElement('div');
+  box.id = 'stOff';
+  box.className = 'st-off' + (back ? ' back' : '');
+  box.tabIndex = -1;
+  box.setAttribute('role', 'alertdialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-labelledby', 'stOffT');
+  box.setAttribute('aria-describedby', 'stOffD');
+  box.innerHTML = `<div class="st-off-card">
+    <span class="st-off-i" aria-hidden="true">${icon(back ? 'refresh' : 'logout')}</span>
+    <h1 id="stOffT">${back ? 'Memora is restarting' : 'Memora is shut down'}</h1>
+    ${
+      back
+        ? `<p id="stOffD">The server stopped and ${restarts === 'docker' ? 'Docker' : 'systemd'} is starting it again. This page reloads by itself when it is back.</p>
+      <div class="st-off-wait" role="status" aria-live="polite"><span class="st-off-spin" aria-hidden="true"></span><span id="stOffW">Waiting for the server...</span></div>`
+        : `<p id="stOffD">The server has stopped, and every browser and agent is disconnected. Start it again on the machine it runs on, for example with one of these, then reload this page:</p>
+      <ul><li><code>memora-cli start</code></li><li><code>sudo systemctl start memora</code></li><li><code>docker start memora</code></li></ul>
+      <div class="st-off-acts"><button class="btn primary" type="button" id="stOffR">${icon('refresh')}Reload</button>
+        <span class="st-off-note" id="stOffW" role="status" aria-live="polite"></span></div>`
+    }
+  </div>`;
+  document.getElementById('app')?.setAttribute('inert', '');
+  document.body.appendChild(box);
+  box.focus({ preventScroll: true });
+  const healthy = (): Promise<boolean> =>
+    fetch('/healthz', { cache: 'no-store' })
+      .then((r) => r.ok)
+      .catch(() => false);
+  if (!back) {
+    const btn = box.querySelector<HTMLButtonElement>('#stOffR')!;
+    btn.onclick = () => {
+      btn.disabled = true;
+      void healthy().then((ok) => {
+        if (ok) location.reload();
+        else {
+          btn.disabled = false;
+          box.querySelector('#stOffW')!.textContent = 'Still stopped. Start it on the server first.';
+        }
+      });
+    };
+    return;
+  }
+  let tries = 0;
+  const poll = (): void => {
+    tries++;
+    window.setTimeout(() => {
+      void healthy().then((ok) => {
+        if (ok) location.reload();
+        else if (tries < 120) poll();
+        else box.querySelector('#stOffW')!.textContent = 'It is taking a while. Check the server, then reload this page.';
+      });
+    }, 2000);
+  };
+  poll();
+}
+
 export async function renderSettings(): Promise<void> {
   useControlStyles();
   useStyles('settings-css-v3', CSS);
@@ -581,8 +705,17 @@ export async function renderSettings(): Promise<void> {
     </section>
 
     <section class="st-card" id="stServer" aria-labelledby="stServerT">
-      ${head('stServer', 'Server', 'Read only. Change these with memora-cli on the server.', 'monitor')}
+      ${head('stServer', 'Server', 'Change these settings with memora-cli on the server.', 'monitor')}
       <dl class="st-kv" id="sServerKv"></dl>
+      <div class="st-danger" role="group" aria-labelledby="sStopH">
+        <div class="st-danger-h" id="sStopH">Shut down</div>
+        ${row(
+          'Stop the server',
+          'Stops Memora on the machine it runs on. Every browser and agent is disconnected until it is started again there.',
+          `<button class="btn danger" id="sShutdown" type="button">${icon('logout')}Shut down</button>`,
+          { ctl: 'end', cls: 'first' },
+        )}
+      </div>
     </section>
 
     <section class="st-card" id="stVersion" aria-labelledby="stVersionT">
@@ -1060,6 +1193,7 @@ export async function renderSettings(): Promise<void> {
     }
   };
   host.querySelector<HTMLButtonElement>('#sLogout')!.onclick = () => void signOutHere();
+  host.querySelector<HTMLButtonElement>('#sShutdown')!.onclick = () => void askShutdown();
   void loadSessions();
 
   // ── vault ────────────────────────────────────────────────────────────

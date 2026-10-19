@@ -228,7 +228,7 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(serve(state, db))
 }
 
-/// Resolves on Ctrl-C or SIGTERM (systemd stop).
+/// Resolves on Ctrl-C, SIGTERM (systemd stop) or a shutdown asked for in the browser.
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -247,6 +247,7 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = term => {},
+        _ = memora_http::shutdown::requested() => {},
     }
     tracing::info!("shutting down");
 }

@@ -42,6 +42,7 @@ pub mod pins;
 pub mod privacy;
 pub mod release;
 pub mod secrets;
+pub mod shutdown;
 
 use cache::rd;
 pub use cache::{session_of, Caches, WebSession};
@@ -525,8 +526,8 @@ async fn mw_auth(
     next.run(req).await
 }
 
-/// Whether a path needs the vault. Account, settings, keys, the access stack
-/// and the UI work without one; notes, the graph, logs and MCP do not.
+/// Whether a path needs the vault. Account, settings, keys, the access stack,
+/// shutting down and the UI work without one; notes, the graph, logs and MCP do not.
 fn needs_vault(path: &str) -> bool {
     if path == "/mcp" || path.starts_with("/mcp/") {
         return true;
@@ -546,6 +547,7 @@ fn needs_vault(path: &str) -> bool {
         || rest.starts_with("access/")
         || rest.starts_with("ui/")
         || rest.starts_with("oauth/")
+        || rest == "server/shutdown"
         || rest == "logs/settings";
     !free
 }
@@ -1533,6 +1535,7 @@ pub fn build_router(st: AppState) -> Router {
         .merge(api::api_router())
         .merge(privacy::router())
         .merge(pins::router())
+        .merge(shutdown::router())
         .merge(oauth::router())
         .fallback(h_notfound)
         .layer(middleware::from_fn_with_state(st.clone(), mw_vault))
@@ -2023,6 +2026,7 @@ mod tests {
             "/healthz",
             "/ws",
             "/app.js",
+            "/api/server/shutdown",
             "/api/auth/state",
             "/api/auth/me",
             "/api/settings",

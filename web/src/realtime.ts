@@ -135,6 +135,8 @@ export const RT = {
   state: 'connecting' as ConnState,
   clients: 0,
   lastActive: -1,
+  /** Set once the server was shut down on purpose: never reconnect. */
+  stopped: false,
 
   setState(kind: ConnState): void {
     const changed = kind !== this.state;
@@ -154,7 +156,7 @@ export const RT = {
     for (const [k, a] of wasActive) if (!now.has(k)) flyHome({ actor: a.actor, id: a.id, paths: a.lastPaths || [] });
     wasActive = now;
     const idle = idleCount(act);
-    if (Date.now() - keysAt > 60_000) void loadKeys();
+    if (!this.stopped && Date.now() - keysAt > 60_000) void loadKeys();
     pill.dataset.state = this.state;
     $('#rtText').textContent = STATE_LABEL[this.state];
     const count = $('#rtAgentN');
@@ -224,8 +226,26 @@ export const RT = {
     this.kick();
   },
 
+  /** Stop for good (the server was shut down): close the socket, no retries. */
+  stop(): void {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    const sock = this.ws;
+    this.ws = null;
+    if (sock) {
+      sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
+      try {
+        sock.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    this.setState('off');
+  },
+
   kick(): void {
     clearTimeout(this.timer);
+    if (this.stopped) return;
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
     let sock: WebSocket;
     try {
@@ -266,6 +286,7 @@ export const RT = {
 
   retry(): void {
     clearTimeout(this.timer);
+    if (this.stopped) return;
     this.tries++;
     const wait = Math.min(30000, 1000 * Math.pow(1.6, Math.min(this.tries, 6)));
     this.timer = setTimeout(() => this.kick(), wait);

@@ -1,0 +1,165 @@
+//! Shutting the server down from the signed-in browser (Settings).
+//!
+//! `POST /api/server/shutdown` answers first, then asks the server to stop
+//! gracefully, the same way Ctrl-C or SIGTERM does, so it exits with status 0.
+//! A supervisor that restarts a cleanly exited process (systemd `Restart=always`,
+//! Docker `--restart unless-stopped`) starts it again; `GET` tells the browser
+//! so the confirmation can say how to stop it for good.
+
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    routing::get,
+    Extension, Json, Router,
+};
+use serde_json::{json, Value};
+use tokio::sync::Notify;
+
+use crate::api::{client_ip, csrf_fail, csrf_ok};
+use crate::{ApiKeyCaller, AppState};
+
+fn notify() -> &'static Notify {
+    static N: OnceLock<Notify> = OnceLock::new();
+    N.get_or_init(Notify::new)
+}
+
+/// Ask the running server to stop gracefully.
+pub fn request() {
+    notify().notify_one();
+}
+
+/// Resolves once [`request`] was called (it keeps the request if nobody waits yet).
+pub async fn requested() {
+    notify().notified().await;
+}
+
+pub fn router() -> Router<AppState> {
+    Router::new().route("/api/server/shutdown", get(h_info).post(h_shutdown))
+}
+
+fn browser_only() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({"error": "the server is shut down from the signed-in browser or memora-cli"})),
+    )
+        .into_response()
+}
+
+async fn h_info(key: Option<Extension<ApiKeyCaller>>) -> Response {
+    if key.is_some() {
+        return browser_only();
+    }
+    Json(supervisor()).into_response()
+}
+
+async fn h_shutdown(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+) -> Response {
+    if key.is_some() {
+        return browser_only();
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let user = crate::cache::session_of(&st, &headers).map(|s| s.user);
+    let ip = client_ip(&headers);
+    memora_state::activity::log_activity(
+        &st.db,
+        "server_shutdown",
+        ip.as_deref(),
+        user.as_deref(),
+        "from the browser",
+    );
+    tracing::warn!(user = ?user, "shutdown requested from the browser");
+    // Answer first: the request is stopped by the graceful shutdown otherwise.
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        request();
+    });
+    let mut v = supervisor();
+    v["ok"] = json!(true);
+    Json(v).into_response()
+}
+
+/// What happens after a clean exit: `{"restarts": null}` when the server stays
+/// down, `"systemd"` (with `unit`) or `"docker"` when it is started again.
+fn supervisor() -> Value {
+    if std::path::Path::new("/.dockerenv").exists() {
+        return json!({"restarts": "docker", "stop": "docker stop memora"});
+    }
+    if std::env::var_os("INVOCATION_ID").is_some() {
+        if let Some(unit) = std::fs::read_to_string("/proc/self/cgroup")
+            .ok()
+            .and_then(|c| unit_from_cgroup(&c))
+        {
+            let policy = std::process::Command::new("systemctl")
+                .args(["show", "-p", "Restart", "--value", &unit])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if restarts_after_clean_exit(&policy) {
+                return json!({
+                    "restarts": "systemd",
+                    "unit": unit,
+                    "stop": format!("sudo systemctl stop {unit}"),
+                });
+            }
+        }
+    }
+    json!({"restarts": null})
+}
+
+/// The service unit in a `/proc/self/cgroup` listing (`0::/system.slice/memora.service`).
+fn unit_from_cgroup(cgroup: &str) -> Option<String> {
+    cgroup
+        .lines()
+        .filter_map(|l| l.rsplit('/').next())
+        .find(|u| u.ends_with(".service"))
+        .filter(|u| {
+            u.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.@:".contains(c))
+        })
+        .map(str::to_string)
+}
+
+/// systemd `Restart=` values that start the unit again after exit status 0.
+fn restarts_after_clean_exit(policy: &str) -> bool {
+    matches!(policy, "always" | "on-success")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unit_is_read_from_the_cgroup() {
+        assert_eq!(
+            unit_from_cgroup("0::/system.slice/codrihub-memory.service\n").as_deref(),
+            Some("codrihub-memory.service")
+        );
+        assert_eq!(
+            unit_from_cgroup("0::/user.slice/user-1000.slice/session-2.scope\n"),
+            None
+        );
+        assert_eq!(
+            unit_from_cgroup("0::/system.slice/a;rm -rf.service\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn only_always_and_on_success_restart_a_clean_exit() {
+        assert!(restarts_after_clean_exit("always"));
+        assert!(restarts_after_clean_exit("on-success"));
+        assert!(!restarts_after_clean_exit("on-failure"));
+        assert!(!restarts_after_clean_exit("no"));
+        assert!(!restarts_after_clean_exit(""));
+    }
+}
