@@ -385,6 +385,13 @@ fn resolve(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| absolute(p))
 }
 
+/// The pid of the server `memora-cli start` launched on `state`, when it
+/// still runs (`db restore` on Windows, which has no /proc to ask).
+#[cfg(windows)]
+pub(crate) fn started_pid(state: &Path) -> Option<u32> {
+    read_pid(state).filter(|p| is_memora(*p))
+}
+
 /// The pid in `<state>/memora.pid`.
 fn read_pid(state: &Path) -> Option<u32> {
     std::fs::read_to_string(state.join(PID_FILE))

@@ -363,8 +363,20 @@ fn create_private(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Windows has no /proc: the server `memora-cli start` launched (its pid
+/// file). A server started another way still holds the file locked, which
+/// the restore reports when it cannot replace it.
+#[cfg(windows)]
+fn db_holders(db: &Path) -> Vec<u32> {
+    db.parent()
+        .and_then(crate::lifecycle::started_pid)
+        .into_iter()
+        .collect()
+}
+
 /// Pids of other processes holding `memora.db*` open (only our own processes
 /// unless run as root).
+#[cfg(unix)]
 fn db_holders(db: &Path) -> Vec<u32> {
     let names: Vec<PathBuf> = ["", "-wal", "-shm"]
         .iter()
@@ -509,7 +521,11 @@ fn copy_db(src: &Path, target: &Path) -> Result<()> {
             bail!("integrity_check of the copy failed: {ic}");
         }
         drop(copy);
-        std::fs::File::open(target)?.sync_all()?;
+        // Opened for writing: Windows refuses to flush a read-only handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(target)?
+            .sync_all()?;
         Ok(())
     })();
     if res.is_err() {
@@ -564,7 +580,8 @@ fn restore(ctx: &Ctx, file: &Path, force: bool) -> Result<i32> {
             .server_unit()
             .map(|u| format!("systemctl stop {u}"))
             .unwrap_or_else(|| {
-                "stop the memora server (systemctl stop <unit> or docker stop)".into()
+                "stop the memora server (memora-cli stop, systemctl stop <unit> or docker stop)"
+                    .into()
             });
         if !force {
             eprintln!(
@@ -695,7 +712,18 @@ fn restore_inner(state: &Path, src: &str, bytes: &[u8]) -> Result<Value> {
     for s in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(with_suffix(&db, s));
     }
-    std::fs::rename(&tmp, &db).context("putting the restored database in place")?;
+    if let Err(e) = std::fs::rename(&tmp, &db) {
+        let _ = std::fs::remove_file(&tmp);
+        // Windows: a database another process has open cannot be replaced.
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            bail!(
+                "{} is in use, so it was not replaced (is the memora server still running? \
+                 stop it first); the current database is unchanged",
+                db.display()
+            );
+        }
+        return Err(anyhow!(e).context("putting the restored database in place"));
+    }
     let _ = std::fs::remove_file(with_suffix(&tmp, "-journal"));
     fsync_dir(state);
     // migrate if the backup is older, and record the restore
