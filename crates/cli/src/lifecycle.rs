@@ -550,7 +550,7 @@ fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
 /// platform package, release zip and `cargo build` all put them together).
 fn server_binary() -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
-    let exe = exe.canonicalize().unwrap_or(exe);
+    let exe = memora_state::canonical_path(&exe).unwrap_or(exe);
     let bin = exe.with_file_name(format!("memora{}", std::env::consts::EXE_SUFFIX));
     if !crate::sys::is_executable(&bin) {
         anyhow::bail!(
