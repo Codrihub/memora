@@ -183,7 +183,7 @@ export const SHELL_CSS = `
 .profile-btn[aria-expanded=true] .pb-chev{transform:rotate(180deg)}
 /* Profile menu (account.ts): a panel as wide as the sidebar's content rising
    from the chip, a sidebar-wide popover beside the rail, or a bottom sheet on
-   phones and portrait tablets. Solid surface, one level above the sidebar. */
+   the phone layout. Solid surface, one level above the sidebar. */
 .pm-scrim{position:fixed;inset:0;z-index:74}
 .pm-scrim.dim{background:rgba(3,5,9,.55);opacity:0;transition:opacity var(--dur-3) var(--ease-out)}
 :root[data-theme=light] .pm-scrim.dim{background:rgba(15,23,42,.34)}

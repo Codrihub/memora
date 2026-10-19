@@ -178,11 +178,12 @@ export function openGuide(): void {
 /* ───────────────────────── profile menu ───────────────────────── */
 
 // Three shapes from one menu: a panel as wide as the sidebar rising from the
-// account chip, a popover beside the collapsed rail, and a bottom sheet on
-// phones and portrait tablets. Same items, same order, same keyboard.
+// account chip, a popover beside the collapsed rail, and a bottom sheet in
+// the phone layout. Same items, same order, same keyboard.
 
-/** Phones and portrait tablets get the bottom sheet. */
-export const SHEET_QUERY = '(max-width: 760px), (max-width: 1100px) and (orientation: portrait)';
+/** Only the phone layout (drawer + bottom tab bar) gets the bottom sheet;
+ *  wherever the sidebar or its rail is on screen, the menu hangs off it. */
+export const SHEET_QUERY = '(max-width: 760px)';
 
 type MenuMode = 'panel' | 'rail' | 'sheet';
 
