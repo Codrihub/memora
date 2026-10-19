@@ -99,6 +99,22 @@ release `SHA256SUMS`, creates a `memora` system user, and installs a hardened
 `sh install.sh --help` for every option, and see
 [docs/INSTALL.md](docs/INSTALL.md) for details.
 
+### npm (Linux x86_64 / arm64)
+
+```bash
+npm install -g @codrihub/memora
+mkdir -p ~/memora && cd ~/memora
+MEMORA_VAULT=./vault MEMORA_STATE=./state memora
+# in a second terminal, same folder:
+MEMORA_STATE=./state memora-cli          # then type /web
+```
+
+The package carries the prebuilt release binaries and the web UI (no install
+script, nothing downloaded at install time) and needs Node 18 or newer. It is
+handy for trying Memora or running it under your own user; for a server, the
+native installer adds the systemd service. On macOS and Windows use Docker or
+build from source. Update with `npm install -g @codrihub/memora@latest`.
+
 ### From source
 
 ```bash
@@ -213,7 +229,7 @@ Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 | Document | Contents |
 |---|---|
-| [docs/INSTALL.md](docs/INSTALL.md) | Native installer, Docker, reverse proxy, backups |
+| [docs/INSTALL.md](docs/INSTALL.md) | Native installer, Docker, npm, reverse proxy, backups |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every setting and where it lives |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment and hardening |
 | [docs/MCP.md](docs/MCP.md) | Connecting agents, OAuth, tool reference |

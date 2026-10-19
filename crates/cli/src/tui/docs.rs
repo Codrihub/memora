@@ -416,6 +416,11 @@ fn getting_started(base: &str) -> Vec<Block> {
               mkdir -p data state && sudo chown -R 1000:1000 data state\n\
               docker compose up -d\n\
               docker compose exec -it gateway memora-cli"),
+        p("npm (Linux x86_64 or arm64, Node 18+): installs `memora` and this console for your \
+           user, with no service. Start the server, then open the console in a second terminal."),
+        code("npm install -g @codrihub/memora\n\
+              MEMORA_VAULT=./vault MEMORA_STATE=./state memora\n\
+              MEMORA_STATE=./state memora-cli"),
         h("2. Create the owner with a one-time code"),
         li("Type `/web` here (or run `memora-cli setup`). It opens a setup window, 5 minutes by \
             default (1-60), and prints a one-time code."),
@@ -637,6 +642,8 @@ fn backups_updates() -> Vec<Block> {
             then downloads, verifies the checksum, swaps the binary and restarts the server. \
             Your data stays."),
         code("memora-cli update --check"),
+        li("Installed with npm? Update the package instead, then restart the server."),
+        code("npm install -g @codrihub/memora@latest"),
         h("Docker"),
         li("Update by pulling the new image; the data stays in `./data` and `./state`."),
         code("docker compose pull && docker compose up -d\ndocker compose exec gateway memora-cli db backup\ndocker compose exec gateway memora-cli db check"),

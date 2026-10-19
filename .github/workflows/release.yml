@@ -49,6 +49,8 @@ jobs:
 
       - name: Extract release notes from CHANGELOG.md
         shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           v="${{ steps.v.outputs.version }}"
@@ -68,6 +70,7 @@ jobs:
             echo '```sh'
             echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/v$v/scripts/install.sh | sudo sh -s -- --version $v"
             echo "docker pull ${IMAGE}:$v"
+            if [ -n "${NPM_TOKEN:-}" ]; then echo "npm install -g @codrihub/memora@$v"; fi
             echo '```'
             echo
             echo "Verify downloads with \`sha256sum -c SHA256SUMS --ignore-missing\`."
@@ -266,6 +269,86 @@ jobs:
             --title "Memora ${VERSION}" \
             --notes-file notes.md \
             --verify-tag "${flags[@]}"
+
+  # --------------------------------------------------------------------- npm
+  # @codrihub/memora runs the binary from @codrihub/memora-linux-<cpu>, an
+  # optionalDependency npm installs only on a matching machine (see npm/).
+  # Publishing needs the NPM_TOKEN secret; without it the packages are still
+  # built and smoke tested, and the publish step is skipped with a notice.
+  npm:
+    name: npm packages
+    needs: [verify, build, smoke, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-amd64
+          path: bin/linux-x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-arm64
+          path: bin/linux-arm64
+
+      - name: Assemble packages
+        run: |
+          node --no-warnings npm/build.ts --version "$VERSION" --out npm-dist --assets assets \
+            --bin linux-x64=bin/linux-x64 --bin linux-arm64=bin/linux-arm64
+
+      - name: Pack and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packs
+          for dir in npm-dist/*/; do npm pack "$dir" --pack-destination packs; done
+          ls -l packs
+          # The arm64 package is not on the registry yet; npm skips that
+          # optional dependency and uses the local x64 tarball.
+          tmp="$(mktemp -d)"
+          npm install --prefix "$tmp" --no-audit --no-fund \
+            "./packs/codrihub-memora-linux-x64-$VERSION.tgz" "./packs/codrihub-memora-$VERSION.tgz"
+          test "$("$tmp/node_modules/.bin/memora" --version)" = "memora $VERSION"
+          test "$("$tmp/node_modules/.bin/memora-cli" --version)" = "memora-cli $VERSION"
+
+      - name: Publish
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::notice::NPM_TOKEN is not set; skipping npm publish of @codrihub/memora $VERSION"
+            exit 0
+          fi
+          tag=latest
+          if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then tag=next; fi
+          # Platform packages first, so the wrapper never points at a missing
+          # version. A re-run skips what is already published.
+          for pkg in memora-linux-x64 memora-linux-arm64 memora; do
+            name="$(node -p "require('./npm-dist/$pkg/package.json').name")"
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is already published"
+              continue
+            fi
+            npm publish "./packs/codrihub-$pkg-$VERSION.tgz" --access public --tag "$tag" --provenance
+          done
 
   # ------------------------------------------------------------------ docker
   docker:

@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- npm install for Linux x86_64 and arm64: `npm install -g @codrihub/memora`
+  provides the `memora` and `memora-cli` commands. npm picks the matching
+  `@codrihub/memora-linux-x64` or `-linux-arm64` package with the prebuilt
+  release binaries; nothing is downloaded by an install script. The web UI
+  ships in the package. Other platforms get a clear message pointing to
+  Docker or a source build. The release workflow builds, smoke tests and
+  publishes the packages at the release version when the `NPM_TOKEN` secret
+  is set.
+- `memora-cli update` recognises an npm install and prints the npm command
+  to update it.
+
 ## [1.2.1] - 2026-10-19
 
 ### Changed

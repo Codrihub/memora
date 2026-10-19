@@ -2,8 +2,8 @@
 //! version and upgrade a native install through the installer it came with.
 //!
 //! The installer (`install.sh`) does the real work: download, sha256 check,
-//! atomic binary swap and service restart. Docker installs are updated by
-//! pulling a new image, so for them this only prints the commands.
+//! atomic binary swap and service restart. Docker and npm installs are updated
+//! by pulling a new image or package, so for them this only prints the commands.
 
 use crate::ok;
 use console::style;
@@ -22,6 +22,18 @@ fn installer() -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|p| p.is_file())
+}
+
+/// True when this binary came from the `@codrihub/memora` npm package (it then
+/// lives in `node_modules/@codrihub/memora-<platform>/bin`).
+fn npm_install() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|p| {
+            p.to_string_lossy()
+                .contains("/node_modules/@codrihub/memora-")
+        })
 }
 
 /// `(major, minor, patch)` of a plain semantic version; pre-releases sort
@@ -97,6 +109,15 @@ pub fn run(theme: Option<&ColorfulTheme>, yes: bool, check_only: bool) -> i32 {
         println!(
             "  {}",
             style("docker compose pull && docker compose up -d").cyan()
+        );
+        println!("The state database is migrated automatically on start.");
+        return 0;
+    }
+    if npm_install() {
+        println!("This copy was installed with npm. Update it with:");
+        println!(
+            "  {}",
+            style("npm install -g @codrihub/memora@latest").cyan()
         );
         println!("The state database is migrated automatically on start.");
         return 0;

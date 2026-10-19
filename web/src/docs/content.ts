@@ -166,8 +166,10 @@ function getStarted(c: PageCtx): string {
     steps([
       [
         'Install Memora',
-        p('Use the native installer on Linux with systemd, or Docker Compose. Both are covered in ' + docLink('install', 'Install') + '.') +
-          codeBlockHTML('curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh', 'bash'),
+        p('Use the native installer on Linux with systemd, Docker Compose, or npm on Linux. All are covered in ' + docLink('install', 'Install') + '.') +
+          codeBlockHTML('curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh', 'bash') +
+          p(`Or with npm on Linux x86_64 or arm64 (Node 18+), then start ${code('memora')} and run ${code('memora-cli')} in a second terminal:`) +
+          codeBlockHTML('npm install -g @codrihub/memora', 'bash'),
       ],
       [
         'Open the console and type /web',
@@ -448,7 +450,7 @@ export const SECTIONS: DocSection[] = [
   { slug: 'get-started', title: 'Get started', group: 'Getting started', lead: 'What Memora is and how to go from install to an agent that remembers.', source: 'README.md', render: getStarted },
   { slug: 'agent-instructions', title: 'Agent instructions', group: 'Getting started', lead: 'The recommended prompt for agents that use Memora as their memory.', render: agentInstructions },
   { slug: 'connect', title: 'Connect an agent', group: 'Getting started', lead: 'The MCP URL, API keys and ready-made client configs.', render: connect },
-  { slug: 'install', title: 'Install', group: 'Guides', lead: 'Native installer, Docker, reverse proxy, backups and upgrades.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
+  { slug: 'install', title: 'Install', group: 'Guides', lead: 'Native installer, Docker, npm, reverse proxy, backups and upgrades.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
   { slug: 'configuration', title: 'Configuration', group: 'Guides', lead: 'Every setting and where it lives.', source: 'docs/CONFIGURATION.md', render: (c) => c.md(configMd, 'docs/CONFIGURATION.md') },
   { slug: 'mcp', title: 'MCP', group: 'Guides', lead: 'Transport, connecting clients, OAuth, results and errors.', source: 'docs/MCP.md', render: (c) => c.md(mcpMd, 'docs/MCP.md') },
   { slug: 'tool-reference', title: 'Tool reference', group: 'Reference', lead: 'The MCP tool catalog, switches and per-key permissions.', source: 'docs/contracts/tools-permissions.md', render: toolReference, mount: mountTools },

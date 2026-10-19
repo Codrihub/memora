@@ -8,13 +8,16 @@ Memora ships as two binaries plus a folder of web UI assets:
 | `memora-cli` | The operator console. Run it with no arguments for slash commands (`/guide`, `/web`, `/config`, ...) |
 | `assets/` | Web UI files, found through `MEMORA_ASSETS` |
 
-There are two supported ways to run it: **native** (systemd, via `install.sh`)
-and **Docker** (Compose). Both end the same way: open the console, type `/web`,
-and finish setup in the browser.
+There are two supported ways to run it as a service: **native** (systemd, via
+`install.sh`) and **Docker** (Compose). On Linux it can also be installed with
+**npm**, which is handy for trying it or running it under your own user. All
+end the same way: open the console, type `/web`, and finish setup in the
+browser.
 
 - [Network exposure](#network-exposure)
 - [Native install](#native-install)
 - [Docker](#docker)
+- [npm](#npm)
 - [Reverse proxy](#reverse-proxy)
 - [Backups](#backups)
 - [Automation: `--check` and `--upgrade`](#automation---check-and---upgrade)
@@ -329,6 +332,42 @@ docker compose pull && docker compose up -d     # or: docker compose up -d --bui
 Settings: `docker compose exec -it gateway memora-cli` → `/config`, then
 `docker compose restart gateway` (`/restart` cannot restart a container from
 inside).
+
+## npm
+
+Requirements: Linux on x86_64 or arm64, Node 18 or newer, and `git` (vault
+history uses it).
+
+```sh
+npm install -g @codrihub/memora
+mkdir -p ~/memora && cd ~/memora
+MEMORA_VAULT=./vault MEMORA_STATE=./state memora
+# in a second terminal, same folder:
+MEMORA_STATE=./state memora-cli                 # then /guide, or /web
+```
+
+`npx @codrihub/memora --version` runs it without a global install.
+
+`@codrihub/memora` holds the `memora` and `memora-cli` commands and the web UI
+(used unless `MEMORA_ASSETS` is set). The binaries come from
+`@codrihub/memora-linux-x64` or `@codrihub/memora-linux-arm64`, optional
+dependencies npm installs only on a matching machine. They are the static
+binaries of the GitHub release with the same version, so glibc and musl
+distributions both work. There is no install script and nothing is downloaded
+at install time, so it works with `--ignore-scripts` and from a registry
+mirror; it does not work with `--omit=optional`, which leaves the binaries
+out. On macOS and Windows the commands print where to go instead: use
+[Docker](#docker) or build from source (on Windows, WSL 2 works too).
+
+The npm install sets up no service, user or data folder: the server runs as
+you, with `MEMORA_STATE` and `MEMORA_VAULT` where you point them (`./state`
+by default). Keep the state folder private (`chmod 700 state`), since it
+holds the owner account and key hashes. For a long-running server, prefer the
+[native install](#native-install).
+
+Upgrade with `npm install -g @codrihub/memora@latest` (`memora-cli update`
+prints this too) and restart the server; the state database is migrated on
+start.
 
 ## Reverse proxy
 
