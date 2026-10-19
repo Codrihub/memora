@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = "memora-v1.3.3";
+  const VERSION = "memora-v1.3.4";
   const SHELL = "shell-" + VERSION;
   const sw = self;
   const OFFLINE_FILES = ["/offline.html", "/icon-192.png", "/icon-512.png"];

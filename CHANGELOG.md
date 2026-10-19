@@ -5,6 +5,75 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-10-20
+
+Every MCP tool was tested against bad, missing, hidden and extreme input. This
+release fixes what that found. Some calls that used to be accepted, and did
+something other than what was asked, are now refused with a clear message.
+
+### Added
+
+- Agent instructions come in five styles: Balanced (recommended), Remember
+  everything, Private, Session journal and Read only, each in a full and a
+  short version, on the docs page, in the connect guide and in the console.
+  Remember everything warns that secrets end up as plain Markdown and how to
+  hide them with privacy rules. Where to paste covers more clients.
+- The live panel in the header opens an agent's page; in Activity, an agent's
+  name on any row, the event drawer and an agent's activity page do too.
+- `list_trash` (MCP): the notes in the trash, with where they came from.
+- Version history can be turned on with a plain `git init` in the vault;
+  `docs/CONFIGURATION.md` explains how.
+
+### Changed
+
+- `tools/call` checks arguments against the tool's schema: unknown names,
+  missing required arguments, wrong types, values outside an enum and numbers
+  below the minimum are refused. Every tool error starts with the tool name.
+- Search no longer keeps a `.fts.db` index. Search and the graph, query and
+  digest tools read one in-memory cache that follows the files on disk, so
+  results are right at startup and include notes changed outside Memora.
+  Old `.fts.db` files are removed.
+- `bulk_delete` moves notes to the trash, and refuses the whole call when any
+  path is wrong. `restore_trash` puts a note back where it was.
+- Moving or renaming a note or folder rewrites the wikilinks that pointed to
+  it, in MCP and in the web UI; results report `links_updated`.
+- `delete_folder` moves notes to the parent folder and keeps their subfolders.
+- Soft locks are enforced: an agent cannot write to a note another agent has
+  locked, and only the holder (or the owner) can release a lock.
+- Tags may contain letters, digits and `- _ / .`; tag tools ignore case.
+  Frontmatter fields refuse line breaks.
+- `follow_ups` returns `{notes, count, truncated}` and takes `limit`; it also
+  counts `waiting` and `blocked`. `digest` reports all events and takes `limit`.
+- Export and import use an exchange folder inside the state folder (0700),
+  not a folder shared by every instance in `/tmp`.
+- `template_create` only reads templates from `Templates/`.
+
+### Fixed
+
+- `move_memory` without `folder` moved the note to the top level, and
+  `create_memory` with an unknown argument created the note somewhere else.
+- `bulk_replace` with an empty `find` inserted text between every character.
+- Tags or fields with line breaks or YAML characters could break a note's
+  frontmatter; `mention_agent` could add fake mention lines.
+- `privacy_set` with an empty agent list removed the rule, exposing a hidden
+  folder; an agent could take another agent's display name or "owner".
+- An agent could release or create locks in another agent's name.
+- `template_create` could read any note, including hidden ones.
+- Search snippets mixed highlight tags with raw note HTML.
+- `get_subgraph` reversed edges, dropped one side of two-way links and
+  returned one node too many; nested folders were ignored by `query_memory`,
+  `digest`, `bulk_replace` and `bulk_delete`; `list_memory` showed nested
+  notes under their top-level folder.
+- `merge_memory` skipped missing sources silently, merged a note into itself
+  and pasted frontmatter into the body; `batch_create` ignored typos.
+- `create_folder` accepted `Root`; `move_folder` into a note created a folder.
+- History tools returned empty results when the vault has no git repository;
+  they now say version history is off. `snapshot` explains its refusals.
+- Many tools returned an empty success for paths that do not exist; they now
+  say what is missing.
+- Parallel calls of one tool could close each other's rows in Activity.
+- `batch_create` did not tell open browsers about the notes it created.
+
 ## [1.3.3] - 2026-10-20
 
 ### Added
@@ -336,6 +405,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.4]: https://github.com/Codrihub/memora/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Codrihub/memora/releases/tag/v1.3.3
 [1.3.2]: https://github.com/Codrihub/memora/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Codrihub/memora/releases/tag/v1.3.1

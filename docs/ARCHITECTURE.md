@@ -43,7 +43,8 @@ through the UI and one made through an agent take the same code path.
 - `search()` blends word matching over name and body with `tag:` and `#tag`
   filters, scored by hits, name hits, phrase, and position.
 - The graph: nodes are notes, links are resolved wikilinks.
-- Versioning: vault changes are committed to git (`create:`, `edit:`,
+- Versioning: when the vault is a git repository, vault changes are committed
+  to it (`create:`, `edit:`,
   `rename:`, `move:`, `delete:`, `folder:`); history, diff, restore, and
   snapshot read from that history.
 - Privacy views: while a caller's `PathView` is set, listings skip hidden
