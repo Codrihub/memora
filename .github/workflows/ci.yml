@@ -36,6 +36,54 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  # The same MSVC build the release ships (static C runtime), plus the test
+  # suite, so a Windows break shows up before a tag is pushed.
+  windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --target x86_64-pc-windows-msvc
+
+      - name: Smoke test the server
+        shell: pwsh
+        run: |
+          cargo build --release --locked --target x86_64-pc-windows-msvc --bin memora --bin memora-cli
+          $bin = "target/x86_64-pc-windows-msvc/release"
+          $env:MEMORA_STATE = "$env:RUNNER_TEMP\memora-state"
+          $env:MEMORA_VAULT = "$env:RUNNER_TEMP\memora-vault"
+          $env:MEMORA_VAULT_AUTO = "true"
+          $env:MEMORA_ASSETS = "crates/http/assets"
+          $env:MEMORA_PORT = "18400"
+          $p = Start-Process -FilePath "$bin/memora.exe" -PassThru -NoNewWindow -RedirectStandardOutput server.log -RedirectStandardError server.err
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18400/healthz | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          & "$bin/memora-cli.exe" --state $env:MEMORA_STATE status
+          Stop-Process -Id $p.Id -Force
+          Get-Content server.log, server.err -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "memora.exe did not answer /healthz" }
+          if (-not (Test-Path "$env:MEMORA_STATE\memora.db")) { throw "no state database" }
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest
