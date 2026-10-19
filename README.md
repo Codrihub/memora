@@ -74,6 +74,9 @@ curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/instal
 # or anywhere with Docker
 docker run -d --name memora --restart unless-stopped -p 8400:8400 \
   -v memora-data:/data -v memora-state:/state ghcr.io/codrihub/memora:latest
+
+# or with npm (Linux x86_64 / arm64, Node 18+), then keep it running
+npm install -g @codrihub/memora && memora
 ```
 
 **2. Get a one-time setup code**
@@ -81,6 +84,7 @@ docker run -d --name memora --restart unless-stopped -p 8400:8400 \
 ```bash
 sudo memora-cli setup --minutes 15                    # native
 docker exec -it memora memora-cli setup --minutes 15  # Docker
+memora-cli setup --minutes 15                         # npm, in a second terminal
 ```
 
 **3. Open the link it prints** (`http://<your-server>:8400/login`), enter the code
