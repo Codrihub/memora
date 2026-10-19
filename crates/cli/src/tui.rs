@@ -44,20 +44,47 @@ extern "C" fn on_sigint(_: libc::c_int) {
     }
 }
 
-/// Windows: the console restores its own input mode when the process exits on
-/// Ctrl-C; only the cursor needs showing again.
+/// Windows: the console input mode (echo, line input) belongs to the console,
+/// not to this process, so a prompt that turned echo off (a password) would
+/// leave the shell without echo after Ctrl+C. The mode at startup is saved
+/// and put back by the Ctrl+C handler, which also shows the cursor again.
 #[cfg(windows)]
 fn install_sigint_guard() {
-    extern "system" fn on_ctrl(_: u32) -> i32 {
-        eprintln!("\x1b[?25h");
-        std::process::exit(130);
-    }
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
     #[link(name = "kernel32")]
     extern "system" {
         fn SetConsoleCtrlHandler(handler: extern "system" fn(u32) -> i32, add: i32) -> i32;
+        fn GetStdHandle(which: u32) -> *mut c_void;
+        fn GetConsoleMode(h: *mut c_void, mode: *mut u32) -> i32;
+        fn SetConsoleMode(h: *mut c_void, mode: u32) -> i32;
     }
-    // SAFETY: registers a handler with the right signature for the process lifetime.
-    unsafe { SetConsoleCtrlHandler(on_ctrl, 1) };
+    /// STD_INPUT_HANDLE ((DWORD)-10).
+    const STD_INPUT_HANDLE: u32 = 0xFFFF_FFF6;
+    /// The console input handle and its mode at startup (0: not a console).
+    static INPUT: AtomicIsize = AtomicIsize::new(0);
+    static MODE: AtomicU32 = AtomicU32::new(0);
+
+    extern "system" fn on_ctrl(_: u32) -> i32 {
+        let h = INPUT.load(Ordering::SeqCst);
+        if h != 0 {
+            // SAFETY: the handle was a valid console input handle at startup.
+            unsafe { SetConsoleMode(h as *mut c_void, MODE.load(Ordering::SeqCst)) };
+        }
+        eprintln!("\x1b[?25h");
+        std::process::exit(130);
+    }
+    // SAFETY: plain console calls on this process's standard input handle; the
+    // handler has the right signature and stays registered for the process lifetime.
+    unsafe {
+        let h = GetStdHandle(STD_INPUT_HANDLE);
+        let mut mode = 0;
+        if !h.is_null() && h as isize != -1 && GetConsoleMode(h, &mut mode) != 0 {
+            MODE.store(mode, Ordering::SeqCst);
+            INPUT.store(h as isize, Ordering::SeqCst);
+        }
+        SetConsoleCtrlHandler(on_ctrl, 1);
+    }
 }
 
 /// Remember the terminal settings and install the SIGINT guard.
