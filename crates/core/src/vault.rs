@@ -7138,7 +7138,14 @@ mod folder_tests {
             BTreeSet::from(["A/one.md".to_string(), "A/B/one.md".to_string()])
         );
         assert_eq!(read(&d, "x.md"), "[[A/one]]", "links are left alone");
-        s.restore_trash_impl("one-1.md", "").unwrap();
+        // Which copy gets the `-1` name depends on the walk order (it differs on Windows).
+        let nested = s
+            .list_trash_impl()
+            .into_iter()
+            .find(|t| t["original"] == "A/B/one.md")
+            .and_then(|t| t["name"].as_str().map(String::from))
+            .unwrap();
+        s.restore_trash_impl(&nested, "").unwrap();
         assert!(d.join("A/B/one.md").is_file());
         fs::remove_dir_all(&d).ok();
     }
