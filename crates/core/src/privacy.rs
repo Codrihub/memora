@@ -257,6 +257,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// An import refuses entries the caller may not see without naming them.
+    #[test]
+    fn import_does_not_echo_hidden_entry_names() {
+        use std::io::Write;
+        let d = vault("import");
+        let m = Mutex::new(MemoryStore::new(&d));
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let o = zip::write::SimpleFileOptions::default();
+            for name in [
+                "Private/merger-with-acme.md",
+                "Notes/secret.md",
+                "Public/new.md",
+            ] {
+                zw.start_file(name, o).unwrap();
+                zw.write_all(b"x").unwrap();
+            }
+            zw.finish().unwrap();
+        }
+        let s = lock_as(&m, view());
+        let r = s.import_zip_impl(&buf, true).unwrap();
+        let text = r.to_string();
+        assert!(
+            !text.contains("merger") && !text.contains("secret"),
+            "{text}"
+        );
+        assert_eq!(r["unsafe"].as_array().unwrap().len(), 2, "{r}");
+        assert_eq!(r["added"], json!(["Public/new.md"]));
+        drop(s);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// `.folders.json` edited outside Memora cannot smuggle CSS into the UI's
+    /// style attributes through a folder color.
+    #[test]
+    fn folder_meta_read_drops_invalid_colors_and_icons() {
+        let d = vault("fmeta");
+        std::fs::write(
+            d.join(".folders.json"),
+            r##"{"Public": {"color": "red;background:url(https://e.example/x)", "icon": "<b>"},
+                "Notes": {"color": "#12ab9f", "icon": "book", "desc": "d"}}"##,
+        )
+        .unwrap();
+        let s = MemoryStore::new(&d);
+        let all = s.get_folder_meta_impl(None).unwrap();
+        assert_eq!(all["Public"], json!({}));
+        assert_eq!(
+            all["Notes"],
+            json!({"color": "#12ab9f", "icon": "book", "desc": "d"})
+        );
+        assert_eq!(s.get_folder_meta_impl(Some("Public")).unwrap(), json!({}));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_view_filters_listings_and_reads() {
         let d = vault("read");

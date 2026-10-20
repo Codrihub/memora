@@ -4940,6 +4940,23 @@ impl MemoryStore {
         if self.restricted() {
             meta.retain(|k, v| self.visible(k) && self.value_visible(v));
         }
+        // The file can be edited outside Memora (sync, a text editor); the web
+        // UI puts color into a style attribute, so only values set_folder_meta
+        // would accept are passed on.
+        for v in meta.values_mut() {
+            if let Some(o) = v.as_object_mut() {
+                if o.get("color")
+                    .is_some_and(|c| !c.as_str().is_some_and(is_hex_color))
+                {
+                    o.remove("color");
+                }
+                if o.get("icon")
+                    .is_some_and(|c| !c.as_str().is_some_and(is_folder_icon))
+                {
+                    o.remove("icon");
+                }
+            }
+        }
         let Some(f) = folder.filter(|f| !f.is_empty()) else {
             return Ok(Value::Object(meta));
         };
@@ -6092,7 +6109,16 @@ impl MemoryStore {
                     } else {
                         "path not allowed"
                     };
-                    unsafe_.push(json!({"entry": name, "reason": reason}));
+                    // Nor is the hidden path echoed back: the zip may come from
+                    // someone who can see more (the exchange folder is shared).
+                    let entry = if self.restricted()
+                        && (!self.visible(&rel) || self.mentions_hidden(&rel))
+                    {
+                        "(hidden entry)".to_string()
+                    } else {
+                        name
+                    };
+                    unsafe_.push(json!({"entry": entry, "reason": reason}));
                     continue;
                 }
             };
