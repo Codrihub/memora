@@ -7,11 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-10-21
+
+### Added
+
+- Rows in the sidebar have a "⋯" button that opens the same menu as a right
+  click. It shows on hover and keyboard focus, and always on touch screens.
+- Copy path and Copy wikilink in every note and folder menu (sidebar, Nodes list,
+  node cards and the reader), so you can point an agent at an exact note. Copy
+  wikilink now copies the full path, e.g. `[[Projects/Launch plan]]`.
+- Deleting a folder that holds notes now asks what to do with them: move them to
+  the parent folder, the top-level folder, Root or any other folder, or send
+  everything to `.Trash`. The MCP tool `delete_folder` and `/api/delete-folder`
+  take the same choice as optional arguments (`into`, `mode: "trash"`); without
+  them nothing changes.
+- An "Update & uninstall" guide in the documentation (web, console and
+  `docs/INSTALL.md`), including how to remove versions before 1.3.2 by hand,
+  safely: it stops Memora, removes only Memora's program and state folder by
+  exact path, asks before deleting, and keeps the vault unless you choose
+  otherwise.
+- A real "Page not found" / "Node not found" view instead of a silent redirect
+  to Overview.
+
 ### Changed
 
 - Windows is installed with npm (`npm install -g @codrihub/memora`); releases no
   longer carry a separate Windows zip. The npm package for Windows x64 is built
   and tested as before. Zips of 1.3.0 to 1.3.5 stay on their release pages.
+- The note delete dialog says plainly that a note is deleted for good (there is
+  no trash for single notes) and when an agent can still restore it.
+- `memora-cli update`, `/update` and `/restart` detect how Memora was installed
+  (npm, Docker, the installer, a release folder or a source build) and give the
+  matching steps. The npm launcher and the Docker image set `MEMORA_INSTALL`.
+- `memora-cli help` lists start, stop, restart, update and uninstall, and an
+  unknown command prints the version and points to `memora-cli update`.
+
+### Fixed
+
+- An npm install was reported as "built from source" by `/update`, and
+  `/restart` suggested systemctl on Windows.
+- `memora-cli start`, `stop`, `restart` and `uninstall` without `--state` could
+  act on another install's running server (for example a systemd service). They
+  now name the state folder and service first, and refuse to drive a service
+  that belongs to a different kind of install.
+- `#tags` inside inline code, code blocks, URLs (`…#install`) and link targets
+  were read as tags, and a tag written twice was listed twice. Tag rename and
+  merge no longer rewrite text in code or URLs either.
+- Activity: rows of read-only calls (including `pin`/`unpin`) no longer stay
+  "running"; the Live popover only says "now" for agents that are active; agent
+  colours match everywhere; counts that may be cut off by the log limit show
+  "2,000+".
+- The sidebar footer lines no longer overlap when they switch.
+- Nodes list excerpts load as rows come into view instead of queueing; folder
+  paths and tags end with an ellipsis on phones.
+- Agent labels in the brain no longer cover the map controls on phones, and the
+  Overview Agents card no longer shows 0 while loading.
 
 ## [1.3.5] - 2026-10-20
 
@@ -430,6 +480,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.6]: https://github.com/Codrihub/memora/releases/tag/v1.3.6
 [1.3.5]: https://github.com/Codrihub/memora/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Codrihub/memora/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Codrihub/memora/releases/tag/v1.3.3

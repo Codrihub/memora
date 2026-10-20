@@ -4,7 +4,7 @@
 // It runs outside the page, so the DOM types do not describe it. Vault data
 // always comes from the network and is never cached.
 
-const VERSION = 'memora-v1.3.5';
+const VERSION = 'memora-v1.3.6';
 const SHELL = 'shell-' + VERSION;
 
 interface SWEvent extends Event {
