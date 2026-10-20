@@ -164,12 +164,14 @@ pub fn color_of(rel_path: &str) -> String {
 // Store
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct MemoryStore {
     root: PathBuf,
     /// Parsed facts per note ([`NoteMeta`]), validated by (mtime, size). Rebuilt
     /// from the current walk on every use, so deleted notes drop out and the
-    /// map never outgrows the vault. This is the search index too.
-    link_cache: std::sync::Mutex<HashMap<PathBuf, LinkCacheEntry>>,
+    /// map never outgrows the vault. This is the search index too. Shared by
+    /// [`MemoryStore::snapshot`] copies.
+    link_cache: Arc<std::sync::Mutex<HashMap<PathBuf, LinkCacheEntry>>>,
     /// Paths the current caller may see (`None` = the owner, everything). Set only for
     /// the length of one locked call by [`privacy::lock_as`].
     pub(crate) view: Option<std::sync::Arc<dyn privacy::PathView>>,
@@ -188,7 +190,7 @@ impl MemoryStore {
         let root = root.as_ref().to_path_buf();
         Self {
             root,
-            link_cache: std::sync::Mutex::new(HashMap::new()),
+            link_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
             view: None,
             hook: None,
         }
@@ -196,6 +198,13 @@ impl MemoryStore {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// A copy of this store for read-only work after the store lock is released:
+    /// same vault, same caller view, same note cache. Long reads (the tree, a note
+    /// view) then never wait for, or hold up, writes and agent calls.
+    pub fn snapshot(&self) -> MemoryStore {
+        self.clone()
     }
 
     /// Walk every note the current caller may see (see [`privacy`]), returning
@@ -273,15 +282,21 @@ impl MemoryStore {
     /// outside Memora (Obsidian, git pull, a copied file) show up on the next
     /// call and nothing re-reads the whole vault per request.
     pub(crate) fn scan(&self, files: &[(String, String, PathBuf)]) -> Vec<Arc<NoteMeta>> {
+        // `stat` every file before taking the cache lock, so concurrent readers
+        // (snapshots, agent calls) only queue for the short bookkeeping below.
+        let stats: Vec<(bool, Option<std::time::SystemTime>, u64)> = files
+            .iter()
+            .map(|(_, _, fp)| match fs::metadata(fp) {
+                Ok(m) => (true, m.modified().ok(), m.len()),
+                Err(_) => (false, None, 0),
+            })
+            .collect();
         let mut cache = self.link_cache.lock().unwrap_or_else(|e| e.into_inner());
         let mut fresh: HashMap<PathBuf, LinkCacheEntry> = HashMap::with_capacity(files.len());
         let mut out = Vec::with_capacity(files.len());
-        for (_, _, fp) in files {
-            let md = fs::metadata(fp).ok();
-            let mtime = md.as_ref().and_then(|m| m.modified().ok());
-            let len = md.as_ref().map(|m| m.len()).unwrap_or(0);
+        for ((_, _, fp), &(exists, mtime, len)) in files.iter().zip(&stats) {
             let entry = match cache.remove(fp) {
-                Some(e) if md.is_some() && e.mtime == mtime && e.len == len => e,
+                Some(e) if exists && e.mtime == mtime && e.len == len => e,
                 _ => LinkCacheEntry {
                     mtime,
                     len,
@@ -299,6 +314,30 @@ impl MemoryStore {
             *cache = fresh;
         }
         out
+    }
+
+    /// Re-read and re-parse notes this server just wrote, created or removed (full
+    /// paths), leaving every other cache entry alone, instead of re-checking the
+    /// whole vault. Always parsed again: a write can keep a note's size and land
+    /// within the same mtime tick as the entry it replaces.
+    pub(crate) fn refresh_notes(&self, files: &[&Path]) {
+        let mut cache = self.link_cache.lock().unwrap_or_else(|e| e.into_inner());
+        for fp in files {
+            match fs::metadata(fp) {
+                Ok(md) if md.is_file() => {
+                    let meta = Arc::new(self.note_meta(&self.read(fp).unwrap_or_default()));
+                    let entry = LinkCacheEntry {
+                        mtime: md.modified().ok(),
+                        len: md.len(),
+                        meta,
+                    };
+                    cache.insert(fp.to_path_buf(), entry);
+                }
+                _ => {
+                    cache.remove(*fp);
+                }
+            }
+        }
     }
 
     /// Parse one note's content into a [`NoteMeta`].
@@ -544,14 +583,16 @@ impl MemoryStore {
             return Vec::new();
         }
         // tag:foo / #foo -> tag filter
-        let tag_re = Regex::new(r"(?:tag:|#)([\w/-]+)").unwrap();
+        static TAG_RE: OnceLock<Regex> = OnceLock::new();
+        let tag_re = cached(&TAG_RE, || Regex::new(r"(?:tag:|#)([\w/-]+)").unwrap());
         let tag_filters: Vec<String> = tag_re
             .captures_iter(&q)
             .map(|c| c.get(1).unwrap().as_str().to_string())
             .collect();
         let q_stripped = tag_re.replace_all(&q, " ").trim().to_string();
 
-        let word_re = Regex::new(r"[^\w/-]+").unwrap();
+        static WORD_RE: OnceLock<Regex> = OnceLock::new();
+        let word_re = cached(&WORD_RE, || Regex::new(r"[^\w/-]+").unwrap());
         let mut words: Vec<String> = Vec::new();
         for w in word_re.split(&q_stripped).filter(|w| !w.is_empty()) {
             if !words.iter().any(|x| x == w) {
@@ -1688,6 +1729,148 @@ mod resource_tests {
         let dg = s.digest_impl(Some("Projects"), None, 1);
         assert_eq!(dg["events"], 2, "{dg}");
         assert_eq!(dg["truncated"], true);
+        fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn tmp_vault(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "memora-core-{tag}-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        fs::create_dir_all(d.join("Projects")).unwrap();
+        d
+    }
+
+    fn cached(s: &MemoryStore, d: &Path, rel: &str) -> Option<Arc<NoteMeta>> {
+        s.link_cache
+            .lock()
+            .unwrap()
+            .get(&d.join(rel))
+            .map(|e| e.meta.clone())
+    }
+
+    fn tree_paths(s: &MemoryStore) -> Vec<String> {
+        let mut v: Vec<String> = s.tree().into_values().flatten().map(|n| n.path).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn a_write_reparses_only_that_note() {
+        let d = tmp_vault("write-one");
+        fs::write(d.join("a.md"), "about [[b]] #one").unwrap();
+        fs::write(d.join("Projects/b.md"), "back to [[a]]").unwrap();
+        let s = MemoryStore::new(&d);
+        assert_eq!(s.reindex().unwrap(), 2);
+        let a0 = cached(&s, &d, "a.md").unwrap();
+        let b0 = cached(&s, &d, "Projects/b.md").unwrap();
+
+        s.save_impl("a.md", "about [[b]] #two and more").unwrap();
+        let a1 = cached(&s, &d, "a.md").unwrap();
+        assert!(!Arc::ptr_eq(&a0, &a1), "the written note is parsed again");
+        assert_eq!(a1.tags, ["two"]);
+        let b1 = cached(&s, &d, "Projects/b.md").unwrap();
+        assert!(Arc::ptr_eq(&b0, &b1), "other notes keep their entry");
+
+        // A new note enters the cache on its own; nothing else is touched.
+        let rel = s.create_impl("C", "Projects", Some("new [[a]]")).unwrap();
+        assert_eq!(rel, "Projects/C.md");
+        assert!(cached(&s, &d, "Projects/C.md").is_some());
+        assert!(Arc::ptr_eq(&a1, &cached(&s, &d, "a.md").unwrap()));
+        assert_eq!(s.link_cache.lock().unwrap().len(), 3);
+
+        // Reads see the write at once.
+        assert_eq!(s.search("more", 5).len(), 1);
+        assert_eq!(s.search_by_tag_impl("two", 10).unwrap().len(), 1);
+        assert!(s.search_by_tag_impl("one", 10).unwrap().is_empty());
+
+        // Same size, same mtime tick: a write still replaces the entry.
+        s.save_impl("a.md", "same size #t1").unwrap();
+        s.save_impl("a.md", "same size #t2").unwrap();
+        assert_eq!(cached(&s, &d, "a.md").unwrap().tags, ["t2"]);
+        assert_eq!(s.search_by_tag_impl("t2", 10).unwrap().len(), 1);
+        // A single note's tags and frontmatter are always read from the file.
+        fs::write(d.join("a.md"), "same size #t3").unwrap();
+        assert_eq!(s.note_tags_fm(&d.join("a.md")).0, ["t3"]);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn tree_follows_writes_and_outside_changes() {
+        let d = tmp_vault("tree");
+        fs::write(d.join("a.md"), "a").unwrap();
+        let s = MemoryStore::new(&d);
+        assert_eq!(tree_paths(&s), ["a.md"]);
+        s.create_impl("B", "Projects", None).unwrap();
+        assert_eq!(tree_paths(&s), ["Projects/B.md", "a.md"]);
+        // Changes made outside Memora (an editor, git pull) show up on the next call.
+        fs::create_dir_all(d.join("Ideas")).unwrap();
+        fs::write(d.join("Ideas/x.md"), "outside").unwrap();
+        fs::remove_file(d.join("a.md")).unwrap();
+        assert_eq!(tree_paths(&s), ["Ideas/x.md", "Projects/B.md"]);
+        s.rename_impl("Ideas/x.md", "y").unwrap();
+        assert_eq!(tree_paths(&s), ["Ideas/y.md", "Projects/B.md"]);
+        // A snapshot reads the same vault and shares the note cache.
+        let snap = s.snapshot();
+        assert_eq!(tree_paths(&snap), tree_paths(&s));
+        assert_eq!(snap.search("outside", 5).len(), 1);
+        assert!(Arc::ptr_eq(&snap.link_cache, &s.link_cache));
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn tags_and_backlinks_come_from_the_cache_and_follow_outside_edits() {
+        let d = tmp_vault("tags");
+        let a = "---\ntags: [alpha, beta]\n---\nlinks [[b]] #gamma\n";
+        fs::write(d.join("a.md"), a).unwrap();
+        fs::write(d.join("Projects/b.md"), "plain").unwrap();
+        let s = MemoryStore::new(&d);
+        // Same tags and frontmatter as the renderer reports.
+        let (_, tags, fm) = crate::vault::render_markdown(a, &|_| None);
+        assert_eq!(s.note_tags_fm(&d.join("a.md")), (tags, fm));
+        assert_eq!(
+            s.note_tags_fm(&d.join("missing.md")),
+            (Vec::new(), serde_json::json!({}))
+        );
+        let counts = |s: &MemoryStore| -> Vec<(String, u64)> {
+            s.list_tags_impl()
+                .into_iter()
+                .map(|v| {
+                    (
+                        v["tag"].as_str().unwrap().to_string(),
+                        v["count"].as_u64().unwrap(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(counts(&s).len(), 3);
+        let backlinks =
+            |s: &MemoryStore| s.read_note_impl("Projects/b.md").unwrap()["backlinks"].clone();
+        assert_eq!(
+            backlinks(&s),
+            serde_json::json!([{"path": "a.md", "name": "a"}])
+        );
+        // Edited outside Memora: tags and backlinks follow on the next call.
+        fs::write(d.join("Projects/b.md"), "now #alpha too, see [[a]]").unwrap();
+        fs::write(d.join("a.md"), "no links any more").unwrap();
+        assert_eq!(counts(&s), [("alpha".to_string(), 1)]);
+        assert_eq!(backlinks(&s), serde_json::json!([]));
+        let hits = s.search_by_tag_impl("ALPHA", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["path"], "Projects/b.md");
+        // The note view still resolves links from the note's own folder first.
+        fs::write(d.join("Projects/a.md"), "near").unwrap();
+        let html = s.read_note_impl("Projects/b.md").unwrap()["html"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(html.contains("Projects/a.md"), "{html}");
         fs::remove_dir_all(&d).ok();
     }
 }

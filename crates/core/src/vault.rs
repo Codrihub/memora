@@ -19,6 +19,15 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+/// A regex compiled once per call site (the renderer runs per line; compiling its
+/// patterns on every call dominated the cost of rendering a note).
+macro_rules! static_re {
+    ($pat:expr) => {{
+        static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| Regex::new($pat).unwrap())
+    }};
+}
+
 // ---------------------------------------------------------------------------
 // Expected errors (user-facing, not bugs)
 // ---------------------------------------------------------------------------
@@ -101,7 +110,7 @@ pub fn is_hex_color(c: &str) -> bool {
 
 /// One folder name segment: word characters, spaces (as `_`) and dashes.
 pub fn clean_segment(name: &str) -> MResult<String> {
-    let re = Regex::new(r"[^\w\s-]").unwrap();
+    let re = static_re!(r"[^\w\s-]");
     let seg = re.replace_all(name, "").trim().replace(' ', "_");
     if seg.is_empty() || seg.starts_with('.') {
         return err(format!("invalid folder name: {name}"));
@@ -275,7 +284,7 @@ pub fn clean_folder_path(path: &str) -> MResult<String> {
 
 /// Turn a note title into a filesystem-safe filename (at most 80 characters).
 pub fn safe_filename(title: &str) -> MResult<String> {
-    let re = regex::Regex::new(r"[^\w\s-]").unwrap();
+    let re = static_re!(r"[^\w\s-]");
     let name = re.replace_all(title, "").trim().replace(' ', "_");
     if name.is_empty() {
         return err("title produces an empty filename");
@@ -853,7 +862,7 @@ fn embed_html(c: &regex::Captures, ctx: &RenderCtx, figure: bool) -> Option<Stri
         return None;
     }
     let opt = unesc(c.get(2).map(|m| m.as_str()).unwrap_or("").trim());
-    let size_re = Regex::new(r"^(\d{1,4})(?:x(\d{1,4}))?$").unwrap();
+    let size_re = static_re!(r"^(\d{1,4})(?:x(\d{1,4}))?$");
     let (size, alt) = match size_re.captures(&opt) {
         Some(s) => (
             Some((
@@ -925,7 +934,7 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
     let mut out = esc_text(s);
 
     // Protect inline code spans from further inline processing.
-    let code_re = Regex::new(r"`([^`]+)`").unwrap();
+    let code_re = static_re!(r"`([^`]+)`");
     let mut codes: Vec<String> = Vec::new();
     out = code_re
         .replace_all(&out, |c: &regex::Captures| {
@@ -934,7 +943,7 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
         })
         .to_string();
     // Code placeholders inside an attribute value turn back into their text.
-    let code_ph = Regex::new("\u{0}C(\\d+)\u{0}").unwrap();
+    let code_ph = static_re!("\u{0}C(\\d+)\u{0}");
     let detok = |t: &str| -> String {
         code_ph
             .replace_all(t, |c: &regex::Captures| {
@@ -977,7 +986,7 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
         })
         .to_string();
 
-    let link_re = Regex::new(r"\[([^\]]+)\]\((https?://[^)\s]+)[^)]*\)").unwrap();
+    let link_re = static_re!(r"\[([^\]]+)\]\((https?://[^)\s]+)[^)]*\)");
     out = link_re
         .replace_all(&out, |c: &regex::Captures| {
             let href = unesc(&detok(&c[2]));
@@ -1016,13 +1025,13 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
         })
         .to_string();
 
-    let bold = Regex::new(r"\*\*([^*]+)\*\*").unwrap();
+    let bold = static_re!(r"\*\*([^*]+)\*\*");
     out = bold.replace_all(&out, "<strong>$1</strong>").to_string();
-    let del = Regex::new(r"~~([^~]+)~~").unwrap();
+    let del = static_re!(r"~~([^~]+)~~");
     out = del.replace_all(&out, "<del>$1</del>").to_string();
     out = emphasize(&out);
 
-    let frag_ph = Regex::new("\u{0}H(\\d+)\u{0}").unwrap();
+    let frag_ph = static_re!("\u{0}H(\\d+)\u{0}");
     out = frag_ph
         .replace_all(&out, |c: &regex::Captures| {
             let i: usize = c[1].parse().unwrap_or(0);
@@ -1148,10 +1157,10 @@ fn fit_row(mut row: Vec<String>, width: usize) -> Vec<String> {
 }
 
 fn render_body(text: &str, ctx: &RenderCtx) -> String {
-    let table_sep = Regex::new(r"^\s*\|?[\s:]*-{2,}[\s:|-]*\|?\s*$").unwrap();
-    let list_re = Regex::new(r"^(\s*)([-*+]|\d+[.)])\s+(.+)$").unwrap();
-    let head_re = Regex::new(r"^(#{1,6})\s+(.+)$").unwrap();
-    let hr_re = Regex::new(r"^\s*((-\s*){3,}|(\*\s*){3,}|(_\s*){3,})$").unwrap();
+    let table_sep = static_re!(r"^\s*\|?[\s:]*-{2,}[\s:|-]*\|?\s*$");
+    let list_re = static_re!(r"^(\s*)([-*+]|\d+[.)])\s+(.+)$");
+    let head_re = static_re!(r"^(#{1,6})\s+(.+)$");
+    let hr_re = static_re!(r"^\s*((-\s*){3,}|(\*\s*){3,}|(_\s*){3,})$");
 
     let lines: Vec<&str> = text.split('\n').collect();
     let n = lines.len();
@@ -1697,20 +1706,23 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
-    /// `(tags, frontmatter)` for a single file.
+    /// `(tags, frontmatter)` for a single file, exactly as [`render_markdown`] reports
+    /// them, without rendering the note (or resolving its links).
     pub fn note_tags_fm(&self, fp: &Path) -> (Vec<String>, Value) {
         let content = self.read_raw(fp).unwrap_or_default();
-        let resolver = self.resolve_wikilink_closure();
-        let (_html, tags, fm) = render_markdown(&content, &resolver);
-        (tags, fm)
+        let mut fm = Map::new();
+        for (k, v) in parse_frontmatter(&split_frontmatter(&content).0) {
+            fm.insert(k, v);
+        }
+        (note_tags(&content), Value::Object(fm))
     }
 
     pub fn list_tags_impl(&self) -> Vec<Value> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-        for (_rel, _name, fp) in self.walk() {
-            let (tags, _) = self.note_tags_fm(&fp);
-            for t in tags {
-                *counts.entry(t).or_insert(0) += 1;
+        let files = self.walk();
+        for meta in self.scan(&files) {
+            for t in &meta.tags {
+                *counts.entry(t.clone()).or_insert(0) += 1;
             }
         }
         let mut v: Vec<(String, usize)> = counts.into_iter().collect();
@@ -1831,8 +1843,10 @@ impl MemoryStore {
             return err("tag required");
         }
         let mut out = Vec::new();
-        for (rel, name, fp) in self.walk() {
-            let (tags, _) = self.note_tags_fm(&fp);
+        let files = self.walk();
+        let metas = self.scan(&files);
+        for ((rel, name, _), meta) in files.into_iter().zip(metas) {
+            let tags = &meta.tags;
             if tags.iter().any(|t| t.to_lowercase() == tag) {
                 out.push(json!({
                     "path": rel,
@@ -2438,8 +2452,12 @@ impl MemoryStore {
             .read_raw(&ap)
             .ok_or_else(|| MemoryErr(format!("permission denied: {path}")))?;
         let note_dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+        // One walk for the whole view: links resolve against it, backlinks come
+        // from the note cache (no file is read again unless it changed).
+        let files = self.walk();
+        let links = LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
         // Links resolve from this note's folder first (same names elsewhere).
-        let resolver = |t: &str| self.resolve_wikilink_from(t, note_dir);
+        let resolver = |t: &str| links.resolve(t, note_dir);
         let images: std::cell::OnceCell<Vec<String>> = std::cell::OnceCell::new();
         let file = |cand: &str, by_name: bool| -> Option<String> {
             if !by_name {
@@ -2463,14 +2481,13 @@ impl MemoryStore {
             t.split('#').next().unwrap_or("").trim().to_lowercase() == name_l
         };
         let mut backlinks = Vec::new();
-        for (rel2, name2, fp2) in self.walk() {
+        let metas = self.scan(&files);
+        for ((rel2, name2, _), meta) in files.iter().zip(&metas) {
             if rel2 == path {
                 continue;
             }
-            if let Some(oc) = self.read_raw(&fp2) {
-                if self.link_targets(&oc).iter().any(names_me) {
-                    backlinks.push(json!({"path": rel2, "name": name2}));
-                }
+            if meta.targets.iter().any(names_me) {
+                backlinks.push(json!({"path": rel2, "name": name2}));
             }
         }
         let size = fs::metadata(&ap).map(|m| m.len()).unwrap_or(0);
@@ -2773,7 +2790,7 @@ impl MemoryStore {
             fs::create_dir_all(parent).ok();
         }
         fs::write(&ap, body).map_err(|e| MemoryErr(e.to_string()))?;
-        let _ = self.reindex();
+        self.refresh_notes(&[&ap]);
         self.git_commit(&format!("create: {rel}"));
         Ok(rel)
     }
@@ -2785,7 +2802,7 @@ impl MemoryStore {
             return err(format!("not found: {rel_path}"));
         }
         fs::write(&ap, content).map_err(|e| MemoryErr(e.to_string()))?;
-        let _ = self.reindex();
+        self.refresh_notes(&[&ap]);
         self.git_commit(&format!("edit: {rel_path}"));
         Ok(())
     }
