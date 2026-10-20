@@ -848,6 +848,18 @@ async fn h_tree(
     Json(serde_json::to_value(t).unwrap())
 }
 
+/// `GET /api/folders` -> `{folders:[path...]}`: every folder the caller may see,
+/// empty and nested ones included (`/api/tree` only knows folders that hold
+/// notes, grouped by top level). Dot folders such as `.Trash` are left out.
+async fn h_folders(
+    State(st): State<AppState>,
+    key: Option<axum::Extension<ApiKeyCaller>>,
+) -> Json<Value> {
+    let key = key.map(|k| k.0);
+    let folders = blocking(move || snapshot_as(&st, key.as_ref()).folders()).await;
+    Json(json!({ "folders": folders }))
+}
+
 async fn h_search(State(st): State<AppState>, req: Request) -> Json<Value> {
     let key = req.extensions().get::<ApiKeyCaller>().cloned();
     let q = req
@@ -1610,6 +1622,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/api/stats", get(h_stats))
         .route("/api/graph", get(h_graph))
         .route("/api/tree", get(h_tree))
+        .route("/api/folders", get(h_folders))
         .route("/api/search", get(h_search))
         .route("/api/access", get(h_access_get))
         .route("/api/access/test", post(h_access_test))

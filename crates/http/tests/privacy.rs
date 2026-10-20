@@ -303,6 +303,7 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
         ("/api/search?q=zebra", 0),
         ("/api/graph", 0),
         ("/api/tree", 0),
+        ("/api/folders", 0),
         ("/api/note?path=Public/hub.md", 0),
         ("/api/note?path=Notes/open.md", 0),
         ("/api/folder-meta", 0),
@@ -313,6 +314,10 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
         assert_eq!(s, StatusCode::OK, "{path}: {body}");
         assert_eq!(leaks(&body, &hidden_c), None, "{path}");
     }
+    let (_, folders) = get(&mut e, c, "/api/folders").await;
+    let folders = folders["folders"].as_array().unwrap().clone();
+    assert!(!folders.contains(&json!("Private")), "{folders:?}");
+    assert!(folders.contains(&json!("Public")), "{folders:?}");
     let (_, stats) = get(&mut e, c, "/api/stats").await;
     assert_eq!(stats["notes"], 4);
     let (s, _) = get(&mut e, c, "/api/vault/file?path=Private/pic.png").await;
@@ -531,6 +536,14 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
         let (_, stats) = get(&mut e, who, "/api/stats").await;
         let (_, tree) = get(&mut e, who, "/api/tree").await;
         assert_eq!(stats["notes"], 5, "{tree}");
+        let (_, folders) = get(&mut e, who, "/api/folders").await;
+        assert!(
+            folders["folders"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Private")),
+            "{folders}"
+        );
     }
     let (_, hits) = get(&mut e, Who::Owner, "/api/search?q=zebra").await;
     assert!(hits.to_string().contains("Private/plan.md"), "{hits}");

@@ -150,6 +150,7 @@ unmatched request is `404 {"error":"not found"}`.
 | Method | Path | Auth | Returns |
 |---|---|---|---|
 | GET | `/api/tree` | Session or key (`read`) | Notes grouped by folder. |
+| GET | `/api/folders` | Session or key (`read`) | Every folder the caller may see, empty and nested ones included (`{folders:[path]}`); dot folders such as `.Trash` are left out. |
 | GET | `/api/note` | Session or key (`read`) | `{path, name, content, html, tags, frontmatter, backlinks, size, mtime}`. Query: `path` (`400` when empty). |
 | GET | `/api/vault/file` | Session or key (`read`) | The raw bytes of one image file in the vault (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO; never SVG). Query: `path` (vault-relative). The file content must match its type. At most 10 MiB (`413`). Sent with an `ETag` (`304` on `If-None-Match`), `Cache-Control: private, max-age=300`, and a sandbox CSP. `400` invalid path, `403` path not allowed, `404` not found, `415` not an image. |
 | GET | `/api/folder-meta` | Session or key (`read`) | Folder metadata keyed by folder name. Query: `folder` (optional). |

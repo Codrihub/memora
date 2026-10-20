@@ -255,6 +255,39 @@ impl MemoryStore {
         out
     }
 
+    /// Every folder the current caller may see, empty ones included, as sorted
+    /// vault-relative paths (the root itself is not listed). Dot folders (`.Trash`,
+    /// `.git`, ...) and everything below them are skipped, and symlinks are not
+    /// followed, the same as [`MemoryStore::walk`]. A hidden folder hides its whole
+    /// subtree, even a visible-looking child.
+    pub fn folders(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut it = WalkDir::new(&self.root)
+            .follow_links(false)
+            .min_depth(1)
+            .into_iter();
+        while let Some(entry) = it.next() {
+            let Ok(entry) = entry else { continue };
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy();
+            let rel = entry
+                .path()
+                .strip_prefix(&self.root)
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            if name.starts_with('.') || !self.visible(&rel) {
+                it.skip_current_dir();
+                continue;
+            }
+            out.push(rel);
+        }
+        out.sort();
+        out
+    }
+
     /// (relative path -> mtime in epoch seconds) for every note.
     pub fn mtimes(&self) -> BTreeMap<String, f64> {
         let mut m = BTreeMap::new();
@@ -963,6 +996,47 @@ mod resource_tests {
         assert_eq!(s.resolve_wikilink_from("Nowhere/Plan", "").as_deref(), None);
         // From elsewhere: the same answer every time (alphabetical at equal depth).
         assert_eq!(s.resolve_wikilink("Plan").as_deref(), Some("Ideas/Plan.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn folders_lists_empty_and_deep_folders_but_not_dot_or_hidden_ones() {
+        struct View;
+        impl crate::privacy::PathView for View {
+            fn visible(&self, rel: &str) -> bool {
+                let l = rel.to_lowercase();
+                !(l == "private" || l.starts_with("private/"))
+            }
+            fn mentions_hidden(&self, _text: &str) -> bool {
+                false
+            }
+        }
+        let d = tmp_vault("folders");
+        for dir in [
+            "Projects/2027/Q1/Empty",
+            "Projects/Web",
+            "Private/Inner",
+            ".Trash/Old",
+            ".git/objects",
+            "Projects/.cache/x",
+        ] {
+            fs::create_dir_all(d.join(dir)).unwrap();
+        }
+        fs::write(d.join("Projects/Web/a.md"), "a").unwrap();
+        fs::write(d.join("Private/Inner/s.md"), "s").unwrap();
+        let mut s = MemoryStore::new(&d);
+        let owner = [
+            "Private",
+            "Private/Inner",
+            "Projects",
+            "Projects/2027",
+            "Projects/2027/Q1",
+            "Projects/2027/Q1/Empty",
+            "Projects/Web",
+        ];
+        assert_eq!(s.folders(), owner);
+        s.view = Some(Arc::new(View));
+        assert_eq!(s.folders(), owner[2..], "hidden subtree skipped for agents");
         let _ = fs::remove_dir_all(&d);
     }
 
