@@ -266,3 +266,55 @@ fn trash_remembers_where_notes_came_from() {
     assert!(s.list_trash_impl().is_empty());
     fs::remove_dir_all(&d).ok();
 }
+
+/// A hidden note's former path (before a rename) is not hidden itself, but its
+/// history holds what was written there: a restricted caller must not read it
+/// through get_history / get_note_at / diff, nor restore it into a visible note.
+#[test]
+fn history_of_a_hidden_notes_former_path_stays_hidden() {
+    use memora_core::privacy::{lock_as, PathView};
+    use std::sync::{Arc, Mutex};
+
+    /// The rule hides `Notes/Moved.md`; its trail remembers `Notes/old.md`.
+    struct View;
+    impl PathView for View {
+        fn visible(&self, rel: &str) -> bool {
+            !rel.to_lowercase().starts_with("notes/moved")
+        }
+        fn mentions_hidden(&self, text: &str) -> bool {
+            let t = text.to_lowercase();
+            t.contains("notes/moved") || t.contains("notes/old")
+        }
+    }
+
+    let d = vault("hidden-trail", true);
+    let m = Mutex::new(MemoryStore::new(&d));
+    let rev = {
+        let s = m.lock().unwrap();
+        s.create_impl("old", "Notes", Some("secret plan")).unwrap();
+        let rev = s.get_history_impl("Notes/old.md", 1).unwrap()[0]["rev"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        s.rename_impl("Notes/old.md", "Moved").unwrap();
+        rev
+    };
+    {
+        let s = lock_as(&m, Some(Arc::new(View)));
+        assert!(errmsg(s.get_history_impl("Notes/old.md", 20)).contains("not found"));
+        assert!(s.get_note_at_impl("Notes/old.md", &rev).is_err());
+        assert!(s.diff_impl("Notes/old.md", &rev, "").is_err());
+        assert!(s.restore_impl("Notes/old.md", &rev).is_err());
+        assert!(!d.join("Notes/old.md").exists());
+        // Visible notes keep their history.
+        assert!(s.get_history_impl("Notes/a.md", 20).is_ok() || !d.join(".git").exists());
+    }
+    // The owner still sees it.
+    let s = m.lock().unwrap();
+    assert_eq!(
+        s.get_note_at_impl("Notes/old.md", &rev).unwrap(),
+        "secret plan"
+    );
+    drop(s);
+    fs::remove_dir_all(&d).ok();
+}

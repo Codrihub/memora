@@ -4654,6 +4654,10 @@ impl MemoryStore {
             && !p.contains(['*', '?', '[', ']'])
             && !p.split(['/', '\\']).any(|seg| seg == "..")
             && self.visible(p)
+            // A former path of a hidden note (renamed or moved into a hidden
+            // folder) is not hidden itself, but its history holds what was
+            // written there, so it stays out of reach like the note.
+            && !self.mentions_hidden(p)
             && self.resolve(p).is_ok_and(|ap| !ap.is_dir())
     }
 
