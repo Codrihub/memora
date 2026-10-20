@@ -1540,6 +1540,48 @@ fn render_body(text: &str, ctx: &RenderCtx) -> String {
 /// Refuse a regex replacement naming a group the pattern does not define (the
 /// regex crate would expand it to nothing). `$$` is a literal `$`; `$1a` names
 /// the group `1a`, so `${1}a` is needed there.
+/// Largest note a replacement (`bulk_replace`, patch `replace`, template
+/// variables) may produce, and the most all edits of one `bulk_replace` may
+/// hold in memory together. Without a bound, a one-character `find` with a
+/// long replacement multiplies across every match and runs the server out of
+/// memory (which aborts the process).
+pub const MAX_REPLACED_NOTE: usize = 16 * 1024 * 1024;
+const MAX_REPLACED_TOTAL: usize = 256 * 1024 * 1024;
+
+/// Length of `text` with every `find` replaced by `with`, without building it.
+fn literal_replaced_len(text: &str, find: &str, with: &str) -> usize {
+    let n = text.matches(find).count();
+    (text.len() - n * find.len()).saturating_add(n.saturating_mul(with.len()))
+}
+
+/// An upper bound on the length of `text` after `pat.replace_all(text, with)`:
+/// each match becomes at most the template plus, per `$` reference, the match.
+fn regex_replaced_len_bound(pat: &Regex, text: &str, with: &str) -> usize {
+    let refs = with.bytes().filter(|&b| b == b'$').count();
+    let mut len = text.len();
+    for m in pat.find_iter(text) {
+        len = len
+            .saturating_sub(m.len())
+            .saturating_add(with.len())
+            .saturating_add(refs.saturating_mul(m.len()));
+        if len > MAX_REPLACED_NOTE {
+            break;
+        }
+    }
+    len
+}
+
+/// Refuse a replacement whose result would pass [`MAX_REPLACED_NOTE`].
+fn replaced_size_ok(len: usize, rel: &str) -> MResult<()> {
+    if len > MAX_REPLACED_NOTE {
+        return err(format!(
+            "the replacement would make {rel} larger than {} MiB; use a shorter replacement or a narrower find",
+            MAX_REPLACED_NOTE / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
+
 fn replace_groups_ok(pat: &Regex, replace: &str) -> MResult<()> {
     let names: HashSet<&str> = pat.capture_names().flatten().collect();
     let groups = pat.captures_len();
@@ -2893,6 +2935,7 @@ impl MemoryStore {
                             "patch op `replace`: `find` text not found in {path}"
                         ));
                     }
+                    replaced_size_ok(literal_replaced_len(&body, &find, &with), path)?;
                     body = body.replace(&find, &with);
                 }
                 other => return err(format!("op {n}: unknown patch op `{other}`")),
@@ -3881,6 +3924,7 @@ impl MemoryStore {
         let folder = self.bulk_folder(folder)?;
         // Every edit is worked out before anything is written.
         let mut edits = Vec::new();
+        let mut held = 0usize;
         for (rel, _name, fp) in self.walk() {
             if !Self::in_bulk_folder(&rel, &folder) {
                 continue;
@@ -3894,11 +3938,22 @@ impl MemoryStore {
                     if p.find_iter(&c).any(|m| m.as_str().is_empty()) {
                         return err(format!("find matches an empty string (in {rel}), which would insert the replacement between characters; make the pattern match at least one character"));
                     }
+                    replaced_size_ok(regex_replaced_len_bound(p, &c, replace), &rel)?;
                     p.replace_all(&c, replace).to_string()
                 }
-                None => c.replace(find, replace),
+                None => {
+                    replaced_size_ok(literal_replaced_len(&c, find, replace), &rel)?;
+                    c.replace(find, replace)
+                }
             };
             if nc != c {
+                held = held.saturating_add(nc.len());
+                if held > MAX_REPLACED_TOTAL {
+                    return err(format!(
+                        "the replacement would rewrite more than {} MiB of notes at once; narrow it with `folder` or a more specific find",
+                        MAX_REPLACED_TOTAL / (1024 * 1024)
+                    ));
+                }
                 edits.push((rel, nc));
             }
         }
@@ -4182,7 +4237,9 @@ impl MemoryStore {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            content = content.replace(&format!("{{{{{k}}}}}"), &val);
+            let slot = format!("{{{{{k}}}}}");
+            replaced_size_ok(literal_replaced_len(&content, &slot, &val), title)?;
+            content = content.replace(&slot, &val);
         }
         self.create_impl(title, folder, Some(&content))
     }

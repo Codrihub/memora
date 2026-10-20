@@ -1127,6 +1127,42 @@ mod resource_tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A short find with a long replacement multiplies across matches; past the
+    /// size bound it is refused before anything is built, dry run included.
+    #[test]
+    fn replacements_cannot_blow_up_memory() {
+        let d = tmp_vault("blowup");
+        let body = "a".repeat(200);
+        fs::write(d.join("Projects/n.md"), &body).unwrap();
+        let s = MemoryStore::new(&d);
+        let big = "x".repeat(200 * 1024);
+        for dry in [true, false] {
+            let e = s
+                .bulk_replace_impl("a", &big, None, false, dry)
+                .unwrap_err();
+            assert!(e.0.contains("larger than"), "{e:?}");
+            let e = s.bulk_replace_impl("a", "$0$0$0$0", None, true, dry);
+            assert!(e.is_ok(), "{e:?}");
+            let e = s
+                .bulk_replace_impl("(a)", &format!("{big}$1"), None, true, dry)
+                .unwrap_err();
+            assert!(e.0.contains("larger than"), "{e:?}");
+        }
+        assert_eq!(
+            fs::read_to_string(d.join("Projects/n.md")).unwrap(),
+            "aaaa".repeat(200)
+        );
+        // Repeated patch replaces would double the note each time.
+        fs::write(d.join("Projects/p.md"), "ab").unwrap();
+        let ops: Vec<serde_json::Value> = (0..40)
+            .map(|_| serde_json::json!({"op": "replace", "find": "a", "with": "aa"}))
+            .collect();
+        let e = s.patch_memory_impl("Projects/p.md", &ops).unwrap_err();
+        assert!(e.0.contains("larger than"), "{e:?}");
+        assert_eq!(fs::read_to_string(d.join("Projects/p.md")).unwrap(), "ab");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn deleted_notes_leave_the_search_index() {
         let d = tmp_vault("ghost");
