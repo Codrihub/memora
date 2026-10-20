@@ -115,7 +115,7 @@ errors map to `404` for not-found (including paths hidden from the caller) and
 | Method | Path | Auth | Returns |
 |---|---|---|---|
 | GET | `/login` | None | The sign-in page. A signed-in browser is redirected to `/` unless the instance is locked or the query has `oauth` (the OAuth consent card). |
-| any | `/logout` | None | Ends the session, clears the cookie, and redirects to `/login`. A cross-site request only clears the cookie. |
+| POST | `/logout` | None (+CSRF) | Ends the session, clears the cookie, and redirects to `/login`. With a session cookie the request must be same-origin (`403` otherwise); other methods get `405`. The web UI uses `POST /api/auth/logout`. |
 | GET | `/`, `/index.html` | Session | The web app shell. Without a session: `302` to `/login`. `503` when the UI assets are not installed. |
 | GET | App routes (see below) | Session | The same app shell as `/`. Without a session: `302` to `/login?r=<path>`, so sign-in returns to the page. |
 

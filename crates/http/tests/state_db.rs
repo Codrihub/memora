@@ -794,3 +794,40 @@ async fn client_registration_is_limited_per_ip() {
     .await;
     assert_eq!(r.status, StatusCode::CREATED);
 }
+
+async fn me_status(e: &mut Env, sid: &str) -> StatusCode {
+    let o = Opts {
+        cookie: Some(sid),
+        ..Default::default()
+    };
+    call(e, Method::GET, "/api/auth/me", None, o).await.status
+}
+
+/// `/logout` is POST only and same-origin: a link, image or cross-site form
+/// on another page must not sign the owner out.
+#[tokio::test]
+async fn logout_is_post_only_and_same_origin() {
+    let mut e = env("logout");
+    let other = cli(&e);
+    arm(&other, ArmMode::Bootstrap, "ABCD-EFGH");
+    let r = bootstrap(&mut e, "ABCD-EFGH").await;
+    assert_eq!(r.status, StatusCode::OK);
+    let sid = r.cookie();
+    let with = |same_origin| Opts {
+        cookie: Some(&sid),
+        same_origin,
+        ..Default::default()
+    };
+    let r = call(&mut e, Method::GET, "/logout", None, with(true)).await;
+    assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
+    let r = call(&mut e, Method::POST, "/logout", None, with(false)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        me_status(&mut e, &sid).await,
+        StatusCode::OK,
+        "still signed in"
+    );
+    let r = call(&mut e, Method::POST, "/logout", None, with(true)).await;
+    assert_eq!(r.status, StatusCode::FOUND);
+    assert_eq!(me_status(&mut e, &sid).await, StatusCode::UNAUTHORIZED);
+}

@@ -1095,12 +1095,18 @@ fn read_asset(st: &AppState, name: &str) -> Option<Vec<u8>> {
     std::fs::read(std::path::Path::new(&st.assets).join(name)).ok()
 }
 
-/// `/logout` - revoke the session cookie and return to the login page.
+/// `POST /logout` - revoke the session cookie and return to the login page.
+///
+/// POST only, with the same-origin check every cookie write gets: a GET (a
+/// link or image on any page) or a cross-site form must not sign the owner
+/// out (logout CSRF).
 async fn h_logout(State(st): State<AppState>, headers: HeaderMap) -> Response {
-    // A cross-site page must not be able to sign the owner out (logout CSRF
-    // via a top-level link); the cookie is still cleared in that browser only.
-    if cross_site_fetch(&headers) {
-        return logout_response();
+    if !origin_ok(&headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "origin mismatch"})),
+        )
+            .into_response();
     }
     if let Some(sid) = cookie_value(&headers, cache::SESSION_COOKIE) {
         let hash = cache::sid_hash(&sid);
@@ -1584,7 +1590,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/mcp", any(h_mcp))
         // Web UI: static login page plus the vault UI
         .route("/login", get(h_login_page))
-        .route("/logout", any(h_logout))
+        .route("/logout", post(h_logout))
         .route("/", get(h_index))
         .route("/index.html", get(h_index))
         // Client-side routes (History API): the app shell, nothing else.
