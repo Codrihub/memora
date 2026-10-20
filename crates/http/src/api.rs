@@ -230,7 +230,8 @@ async fn h_api_note(State(st): State<AppState>, req: Request) -> Response {
         return bad("no path");
     }
     let key = req.extensions().get::<ApiKeyCaller>().cloned();
-    match crate::store_as(&st, key.as_ref()).read_note_impl(&path) {
+    let read = crate::blocking(move || crate::snapshot_as(&st, key.as_ref()).read_note_impl(&path));
+    match read.await {
         Ok(v) => Json(v).into_response(),
         Err(e) => mem_err(e),
     }

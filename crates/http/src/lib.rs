@@ -127,6 +127,26 @@ pub fn store_as<'a>(
     memora_core::privacy::lock_as(&st.store, view)
 }
 
+/// A copy of the store for one read-only request, under the caller's view (see
+/// [`store_as`] and [`MemoryStore::snapshot`]): the store lock is held only to take
+/// the copy, so long reads never queue behind writes or agent calls.
+pub fn snapshot_as(st: &AppState, key: Option<&ApiKeyCaller>) -> MemoryStore {
+    store_as(st, key).snapshot()
+}
+
+/// Run blocking vault or database work on the blocking pool, so a slow call (or one
+/// waiting for the store lock) never holds up the async workers that serve every
+/// other request. A panic in `f` resumes here, as if `f` had run inline.
+pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    match tokio::task::spawn_blocking(f).await {
+        Ok(v) => v,
+        Err(e) => match e.try_into_panic() {
+            Ok(p) => std::panic::resume_unwind(p),
+            Err(e) => panic!("blocking task did not finish: {e}"),
+        },
+    }
+}
+
 /// Scope an API key needs for `method path`, or `None` when the route does
 /// not take keys into account (public or session-only routes).
 /// `mcp` for /mcp; `admin` for tool, key and access-stack management;
@@ -753,7 +773,12 @@ async fn h_mcp(
     if req.id.is_none() && req.method.starts_with("notifications/") {
         return StatusCode::ACCEPTED.into_response();
     }
-    let resp = st.mcp.handle_as(&req, &caller);
+    let mcp = st.mcp.clone();
+    let (req, caller, resp) = blocking(move || {
+        let resp = mcp.handle_as(&req, &caller);
+        (req, caller, resp)
+    })
+    .await;
     if initialize && resp.error.is_none() {
         let sid = st.mcp.new_session_id(&caller);
         let mut out = Json(serde_json::to_value(resp).unwrap()).into_response();
@@ -809,7 +834,8 @@ async fn h_graph(
     State(st): State<AppState>,
     key: Option<axum::Extension<ApiKeyCaller>>,
 ) -> Json<Value> {
-    let g = store_as(&st, key.as_deref()).graph();
+    let key = key.map(|k| k.0);
+    let g = blocking(move || snapshot_as(&st, key.as_ref()).graph()).await;
     Json(json!({"nodes": g.nodes, "links": g.links}))
 }
 
@@ -817,7 +843,8 @@ async fn h_tree(
     State(st): State<AppState>,
     key: Option<axum::Extension<ApiKeyCaller>>,
 ) -> Json<Value> {
-    let t = store_as(&st, key.as_deref()).tree();
+    let key = key.map(|k| k.0);
+    let t = blocking(move || snapshot_as(&st, key.as_ref()).tree()).await;
     Json(serde_json::to_value(t).unwrap())
 }
 
@@ -831,7 +858,8 @@ async fn h_search(State(st): State<AppState>, req: Request) -> Json<Value> {
                 .find_map(|kv| kv.strip_prefix("q=").map(percent_decode))
         })
         .unwrap_or_default();
-    let hits = store_as(&st, key.as_ref()).search(&q, 20);
+    let q2 = q.clone();
+    let hits = blocking(move || snapshot_as(&st, key.as_ref()).search(&q2, 20)).await;
     Json(json!({"q": q, "count": hits.len(), "hits": hits}))
 }
 
