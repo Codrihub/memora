@@ -17,7 +17,7 @@ same way: run `memora-cli setup`, open the link it prints and enter the code.
 setup command prints and enter the code:
 
 ```bash
-# npm (Linux x86_64 / arm64, Windows x64; Node 18+)
+# npm (Linux x86_64 / arm64, Windows x64; Node.js 22 or newer)
 npm install -g @codrihub/memora && memora
 memora-cli setup --minutes 15            # in a second terminal
 
@@ -360,7 +360,7 @@ inside).
 
 ## npm
 
-Requirements: Linux on x86_64 or arm64, or Windows 10/11 on x64; Node 18 or
+Requirements: Linux on x86_64 or arm64, or Windows 10/11 on x64; Node.js 22 or
 newer; and `git` (vault history uses it).
 
 ```sh

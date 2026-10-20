@@ -8,7 +8,7 @@
 // and <out>/memora-<platform> for every --bin given, each a folder ready for
 // `npm pack` / `npm publish`. Every package gets the release version, and the
 // wrapper pins each platform package to it exactly. Needs Node 22.13 or newer
-// (module.stripTypeScriptTypes); the published packages run on Node 18+.
+// (module.stripTypeScriptTypes); the published packages need Node.js 22 or newer.
 
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -122,7 +122,7 @@ writeJson(join(wrapper, 'package.json'), {
   type: 'module',
   bin: Object.fromEntries(BINARIES.map((name) => [name, `bin/${name}.js`])),
   files: ['bin', 'lib', 'assets'],
-  engines: { node: '>=18' },
+  engines: { node: '>=22' },
   optionalDependencies: Object.fromEntries(Object.values(PLATFORMS).map((p) => [p.pkg, version])),
 });
 console.log(`@codrihub/memora@${version} -> ${wrapper}`);

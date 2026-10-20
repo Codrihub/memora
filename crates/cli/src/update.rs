@@ -56,7 +56,7 @@ pub(crate) fn manual_steps(origin: Origin) -> Option<Vec<String>> {
         Origin::Folder => vec![
             "This copy runs from a plain folder of program files (an older release zip,".into(),
             "or copied by hand), which cannot update itself.".into(),
-            "Memora now installs with npm on Windows and Linux (Node 18+). To switch:".into(),
+            "Memora now installs with npm on Windows and Linux (Node.js 22 or newer). To switch:".into(),
             "  1. stop the server: memora-cli stop (or Ctrl+C where it runs)".into(),
             format!("  2. {}", style(format!("npm install -g {}", crate::install::NPM_PACKAGE)).cyan()),
             "  3. start it with the same folders, so settings and notes carry over:".into(),

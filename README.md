@@ -72,7 +72,7 @@ Three steps, about two minutes.
 **1. Install** (pick one, in this order of ease)
 
 ```bash
-# npm (Linux x86_64 / arm64, Windows x64; Node 18+): install, then keep it running
+# npm (Linux x86_64 / arm64, Windows x64; Node.js 22 or newer): install, then keep it running
 npm install -g @codrihub/memora && memora
 
 # Docker (any OS with Docker)
@@ -83,7 +83,7 @@ docker run -d --name memora --restart unless-stopped -p 8400:8400 \
 curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh
 ```
 
-On Windows, install Node.js 18 or newer and use npm (see [npm](#npm-linux-x86_64--arm64-windows-x64)).
+On Windows, install Node.js 22 or newer and use npm (see [npm](#npm-linux-x86_64--arm64-windows-x64)).
 
 **2. Get a one-time setup code**
 
@@ -120,7 +120,7 @@ $env:MEMORA_STATE = '.\state'; memora-cli setup --minutes 15
 ```
 
 The package carries the prebuilt release binaries and the web UI (no install
-script, nothing downloaded at install time) and needs Node 18 or newer. It is
+script, nothing downloaded at install time) and needs Node.js 22 or newer. It is
 handy for trying Memora or running it under your own user; for a server, the
 native installer adds the systemd service. On macOS use Docker or build from
 source. Update with `npm install -g @codrihub/memora@latest`.

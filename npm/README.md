@@ -25,7 +25,7 @@ npx @codrihub/memora --version
 ```
 
 Supported: Linux on x86_64 and arm64 (static binaries, glibc or musl) and
-Windows 10/11 on x64, Node 18 or newer. npm picks the matching
+Windows 10/11 on x64, Node.js 22 or newer. npm picks the matching
 `@codrihub/memora-linux-*` or `@codrihub/memora-win32-x64` package; nothing is
 downloaded by an install script, so it works offline from a registry mirror and
 with `--ignore-scripts`. On macOS use

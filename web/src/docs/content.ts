@@ -169,7 +169,7 @@ function getStarted(c: PageCtx): string {
         'Install Memora',
         p('With npm, Docker or the native installer, in that order of ease. Every other option is in ' + docLink('install', 'Install') + '.') +
           codeBlockHTML(
-            `# npm (Linux x86_64 / arm64, Node 18+), then keep it running
+            `# npm (Linux x86_64 / arm64, Node.js 22 or newer), then keep it running
 npm install -g @codrihub/memora && memora
 
 # Docker

@@ -439,7 +439,7 @@ fn getting_started(base: &str) -> Vec<Block> {
         p("Memora is one server on your machine: a vault of Markdown notes that your AI \
            agents read and write over MCP. Four steps get you from nothing to a connected agent."),
         h("1. Install"),
-        p("npm (Linux x86_64 or arm64, Node 18+), the quickest: installs `memora` and this \
+        p("npm (Linux x86_64 or arm64, Node.js 22 or newer), the quickest: installs `memora` and this \
            console for your user, with no service. Start the server, then open the console in \
            a second terminal."),
         code("npm install -g @codrihub/memora\n\
