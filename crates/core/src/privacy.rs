@@ -74,7 +74,25 @@ pub fn lock_as(store: &Mutex<MemoryStore>, view: Option<Arc<dyn PathView>>) -> V
 
 impl MemoryStore {
     /// Whether the current caller may see `rel` (always true without a view).
+    ///
+    /// A trash entry is hidden too when the place it was deleted from is: the
+    /// rules name the original path, which the trashed file no longer has.
     pub fn visible(&self, rel: &str) -> bool {
+        let Some(v) = self.view.as_ref() else {
+            return true;
+        };
+        if !v.visible(rel) {
+            return false;
+        }
+        match self.trash_original(rel) {
+            Some(original) => v.visible(&original),
+            None => true,
+        }
+    }
+
+    /// [`Self::visible`] without the trash-origin lookup, for callers that check
+    /// the original path themselves (`list_trash`, once per entry).
+    pub(crate) fn view_visible(&self, rel: &str) -> bool {
         self.view.as_ref().is_none_or(|v| v.visible(rel))
     }
 
@@ -197,6 +215,46 @@ mod tests {
 
     fn view() -> Option<Arc<dyn PathView>> {
         Some(Arc::new(TestView))
+    }
+
+    /// A note trashed from a hidden folder stays hidden in the trash: the rules
+    /// name its original path, so the trashed copy must be judged by that.
+    #[test]
+    fn trash_entries_from_hidden_places_stay_hidden() {
+        let d = vault("trash");
+        let m = Mutex::new(MemoryStore::new(&d));
+        let to = {
+            let s = m.lock().unwrap();
+            let v = s.soft_delete_impl("Private/plan.md").unwrap();
+            s.soft_delete_impl("Public/hub.md").unwrap();
+            v["to"].as_str().unwrap().to_string()
+        };
+        let name = to.rsplit('/').next().unwrap().to_string();
+        {
+            let s = lock_as(&m, view());
+            let listed: Vec<String> = s
+                .list_trash_impl()
+                .iter()
+                .map(|e| e["name"].as_str().unwrap_or("").to_string())
+                .collect();
+            assert!(!listed.contains(&name), "{listed:?}");
+            assert!(listed.iter().any(|n| n.starts_with("hub")), "{listed:?}");
+            for spelled in [to.clone(), format!("/{to}"), format!(".Trash//{name}")] {
+                let e = s.read_note_impl(&spelled).unwrap_err();
+                assert!(e.0.starts_with("not found"), "{spelled}: {e:?}");
+            }
+            let e = s.restore_trash_impl(&name, "Public").unwrap_err();
+            assert!(!e.0.contains("Private"), "{e:?}");
+            assert!(d.join(&to).is_file(), "the hidden note stays in the trash");
+        }
+        // The owner still sees and restores it; `into` is checked like a move.
+        let s = m.lock().unwrap();
+        for bad in ["../out", ".Trash", "Public/./x", "a/../b"] {
+            assert!(s.restore_trash_impl(&name, bad).is_err(), "{bad}");
+        }
+        let v = s.restore_trash_impl(&name, "root").unwrap();
+        assert_eq!(v["restored"], "plan.md");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

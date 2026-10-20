@@ -365,6 +365,47 @@ pub fn is_absolute_input(path: &str) -> bool {
     p.starts_with(['/', '\\']) || (b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic())
 }
 
+/// Whether a real (canonical, vault-relative) path is one of the store's own
+/// entries: any segment starting with `.`, except the trash folder at the top.
+fn reserved_real_path(real_rel: &str) -> bool {
+    real_rel
+        .split('/')
+        .enumerate()
+        .any(|(i, seg)| seg.starts_with('.') && !(i == 0 && seg == ".Trash"))
+}
+
+/// A path segment Windows would not store as written: a stream or drive
+/// (`:`), a trailing dot or space (silently dropped, so `Private.` opens
+/// `Private`), a short-name alias (`GIT~1`), or a reserved device name
+/// (`CON`, `nul.md`, `COM1.txt` ...).
+pub fn windows_unsafe_segment(seg: &str) -> bool {
+    if seg.is_empty() || seg == "." {
+        return false;
+    }
+    if seg.contains(':') || seg.ends_with('.') || seg.ends_with(' ') {
+        return true;
+    }
+    let stem = seg.split('.').next().unwrap_or("").trim_end();
+    if let Some((_, n)) = stem.rsplit_once('~') {
+        if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
+            return true;
+        }
+    }
+    let up = stem.to_uppercase();
+    let device_digit = |rest: &str| {
+        matches!(
+            rest,
+            "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+        ) || matches!(rest, "\u{b9}" | "\u{b2}" | "\u{b3}")
+    };
+    matches!(
+        up.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"]
+        .iter()
+        .any(|p| up.strip_prefix(p).is_some_and(device_digit))
+}
+
 /// The folder holding a note path, in full (`Projects/Atlas/Overview.md` ->
 /// `Projects/Atlas`); `""` for a note at the top level.
 pub fn parent_folder(rel: &str) -> &str {
@@ -1706,9 +1747,16 @@ impl MemoryStore {
         }
         let clean = rel_path.replace('\\', "/");
         let clean = clean.trim_start_matches('/');
+        // `C:x` / `C:/x` would replace the vault root when joined on Windows.
+        if is_absolute_input(clean) {
+            return err(format!("path escapes the vault: {rel_path}"));
+        }
         for (i, seg) in clean.split('/').enumerate() {
             if seg == ".." {
                 return err(format!("path escapes the vault: {rel_path}"));
+            }
+            if cfg!(windows) && windows_unsafe_segment(seg) {
+                return err(format!("path not allowed: {rel_path}"));
             }
             // Hidden entries are the store's own files (.locks.json,
             // .events.jsonl, .git ...); only the trash folder is addressable.
@@ -1731,17 +1779,21 @@ impl MemoryStore {
                 if fs::symlink_metadata(probe).is_ok() {
                     match fs::canonicalize(probe) {
                         Ok(real) if real.starts_with(&root) => {
+                            let tail = full.strip_prefix(probe).unwrap_or(Path::new(""));
+                            let real_rel = real
+                                .join(tail)
+                                .strip_prefix(&root)
+                                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                                .unwrap_or_default();
+                            // The real path obeys the same rule as the typed one: a
+                            // symlink, or a Windows short name (`GIT~1` for `.git`),
+                            // must not reach the store's own dot files.
+                            if reserved_real_path(&real_rel) {
+                                return err(format!("path not allowed: {rel_path}"));
+                            }
                             // Nor may it lead a restricted caller into a hidden path.
-                            if self.restricted() {
-                                let tail = full.strip_prefix(probe).unwrap_or(Path::new(""));
-                                let real_rel = real
-                                    .join(tail)
-                                    .strip_prefix(&root)
-                                    .map(|p| p.to_string_lossy().replace('\\', "/"))
-                                    .unwrap_or_default();
-                                if !self.visible(&real_rel) {
-                                    return err(format!("not found: {rel_path}"));
-                                }
+                            if self.restricted() && !self.visible(&real_rel) {
+                                return err(format!("not found: {rel_path}"));
                             }
                             break;
                         }
@@ -1753,7 +1805,8 @@ impl MemoryStore {
                     None => break,
                 }
             }
-        } else if self.restricted() {
+        } else {
+            // Without the real root nothing can be checked for symlinks.
             return err(format!("not found: {rel_path}"));
         }
         Ok(full)
@@ -1838,15 +1891,17 @@ impl MemoryStore {
         if !full.starts_with(&root) {
             return Err(VaultFileErr::Forbidden);
         }
+        let real = full
+            .strip_prefix(&root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        // Nor into the store's own dot files (a symlink, a Windows short name).
+        if reserved_real_path(&real) {
+            return Err(VaultFileErr::Forbidden);
+        }
         // A symlink must not lead a restricted caller into a hidden path.
-        if self.restricted() {
-            let real = full
-                .strip_prefix(&root)
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            if !self.visible(&real) {
-                return Err(VaultFileErr::NotFound);
-            }
+        if self.restricted() && !self.visible(&real) {
+            return Err(VaultFileErr::NotFound);
         }
         if !full.is_file() {
             return Err(VaultFileErr::NotFound);
@@ -4201,6 +4256,22 @@ impl MemoryStore {
         self.root().join(".Trash").join(".index.json")
     }
 
+    /// Where the trash entry `rel` (`.Trash/<name>` in any spelling) was deleted
+    /// from, per the trash index; `None` for any other path.
+    pub(crate) fn trash_original(&self, rel: &str) -> Option<String> {
+        let rel = rel.replace('\\', "/");
+        let mut segs = rel.split('/').filter(|s| !s.is_empty() && *s != ".");
+        if segs.next()? != ".Trash" {
+            return None;
+        }
+        let name = segs.next()?;
+        self.trash_index()
+            .get(name)
+            .and_then(|m| m.get("path"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    }
+
     fn trash_index(&self) -> Map<String, Value> {
         fs::read_to_string(self.trash_index_path())
             .ok()
@@ -4291,7 +4362,7 @@ impl MemoryStore {
             let path = format!(".Trash/{name}");
             let meta = index.get(&name);
             let original = meta.and_then(|m| m.get("path")).and_then(|v| v.as_str());
-            if !self.visible(&path) || original.is_some_and(|o| !self.visible(o)) {
+            if !self.view_visible(&path) || original.is_some_and(|o| !self.visible(o)) {
                 continue;
             }
             let deleted = meta.and_then(|m| m.get("deleted")).cloned();
@@ -4354,11 +4425,19 @@ impl MemoryStore {
             .and_then(|o| o.rsplit('/').next())
             .unwrap_or(&base)
             .to_string();
-        let into = into.trim().trim_matches('/');
-        let dest = match (into, &original) {
-            ("", Some(o)) => o.clone(),
-            ("", None) | ("Root", _) => file,
-            (f, _) => format!("{f}/{file}"),
+        // `into` is a folder like any move destination: checked and cleaned the
+        // same way (no `.`/`..`, no reserved or hidden names).
+        let into = into.trim();
+        let folder = if into.trim_matches('/').is_empty() {
+            None
+        } else {
+            Some(self.move_target(into)?.map(|(f, _)| f).unwrap_or_default())
+        };
+        let dest = match (folder, &original) {
+            (None, Some(o)) => o.clone(),
+            (None, None) => file,
+            (Some(f), _) if f.is_empty() => file,
+            (Some(f), _) => format!("{f}/{file}"),
         };
         let dap = self.resolve(&dest)?;
         if dap.exists() {
@@ -4982,8 +5061,24 @@ impl MemoryStore {
         // The note as spelled on disk: an exact match first, then one that differs
         // only in case. (On Windows and macOS `is_file` is true for any spelling,
         // so the lookup goes through the vault listing.)
-        let want = with_md.replace('\\', "/");
-        let want = want.trim_start_matches('/');
+        // `.` and empty segments are spelling only (`Notes/./a.md`, `Notes//a.md`
+        // open `Notes/a.md`): drop them, or another spelling would slip past a
+        // lock. A symlink is matched by the note it leads to.
+        let typed = with_md.replace('\\', "/");
+        let mut want = typed
+            .split('/')
+            .filter(|seg| !seg.is_empty() && *seg != ".")
+            .collect::<Vec<_>>()
+            .join("/");
+        if let (Ok(root), Ok(real)) = (fs::canonicalize(self.root()), fs::canonicalize(&ap)) {
+            if let Ok(rel) = real.strip_prefix(&root) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                if !rel.is_empty() && rel.to_lowercase().ends_with(".md") {
+                    want = rel;
+                }
+            }
+        }
+        let want = want.as_str();
         let all: Vec<String> = self.walk().into_iter().map(|(rel, _, _)| rel).collect();
         if all.iter().any(|rel| rel == want) {
             return Ok(want.to_string());
@@ -6437,6 +6532,45 @@ mod image_render_tests {
             s.link_targets("![[a.png]] [[Note]] ![[b.JPG|20]]"),
             vec!["Note".to_string()]
         );
+    }
+
+    /// Names Windows would store differently from how they are written: each
+    /// could alias a hidden or reserved entry (`GIT~1` is `.git`, `Private.`
+    /// is `Private`, `x.md:s` is a stream of `x.md`, `NUL` a device).
+    #[test]
+    fn windows_unsafe_segments() {
+        for bad in [
+            "GIT~1",
+            "LOCKS~1.JSO",
+            "Private.",
+            "Private ",
+            "x.md:s",
+            "C:",
+            "CON",
+            "con.md",
+            "Nul",
+            "COM1",
+            "lpt9.txt",
+            "COM\u{b9}",
+            "AUX .md",
+            "CONIN$",
+        ] {
+            assert!(windows_unsafe_segment(bad), "{bad}");
+        }
+        for ok in [
+            "Notes",
+            "Plan.md",
+            "a~b",
+            "COM",
+            "COM10",
+            "Console",
+            "x~1a",
+            "",
+            ".",
+            "nullable.md",
+        ] {
+            assert!(!windows_unsafe_segment(ok), "{ok}");
+        }
     }
 
     #[test]

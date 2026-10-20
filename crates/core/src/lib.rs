@@ -1069,7 +1069,61 @@ mod resource_tests {
                 "a symlink out of the vault is refused"
             );
             let _ = fs::remove_dir_all(&out);
+            // A symlink that stays inside the vault but reaches the store's own
+            // dot files (git config: a write there can run commands on the next
+            // commit) is refused like the typed dot path.
+            fs::create_dir_all(d.join(".git")).unwrap();
+            fs::write(d.join(".git/config"), "[core]\n").unwrap();
+            std::os::unix::fs::symlink(d.join(".git/config"), d.join("Projects/cfg.md")).unwrap();
+            std::os::unix::fs::symlink(d.join(".git"), d.join("Projects/g")).unwrap();
+            std::os::unix::fs::symlink(d.join(".git/h.png"), d.join("Projects/h.png")).unwrap();
+            fs::write(d.join(".git/h.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+            for bad in ["Projects/cfg.md", "Projects/g/config", "Projects/g/new.md"] {
+                assert!(
+                    s.resolve(bad).is_err(),
+                    "{bad} reaches .git and must be refused"
+                );
+            }
+            assert!(s.read_note_impl("Projects/cfg.md").is_err());
+            assert!(s.vault_image_file("Projects/h.png").is_err());
+            assert_eq!(
+                fs::read_to_string(d.join(".git/config")).unwrap(),
+                "[core]\n"
+            );
         }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Another spelling of a locked note (`./`, `//`, a leading `/`, a symlink)
+    /// opens the same file, so it must meet the same lock.
+    #[test]
+    fn locks_cannot_be_dodged_by_respelling_the_path() {
+        let d = tmp_vault("lockspell");
+        fs::write(d.join("Projects/a.md"), "x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(d.join("Projects/a.md"), d.join("Projects/alias.md")).unwrap();
+        let s = MemoryStore::new(&d);
+        s.lock_node_impl("Projects/a.md", "k_a", "A", 300).unwrap();
+        let mut spellings = vec![
+            "Projects/a.md",
+            "Projects/./a.md",
+            "Projects//a.md",
+            "/Projects/a.md",
+            "./Projects/a.md",
+            "Projects/a",
+        ];
+        if cfg!(unix) {
+            spellings.push("Projects/alias.md");
+        }
+        for p in spellings {
+            assert!(
+                s.lock_conflict(&[p.to_string()], &[], "k_b", "B").is_some(),
+                "{p} slipped past the lock"
+            );
+        }
+        assert!(s
+            .lock_conflict(&["Projects/a.md".into()], &[], "k_a", "A")
+            .is_none());
         let _ = fs::remove_dir_all(&d);
     }
 

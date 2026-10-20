@@ -177,6 +177,29 @@ pub fn arg_paths(tool: &str, args: &Value) -> Paths {
     out
 }
 
+/// Folders named by the tool arguments (`folder`, `into`, and `folder` of each
+/// `batch_create` note). They ride along on the stored `start` event so the
+/// privacy filter on logs and events sees them: the label of `create_memory`
+/// is the new note's title, which must stay hidden when the folder is.
+pub fn arg_folders(args: &Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |v: Option<&Value>| {
+        if let Some(f) = v.and_then(|v| v.as_str()).map(str::trim) {
+            if !f.is_empty() && f.len() <= MAX_PATH_LEN && !out.iter().any(|x| x == f) {
+                out.push(f.to_string());
+            }
+        }
+    };
+    add(args.get("folder"));
+    add(args.get("into"));
+    if let Some(items) = args.get("notes").and_then(|v| v.as_array()) {
+        for it in items.iter().take(MAX_PATHS) {
+            add(it.get("folder"));
+        }
+    }
+    out
+}
+
 /// Add note paths found in a tool result (bounded walk, stops once full).
 pub fn add_result_paths(tool: &str, result: &Value, out: &mut Paths) {
     if NO_RESULT_PATHS.contains(&tool) {
@@ -297,8 +320,21 @@ pub fn traced(
     let call_id = new_call_id();
     let mut paths = arg_paths(tool, args);
     let read_only = is_read_only(tool);
+    let folders = arg_folders(args);
+    let with_folders = |mut v: Value| {
+        if !folders.is_empty() {
+            v["folders"] = json!(folders);
+        }
+        v
+    };
     if !read_only {
-        hub.publish(start_event(caller, &call_id, tool, label, paths.as_slice()));
+        hub.publish(with_folders(start_event(
+            caller,
+            &call_id,
+            tool,
+            label,
+            paths.as_slice(),
+        )));
     }
     let t0 = Instant::now();
     let res = f();
@@ -310,7 +346,7 @@ pub fn traced(
     if read_only {
         // Published after the call, so the stored row (the log keeps only starts)
         // already says how it went: readers never show a finished call as running.
-        let mut v = start_event(caller, &call_id, tool, label, paths.as_slice());
+        let mut v = with_folders(start_event(caller, &call_id, tool, label, paths.as_slice()));
         v["ok"] = json!(err.is_none());
         v["ms"] = json!(ms);
         hub.publish(v);
@@ -330,6 +366,40 @@ pub fn traced(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `create_memory` logs the title as its label; the folder rides along so
+    /// an agent that may not see the folder never reads the title in the logs.
+    #[test]
+    fn folders_ride_along_so_hidden_titles_stay_hidden() {
+        assert_eq!(
+            arg_folders(&json!({"title": "t", "folder": "Private/Deals"})),
+            ["Private/Deals"]
+        );
+        assert_eq!(
+            arg_folders(
+                &json!({"notes": [{"folder": "A"}, {"folder": "B"}, {"folder": "A"}], "into": "C"})
+            ),
+            ["C", "A", "B"]
+        );
+        assert!(arg_folders(&json!({"folder": "  "})).is_empty());
+
+        struct HidePrivate;
+        impl memora_core::privacy::PathView for HidePrivate {
+            fn visible(&self, rel: &str) -> bool {
+                !rel.to_lowercase().starts_with("private")
+            }
+            fn mentions_hidden(&self, text: &str) -> bool {
+                text.to_lowercase().contains("private")
+            }
+        }
+        let store = std::sync::Mutex::new(memora_core::MemoryStore::new(std::env::temp_dir()));
+        let view = memora_core::privacy::lock_as(&store, Some(std::sync::Arc::new(HidePrivate)));
+        let caller = Caller::full("k_x");
+        let mut ev = start_event(&caller, "c1", "create_memory", "Merger plan", &[]);
+        assert!(view.value_visible(&ev));
+        ev["folders"] = json!(arg_folders(&json!({"folder": "Private"})));
+        assert!(!view.value_visible(&ev));
+    }
 
     #[test]
     fn arg_paths_cover_path_fields() {
