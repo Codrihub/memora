@@ -680,7 +680,7 @@ function prepareCode(s: AuthState): void {
   const reset = isReset();
   $('#codeTitle').textContent = reset ? 'Enter the reset code' : 'Enter the setup code';
   $('#codeSub').textContent =
-    'Enter the ' + (reset ? 'reset' : 'setup') + ' code shown in the server terminal. One try only: a wrong code voids it.';
+    'Enter the ' + (reset ? 'reset' : 'setup') + ' code shown in the server terminal. A few wrong tries from one device pause it for a while.';
   $('#codeLabel').textContent = reset ? 'Reset code' : 'Setup code';
   const c = input('#code');
   c.value = '';
