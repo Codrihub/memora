@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-10-21
+
+A security and reliability pass: dependencies checked against published
+advisories, Memora's own code reviewed for common vulnerability classes, and a
+long load test for leaks. This covers what was found; it is not a guarantee
+that nothing else is there.
+
+### Security
+
+- Dependencies: updated rustls-webpki (RUSTSEC-2026-0382) and webpki-roots
+  (RUSTSEC-2026-0381), used by the release check and OAuth metadata fetch, and
+  zip (RUSTSEC-2026-0367, -0368, -0369; Memora never extracted archives, so it
+  was not exposed). `cargo audit` and `npm audit` now run in CI, Dependabot is
+  on, GitHub Actions are pinned to commits, and the Docker image is based on
+  Debian 13.
+- A note containing a crafted embed could crash the server every time it was
+  viewed. Fixed.
+- Behind a reverse proxy, a client-sent `CF-Connecting-IP` or `X-Real-IP` could
+  choose the caller's address, including `127.0.0.1`, and skip sign-in rate
+  limits. Memora now uses the right-most `X-Forwarded-For` entry that is not a
+  trusted proxy and ignores loopback addresses in headers.
+- Many failed sign-ins no longer lock the owner out: the server slows down
+  instead, and a correct password from a device without recent failures still
+  works. A wrong setup code no longer closes the setup window on the first try.
+- OAuth client registration is rate-limited per address and unused clients are
+  removed after an hour. The public client metadata fetch also refuses IPv4
+  addresses wrapped in IPv6 (such as NAT64).
+- Paths that pointed at `.git` or other store files through a symlink or a
+  Windows short name (`GIT~1`), and respelled paths that slipped past soft
+  locks, are refused. Windows device names, `:` streams and trailing dots or
+  spaces are refused too.
+- Privacy rules now also cover the trash, the activity log of `create_memory`,
+  the history of a hidden note's former path, and `import_memory` replies.
+- Text replacements (`bulk_replace`, patch `replace`, templates) are capped so
+  they cannot exhaust memory.
+- `/logout` accepts POST only, with the same-origin check. `/_bus` refuses
+  requests made by a browser.
+- Folder colours and icons read from `.folders.json` are validated.
+- The state folder is tightened to owner-only, and Memora's own files in the
+  vault (`.events.jsonl`, `.locks.json` and others) are created owner-only.
+
+### Fixed
+
+- `memora.log` grew without limit (one line per MCP request); it is now
+  bounded. The server raises its open-file limit so connection spikes do not
+  run out of file handles.
+- Memora's own files (`.events.jsonl`, `.locks.json`) were committed to the
+  vault's git history on every write.
+- The activity log endpoint kept every parsed event of its window in memory.
+- Leaving the Brain view kept its node card and controller in memory, and a
+  paused Activity page queued events without limit.
+
+### Changed
+
+- The npm package needs Node.js 22 or newer (18 and 20 no longer get security
+  updates).
+
 ## [1.3.7] - 2026-10-21
 
 ### Added
@@ -509,6 +566,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.8]: https://github.com/Codrihub/memora/releases/tag/v1.3.8
 [1.3.7]: https://github.com/Codrihub/memora/releases/tag/v1.3.7
 [1.3.6]: https://github.com/Codrihub/memora/releases/tag/v1.3.6
 [1.3.5]: https://github.com/Codrihub/memora/releases/tag/v1.3.5
