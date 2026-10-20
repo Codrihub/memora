@@ -22,7 +22,7 @@
 
 use serde_json::{json, Value};
 use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -163,7 +163,7 @@ impl EventHub {
         }
         if dropped > 0 {
             let tmp = p.with_extension("jsonl.compact");
-            if fs::write(&tmp, &kept).is_ok() && fs::rename(&tmp, &p).is_ok() {
+            if crate::vault::write_private(&tmp, &kept).is_ok() && fs::rename(&tmp, &p).is_ok() {
                 st.lines = kept.lines().count();
                 st.bytes = kept.len() as u64;
                 st.counted = true;
@@ -247,7 +247,7 @@ impl EventHub {
             st.bytes = bytes;
             st.counted = true;
         }
-        let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&p) else {
+        let Ok(mut f) = crate::vault::open_private(&p, true) else {
             return;
         };
         if writeln!(f, "{line}").is_ok() {
@@ -346,7 +346,7 @@ fn compact_log(p: &Path, keep_lines: usize, keep_bytes: u64) -> Option<(usize, u
         out.push(b'\n');
     }
     let tmp = p.with_extension("jsonl.compact");
-    fs::write(&tmp, &out).ok()?;
+    crate::vault::write_private(&tmp, &out).ok()?;
     fs::rename(&tmp, p).ok()?;
     Some((kept.len(), out.len() as u64))
 }
@@ -408,6 +408,24 @@ mod tests {
         let log = std::fs::read_to_string(dir.join(".events.jsonl")).unwrap();
         assert_eq!(log.lines().count(), 1);
         assert!(log.contains("\"start\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The event log holds agent names, labels and search text: owner-only,
+    /// and an existing log with a wider mode is tightened on the next append.
+    #[cfg(unix)]
+    #[test]
+    fn the_event_log_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmpdir("mode");
+        let p = dir.join(".events.jsonl");
+        std::fs::write(&p, "").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let hub = EventHub::new();
+        hub.set_events_path(p.clone());
+        hub.publish(json!({"type": "ai_activity", "phase": "start", "call_id": "c1"}));
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

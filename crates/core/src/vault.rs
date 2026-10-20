@@ -97,6 +97,38 @@ pub fn now_secs() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Open one of the store's own files (`.events.jsonl`, `.locks.json`, ...)
+/// owner-only (0600 on Unix): they hold agent names, labels, search text and
+/// paths, which other local users should not read even when the notes
+/// themselves are shared. An existing file with a wider mode is tightened.
+pub fn open_private(path: &Path, append: bool) -> std::io::Result<fs::File> {
+    let mut o = fs::OpenOptions::new();
+    o.create(true);
+    if append {
+        o.append(true);
+    } else {
+        o.write(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        o.mode(0o600);
+        let f = o.open(path)?;
+        if f.metadata()?.permissions().mode() & 0o077 != 0 {
+            f.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(f)
+    }
+    #[cfg(not(unix))]
+    o.open(path)
+}
+
+/// Write one of the store's own files owner-only (see [`open_private`]).
+pub fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+    use std::io::Write;
+    open_private(path, false)?.write_all(contents.as_ref())
+}
+
 /// Current local time with offset, second resolution.
 pub fn now_iso() -> String {
     chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
@@ -3380,8 +3412,8 @@ impl MemoryStore {
             }
         }
         if changed {
-            fs::write(
-                self.folders_path(),
+            write_private(
+                &self.folders_path(),
                 serde_json::to_string_pretty(&Value::Object(out)).unwrap(),
             )
             .ok();
@@ -4342,7 +4374,7 @@ impl MemoryStore {
             fs::create_dir_all(dir).ok();
         }
         if let Ok(s) = serde_json::to_string_pretty(index) {
-            fs::write(p, s).ok();
+            write_private(&p, s).ok();
         }
     }
 
@@ -5047,8 +5079,8 @@ impl MemoryStore {
         } else {
             meta.insert(folder.to_string(), Value::Object(m.clone()));
         }
-        fs::write(
-            self.folders_path(),
+        write_private(
+            &self.folders_path(),
             serde_json::to_string_pretty(&Value::Object(meta)).unwrap(),
         )
         .ok();
@@ -5095,8 +5127,8 @@ impl MemoryStore {
     }
 
     fn save_locks(&self, locks: &Map<String, Value>) {
-        fs::write(
-            self.locks_path(),
+        write_private(
+            &self.locks_path(),
             serde_json::to_string_pretty(locks).unwrap(),
         )
         .ok();
@@ -5668,8 +5700,8 @@ impl MemoryStore {
         }
         let mut aliases = self.get_actor_aliases();
         aliases.insert(actor.to_string(), json!(alias));
-        fs::write(
-            self.actors_path(),
+        write_private(
+            &self.actors_path(),
             serde_json::to_string_pretty(&Value::Object(aliases.clone())).unwrap(),
         )
         .ok();

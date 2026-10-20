@@ -1163,6 +1163,35 @@ mod resource_tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// The store's own files (locks, folder looks, actor names, trash index)
+    /// are written owner-only, and a wider existing mode is tightened.
+    #[cfg(unix)]
+    #[test]
+    fn store_dot_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp_vault("dotmode");
+        fs::write(d.join("Projects/a.md"), "x").unwrap();
+        fs::write(d.join("Projects/b.md"), "x").unwrap();
+        fs::write(d.join(".locks.json"), "{}").unwrap();
+        fs::set_permissions(d.join(".locks.json"), fs::Permissions::from_mode(0o644)).unwrap();
+        let s = MemoryStore::new(&d);
+        s.lock_node_impl("Projects/a.md", "k_a", "A", 300).unwrap();
+        s.set_folder_meta_impl("Projects", Some("#12ab9f"), None, None)
+            .unwrap();
+        s.set_actor_alias("k_a", "Alpha").unwrap();
+        s.soft_delete_impl("Projects/b.md").unwrap();
+        for f in [
+            ".locks.json",
+            ".folders.json",
+            ".actors.json",
+            ".Trash/.index.json",
+        ] {
+            let mode = fs::metadata(d.join(f)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{f}");
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn deleted_notes_leave_the_search_index() {
         let d = tmp_vault("ghost");
