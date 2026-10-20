@@ -235,7 +235,8 @@ First-run and recovery (the arm window):
   exists.
 - `memora-cli reset-password` arms a `reset` window; `/api/auth/reset`
   replaces the password.
-- A wrong code voids the window. If a window expires unfinished, the instance
+- A wrong code spends that IP's small budget (3, then a cooldown); 50 wrong
+  codes in one window void it. If a window expires unfinished, the instance
   becomes LOCKED. While locked, only the lock allow list and static assets are
   reachable. `memora-cli unlock`, `setup`, or `reset-password` clears the lock.
 

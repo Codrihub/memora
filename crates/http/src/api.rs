@@ -638,9 +638,46 @@ fn succeeded(st: &AppState, headers: &HeaderMap) {
     }
 }
 
-/// A wrong setup code voids the window at once: the code can never be tried
-/// again, and the operator has to open a new window (`/web`) on the server.
-fn burned_code(st: &AppState, headers: &HeaderMap) -> Response {
+/// A wrong setup code. It spends the caller's small per-IP budget
+/// ([`crate::guard::CODE_IP_LIMIT`], then a cooldown) instead of closing the
+/// window at once, which let anyone who could reach `/login` keep the owner
+/// from ever finishing setup. Only after
+/// [`crate::guard::CODE_WINDOW_LIMIT`] wrong codes in all is the window closed
+/// and the code voided ([`burn_window`]). The code stays single-use and the
+/// window time-limited.
+fn wrong_code(st: &AppState, headers: &HeaderMap) -> Response {
+    let armed_at = cache::arm_window(st).armed_at.unwrap_or(0);
+    let ip = crate::guard::header_ip(headers)
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    let (wait, close) = st.guard.code_miss(&ip, armed_at);
+    if close {
+        return burn_window(st, headers);
+    }
+    act(st, headers, "code_wrong", None, "wrong setup code");
+    tracing::warn!(%ip, "wrong setup code");
+    if let Some(wait) = wait {
+        act(
+            st,
+            headers,
+            "cooldown",
+            None,
+            &format!("{} minutes", wait / 60),
+        );
+        return crate::guard::too_many(wait, true);
+    }
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "Wrong setup code. Check the code shown on the server and try again.",
+            "burned": false,
+        })),
+    )
+        .into_response()
+}
+
+/// Too many wrong codes for this window: void the code and close the window;
+/// the operator has to open a new one (`/web`) on the server.
+fn burn_window(st: &AppState, headers: &HeaderMap) -> Response {
     let ip = crate::guard::header_ip(headers)
         .map(|i| i.to_string())
         .unwrap_or_else(|| "?".into());
@@ -651,23 +688,18 @@ fn burned_code(st: &AppState, headers: &HeaderMap) -> Response {
             headers,
             "code_burned",
             None,
-            "wrong code; window closed",
+            "too many wrong codes; window closed",
         )
     });
     if let Err(e) = burned {
         tracing::error!("could not close the window after a wrong code: {e}");
     }
     cache::reload(st, Domain::Arm);
-    tracing::warn!(%ip, "wrong setup code: window closed, code voided");
-    if let Some(ip) = crate::guard::header_ip(headers) {
-        if let Some(wait) = st.guard.fail_login(&ip) {
-            return crate::guard::too_many(wait, true);
-        }
-    }
+    tracing::warn!(%ip, "too many wrong setup codes: window closed, code voided");
     (
         StatusCode::FORBIDDEN,
         Json(json!({
-            "error": "Wrong setup code. For safety that code is now void and the window is closed. Open a new one on the server: memora-cli, then /web.",
+            "error": "Too many wrong setup codes. For safety the code is now void and the window is closed. Open a new one on the server: memora-cli, then /web.",
             "burned": true,
         })),
     )
@@ -718,7 +750,7 @@ async fn h_auth_verify(
         return forbidden("instance is not ready: the vault or state folder is not writable");
     }
     if !code_ok(&st, &b) {
-        return burned_code(&st, &headers);
+        return wrong_code(&st, &headers);
     }
     let mode = s.mode.map(|m| m.as_str()).unwrap_or("");
     act(&st, &headers, "code_ok", None, mode);
@@ -1563,6 +1595,11 @@ async fn h_auth_login(
             "invalid credentials",
         );
     }
+    // Slow mode (many failures from several addresses): every attempt waits a
+    // little, which costs a guesser far more than the owner.
+    if st.guard.account_hot() {
+        tokio::time::sleep(crate::guard::HOT_LOGIN_DELAY).await;
+    }
     let rec = find_user(&st, &username);
     // An unknown username still pays for one argon2 verify, so response time
     // does not reveal whether the account exists.
@@ -1651,7 +1688,7 @@ async fn h_auth_bootstrap(
         return forbidden("setup window is not open; run memora-cli setup on the server");
     }
     if !code_ok(&st, &b) {
-        return burned_code(&st, &headers);
+        return wrong_code(&st, &headers);
     }
     if !readiness(&st).values().all(|v| v.as_bool() == Some(true)) {
         return forbidden("instance is not ready: the vault or state folder is not writable");
@@ -1737,7 +1774,7 @@ async fn h_auth_reset(
         return forbidden("reset window is not open; run memora-cli reset-password on the server");
     }
     if !code_ok(&st, &b) {
-        return burned_code(&st, &headers);
+        return wrong_code(&st, &headers);
     }
     let (Some(username), Some(password)) = (body_str(&b, "username"), body_password(&b)) else {
         return bad("username and password are required");

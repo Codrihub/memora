@@ -226,10 +226,29 @@ In the console (`memora-cli` with no arguments), `/web` does the same as
 `setup` or `reset-password`, and `/guide` walks through the first run.
 
 Then open `/login`, enter the code, and fill in the form before the window
-closes. A wrong code closes the window; open a new one. If a window expires
+closes. A wrong code counts against that IP's budget of 3 (then it waits 5
+minutes); the code stays valid and single-use until the window ends. Only 50
+wrong codes in one window, from any IPs, close it early; open a new one then. If a window expires
 unfinished, the instance locks: API and MCP return `423` and pages go to the lock screen until
 `setup`, `reset-password`, or `unlock` runs. This keeps an unclaimed instance
 from being taken over by whoever reaches the port first.
+
+### Failed sign-ins
+
+Memora limits guessing without letting anyone lock you out:
+
+- Per IP: 5 failed sign-ins (or 3 wrong setup codes) within 15 minutes put
+  that IP on a cooldown of 5, then 10, then 15 minutes (`429`). A successful
+  sign-in from the IP clears it.
+- Across all IPs: 20 failures within 15 minutes switch on slow mode for 15
+  minutes after the latest failure. Every sign-in then waits about a second,
+  and one failure is enough to put an IP on its cooldown. There is no
+  account-wide lockout: a correct password from an IP without recent failures
+  still signs in, and that ends slow mode.
+- `memora-cli clear-cooldowns` clears every cooldown in the running server.
+
+Behind a proxy, these limits only work per client when Memora sees the real
+client IP (see [Reverse proxy](#reverse-proxy)).
 
 ## Backups
 

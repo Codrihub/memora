@@ -7,9 +7,15 @@
 //!     trusted proxy (loopback, e.g. cloudflared, or `MEMORA_TRUSTED_PROXIES`),
 //!     so spoofed `X-Forwarded-For` cannot buy a fresh bucket per request
 //!   * token buckets per IP cap how fast anyone can call the auth endpoints
-//!   * failed attempts (password, setup code, API key) put the IP, and after
-//!     many failures the owner account, on a cooldown that grows 5 -> 10 -> 15
-//!     minutes and is cleared by a successful attempt
+//!   * failed attempts (password, setup code, API key) put the IP on a
+//!     cooldown that grows 5 -> 10 -> 15 minutes and is cleared by a successful
+//!     attempt
+//!   * many failures across all IPs never lock the owner out: they switch the
+//!     account into a slow mode (see [`Guard::account_hot`]) where every login
+//!     waits a little and a single failure cools that IP down, while a correct
+//!     password from an IP without failures still signs in
+//!   * wrong setup codes count against a small per-IP budget; only many wrong
+//!     codes from many places close the window
 //!   * argon2 runs on the blocking pool behind a small semaphore, so a login
 //!     flood cannot starve the async runtime that serves agents
 
@@ -32,8 +38,20 @@ pub const CLIENT_IP_HEADER: &str = "x-memora-client-ip";
 const FAIL_WINDOW: Duration = Duration::from_secs(15 * 60);
 /// Failures per IP before a cooldown.
 const IP_FAIL_LIMIT: u32 = 5;
-/// Failures across all IPs before the owner account itself cools down.
+/// Failures across all IPs (in [`FAIL_WINDOW`]) before the account goes into
+/// slow mode. Slow mode delays logins and cuts the per-IP budget to one
+/// failure; it never refuses a correct password from an IP without failures.
 const ACCOUNT_FAIL_LIMIT: u32 = 20;
+/// Per-IP failures allowed while the account is in slow mode.
+const HOT_IP_FAIL_LIMIT: u32 = 1;
+/// Extra wait on every login while the account is in slow mode.
+pub const HOT_LOGIN_DELAY: Duration = Duration::from_secs(1);
+/// Wrong setup codes one IP may send before it cools down.
+pub const CODE_IP_LIMIT: u32 = 3;
+/// Wrong setup codes (from all IPs) one window survives; past this the window
+/// is closed. 50 guesses at an 8-character code from a 31-letter alphabet
+/// (about 8.5e11 codes) leave no real chance of a hit.
+pub const CODE_WINDOW_LIMIT: u32 = 50;
 /// Cooldown per strike: 5, 10, then 15 minutes at most.
 const COOLDOWN_STEP: Duration = Duration::from_secs(5 * 60);
 const COOLDOWN_MAX_STRIKES: u32 = 3;
@@ -98,6 +116,8 @@ pub struct Guard {
     trusted: Vec<IpAddr>,
     buckets: Mutex<HashMap<String, TokenBucket>>,
     failures: Mutex<HashMap<String, Failures>>,
+    /// Wrong setup codes in the current window: (window `armed_at`, count).
+    code_misses: Mutex<(i64, u32)>,
     hashing: Arc<Semaphore>,
     bucket_sweep: Mutex<Option<Instant>>,
     failure_sweep: Mutex<Option<Instant>>,
@@ -123,6 +143,7 @@ impl Guard {
                 .collect(),
             buckets: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
+            code_misses: Mutex::new((0, 0)),
             hashing: Arc::new(Semaphore::new(HASH_PERMITS)),
             bucket_sweep: Mutex::new(None),
             failure_sweep: Mutex::new(None),
@@ -243,20 +264,37 @@ impl Guard {
         (until > now).then(|| until.duration_since(now).as_secs().max(1))
     }
 
-    /// Longest active cooldown among the IP and the account.
+    /// Longest active cooldown of this IP (failed logins or wrong setup codes).
+    /// Failures from other IPs never block it: see [`Self::account_hot`].
     pub fn blocked(&self, ip: &IpAddr) -> Option<u64> {
         let a = self.cooldown(&ip_key(ip));
-        let b = self.cooldown(ACCOUNT_KEY);
+        let b = self.cooldown(&code_key(ip));
         a.max(b)
+    }
+
+    /// Slow mode: at least [`ACCOUNT_FAIL_LIMIT`] failed logins from any IPs in
+    /// the last [`FAIL_WINDOW`] (kept up while failures continue). A hard
+    /// account-wide cooldown would let anyone lock the owner out with a few
+    /// addresses; slow mode only makes guessing costlier.
+    pub fn account_hot(&self) -> bool {
+        let map = self.failures.lock().unwrap();
+        map.get(ACCOUNT_KEY)
+            .and_then(|f| f.blocked_until)
+            .is_some_and(|u| u > Instant::now())
     }
 
     /// Record a failed attempt; returns the cooldown it started, if any.
     pub fn fail(&self, key: &str) -> Option<u64> {
-        let limit = if key == ACCOUNT_KEY {
-            ACCOUNT_FAIL_LIMIT
+        let limit = if self.account_hot() {
+            HOT_IP_FAIL_LIMIT
         } else {
             IP_FAIL_LIMIT
         };
+        self.fail_with(key, limit)
+    }
+
+    /// [`Self::fail`] with an explicit per-key limit.
+    fn fail_with(&self, key: &str, limit: u32) -> Option<u64> {
         let now = Instant::now();
         let mut map = self.failures.lock().unwrap();
         if map.len() >= MAX_ENTRIES && !map.contains_key(key) {
@@ -284,6 +322,17 @@ impl Guard {
             f.strikes = 0;
         }
         f.count += 1;
+        if key == ACCOUNT_KEY {
+            // Never a cooldown for the account: past the limit it stays in slow
+            // mode for a window after the latest failure.
+            if f.count >= ACCOUNT_FAIL_LIMIT {
+                if f.blocked_until.is_none_or(|u| u <= now) {
+                    tracing::warn!("many failed logins from several addresses: slow mode on");
+                }
+                f.blocked_until = Some(now + FAIL_WINDOW);
+            }
+            return None;
+        }
         if f.count < limit {
             return None;
         }
@@ -301,17 +350,36 @@ impl Guard {
         Some(d.as_secs())
     }
 
-    /// Record a failure for both the IP and the account.
+    /// Record a failure for the IP and count it for the account (slow mode);
+    /// returns the IP's cooldown, if one started.
     pub fn fail_login(&self, ip: &IpAddr) -> Option<u64> {
         let a = self.fail(&ip_key(ip));
-        let b = self.fail(ACCOUNT_KEY);
-        a.max(b)
+        self.fail_with(ACCOUNT_KEY, ACCOUNT_FAIL_LIMIT);
+        a
+    }
+
+    /// A wrong setup code from `ip` in the window opened at `armed_at`.
+    /// Returns the IP's cooldown (its budget of [`CODE_IP_LIMIT`] is spent) and
+    /// whether the window has now had [`CODE_WINDOW_LIMIT`] wrong codes in all.
+    pub fn code_miss(&self, ip: &IpAddr, armed_at: i64) -> (Option<u64>, bool) {
+        let total = {
+            let mut m = self.code_misses.lock().unwrap();
+            if m.0 != armed_at {
+                *m = (armed_at, 0);
+            }
+            m.1 += 1;
+            m.1
+        };
+        let wait = self.fail_with(&code_key(ip), CODE_IP_LIMIT);
+        self.fail_with(ACCOUNT_KEY, ACCOUNT_FAIL_LIMIT);
+        (wait, total >= CODE_WINDOW_LIMIT)
     }
 
     /// A successful attempt clears the counters and strikes for these keys.
     pub fn succeed(&self, ip: &IpAddr) {
         let mut map = self.failures.lock().unwrap();
         map.remove(&ip_key(ip));
+        map.remove(&code_key(ip));
         map.remove(ACCOUNT_KEY);
     }
 
@@ -368,6 +436,11 @@ pub fn ip_net(ip: &IpAddr) -> String {
 
 pub fn ip_key(ip: &IpAddr) -> String {
     format!("ip:{}", ip_net(ip))
+}
+
+/// Failure key for wrong setup codes from one IP (or IPv6 /64).
+fn code_key(ip: &IpAddr) -> String {
+    format!("code:{}", ip_net(ip))
 }
 
 /// A fixed argon2id hash used when the username does not exist, so a wrong
@@ -611,6 +684,53 @@ mod tests {
         }
         assert!(g.fail(&ip_key(&fresh)).is_none());
         assert_eq!(g.failures.lock().unwrap().len(), MAX_ENTRIES);
+    }
+
+    /// Failures from many addresses must not lock the owner out: a correct
+    /// password from an IP without failures still gets through, while the
+    /// attackers' addresses cool down after a single miss in slow mode.
+    #[test]
+    fn many_failures_slow_down_but_never_lock_out_the_owner() {
+        let g = guard();
+        for i in 0..ACCOUNT_FAIL_LIMIT {
+            let ip: IpAddr = format!("203.0.113.{i}").parse().unwrap();
+            g.fail_login(&ip);
+        }
+        assert!(g.account_hot());
+        let owner: IpAddr = "198.51.100.7".parse().unwrap();
+        assert!(g.blocked(&owner).is_none(), "a fresh IP is never blocked");
+        // In slow mode one failure is enough to cool an address down.
+        let attacker: IpAddr = "192.0.2.50".parse().unwrap();
+        assert!(g.fail_login(&attacker).is_some());
+        assert!(g.blocked(&attacker).is_some());
+        assert!(g.blocked(&owner).is_none());
+        // The owner's successful login ends slow mode.
+        g.succeed(&owner);
+        assert!(!g.account_hot());
+    }
+
+    /// Wrong setup codes spend a small per-IP budget; the window only closes
+    /// after many misses in all, and a new window starts a new count.
+    #[test]
+    fn setup_code_misses_have_a_per_ip_budget() {
+        let g = guard();
+        let ip: IpAddr = "203.0.113.9".parse().unwrap();
+        for _ in 0..CODE_IP_LIMIT - 1 {
+            assert_eq!(g.code_miss(&ip, 100), (None, false));
+        }
+        assert!(g.blocked(&ip).is_none());
+        let (wait, close) = g.code_miss(&ip, 100);
+        assert!(wait.is_some() && !close);
+        assert!(g.blocked(&ip).is_some());
+        let other: IpAddr = "198.51.100.3".parse().unwrap();
+        assert!(g.blocked(&other).is_none());
+        let mut closed = false;
+        for i in CODE_IP_LIMIT..CODE_WINDOW_LIMIT {
+            let ip: IpAddr = format!("10.1.{}.{}", i / 200, i % 200).parse().unwrap();
+            closed = g.code_miss(&ip, 100).1;
+        }
+        assert!(closed, "the window closes after {CODE_WINDOW_LIMIT} misses");
+        assert!(!g.code_miss(&other, 200).1, "a new window starts over");
     }
 
     #[test]

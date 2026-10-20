@@ -144,6 +144,21 @@ async fn bootstrap(e: &mut Env, code: &str) -> Resp {
     .await
 }
 
+async fn bootstrap_from(e: &mut Env, code: &str, peer: Option<&str>) -> Resp {
+    let body = json!({"code": code, "username": "Owner", "password": PASSWORD});
+    call(
+        e,
+        Method::POST,
+        "/api/auth/bootstrap",
+        Some(body),
+        Opts {
+            peer,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
 #[tokio::test]
 async fn setup_login_keys_mcp_and_cli_signout() {
     let mut e = env("flow");
@@ -174,10 +189,40 @@ async fn setup_login_keys_mcp_and_cli_signout() {
     assert_eq!(r.body["armed"], true);
     assert_eq!(r.body["mode"], "bootstrap");
 
-    // A wrong code burns the window: the right code no longer works.
+    // A wrong code no longer closes the window at once (anyone who can reach
+    // /login could keep the owner from finishing setup): it spends a small
+    // per-IP budget, then that IP cools down.
     let r = bootstrap(&mut e, "WRON-GCOD").await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
-    assert_eq!(r.body["burned"], true);
+    assert_eq!(r.body["burned"], false);
+    let w = e.st.db.read(memora_state::arm::get).unwrap();
+    assert!(w.last_burn.is_none());
+    let far = Some("203.0.113.77");
+    for i in 0..memora_http::guard::CODE_IP_LIMIT {
+        let r = bootstrap_from(&mut e, "WRON-GCOD", far).await;
+        let want = if i + 1 < memora_http::guard::CODE_IP_LIMIT {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::TOO_MANY_REQUESTS
+        };
+        assert_eq!(r.status, want, "miss {i}: {}", r.body);
+    }
+    let r = bootstrap_from(&mut e, "ABCD-EFGH", far).await;
+    assert_eq!(
+        r.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "that IP is cooling down"
+    );
+    // Many wrong codes from many places do close the window and void the code.
+    let mut last = None;
+    for i in 0..memora_http::guard::CODE_WINDOW_LIMIT {
+        let ip = format!("198.51.100.{}", i % 250 + 1);
+        last = Some(bootstrap_from(&mut e, "WRON-GCOD", Some(&ip)).await);
+        if last.as_ref().unwrap().body["burned"] == true {
+            break;
+        }
+    }
+    assert_eq!(last.unwrap().body["burned"], true);
     let r = bootstrap(&mut e, "ABCD-EFGH").await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     let w = e.st.db.read(memora_state::arm::get).unwrap();
@@ -652,4 +697,59 @@ async fn expired_window_locks_the_instance() {
     )
     .await;
     assert_eq!(r.body["locked"], false);
+}
+
+/// Failed logins from many addresses used to put the whole account on a
+/// cooldown, so anyone with a few IPs could lock the owner out. Now they only
+/// switch on slow mode: a correct password from an address without failures
+/// still signs in, while an attacking address cools down after one miss.
+#[tokio::test]
+async fn failed_logins_from_many_ips_do_not_lock_out_the_owner() {
+    let mut e = env("lockout");
+    let other = cli(&e);
+    arm(&other, ArmMode::Bootstrap, "ABCD-EFGH");
+    assert_eq!(bootstrap(&mut e, "ABCD-EFGH").await.status, StatusCode::OK);
+    let wrong = json!({"username": "owner", "password": "nope nope nope"});
+    for i in 0..30 {
+        let ip = format!("203.0.113.{}", i + 1);
+        let r = call(
+            &mut e,
+            Method::POST,
+            "/api/auth/login",
+            Some(wrong.clone()),
+            Opts {
+                peer: Some(&ip),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_ne!(r.status, StatusCode::OK);
+    }
+    assert!(e.st.guard.account_hot());
+    // An attacking address in slow mode is cut off after a single miss.
+    let r = call(
+        &mut e,
+        Method::POST,
+        "/api/auth/login",
+        Some(wrong.clone()),
+        Opts {
+            peer: Some("192.0.2.200"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // The owner, from a fresh address, still gets in.
+    let r = call(
+        &mut e,
+        Method::POST,
+        "/api/auth/login",
+        Some(json!({"username": "owner", "password": PASSWORD})),
+        Opts {
+            peer: Some("198.51.100.42"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
 }

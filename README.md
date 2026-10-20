@@ -306,8 +306,8 @@ command to use instead.
   session ids are stored only as SHA-256 hashes; a key is shown once.
 - Session cookies are `HttpOnly` and `SameSite=Lax`, cookie writes are checked
   against the request origin, and pages use a nonce-based Content-Security-Policy.
-- Login and setup are rate limited with cooldowns; a wrong setup code closes the
-  window.
+- Login and setup are rate limited with per-IP cooldowns; many failures from
+  many IPs only slow sign-ins down and never lock the owner out.
 - Forwarding headers are trusted only from loopback and `MEMORA_TRUSTED_PROXIES`.
 - Access rules can allow or block by IP, range, CIDR and domain; loopback always
   stays allowed so you cannot lock yourself out.
