@@ -178,8 +178,21 @@ fn enable_wal(conn: &Connection, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Create the state folder owner-only (0700), or tighten an existing one that
+/// others can read or enter: it holds the database and the key that unseals
+/// stored secrets. Tightening is best effort (a folder owned by another user,
+/// e.g. a container volume, is left as it is; the CLI's `db check` reports it).
 fn ensure_private_dir(dir: &Path) -> Result<()> {
     if dir.is_dir() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(dir) {
+                if meta.permissions().mode() & 0o077 != 0 {
+                    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
         return Ok(());
     }
     std::fs::create_dir_all(dir)?;
@@ -257,5 +270,29 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod perm_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// An existing state folder that others can read is tightened to 0700 when
+    /// the database opens: it holds the database and the sealing key.
+    #[test]
+    fn an_open_state_folder_is_tightened() {
+        let dir = std::env::temp_dir().join(format!(
+            "memora-state-perm-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let db = Db::open(&dir).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
