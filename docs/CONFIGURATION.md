@@ -50,6 +50,7 @@ most 2048 bytes).
 | `MEMORA_API_KEY`, `MEMORA_API_KEY_FILE` | unset | Installs an agent API key with id `k_env` and scopes `mcp`, `read`, `write` (at least 24 characters). Only its SHA-256 is stored; the key is replaced when the value changes. |
 | `MEMORA_STATE` | `state` (relative to the working directory) | State directory holding `memora.db`. Created with mode 0700 if missing. |
 | `MEMORA_ASSETS` | the `crates/http/assets` folder of the build tree | Directory of the web UI assets. |
+| `MEMORA_INSTALL` | set by the npm launcher (`npm`) and the Docker image (`docker`) | How this copy was installed: `npm`, `docker`, `native`, `zip` or `source`. `memora-cli update`, `start`, `stop`, `restart` and `uninstall` use it to pick the right steps; when unset they work it out from the program's path. |
 | `MEMORA_SETUP_HINT` | `memora-cli setup (run on the server)` | Hint returned by `GET /api/auth/state` and shown on the login screen. |
 | `MEMORA_UPDATE_CHECK` | `true` | Release check: shortly after start and then every 6 hours the server asks GitHub (`api.github.com/repos/Codrihub/memora/releases/latest`) for the newest release and the web UI shows when an update is available. `false` (also `0`, `no`, `off`) turns it off; no network call is made. |
 
@@ -109,7 +110,8 @@ Compose also passes these through from `.env` to the container:
 
 Inside the container the image sets `MEMORA_VAULT=/data`,
 `MEMORA_STATE=/state`, `MEMORA_PORT=8400`, `MEMORA_BIND=0.0.0.0`,
-`MEMORA_ARM_TTL=300`, `MEMORA_ASSETS=/app/assets`, and `RUST_LOG=info`.
+`MEMORA_ARM_TTL=300`, `MEMORA_ASSETS=/app/assets`, `MEMORA_INSTALL=docker`,
+and `RUST_LOG=info`.
 
 ## State directory
 

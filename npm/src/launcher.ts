@@ -72,6 +72,10 @@ function binaryPath(name: Binary): string {
 export function run(name: Binary): void {
   const bin = binaryPath(name);
   const env = { ...process.env };
+  // Tells both binaries they came from npm, so `memora-cli update`, restart and
+  // uninstall give npm instructions without guessing from the path. An explicit
+  // MEMORA_INSTALL still wins.
+  if (!env.MEMORA_INSTALL) env.MEMORA_INSTALL = 'npm';
   // The web UI ships in this package; an explicit MEMORA_ASSETS still wins.
   if (name === 'memora' && !env.MEMORA_ASSETS) {
     env.MEMORA_ASSETS = join(dirname(dirname(fileURLToPath(import.meta.url))), 'assets');

@@ -13,6 +13,7 @@
 //! `uninstall` removes the program parts of the install kind and keeps the
 //! state folder and the vault unless the operator selects them ([`build_plan`]).
 
+use crate::install::{Origin, NPM_PACKAGE};
 use crate::{ok, Ctx};
 use anyhow::{Context, Result};
 use console::style;
@@ -39,8 +40,6 @@ const UNIT_FILE: &str = "/etc/systemd/system/memora.service";
 const STOP_WAIT: Duration = Duration::from_secs(10);
 /// How long `start` waits for /healthz to answer.
 const START_WAIT: Duration = Duration::from_secs(15);
-/// The npm package, for the uninstall hint.
-const NPM_PACKAGE: &str = "@codrihub/memora";
 /// Exit code when root is needed (same as `update`).
 const NEEDS_ROOT: i32 = 6;
 
@@ -72,25 +71,25 @@ pub(crate) enum Kind {
 pub(crate) struct Probe {
     /// The systemd unit of the running server.
     pub running_unit: Option<String>,
-    /// `/.dockerenv` exists.
-    pub in_docker: bool,
+    /// How the program files were installed ([`crate::install::detect`]).
+    pub origin: Origin,
     /// install.sh's unit file exists.
     pub unit_installed: bool,
     /// That unit's MEMORA_STATE is the state dir in use.
     pub unit_state_matches: bool,
     /// The state dir is the fallback `./state` (no flag, env or server).
     pub state_is_default: bool,
-    /// This binary comes from the npm package.
-    pub npm: bool,
     /// install.sh's saved copy.
     pub installer: Option<PathBuf>,
 }
 
 /// The install kind. Docker first (a container never drives systemd), then a
 /// running unit, then install.sh's unit when it serves this state dir (or no
-/// state dir was named, as with a stopped service and plain `sudo memora-cli`).
+/// state dir was named, as with a stopped service and plain `sudo memora-cli`)
+/// and this copy is not an npm or source one.
 pub(crate) fn detect(p: &Probe) -> Kind {
-    if p.in_docker {
+    let npm = p.origin == Origin::Npm;
+    if p.origin == Origin::Docker {
         return Kind::Docker;
     }
     if let Some(unit) = &p.running_unit {
@@ -100,13 +99,16 @@ pub(crate) fn detect(p: &Probe) -> Kind {
             installer,
         };
     }
-    if p.unit_installed && (p.unit_state_matches || p.state_is_default) {
+    if p.unit_installed
+        && (p.unit_state_matches || p.state_is_default)
+        && !matches!(p.origin, Origin::Npm | Origin::Source)
+    {
         return Kind::Service {
             unit: UNIT_NAME.to_string(),
             installer: p.installer.clone(),
         };
     }
-    Kind::Process { npm: p.npm }
+    Kind::Process { npm }
 }
 
 /// Probe this machine for [`detect`].
@@ -117,11 +119,10 @@ fn probe(ctx: &Ctx) -> Probe {
         .and_then(|t| unit_env(t, "MEMORA_STATE"));
     Probe {
         running_unit: ctx.server_unit(),
-        in_docker: Path::new("/.dockerenv").exists(),
+        origin: crate::install::detect(),
         unit_installed: unit_text.is_some(),
         unit_state_matches: unit_state.is_some_and(|s| crate::same_path(Path::new(&s), &ctx.state)),
         state_is_default: ctx.source.starts_with("default"),
-        npm: crate::update::npm_install(),
         installer: crate::update::installer(),
     }
 }
@@ -1657,7 +1658,7 @@ mod tests {
             }
         );
         // Docker wins over everything
-        p.in_docker = true;
+        p.origin = Origin::Docker;
         assert_eq!(detect(&p), Kind::Docker);
         // stopped native service: its unit file serves this (or the default) state dir
         let mut p = Probe {
@@ -1671,9 +1672,14 @@ mod tests {
         assert_eq!(detect(&p), Kind::Process { npm: false });
         p.state_is_default = true;
         assert!(matches!(detect(&p), Kind::Service { .. }));
+        // ...but an npm or source copy runs its own process
+        p.origin = Origin::Npm;
+        assert_eq!(detect(&p), Kind::Process { npm: true });
+        p.origin = Origin::Source;
+        assert_eq!(detect(&p), Kind::Process { npm: false });
         // plain processes
         let p = Probe {
-            npm: true,
+            origin: Origin::Npm,
             ..Probe::default()
         };
         assert_eq!(detect(&p), Kind::Process { npm: true });

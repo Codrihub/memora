@@ -5,6 +5,7 @@
 //! dir (`db.rs`), so no root-owned `memora.db*` files appear.
 
 mod db;
+mod install;
 mod lifecycle;
 mod manage;
 mod store;
@@ -804,7 +805,14 @@ fn main() -> anyhow::Result<()> {
         "uninstall",
     ];
     if !known.contains(&cmd.as_str()) {
-        usage_error(&format!("unknown command `{cmd}`"));
+        eprintln!("memora-cli: unknown command `{cmd}`");
+        eprintln!(
+            "This is memora-cli {}; `memora-cli help` lists its commands.",
+            env!("CARGO_PKG_VERSION")
+        );
+        eprintln!("A command from newer docs needs a newer version: see `memora-cli update`, or");
+        eprintln!("https://github.com/Codrihub/memora/blob/main/docs/INSTALL.md#troubleshooting");
+        std::process::exit(2);
     }
     if cmd == "update" {
         let mut yes = false;

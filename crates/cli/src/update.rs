@@ -2,9 +2,11 @@
 //! version and upgrade a native install through the installer it came with.
 //!
 //! The installer (`install.sh`) does the real work: download, sha256 check,
-//! atomic binary swap and service restart. Docker and npm installs are updated
-//! by pulling a new image or package, so for them this only prints the commands.
+//! atomic binary swap and service restart. Other installs (npm, Docker, a
+//! release folder, a source build) cannot update themselves, so for them this
+//! prints the commands for that install ([`manual_steps`]).
 
+use crate::install::Origin;
 use crate::ok;
 use console::style;
 use dialoguer::theme::ColorfulTheme;
@@ -24,17 +26,56 @@ pub(crate) fn installer() -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// True when this binary came from the `@codrihub/memora` npm package (it then
-/// lives in `node_modules/@codrihub/memora-<platform>/bin`, with backslashes on Windows).
-pub(crate) fn npm_install() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.canonicalize().ok())
-        .is_some_and(|p| {
-            p.to_string_lossy()
-                .replace('\\', "/")
-                .contains("/node_modules/@codrihub/memora-")
-        })
+const NPM_UPDATE: &str = "npm install -g @codrihub/memora@latest";
+const INSTALL_SH: &str =
+    "curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/install.sh | sudo sh";
+const GUIDE: &str = "https://github.com/Codrihub/memora/blob/main/docs/INSTALL.md#update";
+
+/// How to update an install this command cannot upgrade itself, one line per
+/// item; `None` for the native installer, which `run` upgrades.
+pub(crate) fn manual_steps(origin: Origin) -> Option<Vec<String>> {
+    let cmd = |c: &str| format!("  {}", style(c).cyan());
+    let lines = match origin {
+        Origin::Native => return None,
+        Origin::Npm => vec![
+            "This copy was installed with npm. Update it with:".into(),
+            cmd(NPM_UPDATE),
+            "then restart the server so it runs the new version:".into(),
+            cmd("memora-cli restart"),
+            "(or stop it with Ctrl+C where it runs and start `memora` again).".into(),
+            "Your settings and notes stay; the state database is migrated on start.".into(),
+        ],
+        Origin::Docker => vec![
+            "This is a Docker install. Update it from the host:".into(),
+            cmd("docker compose pull && docker compose up -d"),
+            "or, for a container started with docker run:".into(),
+            cmd("docker pull ghcr.io/codrihub/memora:latest"),
+            "then remove and re-create the container with the same volumes.".into(),
+            "The state database is migrated automatically on start.".into(),
+        ],
+        Origin::Folder => vec![
+            "This copy runs from a plain folder of program files (an older release zip,".into(),
+            "or copied by hand), which cannot update itself.".into(),
+            "Memora now installs with npm on Windows and Linux (Node 18+). To switch:".into(),
+            "  1. stop the server: memora-cli stop (or Ctrl+C where it runs)".into(),
+            format!("  2. {}", style(format!("npm install -g {}", crate::install::NPM_PACKAGE)).cyan()),
+            "  3. start it with the same folders, so settings and notes carry over:".into(),
+            cmd("MEMORA_STATE=<your state folder> MEMORA_VAULT=<your vault> memora"),
+            "     (PowerShell: $env:MEMORA_STATE = '<your state folder>'; $env:MEMORA_VAULT = '<your vault>'; memora)".into(),
+            "  4. delete the old program folder (only the program files, not state or vault).".into(),
+            "On a Linux server you can use the native installer instead:".into(),
+            cmd(INSTALL_SH),
+        ],
+        Origin::Source => vec![
+            "This copy was built from source. Update the checkout and rebuild:".into(),
+            cmd("git pull && cargo build --release"),
+            "then restart the server:".into(),
+            cmd("memora-cli restart"),
+        ],
+    };
+    let mut lines = lines;
+    lines.push(format!("Details: {GUIDE}"));
+    Some(lines)
 }
 
 /// `(major, minor, patch)` of a plain semantic version; pre-releases sort
@@ -104,31 +145,17 @@ pub fn run(theme: Option<&ColorfulTheme>, yes: bool, check_only: bool) -> i32 {
     let current = env!("CARGO_PKG_VERSION");
     println!("Installed: memora {current}");
 
-    if std::path::Path::new("/.dockerenv").exists() {
-        println!("This is a Docker install. Update it from the host:");
-        println!(
-            "  {}",
-            style("docker compose pull && docker compose up -d").cyan()
-        );
-        println!("The state database is migrated automatically on start.");
-        return 0;
-    }
-    if npm_install() {
-        println!("This copy was installed with npm. Update it with:");
-        println!(
-            "  {}",
-            style("npm install -g @codrihub/memora@latest").cyan()
-        );
-        println!("The state database is migrated automatically on start.");
+    let origin = crate::install::detect();
+    if let Some(lines) = manual_steps(origin) {
+        for l in lines {
+            println!("{l}");
+        }
         return 0;
     }
     let Some(script) = installer() else {
-        println!(
-            "This copy was not installed with install.sh (built from source or copied by hand)."
-        );
-        println!("Update it the same way it was installed, for example:");
-        println!("  {}", style("git pull && cargo build --release").cyan());
-        println!("or switch to the installer: https://github.com/Codrihub/memora#install");
+        println!("This copy is a native install, but install.sh's saved copy is missing.");
+        println!("Run the installer again to update it (your data stays):");
+        println!("  {}", style(INSTALL_SH).cyan());
         return 0;
     };
 
@@ -227,6 +254,26 @@ pub fn run(theme: Option<&ColorfulTheme>, yes: bool, check_only: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steps_per_install() {
+        console::set_colors_enabled(false);
+        let text = |o| manual_steps(o).unwrap().join("\n");
+        assert!(manual_steps(Origin::Native).is_none());
+        let npm = text(Origin::Npm);
+        assert!(npm.contains(NPM_UPDATE) && npm.contains("memora-cli restart"));
+        assert!(
+            !npm.contains("cargo"),
+            "never tell an npm user to cargo build"
+        );
+        let docker = text(Origin::Docker);
+        assert!(docker.contains("docker compose pull") && !docker.contains("cargo"));
+        let folder = text(Origin::Folder);
+        assert!(folder.contains("npm install -g @codrihub/memora"));
+        assert!(folder.contains("MEMORA_STATE") && folder.contains("MEMORA_VAULT"));
+        assert!(!folder.contains("cargo"));
+        assert!(text(Origin::Source).contains("cargo build --release"));
+    }
 
     #[test]
     fn version_order() {

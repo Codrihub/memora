@@ -87,6 +87,7 @@ ENV MEMORA_VAULT=/data \
     MEMORA_BIND=0.0.0.0 \
     MEMORA_ARM_TTL=300 \
     MEMORA_ASSETS=/app/assets \
+    MEMORA_INSTALL=docker \
     GIT_AUTHOR_NAME=Memora \
     GIT_AUTHOR_EMAIL=memora@localhost \
     GIT_COMMITTER_NAME=Memora \
