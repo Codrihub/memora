@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Windows is installed with npm (`npm install -g @codrihub/memora`); releases no
+  longer carry a separate Windows zip. The npm package for Windows x64 is built
+  and tested as before. Zips of 1.3.0 to 1.3.5 stay on their release pages.
+
 ## [1.3.5] - 2026-10-20
 
 ### Fixed

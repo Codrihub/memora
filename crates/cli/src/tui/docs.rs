@@ -761,18 +761,6 @@ fn manage() -> Vec<Block> {
             `docker compose down` in the folder of docker-compose.yml; then delete the ./state \
             and ./data folders if you want them gone.",
         ),
-        h("Windows (release zip)"),
-        li(
-            "Like npm: `memora-cli start` runs memora.exe in the background without a window. \
-            `memora-cli stop` asks it to stop; if Windows cannot, `memora-cli stop --force` \
-            ends it.",
-        ),
-        code(
-            "memora-cli.exe --state .\\state start\n\
-              memora-cli.exe --state .\\state stop --force\n\
-              memora-cli.exe --state .\\state uninstall",
-        ),
-        li("After uninstall, delete the program folder."),
         h("What uninstall keeps"),
         li(
             "By default only the program goes. Settings and accounts (the state folder: \

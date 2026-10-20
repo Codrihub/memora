@@ -184,9 +184,11 @@ jobs:
           path: dist/bin/${{ matrix.docker }}/
           if-no-files-found: error
 
+  # Windows binaries for the @codrihub/memora-win32-x64 npm package (Windows is
+  # installed with npm; there is no separate Windows download).
   build-windows:
     name: Build x86_64 Windows
-    needs: [verify, web]
+    needs: [verify]
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.verify.outputs.version }}
@@ -221,29 +223,6 @@ jobs:
         with:
           name: bin-windows-amd64
           path: dist/bin/windows-amd64/
-          if-no-files-found: error
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: assets
-          path: assets
-
-      # The release zip: unpack anywhere and run memora.exe; it finds the web UI
-      # in the assets folder next to it.
-      - name: Package zip
-        shell: pwsh
-        run: |
-          $name = "memora-$env:VERSION-x86_64-windows"
-          New-Item -ItemType Directory -Force "dist/$name" | Out-Null
-          Copy-Item dist/bin/windows-amd64/*.exe "dist/$name/"
-          Copy-Item -Recurse assets "dist/$name/assets"
-          Copy-Item LICENSE, README.md "dist/$name/"
-          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tarball-windows-x86_64
-          path: dist/memora-*-x86_64-windows.zip
           if-no-files-found: error
 
   # --------------------------------------------------------------- smoke test
@@ -315,7 +294,7 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: |
-          sha256sum memora-*.tar.gz memora-*.zip > SHA256SUMS
+          sha256sum memora-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create release
@@ -326,7 +305,7 @@ jobs:
           set -euo pipefail
           flags=()
           if [ "${{ needs.verify.outputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "${GITHUB_REF_NAME}" dist/memora-*.tar.gz dist/memora-*.zip dist/SHA256SUMS \
+          gh release create "${GITHUB_REF_NAME}" dist/memora-*.tar.gz dist/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Memora ${VERSION}" \
             --notes-file notes.md \

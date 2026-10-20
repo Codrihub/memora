@@ -10,7 +10,7 @@ Memora ships as two binaries plus a folder of web UI assets:
 
 It runs on Linux (x86_64, aarch64) and Windows 10/11 (x64). Install it with
 **npm** (Linux and Windows, runs as you), **Docker**, the **native** installer
-(a systemd service on Linux), the **Windows zip** or from source. All end the
+(a systemd service on Linux) or from source. On Windows, use npm. All end the
 same way: run `memora-cli setup`, open the link it prints and enter the code.
 
 **Fastest path** (pick one, in this order of ease), then open the link the
@@ -35,7 +35,6 @@ sudo memora-cli setup --minutes 15
 - [Native install](#native-install)
 - [Docker](#docker)
 - [npm](#npm)
-- [Windows zip](#windows-zip)
 - [Start, stop and restart](#start-stop-and-restart)
 - [Uninstall with memora-cli](#uninstall-with-memora-cli)
 - [Reverse proxy](#reverse-proxy)
@@ -405,25 +404,6 @@ Upgrade with `npm install -g @codrihub/memora@latest` (`memora-cli update`
 prints this too) and restart the server; the state database is migrated on
 start.
 
-## Windows zip
-
-Each GitHub release also carries `memora-<version>-x86_64-windows.zip`:
-`memora.exe`, `memora-cli.exe`, the web UI (`assets\`), `LICENSE` and this
-README. It needs no installer, Node or runtime (static C runtime), and
-`memora.exe` finds the `assets` folder next to it. Check the download against
-the release `SHA256SUMS` (`Get-FileHash memora-*.zip`), unzip it, then in
-PowerShell:
-
-```powershell
-cd memora-<version>-x86_64-windows
-$env:MEMORA_VAULT = '.\vault'; $env:MEMORA_STATE = '.\state'; .\memora.exe
-# in a second window, same folder:
-$env:MEMORA_STATE = '.\state'; .\memora-cli.exe setup --minutes 15
-```
-
-Open `http://localhost:8400/login` and enter the code. Like the npm install,
-it runs as you with no service; keep the folder under your user profile.
-
 ## Start, stop and restart
 
 `memora-cli start`, `stop` and `restart` (or `/start`, `/shutdown` and
@@ -433,7 +413,7 @@ thing:
 | Install | What `memora-cli start / stop / restart` does | By hand |
 |---|---|---|
 | Native (systemd) | runs `systemctl start / stop / restart memora` (as root) | `sudo systemctl start memora` |
-| npm, Windows zip, source | runs the server in the background, with `memora.pid`, `memora.log` and `stop.token` in the state folder; `stop` asks it to end over a local, token-protected request and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
+| npm, source | runs the server in the background, with `memora.pid`, `memora.log` and `stop.token` in the state folder; `stop` asks it to end over a local, token-protected request and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
 | Docker | prints the host commands (a container cannot stop itself) | `docker start / stop / restart memora` |
 
 From the browser, the owner can shut the server down in Settings, Server, Shut
@@ -466,7 +446,7 @@ never deleted.
 |---|---|
 | Native (systemd) | runs the installed `install.sh --uninstall` (adds `--purge` only when both folders are the installer's own) |
 | npm | stops the server, deletes what you ticked, then tells you to run `npm uninstall -g @codrihub/memora` |
-| Windows zip, source | stops the server, deletes what you ticked; delete the program folder yourself |
+| Source | stops the server, deletes what you ticked; delete the program folder yourself |
 | Docker | prints `docker rm -f memora` and, for what you ticked, `docker volume rm memora-state` / `docker volume rm memora-data` |
 
 Without a terminal it needs `--yes` and deletes only what the flags say:
