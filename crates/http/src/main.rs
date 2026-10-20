@@ -225,8 +225,50 @@ fn main() -> anyhow::Result<()> {
     for line in &startup_log {
         tracing::info!("{line}");
     }
+    raise_open_file_limit();
     tokio::runtime::Runtime::new()?.block_on(serve(state, db))
 }
+
+/// Open files the server asks for: every connection and realtime client holds a socket,
+/// and the request limit (1024 at once) plus the database, logs and git need more than
+/// the usual soft limit of 1024. Past it, accept fails ("Too many open files") and the
+/// server stops answering until clients give up.
+const WANT_OPEN_FILES: u64 = 16_384;
+
+/// The soft open-file limit to set given the current `soft` and `hard` limits, or `None`
+/// to leave it: never lowered, never above the hard limit.
+fn open_file_target(soft: u64, hard: u64) -> Option<u64> {
+    let want = WANT_OPEN_FILES.min(hard);
+    (want > soft).then_some(want)
+}
+
+/// Raise the soft open-file limit towards [`WANT_OPEN_FILES`] (within the hard limit).
+#[cfg(unix)]
+fn raise_open_file_limit() {
+    let mut lim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `lim` is a valid, writable rlimit for the duration of the calls.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        let Some(to) = open_file_target(lim.rlim_cur, lim.rlim_max) else {
+            return;
+        };
+        let from = lim.rlim_cur;
+        lim.rlim_cur = to;
+        if libc::setrlimit(libc::RLIMIT_NOFILE, &lim) == 0 {
+            tracing::debug!(from, to, "open file limit raised");
+        } else {
+            tracing::warn!(from, to, "could not raise the open file limit");
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn raise_open_file_limit() {}
 
 /// Resolves on Ctrl-C, SIGTERM (systemd stop) or a shutdown asked for in the browser.
 async fn shutdown_signal() {
@@ -321,6 +363,22 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     let st = app_state.clone();
     let _ = tokio::task::spawn_blocking(move || cache::flush_all(&st)).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::{open_file_target, WANT_OPEN_FILES};
+
+    #[test]
+    fn open_file_limit_is_raised_within_the_hard_limit() {
+        assert_eq!(open_file_target(1024, 1_048_576), Some(WANT_OPEN_FILES));
+        assert_eq!(open_file_target(1024, 4096), Some(4096));
+        assert_eq!(open_file_target(1024, u64::MAX), Some(WANT_OPEN_FILES));
+        // Never lowered, nothing to do at or above the target.
+        assert_eq!(open_file_target(65_536, 1_048_576), None);
+        assert_eq!(open_file_target(WANT_OPEN_FILES, WANT_OPEN_FILES), None);
+        assert_eq!(open_file_target(1024, 1024), None);
+    }
 }
 
 #[cfg(test)]

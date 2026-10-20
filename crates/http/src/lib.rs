@@ -748,7 +748,7 @@ async fn h_mcp(
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
     let kind = detect_client("/mcp", &hdrs, Some(&json_body));
-    tracing::info!(client = ?kind, "MCP request");
+    tracing::debug!(client = ?kind, "MCP request");
 
     let req: RpcRequest = match serde_json::from_value(json_body) {
         Ok(r) => r,

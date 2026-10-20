@@ -30,6 +30,9 @@ use std::time::{Duration, Instant};
 const PID_FILE: &str = "memora.pid";
 /// That server's stdout and stderr, in the state dir.
 const LOG_FILE: &str = "memora.log";
+/// Past this size, `start` moves the log to `memora.log.1` (replacing an older one) and
+/// begins a new file, so a server restarted now and then never fills the disk.
+const LOG_ROTATE_BYTES: u64 = 16 * 1024 * 1024;
 /// The running server's token for `POST /_stop`, in the state dir
 /// (`memora_http::shutdown::STOP_TOKEN_FILE`).
 const STOP_TOKEN_FILE: &str = "stop.token";
@@ -647,6 +650,16 @@ fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
     child
 }
 
+/// Move `log` aside to `<log>.1` when it is larger than `max` bytes (the previous `.1`
+/// is replaced). Errors leave the log where it is.
+fn rotate_log(log: &Path, max: u64) {
+    if std::fs::metadata(log).is_ok_and(|m| m.len() > max) {
+        let mut old = log.as_os_str().to_owned();
+        old.push(".1");
+        let _ = std::fs::rename(log, PathBuf::from(old));
+    }
+}
+
 /// The `memora` server binary next to this `memora-cli` (native install, npm
 /// platform package, release zip and `cargo build` all put them together).
 fn server_binary() -> Result<PathBuf> {
@@ -831,6 +844,7 @@ fn proc_start(ctx: &Ctx, npm: bool) -> Result<i32> {
     let bin = server_binary()?;
     std::fs::create_dir_all(&state).with_context(|| format!("creating {}", state.display()))?;
     let log_path = state.join(LOG_FILE);
+    rotate_log(&log_path, LOG_ROTATE_BYTES);
     let mut log = {
         use crate::sys::OpenOptionsExt;
         std::fs::OpenOptions::new()
@@ -1731,6 +1745,27 @@ pub(crate) fn uninstall(ctx: &Ctx, theme: Option<&ColorfulTheme>, f: &Flags) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_large_log_is_moved_aside_on_start() {
+        let d = std::env::temp_dir().join(format!("memora-logrot-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let log = d.join(LOG_FILE);
+        std::fs::write(&log, "small").unwrap();
+        rotate_log(&log, 10);
+        assert!(log.is_file(), "a small log stays");
+        std::fs::write(d.join("memora.log.1"), "older").unwrap();
+        std::fs::write(&log, "x".repeat(11)).unwrap();
+        rotate_log(&log, 10);
+        assert!(!log.exists());
+        assert_eq!(
+            std::fs::read_to_string(d.join("memora.log.1")).unwrap(),
+            "x".repeat(11),
+            "the previous .1 is replaced"
+        );
+        rotate_log(&log, 10); // no log at all: nothing happens
+        std::fs::remove_dir_all(&d).ok();
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
