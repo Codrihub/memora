@@ -154,6 +154,17 @@ export function allFolderPaths(): string[] {
   return Array.from(byPath.keys()).sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Every folder to offer in a folder picker: the ones holding notes plus every
+ * folder the server lists (empty and nested ones too), sorted, without ''.
+ */
+export function pickerFolders(): string[] {
+  const out = new Set(allFolderPaths());
+  for (const f of state.folders) out.add(f);
+  out.delete('');
+  return Array.from(out).sort((a, b) => a.localeCompare(b));
+}
+
 /** Every note below a folder (recursive). */
 export function notesUnder(path: string): NoteRef[] {
   return allNotes().filter((n) => isInside(dirOf(n.path), path));

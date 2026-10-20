@@ -43,6 +43,8 @@ interface Me {
 interface AppState {
   page: Page;
   tree: Tree;
+  /** Every folder path from /api/folders, empty and nested ones included. */
+  folders: string[];
   folderMeta: FolderMetaMap;
   stats: Stats;
   health: Health;
@@ -61,6 +63,7 @@ interface AppState {
 export const state: AppState = {
   page: 'brain',
   tree: {},
+  folders: [],
   folderMeta: {},
   stats: { notes: 0, links: 0, folders: 0 },
   health: {},

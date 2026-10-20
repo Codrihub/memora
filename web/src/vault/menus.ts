@@ -2,7 +2,6 @@
 
 import { esc, useStyles } from '../dom';
 import { copyText } from '../control/ui';
-import { createSelect, type SelectOption } from '../ui/select';
 import { noteName } from '../format';
 import { Modal } from '../modal';
 import { I } from './icons';
@@ -17,8 +16,8 @@ import {
   renameNote,
   setFolderMeta,
 } from './ops';
+import { createFolderPicker, pickFolderDialog } from './folder-picker';
 import {
-  allFolderPaths,
   baseName,
   dirOf,
   folderColor,
@@ -26,10 +25,11 @@ import {
   isInside,
   isPinned,
   notesUnder,
+  pickerFolders,
   togglePin,
   unpin,
 } from './store';
-import { folderLookDialog, openMenu, pickFolder, promptName, undoToast } from './ui';
+import { folderLookDialog, openMenu, promptName, undoToast } from './ui';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
 
 type Anchor = { x: number; y: number } | HTMLElement;
@@ -88,24 +88,28 @@ export function confirmFolderMove(src: string, destParent: string): void {
 }
 
 export function askMoveNotes(paths: string[]): void {
-  const cur = paths.length === 1 ? dirOf(paths[0]) : '';
-  pickFolder(
-    paths.length === 1 ? `Move "${noteName(paths[0])}" to` : `Move ${paths.length} nodes to`,
-    allFolderPaths(),
-    cur,
-    () => false,
-    (f) => void moveNotes(paths, f),
-  );
+  // "current" only when every node lives in the same folder.
+  const dirs = new Set(paths.map(dirOf));
+  const cur = dirs.size === 1 ? [...dirs][0] : null;
+  pickFolderDialog({
+    title: paths.length === 1 ? `Move "${noteName(paths[0])}" to` : `Move ${paths.length} nodes to`,
+    folders: pickerFolders(),
+    current: cur,
+    disabled: (f) => (f === cur ? (paths.length === 1 ? 'The node is already here' : 'The nodes are already here') : false),
+    run: (f) => void moveNotes(paths, f),
+  });
 }
 
 export function askMoveFolder(path: string): void {
-  pickFolder(
-    `Move folder "${baseName(path)}" into`,
-    allFolderPaths(),
-    dirOf(path),
-    (f) => isInside(f, path) || f === dirOf(path),
-    (f) => confirmFolderMove(path, f),
-  );
+  // The folder itself and everything below it are not offered.
+  pickFolderDialog({
+    title: `Move folder "${baseName(path)}" into`,
+    folders: pickerFolders(),
+    current: dirOf(path),
+    exclude: [path],
+    disabled: (f) => (f === dirOf(path) ? 'The folder is already here' : false),
+    run: (f) => confirmFolderMove(path, f),
+  });
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -143,41 +147,24 @@ export function confirmDeleteNotes(paths: string[], after?: () => void): void {
 const FD_CSS = `
 .fd-p{margin:0 0 10px}
 .fd-p:last-child{margin-bottom:0}
-.fd-opt{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border:1px solid var(--line);border-radius:12px;margin-top:10px;cursor:pointer;
+.fd-opt{display:block;padding:12px 13px;border:1px solid var(--line);border-radius:12px;margin-top:10px;cursor:pointer;
   transition:border-color .15s,background .15s}
 .fd-opt:hover{border-color:var(--line-strong)}
 .fd-opt:has(input:checked){border-color:var(--accent-line);background:var(--accent-soft)}
 .fd-opt.danger:has(input:checked){border-color:color-mix(in srgb,var(--danger) 55%,transparent);background:var(--danger-soft)}
-.fd-opt input{margin:3px 0 0;flex:none;accent-color:var(--accent)}
-.fd-opt.danger input{accent-color:var(--danger)}
+.fd-opt input[type=radio]{margin:3px 0 0;flex:none;accent-color:var(--accent)}
+.fd-opt.danger input[type=radio]{accent-color:var(--danger)}
 .fd-opt-t{display:block;font-weight:600;font-size:14px}
 .fd-opt.danger .fd-opt-t{color:var(--danger)}
 .fd-opt-d{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.45}
 .fd-opt-b{flex:1;min-width:0}
-.fd-dest{display:block;margin-top:9px}
-.fd-dest .ui-sel{width:100%}
+.fd-opt-l{display:flex;gap:11px;align-items:flex-start;cursor:pointer}
+.fd-dest{display:block;margin:10px 0 0 24px}
+.fd-dest-l{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.fd-dest .fp-tree{max-height:min(34vh,280px)}
+.fd-opt:not(:has(input:checked)) .fd-dest{opacity:.6}
+@media (max-width:640px){.fd-dest{margin-left:0}}
 `;
-
-/** Destination choices for the nodes of a folder being deleted. */
-export function folderDeleteTargets(path: string, folders: string[]): SelectOption[] {
-  const parent = dirOf(path);
-  const top = path.split('/')[0];
-  const opts: SelectOption[] = [];
-  const seen = new Set<string>();
-  const add = (value: string, label: string, hint: string, group?: string): void => {
-    if (seen.has(value)) return;
-    seen.add(value);
-    opts.push({ value, label, hint, group });
-  };
-  if (parent) add(parent, parent, 'Parent folder (default)');
-  if (top !== path && top !== parent) add(top, top, 'Top-level folder of this path');
-  add('', 'Root', parent ? 'The top level of the vault' : 'The top level of the vault (default)');
-  for (const f of folders) {
-    if (!f || isInside(f, path)) continue;
-    add(f, f, '', 'Another folder');
-  }
-  return opts;
-}
 
 /**
  * Delete a folder in up to two steps: confirm, then (when nodes are inside)
@@ -186,7 +173,7 @@ export function folderDeleteTargets(path: string, folders: string[]): SelectOpti
 export function confirmDeleteFolder(path: string): void {
   useStyles('fd-css', FD_CSS);
   const n = notesUnder(path).length;
-  const subs = allFolderPaths().filter((f) => f !== path && isInside(f, path)).length;
+  const subs = pickerFolders().filter((f) => f !== path && isInside(f, path)).length;
   const name = baseName(path);
   Modal.open({
     title: `Delete folder "${name}"?`,
@@ -227,14 +214,17 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
     : !direct
       ? `This folder has ${nodes} in ${plural(subs, 'subfolder')}.`
       : `This folder has ${nodes}: ${direct} directly inside and the rest in ${plural(subs, 'subfolder')}.`;
-  const targets = folderDeleteTargets(path, allFolderPaths());
   let mode: 'move' | 'trash' = 'move';
-  const sel = createSelect({
-    options: targets,
-    value: targets[0].value,
+  let go: HTMLButtonElement | null = null;
+  // The folder being deleted and everything below it are not destinations.
+  const sel = createFolderPicker({
+    folders: pickerFolders(),
+    value: dirOf(path),
+    exclude: [path],
     label: 'Move the nodes to',
-    searchable: targets.length > 6,
-    className: 'block',
+    onChange: () => {
+      if (go && mode === 'move') go.disabled = sel.value == null;
+    },
   });
   const moveLabel = `Move ${nodes} and delete folder`;
   const trashLabel = `Delete folder and ${nodes}`;
@@ -243,10 +233,10 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
   Modal.open({
     title: `Delete folder "${name}"?`,
     body: `<p class="fd-p">${esc(holds)}</p>
-<label class="fd-opt"><input type="radio" name="fdMode" value="move" checked><span class="fd-opt-b"><span class="fd-opt-t">Move the nodes, then delete the folder</span>
-<span class="fd-opt-d">Subfolders are kept inside the destination and links to the moved nodes are updated. A clashing name gets a -N suffix.</span>
-<span class="fd-dest" data-fd-dest></span></span></label>
-<label class="fd-opt danger"><input type="radio" name="fdMode" value="trash"><span class="fd-opt-b"><span class="fd-opt-t">Delete everything in this folder</span>
+<div class="fd-opt" data-fd-move><label class="fd-opt-l"><input type="radio" name="fdMode" value="move" checked><span class="fd-opt-b"><span class="fd-opt-t">Move the nodes, then delete the folder</span>
+<span class="fd-opt-d">Subfolders are kept inside the destination and links to the moved nodes are updated. A clashing name gets a -N suffix.</span></span></label>
+<div class="fd-dest" data-fd-dest><span class="fd-dest-l">Move the nodes to</span></div></div>
+<label class="fd-opt fd-opt-l danger"><input type="radio" name="fdMode" value="trash"><span class="fd-opt-b"><span class="fd-opt-t">Delete everything in this folder</span>
 <span class="fd-opt-d">All ${esc(nodes)} go to the vault's trash (the <span class="mono">.Trash</span> folder). The web app cannot restore them yet; an agent can, with the <span class="mono">restore_trash</span> tool, back to their old paths. Other files in the folder (such as images) are deleted for good.</span></span></label>`,
     actions: [
       {
@@ -262,7 +252,8 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
         label: moveLabel,
         cls: 'primary',
         run: async () => {
-          const into = sel.value;
+          const into = sel.value ?? '';
+          if (mode === 'move' && sel.value == null) return;
           Modal.close();
           const done = await deleteFolder(path, mode === 'trash' ? { mode } : { mode, into });
           if (done == null) return;
@@ -278,7 +269,7 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
     ],
     onOpen: (body) => {
       body.querySelector('[data-fd-dest]')?.appendChild(sel.el);
-      const go = body.parentElement?.querySelector<HTMLButtonElement>('.modal-foot .btn:last-child');
+      go = body.parentElement?.querySelector<HTMLButtonElement>('.modal-foot .btn:last-child') || null;
       body.querySelectorAll<HTMLInputElement>('input[name=fdMode]').forEach((r) =>
         r.addEventListener('change', () => {
           if (!r.checked) return;
@@ -287,17 +278,20 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
             go.textContent = mode === 'trash' ? trashLabel : moveLabel;
             go.classList.toggle('primary', mode === 'move');
             go.classList.toggle('danger', mode === 'trash');
+            go.disabled = mode === 'move' && sel.value == null;
           }
         }),
       );
       // Choosing a destination also picks the move option.
-      sel.el.addEventListener('click', () => {
+      const pickMove = (): void => {
         const r = body.querySelector<HTMLInputElement>('input[value=move]');
         if (r && !r.checked) {
           r.checked = true;
           r.dispatchEvent(new Event('change'));
         }
-      });
+      };
+      body.querySelector('[data-fd-move]')?.addEventListener('click', pickMove);
+      sel.el.addEventListener('focusin', pickMove);
     },
   });
 }
@@ -346,12 +340,13 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void): void 
         icon: I.move,
         disabled: root,
         run: () =>
-          pickFolder(
-            `Move everything in "${baseName(path)}" into`,
-            allFolderPaths(),
-            '',
-            (f) => f === path || isInside(f, path),
-            (f) =>
+          pickFolderDialog({
+            title: `Move everything in "${baseName(path)}" into`,
+            folders: pickerFolders(),
+            value: dirOf(path),
+            exclude: [path],
+            verb: 'Move contents here',
+            run: (f) =>
               Modal.confirm(
                 'Move contents',
                 `Every node and sub folder in "${path}" moves into ${f || 'the top level'}; "${baseName(path)}" is then removed. Clashing names get a -N suffix.`,
@@ -362,7 +357,7 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void): void 
                 },
                 false,
               ),
-          ),
+          }),
       },
       { label: 'Copy path', icon: I.copy, disabled: root, run: () => copyPath(path) },
       { label: 'Color and icon…', icon: I.palette, disabled: root, run: () => folderLook(path) },

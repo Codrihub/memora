@@ -1,5 +1,5 @@
 // Small UI primitives for the vault: context menu, undo toast, inline rename
-// and the folder picker / folder look dialogs.
+// and the folder look dialog (the folder picker lives in folder-picker.ts).
 
 import { el, esc, attr } from '../dom';
 import { Modal } from '../modal';
@@ -169,63 +169,6 @@ export function inlineEdit(target: HTMLElement, value: string): Promise<string |
 // ---------------------------------------------------------------------------
 // Dialogs
 // ---------------------------------------------------------------------------
-
-/** Pick a folder from a searchable list. */
-export function pickFolder(
-  title: string,
-  folders: string[],
-  current: string,
-  disabled: (f: string) => boolean,
-  run: (folder: string) => void,
-): void {
-  const box = el('div', 'vx-pick');
-  box.innerHTML = `<input class="vx-pick-q" type="text" placeholder="Filter folders" aria-label="Filter folders" spellcheck="false">
-    <div class="vx-pick-list" role="listbox"></div>`;
-  const list = box.querySelector<HTMLElement>('.vx-pick-list')!;
-  const q = box.querySelector<HTMLInputElement>('.vx-pick-q')!;
-  const draw = (): void => {
-    const needle = q.value.trim().toLowerCase();
-    list.innerHTML = folders
-      .filter((f) => !needle || (f || 'vault').toLowerCase().includes(needle))
-      .map((f) => {
-        const depth = f ? f.split('/').length : 0;
-        const off = disabled(f);
-        return `<button class="vx-pick-row${f === current ? ' cur' : ''}" role="option" data-f="${attr(f)}" ${
-          off ? 'disabled' : ''
-        } style="padding-left:${10 + (needle ? 0 : depth * 14)}px">${f ? I.folder : I.vault}<span>${esc(
-          needle ? f || 'Vault' : f ? f.split('/').pop() : 'Vault (root)',
-        )}</span>${f === current ? '<em>current</em>' : ''}</button>`;
-      })
-      .join('');
-    list.querySelectorAll<HTMLButtonElement>('.vx-pick-row').forEach((b) => {
-      b.onclick = () => {
-        Modal.close();
-        run(b.dataset.f || '');
-      };
-    });
-  };
-  q.oninput = draw;
-  q.onkeydown = (e) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      list.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-    }
-  };
-  list.onkeydown = (e) => {
-    const bs = Array.from(list.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
-    const i = bs.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      bs[Math.min(bs.length - 1, i + 1)]?.focus();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (i <= 0) q.focus();
-      else bs[i - 1]?.focus();
-    }
-  };
-  draw();
-  Modal.open({ title, body: box, actions: [{ label: 'Cancel', cls: 'ghost', run: () => Modal.close() }] });
-}
 
 /** Folder color and icon. */
 export function folderLookDialog(

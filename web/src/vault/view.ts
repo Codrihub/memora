@@ -5,7 +5,7 @@
 // to a folder keeps its scroll position. Phones get the same two screens,
 // full width, with back navigation through the browser history.
 
-import { $, attr, el, esc, useStyles } from '../dom';
+import { $, el, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
 import { allNotes, state } from '../state';
 import { I } from './icons';
@@ -17,11 +17,11 @@ import {
   baseName,
   dirOf,
   folderAt,
-  folderColor,
   isInside,
   onPinsSynced,
   onVaultChange,
   openFolders,
+  pickerFolders,
   prefs,
   saveOpen,
   savePrefs,
@@ -30,6 +30,7 @@ import {
 } from './store';
 import { TreeView, refreshTrees } from './tree';
 import { promptName } from './ui';
+import { createFolderPicker, type FolderPicker } from './folder-picker';
 import { setSheetEditor } from './sheet';
 import { Modal } from '../modal';
 import { setToTopScroller } from '../ui/totop';
@@ -330,15 +331,18 @@ nav.selectFolder = selectFolder;
 nav.openNote = (p) => void openNote(p);
 setSheetEditor((p) => void openInPane(p, true));
 nav.newNote = (folder) => {
-  // Ask where it goes: on its own at the vault root, or inside a folder.
-  const folders = Object.keys(state.tree)
-    .filter((f) => f && f !== 'Root')
-    .sort((a, b) => a.localeCompare(b));
+  // Ask where it goes: the vault root or any folder, at any depth.
+  const folders = pickerFolders();
   const start = folder && folder !== 'Root' && folders.includes(folder) ? folder : '';
+  let picker: FolderPicker | null = null;
   const create = async (body: HTMLElement): Promise<void> => {
-    const title = body.querySelector<HTMLInputElement>('#vxName')?.value.trim() || '';
-    if (!title) return;
-    const where = body.querySelector<HTMLElement>('#vxWhere')?.dataset.value || '';
+    const input = body.querySelector<HTMLInputElement>('#vxName');
+    const title = input?.value.trim() || '';
+    if (!title) {
+      input?.focus();
+      return;
+    }
+    const where = picker?.value ?? '';
     Modal.close();
     const p = await createNote(where, title);
     if (!p) return;
@@ -349,16 +353,19 @@ nav.newNote = (folder) => {
     title: 'New node',
     body:
       Modal.field('Title', 'vxName', { value: '' }) +
-      `<div class="field"><label id="vxWhereL">Location</label><div class="vx-pick" id="vxWhere" data-value="${attr(start)}">` +
-      `<button type="button" class="vx-pick-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="vxWhereL"></button>` +
-      `<div class="vx-pick-pop" hidden><input class="vx-pick-q" type="search" placeholder="Filter folders" aria-label="Filter folders" autocomplete="off">` +
-      `<div class="vx-pick-list" role="listbox" aria-labelledby="vxWhereL"></div></div></div></div>`,
+      `<div class="field"><label id="vxWhereL">Location</label><div id="vxWhere"></div></div>`,
     actions: [
       { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
       { label: 'Create', cls: 'primary', run: create },
     ],
     onOpen: (body) => {
-      wireFolderPick(body.querySelector<HTMLElement>('#vxWhere')!, folders);
+      picker = createFolderPicker({
+        folders,
+        value: start,
+        label: 'Location',
+        onPick: () => void create(body),
+      });
+      body.querySelector('#vxWhere')?.appendChild(picker.el);
       const input = body.querySelector<HTMLInputElement>('#vxName');
       input?.focus();
       if (input)
@@ -371,88 +378,6 @@ nav.newNote = (folder) => {
     },
   });
 };
-/** Custom location picker: vault root or one of `folders`, with a filter. */
-function wireFolderPick(pick: HTMLElement, folders: string[]): void {
-  const btn = pick.querySelector<HTMLButtonElement>('.vx-pick-btn')!;
-  const pop = pick.querySelector<HTMLElement>('.vx-pick-pop')!;
-  const q = pick.querySelector<HTMLInputElement>('.vx-pick-q')!;
-  const list = pick.querySelector<HTMLElement>('.vx-pick-list')!;
-  const label = (v: string): string =>
-    v
-      ? `<i style="--c:${attr(folderColor(v))}"></i><span>${esc(v)}</span><em>${(state.tree[v] || []).length}</em>`
-      : `<i class="root"></i><span>On its own</span><em>vault root</em>`;
-  const paint = (): void => {
-    btn.innerHTML = label(pick.dataset.value || '') + I.caret;
-  };
-  let active = 0;
-  const items = (): HTMLElement[] => Array.from(list.querySelectorAll<HTMLElement>('[role=option]'));
-  const mark = (): void => items().forEach((o, i) => o.classList.toggle('kb', i === active));
-  const fill = (): void => {
-    const f = q.value.trim().toLowerCase();
-    const opts = ['', ...folders].filter((v) => !f || (v || 'on its own vault root').toLowerCase().includes(f));
-    list.innerHTML = opts.length
-      ? opts
-          .map(
-            (v) =>
-              `<div role="option" data-v="${attr(v)}" aria-selected="${v === (pick.dataset.value || '')}" style="--d:${v ? v.split('/').length - 1 : 0}">${label(v)}</div>`,
-          )
-          .join('')
-      : '<p>No folder matches.</p>';
-    active = Math.max(0, opts.indexOf(pick.dataset.value || ''));
-    mark();
-  };
-  const open = (on: boolean): void => {
-    pop.hidden = !on;
-    btn.setAttribute('aria-expanded', String(on));
-    pick.classList.toggle('open', on);
-    if (on) {
-      q.value = '';
-      fill();
-      q.focus();
-      items()[active]?.scrollIntoView({ block: 'nearest' });
-    }
-  };
-  const choose = (v: string): void => {
-    pick.dataset.value = v;
-    paint();
-    open(false);
-    btn.focus();
-  };
-  paint();
-  btn.onclick = () => open(pop.hidden);
-  // Keep focus in the filter while pressing an option, or focusout closes the
-  // list before the click lands and the choice is lost.
-  list.onpointerdown = (e) => e.preventDefault();
-  list.onmousedown = (e) => e.preventDefault();
-  list.onclick = (e) => {
-    const o = (e.target as HTMLElement).closest<HTMLElement>('[role=option]');
-    if (o) choose(o.dataset.v || '');
-  };
-  q.oninput = fill;
-  q.onkeydown = (e) => {
-    const n = items().length;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (!n) return;
-      active = (active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
-      mark();
-      items()[active]?.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      const o = items()[active];
-      if (o) choose(o.dataset.v || '');
-    } else if (e.key === 'Escape') {
-      // Close the picker, not the modal.
-      e.preventDefault();
-      e.stopPropagation();
-      open(false);
-      btn.focus();
-    }
-  };
-  pick.addEventListener('focusout', (e) => {
-    if (!pick.contains(e.relatedTarget as Node | null)) open(false);
-  });
-}
 
 nav.newFolder = (parent) => {
   promptName(parent ? `New folder in ${parent}` : 'New folder', 'Folder name', '', async (name) => {

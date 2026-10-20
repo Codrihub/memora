@@ -116,33 +116,6 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-count{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:18px;text-align:right}
 .vx-row-more{opacity:0;border:0;background:none;color:var(--muted);cursor:pointer;padding:2px;border-radius:5px;display:inline-flex}
 .vx-row:hover .vx-row-more,.vx-row:focus-visible .vx-row-more,.vx-note:hover .vx-row-more,.vx-note:focus-visible .vx-row-more{opacity:1}
-.vx-pick{position:relative}
-.vx-pick-btn{all:unset;box-sizing:border-box;cursor:pointer;width:100%;height:40px;display:flex;align-items:center;gap:10px;padding:0 12px;
-  border-radius:10px;border:1px solid var(--line-strong,var(--line));background:var(--surface-2,var(--panel-2));color:var(--fg);font-size:14px;
-  transition:border-color .2s,box-shadow .2s}
-.vx-pick-btn:hover,.vx-pick.open .vx-pick-btn{border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
-.vx-pick-btn:focus-visible,.vx-pick.open .vx-pick-btn{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
-.vx-pick-btn > svg{width:14px;height:14px;color:var(--muted);transform:rotate(90deg);transition:transform .2s}
-.vx-pick.open .vx-pick-btn > svg{transform:rotate(-90deg)}
-.vx-pick i{width:10px;height:10px;border-radius:50%;flex:none;background:var(--c);box-shadow:0 0 8px color-mix(in srgb,var(--c) 60%,transparent)}
-.vx-pick i.root{background:none;border:1.5px dashed var(--muted);box-shadow:none;box-sizing:border-box}
-.vx-pick span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vx-pick em{font-style:normal;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
-.vx-pick-pop{margin-top:6px;border-radius:12px;border:1px solid var(--line-strong,var(--line));background:var(--surface-1,var(--panel));
-  box-shadow:0 12px 30px -12px rgba(0,0,0,.45);padding:8px;animation:vxPickIn .18s cubic-bezier(.2,.8,.2,1)}
-@keyframes vxPickIn{from{opacity:0;transform:translateY(-4px)}}
-.vx-pick-q{width:100%;box-sizing:border-box;height:36px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2,var(--panel-2));
-  color:var(--fg);font-size:13px;outline:none;margin-bottom:6px}
-.vx-pick-q:focus{border-color:var(--accent)}
-.vx-pick-list{max-height:260px;overflow:auto;scrollbar-width:thin;display:flex;flex-direction:column;gap:4px;padding:4px 0 2px}
-.vx-pick-list [role=option]{flex:none;display:flex;align-items:center;gap:12px;height:40px;padding:0 12px 0 calc(12px + var(--d,0) * 14px);border-radius:9px;cursor:pointer;font-size:13.5px}
-/* "On its own" stands apart from the folder list. */
-.vx-pick-list [role=option][data-v=""]{margin-bottom:6px;position:relative}
-.vx-pick-list [role=option][data-v=""]::after{content:"";position:absolute;left:8px;right:8px;bottom:-6px;height:1px;background:var(--line)}
-.vx-pick-list [role=option]:hover,.vx-pick-list [role=option].kb{background:color-mix(in srgb,var(--fg) 7%,transparent)}
-.vx-pick-list [role=option][aria-selected=true]{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
-.vx-pick-list p{margin:8px 10px;font-size:12.5px;color:var(--muted)}
-@media (prefers-reduced-motion:reduce){.vx-pick-pop{animation:none}}
 /* Tree rows end in one fixed slot: a folder's count and the "more" button share it (stacked),
    so showing the button on hover or focus never moves or covers anything else on the row. */
 .vx-end{flex:none;margin-left:auto;display:grid;align-items:center;justify-items:end;min-width:24px;height:22px}
@@ -637,15 +610,6 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-menu-label{flex:1}
 .vx-menu-item kbd{font-size:10px;color:var(--muted)}
 .vx-menu-sep{height:1px;background:var(--line);margin:4px 6px}
-.vx-pick{display:flex;flex-direction:column;gap:8px}
-.vx-pick-q{height:34px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:0 10px;font:inherit}
-.vx-pick-list{max-height:min(50vh,380px);overflow:auto;display:flex;flex-direction:column;gap:1px}
-.vx-pick-row{display:flex;align-items:center;gap:8px;border:0;background:none;color:var(--fg);font:inherit;font-size:13px;
-  padding:7px 10px;border-radius:7px;cursor:pointer;text-align:left}
-.vx-pick-row:hover:not(:disabled),.vx-pick-row:focus-visible{background:var(--panel-2);outline:none}
-.vx-pick-row:disabled{opacity:.35;cursor:not-allowed}
-.vx-pick-row em{margin-left:auto;font-size:11px;color:var(--muted);font-style:normal}
-.vx-pick-row .vx-i{color:var(--muted)}
 .vx-look-label{font-size:11.5px;color:var(--muted);margin:4px 0 8px}
 .vx-look-prev{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}
 .vx-look-prev b{font-size:14px}
