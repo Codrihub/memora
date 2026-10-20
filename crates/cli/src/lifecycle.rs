@@ -127,9 +127,94 @@ fn probe(ctx: &Ctx) -> Probe {
     }
 }
 
-/// The install kind of this machine.
-pub(crate) fn kind(ctx: &Ctx) -> Kind {
-    detect(&probe(ctx))
+/// Exit code when the target is refused (another install's server).
+const REFUSED: i32 = 2;
+
+/// Whether `start` / `stop` / `restart` / `uninstall` may act on `kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Guard {
+    /// The state folder was named (`--state`, `MEMORA_STATE`) or is the default.
+    Go,
+    /// The state folder was taken from a running server: say so, then go on.
+    Notice(String),
+    /// The running server belongs to another kind of install: refuse.
+    Refuse(String),
+}
+
+/// The decision behind [`checked_kind`]. `adopted` means neither `--state`
+/// nor `MEMORA_STATE` was given and the state folder came from a running
+/// server. A systemd service or a container found that way is only driven
+/// when this binary is the same kind of install (a native install for a
+/// service, the image for a container); an npm, source or release copy that
+/// merely sees a service on the machine must not restart or remove it.
+pub(crate) fn guard(adopted: bool, kind: &Kind, origin: Origin, state: &Path) -> Guard {
+    if !adopted {
+        return Guard::Go;
+    }
+    let target = match kind {
+        Kind::Service { unit, .. } => format!("the systemd service {unit}"),
+        Kind::Docker => "this Docker container".to_string(),
+        Kind::Process { .. } => "the memora process using it".to_string(),
+    };
+    let notice = format!(
+        "No --state or MEMORA_STATE given: using the running server's state folder {} ({target}).",
+        state.display()
+    );
+    let mismatch = match kind {
+        Kind::Service { .. } => origin != Origin::Native,
+        Kind::Docker => origin != Origin::Docker,
+        Kind::Process { .. } => false,
+    };
+    if !mismatch {
+        return Guard::Notice(notice);
+    }
+    let how = match kind {
+        Kind::Service { unit, .. } => {
+            format!("run systemctl yourself (sudo systemctl restart {unit})")
+        }
+        _ => "run docker on the host (docker restart memora)".to_string(),
+    };
+    Guard::Refuse(format!(
+        "{notice}\nThis memora-cli is {} install, not the one that runs {target}, so it will not \
+         act on it. Pass --state <DIR> (or set MEMORA_STATE) for the server you mean, or {how}.",
+        origin_name(origin)
+    ))
+}
+
+/// `an npm`, `a source`, ... for [`guard`]'s message.
+fn origin_name(o: Origin) -> &'static str {
+    match o {
+        Origin::Npm => "an npm",
+        Origin::Docker => "a Docker",
+        Origin::Native => "a native",
+        Origin::Folder => "a release-folder",
+        Origin::Source => "a source-build",
+    }
+}
+
+/// The install kind, after [`guard`]: prints the notice, or the refusal and
+/// returns its exit code. Never asks, so it is safe without a terminal.
+fn checked_kind(ctx: &Ctx) -> std::result::Result<Kind, i32> {
+    let p = probe(ctx);
+    let kind = detect(&p);
+    let adopted = ctx.source.starts_with("running memora server");
+    match guard(adopted, &kind, p.origin, &ctx.state) {
+        Guard::Go => Ok(kind),
+        Guard::Notice(n) => {
+            println!("{}", style(n).dim());
+            Ok(kind)
+        }
+        Guard::Refuse(msg) => {
+            let mut lines = msg.lines();
+            if let Some(first) = lines.next() {
+                println!("{first}");
+            }
+            for l in lines {
+                println!("{} {l}", style("refused:").red().bold());
+            }
+            Err(REFUSED)
+        }
+    }
 }
 
 /// The last `Environment=KEY=value` of a unit file (`Environment="KEY=value"` too).
@@ -211,7 +296,11 @@ pub(crate) fn cli(ctx: &Ctx, cmd: &str, f: &Flags) -> Result<i32> {
 
 /// `start` / `/start`.
 pub(crate) fn start(ctx: &Ctx) -> Result<i32> {
-    match kind(ctx) {
+    let kind = match checked_kind(ctx) {
+        Ok(k) => k,
+        Err(code) => return Ok(code),
+    };
+    match kind {
         Kind::Docker => {
             docker_hint("start");
             Ok(0)
@@ -223,7 +312,11 @@ pub(crate) fn start(ctx: &Ctx) -> Result<i32> {
 
 /// `stop` / `/shutdown`. `theme` lets it ask before forcing.
 pub(crate) fn stop(ctx: &Ctx, theme: Option<&ColorfulTheme>, force: bool) -> Result<i32> {
-    match kind(ctx) {
+    let kind = match checked_kind(ctx) {
+        Ok(k) => k,
+        Err(code) => return Ok(code),
+    };
+    match kind {
         Kind::Docker => {
             docker_hint("stop");
             Ok(0)
@@ -238,7 +331,11 @@ pub(crate) fn stop(ctx: &Ctx, theme: Option<&ColorfulTheme>, force: bool) -> Res
 
 /// `restart` / `/restart`: stop, then start (a stopped server is just started).
 pub(crate) fn restart(ctx: &Ctx, theme: Option<&ColorfulTheme>, force: bool) -> Result<i32> {
-    match kind(ctx) {
+    let kind = match checked_kind(ctx) {
+        Ok(k) => k,
+        Err(code) => return Ok(code),
+    };
+    match kind {
         Kind::Docker => {
             docker_hint("restart");
             Ok(0)
@@ -271,7 +368,10 @@ pub(crate) fn after_change(ctx: &Ctx, theme: &ColorfulTheme) -> Result<()> {
         }
         Ok(go == Some(true))
     };
-    match kind(ctx) {
+    let Ok(kind) = checked_kind(ctx) else {
+        return Ok(());
+    };
+    match kind {
         Kind::Docker => docker_hint("restart"),
         Kind::Service { unit, .. } => {
             let active = Command::new("systemctl")
@@ -1439,7 +1539,10 @@ fn docker_uninstall(
 /// `uninstall` / `/uninstall`. `theme` is `None` when it must not ask
 /// (`--yes`, or no terminal): then only the flags decide what is deleted.
 pub(crate) fn uninstall(ctx: &Ctx, theme: Option<&ColorfulTheme>, f: &Flags) -> Result<Outcome> {
-    let kind = kind(ctx);
+    let kind = match checked_kind(ctx) {
+        Ok(k) => k,
+        Err(code) => return Ok(Outcome::nothing(code)),
+    };
     if theme.is_none() && !f.yes {
         println!("memora-cli uninstall needs a terminal to ask, or --yes to go ahead without one.");
         println!("With --yes only the program is removed, plus what --delete-config and");
@@ -1684,6 +1787,45 @@ mod tests {
         };
         assert_eq!(detect(&p), Kind::Process { npm: true });
         assert_eq!(detect(&Probe::default()), Kind::Process { npm: false });
+    }
+
+    #[test]
+    fn guard_against_another_installs_server() {
+        let state = Path::new("/var/lib/memora/state");
+        let service = Kind::Service {
+            unit: "codrihub-memory.service".into(),
+            installer: None,
+        };
+        // a named state folder (flag, env, default) is never second-guessed
+        assert_eq!(guard(false, &service, Origin::Npm, state), Guard::Go);
+        // adopted from a running service: only a native install drives it
+        let g = guard(true, &service, Origin::Native, state);
+        assert!(
+            matches!(&g, Guard::Notice(n) if n.contains("/var/lib/memora/state")
+            && n.contains("codrihub-memory.service"))
+        );
+        for o in [Origin::Npm, Origin::Source, Origin::Folder, Origin::Docker] {
+            let g = guard(true, &service, o, state);
+            assert!(
+                matches!(&g, Guard::Refuse(m) if m.contains("--state")
+                    && m.contains("systemctl") && m.contains("codrihub-memory.service")),
+                "{o:?}: {g:?}"
+            );
+        }
+        // a container is only driven from its own image
+        assert!(matches!(
+            guard(true, &Kind::Docker, Origin::Docker, state),
+            Guard::Notice(_)
+        ));
+        assert!(matches!(
+            guard(true, &Kind::Docker, Origin::Npm, state),
+            Guard::Refuse(_)
+        ));
+        // a plain process: say which state folder, then go on
+        assert!(matches!(
+            guard(true, &Kind::Process { npm: true }, Origin::Npm, state),
+            Guard::Notice(_)
+        ));
     }
 
     #[test]
