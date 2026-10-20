@@ -169,13 +169,61 @@ pub fn connections(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(rows)
 }
 
-/// Drop expired codes and dynamic clients unused for 30 days. Returns rows removed.
+/// Drop expired codes, dynamic clients unused for 30 days and cached client
+/// metadata documents not fetched for 30 days, unless a grant uses them.
+/// Returns rows removed.
 pub fn prune(tx: &Transaction<'_>, now: i64) -> Result<usize> {
     let codes = tx.execute("DELETE FROM oauth_code WHERE expires_at <= ?1", [now])?;
     let clients = tx.execute(
-        "DELETE FROM oauth_client WHERE kind = 'dcr' AND created_at < ?1
-           AND client_id NOT IN (SELECT client_id FROM oauth_grant)",
+        "DELETE FROM oauth_client WHERE client_id NOT IN (SELECT client_id FROM oauth_grant)
+           AND ((kind = 'dcr' AND created_at < ?1)
+             OR (kind = 'cimd' AND COALESCE(fetched_at, created_at) < ?1))",
         [now - 30 * 86_400],
     )?;
     Ok(codes + clients)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Db;
+
+    fn client(id: &str, kind: &str, created_at: i64, fetched_at: Option<i64>) -> Client {
+        Client {
+            client_id: id.into(),
+            name: "c".into(),
+            redirect_uris: vec!["https://e.example/cb".into()],
+            kind: kind.into(),
+            created_at,
+            fetched_at,
+        }
+    }
+
+    /// Cached metadata clients (fetchable without signing in) age out like
+    /// dynamic registrations, so they cannot fill the table for good.
+    #[test]
+    fn prune_drops_stale_metadata_clients_too() {
+        let db = Db::open_temp().unwrap();
+        let now = 1_700_000_000;
+        let old = now - 31 * 86_400;
+        db.write(|tx| {
+            put_client(tx, &client("dcr-old-client", "dcr", old, None))?;
+            put_client(tx, &client("https://a.example/old", "cimd", old, Some(old)))?;
+            put_client(tx, &client("https://a.example/new", "cimd", old, Some(now)))?;
+            put_client(tx, &client("manual-old-client", "manual", old, None))?;
+            prune(tx, now)?;
+            Ok(())
+        })
+        .unwrap();
+        let left: Vec<String> = db
+            .read(|c| {
+                let mut st = c.prepare("SELECT client_id FROM oauth_client ORDER BY client_id")?;
+                let rows = st
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?;
+                Ok(rows)
+            })
+            .unwrap();
+        assert_eq!(left, ["https://a.example/new", "manual-old-client"]);
+    }
 }

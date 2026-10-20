@@ -335,16 +335,51 @@ fn public_ip(ip: IpAddr) -> bool {
                 // 0.0.0.0/8 ("this network"), 100.64.0.0/10 (CGNAT), 240.0.0.0/4 (reserved)
                 || o[0] == 0
                 || o[0] == 100 && (64..128).contains(&o[1])
-                || o[0] >= 240)
+                || o[0] >= 240
+                // 192.0.0.0/24 (protocol assignments), 198.18.0.0/15 (benchmarking),
+                // and the documentation ranges.
+                || o[..3] == [192, 0, 0]
+                || o[0] == 198 && (o[1] == 18 || o[1] == 19)
+                || o[..3] == [192, 0, 2]
+                || o[..3] == [198, 51, 100]
+                || o[..3] == [203, 0, 113])
         }
         IpAddr::V6(v) => {
-            let seg = v.segments()[0];
+            let s = v.segments();
+            let seg = s[0];
+            // An IPv4 address carried inside IPv6 (NAT64, 6to4, IPv4-compatible)
+            // must itself be public: a gateway would deliver it to that address.
+            let embedded = if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] || s[..6] == [0; 6] {
+                Some(std::net::Ipv4Addr::new(
+                    (s[6] >> 8) as u8,
+                    s[6] as u8,
+                    (s[7] >> 8) as u8,
+                    s[7] as u8,
+                ))
+            } else if seg == 0x2002 {
+                Some(std::net::Ipv4Addr::new(
+                    (s[1] >> 8) as u8,
+                    s[1] as u8,
+                    (s[2] >> 8) as u8,
+                    s[2] as u8,
+                ))
+            } else {
+                None
+            };
             !(v.is_loopback()
                 || v.is_unspecified()
                 || v.is_multicast()
                 || seg & 0xfe00 == 0xfc00
-                || seg & 0xffc0 == 0xfe80)
+                || seg & 0xffc0 == 0xfe80
+                // fec0::/10 (old site-local), 64:ff9b:1::/48 (local NAT64),
+                // 2001::/32 (Teredo), 2001:db8::/32 (documentation), 100::/64 (discard).
+                || seg & 0xffc0 == 0xfec0
+                || s[..3] == [0x64, 0xff9b, 1]
+                || s[..2] == [0x2001, 0]
+                || s[..2] == [0x2001, 0xdb8]
+                || s[..4] == [0x100, 0, 0, 0])
                 && v.to_ipv4_mapped().is_none_or(|m| public_ip(IpAddr::V4(m)))
+                && embedded.is_none_or(|m| public_ip(IpAddr::V4(m)))
         }
     }
 }
@@ -363,12 +398,16 @@ fn fetch_cimd(url: &str, now: i64) -> Result<Client, String> {
         Some((h, p)) => (h, p.parse::<u16>().map_err(|_| "invalid port")?),
         None => (host, 443),
     };
+    // One answer for "does not resolve" and "resolves to a private address":
+    // this is reachable without signing in, and two answers would let anyone
+    // probe which internal host names exist.
+    let not_public = || "client_id host does not resolve to a public address".to_string();
     let addrs: Vec<SocketAddr> = (name, port)
         .to_socket_addrs()
-        .map_err(|e| format!("cannot resolve {name}: {e}"))?
+        .map_err(|_| not_public())?
         .collect();
     if addrs.is_empty() || !addrs.iter().all(|a| public_ip(a.ip())) {
-        return Err("client_id host is not a public address".into());
+        return Err(not_public());
     }
     let agent = ureq::AgentBuilder::new()
         // Connect only to the addresses checked above: a second lookup could
@@ -442,7 +481,24 @@ async fn resolve_client(st: &AppState, client_id: &str) -> Result<Client, String
                 created_at: known.as_ref().map_or(now, |k| k.created_at),
                 ..c
             };
-            let _ = st.db.write(|tx| store::put_client(tx, &keep));
+            // A new metadata client takes a row like a registration does, under
+            // the same cap: this path is reachable without signing in.
+            let stored = st
+                .db
+                .write(|tx| {
+                    if known.is_none() && store::count_clients(tx)? >= store::MAX_CLIENTS {
+                        store::prune(tx, now)?;
+                        if store::count_clients(tx)? >= store::MAX_CLIENTS {
+                            return Ok(false);
+                        }
+                    }
+                    store::put_client(tx, &keep)?;
+                    Ok(true)
+                })
+                .unwrap_or(false);
+            if !stored && known.is_none() {
+                return Err("too many registered clients".to_string());
+            }
             Ok(keep)
         }
         // A cached copy beats an outage of the client's metadata host.
@@ -1013,6 +1069,17 @@ mod tests {
         assert!(valid_redirect("http://[::1]:8080/cb"));
     }
 
+    /// Unknown and private hosts answer alike, so the public metadata fetch
+    /// cannot be used to map internal host names.
+    #[test]
+    fn metadata_fetch_does_not_tell_unknown_from_private_hosts() {
+        let a = fetch_cimd("https://no-such-host.invalid/client", 0).unwrap_err();
+        let b = fetch_cimd("https://127.0.0.1/client", 0).unwrap_err();
+        let c = fetch_cimd("https://localhost:8443/client", 0).unwrap_err();
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
     #[test]
     fn public_addresses_only() {
         for ip in [
@@ -1026,11 +1093,28 @@ mod tests {
             "::1",
             "fd00::1",
             "::ffff:10.0.0.1",
+            // IPv4 inside IPv6, and other special ranges.
+            "64:ff9b::a9fe:a9fe",
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::1",
+            "2002:7f00:1::1",
+            "2002:c0a8:101::1",
+            "::7f00:1",
+            "fec0::1",
+            "2001:0:4136:e378::1",
+            "2001:db8::1",
+            "100::1",
+            "192.0.0.8",
+            "198.18.0.1",
+            "198.19.255.1",
         ] {
             assert!(!public_ip(ip.parse().unwrap()), "{ip}");
         }
         assert!(public_ip("1.1.1.1".parse().unwrap()));
         assert!(public_ip("2606:4700::1111".parse().unwrap()));
+        // A public IPv4 host reached through NAT64 / 6to4 stays reachable.
+        assert!(public_ip("64:ff9b::101:101".parse().unwrap()));
+        assert!(public_ip("2002:101:101::1".parse().unwrap()));
     }
 
     #[test]
