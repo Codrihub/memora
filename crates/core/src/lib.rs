@@ -1526,7 +1526,7 @@ mod resource_tests {
         let names: Vec<String> = zip::ZipArchive::new(std::io::Cursor::new(zip))
             .unwrap()
             .file_names()
-            .map(String::from)
+            .map(|n| n.unwrap().into_owned())
             .collect();
         assert_eq!(names, ["Projects/n.md"]);
         fs::remove_dir_all(&d).ok();

@@ -1,0 +1,15 @@
+# cargo-audit configuration (https://github.com/rustsec/rustsec/tree/main/cargo-audit).
+# CI runs `cargo audit`: a vulnerability advisory fails the build; unmaintained,
+# unsound and yanked notices are printed as warnings. Every ignored advisory
+# below has been reviewed and carries the reason it does not apply.
+
+[advisories]
+ignore = [
+    # webpki-roots: distrusted emSign intermediates in the bundled roots.
+    # Fixed in webpki-roots 1.0.10, which Cargo.lock uses. The 0.26.11 entry
+    # that ureq 2 pulls in is an empty "semver trick" crate that re-exports
+    # webpki-roots 1.x, so it carries the fixed 1.0.10 roots too; the advisory
+    # matches it by version number only.
+    "RUSTSEC-2026-0381",
+]
+informational_warnings = ["unmaintained", "unsound", "yanked"]

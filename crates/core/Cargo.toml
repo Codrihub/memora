@@ -12,4 +12,4 @@ regex.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }

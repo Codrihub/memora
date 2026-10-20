@@ -5910,7 +5910,14 @@ impl MemoryStore {
         let mut total: u64 = 0;
         for i in 0..zr.len() {
             let mut f = zr.by_index(i).map_err(|e| MemoryErr(e.to_string()))?;
-            let name = f.name().to_string();
+            let name = match f.name() {
+                Ok(n) => n.into_owned(),
+                Err(_) => {
+                    failed
+                        .push(json!({"entry": format!("#{i}"), "reason": "unreadable entry name"}));
+                    continue;
+                }
+            };
             if !name.ends_with(".md") || name.ends_with('/') {
                 continue;
             }
@@ -6878,6 +6885,43 @@ mod note_ops_tests {
             fs::read_to_string(d.join("Notes/Ideas.md")).unwrap(),
             "replaced"
         );
+        fs::remove_dir_all(&d).ok();
+    }
+
+    /// Import never uses the zip crate's extract(): a symlink entry or a
+    /// setuid mode in the archive (RUSTSEC-2026-0367/0368/0369) only ever
+    /// becomes a plain note holding the entry's bytes.
+    #[test]
+    fn import_writes_symlink_and_setuid_entries_as_plain_notes() {
+        use std::io::Write;
+        let (d, s) = vault("zip-links");
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let o = zip::write::SimpleFileOptions::default();
+            zw.add_symlink("Notes/Link.md", "/etc/passwd", o).unwrap();
+            zw.start_file("Notes/Suid.md", o.unix_permissions(0o4755))
+                .unwrap();
+            zw.write_all(b"suid").unwrap();
+            zw.finish().unwrap();
+        }
+        let r = s.import_zip_impl(&buf, false).unwrap();
+        assert_eq!(r["added"], json!(["Notes/Link.md", "Notes/Suid.md"]), "{r}");
+        let link = d.join("Notes/Link.md");
+        assert!(!fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&link).unwrap(), "/etc/passwd");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(d.join("Notes/Suid.md"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o7000, 0, "mode {mode:o}");
+        }
         fs::remove_dir_all(&d).ok();
     }
 }
