@@ -13,7 +13,7 @@
     "@types/three": "^0.186.0",
     "esbuild": "^0.25.0",
     "three": "^0.186.1",
-    "typescript": "^5.6.3",
+    "typescript": "^7.0.2",
     "vite": "^7.3.7"
   },
   "devDependencies": {
