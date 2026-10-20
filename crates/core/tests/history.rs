@@ -318,3 +318,52 @@ fn history_of_a_hidden_notes_former_path_stays_hidden() {
     drop(s);
     fs::remove_dir_all(&d).ok();
 }
+
+fn git_out(d: &PathBuf, args: &[&str]) -> String {
+    let o = Command::new("git")
+        .args(args)
+        .current_dir(d)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&o.stdout).to_string()
+}
+
+#[test]
+fn store_files_stay_out_of_the_history() {
+    let d = vault("unversioned", true);
+    fs::write(d.join(".events.jsonl"), "{\"type\":\"ai_activity\"}\n").unwrap();
+    fs::write(d.join(".locks.json"), "{}").unwrap();
+    // An older Memora committed them: they are tracked before the fix runs.
+    let id = ["-c", "user.name=t", "-c", "user.email=t@localhost"];
+    git_out(&d, &["add", "-A"]);
+    git_out(
+        &d,
+        &[id[0], id[1], id[2], id[3], "commit", "-q", "-m", "old"],
+    );
+    assert!(git_out(&d, &["ls-files"]).contains(".events.jsonl"));
+
+    let s = MemoryStore::new(&d);
+    fs::write(d.join("top.md"), "changed").unwrap();
+    s.git_commit("edit: top.md");
+    let tracked = git_out(&d, &["ls-files"]);
+    assert!(!tracked.contains(".events.jsonl"), "{tracked}");
+    assert!(!tracked.contains(".locks.json"), "{tracked}");
+    assert!(tracked.contains("top.md"));
+    // The files themselves stay on disk.
+    assert!(d.join(".events.jsonl").is_file() && d.join(".locks.json").is_file());
+
+    // Later writes to the event log never reach a commit, and the exclude file is
+    // written once.
+    let exclude = fs::read_to_string(d.join(".git/info/exclude")).unwrap();
+    fs::write(d.join(".events.jsonl"), "{}\n{}\n").unwrap();
+    fs::write(d.join("top.md"), "again").unwrap();
+    s.git_commit("edit: top.md");
+    let last = git_out(&d, &["show", "--name-only", "--format=", "HEAD"]);
+    assert_eq!(last.trim(), "top.md");
+    assert_eq!(
+        fs::read_to_string(d.join(".git/info/exclude")).unwrap(),
+        exclude
+    );
+    assert_eq!(git_out(&d, &["status", "--porcelain"]).trim(), "");
+    fs::remove_dir_all(&d).ok();
+}

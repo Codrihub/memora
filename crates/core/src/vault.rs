@@ -4589,6 +4589,53 @@ impl Drop for CommitAuthor {
     }
 }
 
+/// Sort events newest first (by `_ts`) and keep the first `cap`. Stable, so events with
+/// the same stamp keep their file order.
+fn newest_first(events: &mut Vec<Value>, cap: usize) {
+    let ts = |e: &Value| e.get("_ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    events.sort_by(|a, b| {
+        ts(b)
+            .partial_cmp(&ts(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    events.truncate(cap);
+}
+
+/// The store's own scratch files at the vault root, kept out of the git history: the
+/// realtime event log (rewritten on every call, up to megabytes) and the note locks.
+/// Patterns for `info/exclude` (anchored to the vault root).
+const UNVERSIONED: [&str; 2] = ["/.events.jsonl", "/.locks.json"];
+
+/// Header line above [`UNVERSIONED`] in `info/exclude`.
+const UNVERSIONED_MARK: &str = "# memora: store files, not notes";
+
+/// `exclude` (the text of a repository's `info/exclude`) with every [`UNVERSIONED`]
+/// pattern listed, or `None` when it already lists them all.
+fn with_unversioned_excluded(exclude: &str) -> Option<String> {
+    let have: BTreeSet<&str> = exclude.lines().map(str::trim).collect();
+    let missing: Vec<&str> = UNVERSIONED
+        .iter()
+        .copied()
+        .filter(|p| !have.contains(p))
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let mut out = exclude.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if !have.contains(UNVERSIONED_MARK) {
+        out.push_str(UNVERSIONED_MARK);
+        out.push('\n');
+    }
+    for p in missing {
+        out.push_str(p);
+        out.push('\n');
+    }
+    Some(out)
+}
+
 /// One commit of a note's history (see [`MemoryStore::note_log`]).
 struct LogEntry {
     id: String,
@@ -4649,11 +4696,45 @@ impl MemoryStore {
         }
     }
 
+    /// Keep the store's own scratch files ([`UNVERSIONED`]) out of the vault history:
+    /// list them in the repository's `info/exclude` (local, never committed) and stop
+    /// tracking them once if an earlier commit picked them up. Without this every write
+    /// committed the whole event log again, so `.git` grew by megabytes per edit and
+    /// agent activity ended up in the note history.
+    fn exclude_unversioned(&self) {
+        let root = self.root();
+        let dot_git = root.join(".git");
+        let exclude = if dot_git.is_dir() {
+            dot_git.join("info").join("exclude")
+        } else {
+            // A worktree or submodule: `.git` is a file pointing elsewhere.
+            let (ok, out) = self.git(&["rev-parse", "--git-path", "info/exclude"]);
+            if !ok || out.trim().is_empty() {
+                return;
+            }
+            root.join(out.trim())
+        };
+        let current = fs::read_to_string(&exclude).unwrap_or_default();
+        let Some(updated) = with_unversioned_excluded(&current) else {
+            return;
+        };
+        if let Some(dir) = exclude.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        if fs::write(&exclude, updated).is_err() {
+            return;
+        }
+        let mut args = vec!["rm", "--cached", "-q", "--ignore-unmatch", "--"];
+        args.extend(UNVERSIONED.iter().map(|f| f.trim_start_matches('/')));
+        self.git(&args);
+    }
+
     /// Commit everything, authored by the [`CommitAuthor`] of this call when set.
     pub fn git_commit(&self, message: &str) {
         if !self.history_enabled() {
             return;
         }
+        self.exclude_unversioned();
         self.git(&["add", "-A"]);
         let mut args: Vec<&str> = Vec::new();
         // git refuses to commit without an identity; a fresh `git init` has none.
@@ -5595,6 +5676,7 @@ impl MemoryStore {
             (Some(now - 86400.0), None)
         };
         let ql = q.trim().to_lowercase();
+        let cap = limit.clamp(1, 2000);
         let mut out: Vec<Value> = Vec::new();
         if let Ok(raw) = fs::read_to_string(self.events_path()) {
             for line in raw.lines() {
@@ -5645,14 +5727,14 @@ impl MemoryStore {
                     }
                 }
                 out.push(ev);
+                // Keep at most twice the answer in memory: a day of a busy event log
+                // is tens of thousands of events, parsed only to keep the newest few.
+                if out.len() >= 2 * cap {
+                    newest_first(&mut out, cap);
+                }
             }
         }
-        out.sort_by(|a, b| {
-            let x = b.get("_ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let y = a.get("_ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        out.truncate(limit.clamp(1, 2000));
+        newest_first(&mut out, cap);
         for ev in out.iter_mut() {
             let ts = ev.get("_ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let t = chrono::DateTime::from_timestamp(ts as i64, 0)
@@ -6764,6 +6846,60 @@ mod image_render_tests {
         );
         assert!(h.contains("image not found: img/link.png"), "{h}");
         let _ = fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod leak_tests {
+    use super::*;
+
+    #[test]
+    fn logs_keep_the_newest_events_whatever_the_file_order() {
+        let d = std::env::temp_dir().join(format!(
+            "memora-logs-cap-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        let now = now_secs();
+        // 5000 events in a shuffled order (a clock step can put older stamps later).
+        let mut lines = String::new();
+        for i in 0..5000u64 {
+            let k = (i * 7919) % 5000;
+            lines.push_str(&format!(
+                "{{\"type\":\"ai_activity\",\"actor\":\"a\",\"label\":\"e{k}\",\"_ts\":{}}}\n",
+                now - 5000.0 + k as f64
+            ));
+        }
+        fs::write(d.join(".events.jsonl"), lines).unwrap();
+        let s = MemoryStore::new(&d);
+        let out = s.get_logs_between("1d", None, "", "", 300);
+        let evs = out["events"].as_array().unwrap();
+        assert_eq!(evs.len(), 300);
+        let labels: Vec<&str> = evs.iter().map(|e| e["label"].as_str().unwrap()).collect();
+        let want: Vec<String> = (0..300).map(|i| format!("e{}", 4999 - i)).collect();
+        assert_eq!(labels, want);
+        let one = s.get_logs_between("1d", None, "", "", 0);
+        assert_eq!(one["events"][0]["label"], "e4999");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn exclude_lists_store_files_once() {
+        let fresh = with_unversioned_excluded("").unwrap();
+        assert!(fresh.contains("/.events.jsonl\n") && fresh.contains("/.locks.json\n"));
+        assert!(with_unversioned_excluded(&fresh).is_none(), "idempotent");
+        // git's sample exclude file without a trailing newline keeps its lines.
+        let sample = "# git ls-files --others --exclude-from=.git/info/exclude\n*.tmp";
+        let out = with_unversioned_excluded(sample).unwrap();
+        assert!(
+            out.starts_with(sample) && out.contains("*.tmp\n# memora"),
+            "{out}"
+        );
+        // Only the missing pattern is added.
+        let one = format!("{UNVERSIONED_MARK}\n/.events.jsonl\n");
+        let out = with_unversioned_excluded(&one).unwrap();
+        assert_eq!(out, format!("{one}/.locks.json\n"));
     }
 }
 
