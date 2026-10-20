@@ -143,11 +143,21 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-pick-list [role=option][aria-selected=true]{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
 .vx-pick-list p{margin:8px 10px;font-size:12.5px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.vx-pick-pop{animation:none}}
-/* Folder rows: the count sits flush right; the actions button takes its place on hover. */
-.vx-row .vx-count{margin-left:auto;min-width:22px;padding-right:4px}
-.vx-row .vx-row-more{display:none}
-.vx-row:hover .vx-count,.vx-row:focus-visible .vx-count,.vx-row:focus-within .vx-count{display:none}
-.vx-row:hover .vx-row-more,.vx-row:focus-visible .vx-row-more,.vx-row:focus-within .vx-row-more{display:inline-flex;opacity:1}
+/* Tree rows end in one fixed slot: a folder's count and the "more" button share it (stacked),
+   so showing the button on hover or focus never moves or covers anything else on the row. */
+.vx-end{flex:none;margin-left:auto;display:grid;align-items:center;justify-items:end;min-width:24px;height:22px}
+.vx-end>*{grid-area:1/1}
+.vx-row .vx-count{min-width:22px;padding-right:4px;box-sizing:border-box}
+.vx-row .vx-row-more{width:22px;height:22px;padding:0;align-items:center;justify-content:center;opacity:0;pointer-events:none}
+.vx-row:hover .vx-count,.vx-row:focus-visible .vx-count,.vx-row:focus-within .vx-count{visibility:hidden}
+.vx-row:hover .vx-row-more,.vx-row:focus-visible .vx-row-more,.vx-row:focus-within .vx-row-more{opacity:1;pointer-events:auto}
+.vx-row-more:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* Touch screens have no hover: the button is always there, next to the count. */
+@media (hover:none){
+  .vx-end{display:flex;gap:2px;height:auto}
+  .vx-row .vx-count{visibility:visible!important}
+  .vx-row .vx-row-more{opacity:1;pointer-events:auto;width:32px;height:32px}
+}
 .vx-row-more:hover{background:var(--panel);color:var(--fg)}
 @keyframes vxPulse{50%{box-shadow:0 0 0 5px transparent}}
 .vx-kids{overflow:hidden;height:0;transition:height .28s cubic-bezier(.32,.72,0,1)}
@@ -277,6 +287,7 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-note-pin .vx-i{width:13px;height:13px}
 .vx-note-folder{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);white-space:nowrap;min-width:0;flex:0 10 auto;overflow:hidden}
 .vx-note-folder i{width:6px;height:6px;border-radius:50%;background:var(--fc);flex:none}
+.vx-note-folder>span,.vx-note-mf>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vx-note-meta{display:none}
 .vx-note-ex{font-size:13px;line-height:18px;height:18px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vx-note-ex.none{font-style:italic;color:var(--text-3)}
@@ -673,10 +684,15 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
   .vx-note-meta{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;line-height:18px;color:var(--muted);white-space:nowrap;overflow:hidden}
   .vx-note-meta>*+*::before{content:"·";margin-right:6px;color:var(--text-3)}
   .vx-note-meta>:empty{display:none}
-  .vx-note-mf{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  /* Folder path and tags shrink with an ellipsis (on the inner text: a flex box clips without one); the time never shrinks. */
+  .vx-note-meta>time{flex:none}
+  .vx-note-mf{display:inline-flex;align-items:center;gap:5px;min-width:3em;flex:0 1 auto;overflow:hidden}
   .vx-note-mf i{width:6px;height:6px;border-radius:50%;background:var(--fc);flex:none}
-  .vx-note-mtags{display:inline-flex;gap:6px;overflow:hidden}
-  .vx-note-meta>.vx-note-mtags::before{margin-right:0}
+  /* Tags: the first one shrinks with an ellipsis, a second one that does not fit wraps onto a hidden line. */
+  .vx-note-mtags{display:inline-flex;flex-wrap:wrap;column-gap:6px;height:18px;min-width:4.5em;flex:0 1 auto;overflow:hidden}
+  .vx-note-meta>.vx-note-mtags::before{content:none}
+  .vx-note-mtags span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vx-note-mtags span:first-child::before{content:"·";margin-right:6px;color:var(--text-3)}
   .vx-note-mtags span{color:var(--tc)}
   .vx-note .vx-row-more{opacity:1;width:40px;height:40px}
   .vx-note-thumb{width:48px;height:48px}
@@ -703,7 +719,9 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 @media (max-width:760px){
   .vx-row,.vx-pin{height:40px;min-height:40px}
   .vx-row-more,.vx-pin-x{opacity:1}
-  .vx-row .vx-row-more{display:inline-flex}
+  .vx-end{display:flex;gap:2px;height:auto}
+  .vx-row .vx-count{visibility:visible!important}
+  .vx-row .vx-row-more{opacity:1;pointer-events:auto;width:32px;height:32px}
   .vx-btitle h1{font-size:23px}
   .vx-bico .vx-i{width:22px;height:22px}
   .vx-bmeta{margin-left:34px}

@@ -301,7 +301,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   sec.appendChild(rows);
   page.appendChild(sec);
   sc.scrollTop = scroll;
-  watchExcerpts(rows);
+  watchExcerpts(rows, sc);
 
   // Wiring
   head.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
@@ -505,12 +505,12 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
         isPinned('note', n.path) ? `<span class="vx-note-pin" title="Pinned">${I.pin}</span>` : ''
       }${
         showFolder && rel
-          ? `<span class="vx-note-folder" title="${attr(sub)}"><i></i>${esc(rel)}</span>`
+          ? `<span class="vx-note-folder" title="${attr(sub)}"><i></i><span>${esc(rel)}</span></span>`
           : ''
       }</span>
       <span class="vx-note-ex"></span>
       <span class="vx-note-meta">${
-        showFolder && rel ? `<span class="vx-note-mf"><i></i>${esc(rel)}</span>` : ''
+        showFolder && rel ? `<span class="vx-note-mf" title="${attr(sub)}"><i></i><span>${esc(rel)}</span></span>` : ''
       }<time>${esc(relTs(n.mtime))}</time><span class="vx-note-mtags"></span></span>
     </span>
     <span class="vx-note-side">
@@ -609,7 +609,7 @@ function paintExcerpt(row: HTMLElement): void {
     .map((x) => `<span class="vx-chip-tag" style="--tc:${hashColor(x)}">#${esc(x)}</span>`)
     .join('');
   const mt = row.querySelector<HTMLElement>('.vx-note-mtags');
-  if (mt) mt.innerHTML = e.tags.slice(0, 2).map((x) => `<span style="--tc:${hashColor(x)}">#${esc(x)}</span>`).join('');
+  if (mt) mt.innerHTML = e.tags.slice(0, 2).map((x) => `<span style="--tc:${hashColor(x)}" title="#${attr(x)}">#${esc(x)}</span>`).join('');
   // A small thumbnail when the node has an image (hidden again if it fails to load).
   const th = row.querySelector<HTMLElement>('.vx-note-thumb');
   if (th && e.img && !th.firstChild) {
@@ -628,23 +628,37 @@ function paintExcerpt(row: HTMLElement): void {
   }
 }
 
-/** Ask for excerpts of the rows that are (nearly) on screen. */
-function watchExcerpts(rows: HTMLElement): void {
+/**
+ * Ask for excerpts of the rows that are (nearly) on screen. Rows stay watched
+ * until their excerpt lands, both ways: a row that scrolls away leaves the
+ * set of wanted rows and its queued request is dropped (it is asked for again
+ * if it comes back). Otherwise every row scrolled past stays queued, and after
+ * a long scroll (a Folder sorted list with its group headers is the longest)
+ * the rows on screen wait behind all of them.
+ */
+function watchExcerpts(rows: HTMLElement, scroller: HTMLElement): void {
   observer?.disconnect();
-  const want = new Set<string>();
+  const onScreen = new Set<string>();
   observer = new IntersectionObserver(
     (entries) => {
       for (const en of entries) {
-        if (!en.isIntersecting) continue;
         const r = en.target as HTMLElement;
-        observer?.unobserve(r);
         const p = r.dataset.path || '';
-        want.add(p);
+        if (!en.isIntersecting) {
+          onScreen.delete(p);
+          continue;
+        }
+        if (excerptOf(p, Number(r.dataset.m) || 0)) {
+          observer?.unobserve(r);
+          continue;
+        }
+        onScreen.add(p);
         wantExcerpt(p, Number(r.dataset.m) || 0);
       }
-      keepExcerpts(want);
+      keepExcerpts(onScreen);
     },
-    { rootMargin: '300px 0px' },
+    // The list scrolls inside its own box: measure against it, so the margin preloads the next rows.
+    { root: scroller, rootMargin: '300px 0px' },
   );
   rows.querySelectorAll<HTMLElement>('.vx-note').forEach((r) => {
     if (!excerptOf(r.dataset.path || '', Number(r.dataset.m) || 0)) observer!.observe(r);
@@ -654,7 +668,9 @@ function watchExcerpts(rows: HTMLElement): void {
 onExcerpt((path) => {
   if (!listHost || !listHost.isConnected) return;
   listHost.querySelectorAll<HTMLElement>('.vx-note').forEach((r) => {
-    if (r.dataset.path === path) paintExcerpt(r);
+    if (r.dataset.path !== path) return;
+    paintExcerpt(r);
+    if (excerptOf(path, Number(r.dataset.m) || 0)) observer?.unobserve(r);
   });
 });
 

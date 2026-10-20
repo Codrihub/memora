@@ -100,6 +100,12 @@ window.addEventListener('memora:sections-ask', () => announceSections());
 
 /** A group of rows one level down; `--gx` places its branch line under the
  * parent's chevron (rows indent 14px per level, see .vx-row). */
+/** The "more" button at the end of a tree row: opens the same menu as a right-click. */
+function moreBtn(name: string): string {
+  const label = `More actions for ${name}`;
+  return `<button class="vx-row-more" type="button" tabindex="-1" aria-label="${attr(label)}" title="More actions">${I.more}</button>`;
+}
+
 function branchGroup(depth: number): HTMLElement {
   const g = el('div', 'vx-kids-inner');
   g.style.setProperty('--gx', depth * 14 + 'px');
@@ -633,8 +639,7 @@ export class TreeView {
       <span class="vx-fico">${isRoot ? I.vault : folderGlyph(folderIcon(f.path), open && hasKids)}</span>
       <span class="vx-fname">${esc(isRoot ? 'All nodes' : f.name)}</span>${isRoot ? '' : lockMark('folder', f.path)}
       ${coinsHTML(here)}
-      <span class="vx-count">${f.total}</span>
-      <button class="vx-row-more" tabindex="-1" aria-label="Folder actions" title="Actions">${I.more}</button>`;
+      <span class="vx-end"><span class="vx-count">${f.total}</span>${moreBtn(isRoot ? 'All nodes' : f.name)}</span>`;
 
     row.onclick = (e) => {
       const t = e.target as HTMLElement;
@@ -749,8 +754,15 @@ export class TreeView {
     row.setAttribute('aria-selected', String(isActive || selection.has(n.path)));
     row.innerHTML = `<span class="vx-twist none"></span><span class="vx-nico">${I.note}</span><span class="vx-fname">${esc(
       n.name,
-    )}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}`;
+    )}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(n.name)}</span>`;
     row.onclick = (e) => {
+      const more = (e.target as HTMLElement).closest<HTMLElement>('.vx-row-more');
+      if (more) {
+        e.stopPropagation();
+        const paths = selection.has(n.path) && selection.size > 1 ? Array.from(selection) : [n.path];
+        noteMenu(paths, more, () => this.renameNoteInline(row, n.path));
+        return;
+      }
       if (e.metaKey || e.ctrlKey) {
         if (selection.has(n.path)) selection.delete(n.path);
         else selection.add(n.path);
@@ -761,6 +773,7 @@ export class TreeView {
       nav.openNote(n.path);
     };
     row.ondblclick = (e) => {
+      if ((e.target as HTMLElement).closest('.vx-row-more')) return;
       e.preventDefault();
       this.renameNoteInline(row, n.path);
     };
