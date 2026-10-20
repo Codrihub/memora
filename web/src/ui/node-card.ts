@@ -362,7 +362,10 @@ export class NodeCard {
   private mutated(m: WsEvent): void {
     const mine = this.doc?.path ?? this.loading;
     if (!mine) return;
-    const paths = [m.path, m.to, m.new_path, m.old_path, m.from].filter((v): v is string => typeof v === 'string');
+    // node_created / node_updated / node_renamed carry the note in `node`; deletes and
+    // renames name paths at the top level.
+    const node = m.node as { path?: unknown } | undefined;
+    const paths = [m.path, m.to, m.new_path, m.old_path, m.from, node?.path].filter((v): v is string => typeof v === 'string');
     if (!paths.length || paths.includes(mine)) this.stale = true;
   }
 
