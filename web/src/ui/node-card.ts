@@ -7,10 +7,11 @@
 // Reset/Filter). Phones: a bottom sheet with a handle, swipe down to close.
 
 import { apiGet } from '../api';
+import { on } from '../bus';
 import { attr, esc, useStyles } from '../dom';
 import { relTs } from '../format';
 import { hooks } from '../hooks';
-import type { NoteDoc } from '../types';
+import type { NoteDoc, WsEvent } from '../types';
 import { folderMenu, noteMenu } from '../vault/menus';
 import { nav } from '../vault/nav';
 import { previewSkeleton } from './skeleton';
@@ -156,6 +157,14 @@ export class NodeCard {
   private mapTap = -1e9;
   /** Listeners on the map root, removed on destroy. */
   private off = new AbortController();
+  /** What the server last said about a note (preview, size and date, tags). */
+  private doc: { path: string; preview: string; meta: string; tags: string[] } | null = null;
+  /** `doc`'s note changed on the server after it was fetched. */
+  private stale = false;
+  /** Everything the last `showNote` drew from, to skip redrawing the same card. */
+  private drawn = '';
+  /** The note whose preview is being fetched. */
+  private loading: string | null = null;
 
   constructor(private host: CardHost) {
     useStyles('node-card-css', CSS);
@@ -174,6 +183,10 @@ export class NodeCard {
       }
     });
     this.wireSwipe();
+    // Maps redraw the open card after every realtime update; only a change to
+    // this note itself needs a new preview from the server.
+    const unsub = on('mutation', (m) => this.mutated(m));
+    this.off.signal.addEventListener('abort', unsub);
     // A tap on the map itself (not its controls) while the card is up.
     host.root.addEventListener(
       'pointerdown',
@@ -238,12 +251,19 @@ export class NodeCard {
 
   /** A note: its links from the map, the rest from the server. */
   showNote(path: string, name: string, folder: string, color: string, tags: string[] = []): void {
-    const seq = ++this.seq;
-    const reopen = this.path === path;
-    this.path = path;
-    if (!reopen) this.tab = 'preview';
+    const reopen = this.path === path && this.isOpen;
     const { out, in: inc } = this.host.links(path);
     const extras = this.host.extras?.(path) || [];
+    const row = (l: CardLink): unknown[] => [l.path, l.name, l.color, l.degree];
+    const drawn = JSON.stringify([path, name, folder, color, tags, out.map(row), inc.map(row), extras.map((x) => [x.id, x.label, !!x.on])]);
+    // The same node redrawn (a map refresh): reuse the preview already loaded
+    // unless this note changed; with nothing new at all, leave the card alone.
+    const cached = reopen && this.doc?.path === path ? this.doc : null;
+    if (reopen && !this.stale && drawn === this.drawn && (cached || this.loading === path)) return;
+    this.drawn = drawn;
+    const seq = ++this.seq;
+    this.path = path;
+    if (!reopen) this.tab = 'preview';
     // Another node opens unfolded; the same one redrawn keeps its state.
     if (!reopen) this.expand();
     this.el.setAttribute('aria-label', `Node ${name}`);
@@ -256,7 +276,7 @@ export class NodeCard {
       <h2 class="nc-title">${esc(name)}</h2>
       <div class="nc-fold"><div class="nc-fold-in">
       <div class="nc-stats"><span><b>${out.length}</b> link${out.length === 1 ? '' : 's'} out</span><span><b>${inc.length}</b> backlink${inc.length === 1 ? '' : 's'}</span><span data-meta></span></div>
-      <div class="nc-tags">${this.tagChips(tags)}</div>
+      <div class="nc-tags">${this.tagChips(cached?.tags.length ? cached.tags : tags)}</div>
       <div class="nc-acts">
         <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open node</button>
         <button type="button" class="nc-act" data-a="node" title="Center the map on this node">${ICON.target}Focus</button>
@@ -270,7 +290,11 @@ export class NodeCard {
       <div class="nc-body" role="tabpanel"></div>
       </div></div>`;
     const body = this.el.querySelector<HTMLElement>('.nc-body')!;
-    let preview = previewSkeleton();
+    let preview = cached ? cached.preview : previewSkeleton();
+    if (cached) {
+      const meta = this.el.querySelector<HTMLElement>('[data-meta]');
+      if (meta) meta.textContent = cached.meta;
+    }
     const paint = (): void => {
       this.el.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === this.tab)));
       body.innerHTML =
@@ -301,25 +325,45 @@ export class NodeCard {
     this.on('menu', (b) => noteMenu([path], b));
     this.el.classList.add('open');
 
+    if (cached && !this.stale) return;
+    this.stale = false;
+    if (!cached) this.doc = null;
+    this.loading = path;
     void apiGet<NoteDoc>('/api/note?path=' + encodeURIComponent(path))
       .then((d) => {
         if (seq !== this.seq) return;
+        this.loading = null;
+        const metaText = [d.mtime ? 'edited ' + relTs(d.mtime) : '', d.size ? `${Math.max(1, Math.round(d.size / 1024))} KB` : ''].filter(Boolean).join(' · ');
         const meta = this.el.querySelector<HTMLElement>('[data-meta]');
-        if (meta) meta.textContent = [d.mtime ? 'edited ' + relTs(d.mtime) : '', d.size ? `${Math.max(1, Math.round(d.size / 1024))} KB` : ''].filter(Boolean).join(' · ');
+        if (meta) meta.textContent = metaText;
         if (d.tags && d.tags.length) {
           const host = this.el.querySelector<HTMLElement>('.nc-tags')!;
           host.innerHTML = this.tagChips(d.tags);
           this.wireTags(host);
         }
         const text = d.html || (d.content ? `<pre>${esc(d.content)}</pre>` : '');
-        preview = text ? clipPreview(text) : '<div class="nc-empty">This node is empty.</div>';
+        const fresh = text ? clipPreview(text) : '<div class="nc-empty">This node is empty.</div>';
+        this.doc = { path, preview: fresh, meta: metaText, tags: d.tags || [] };
+        if (fresh === preview) return;
+        preview = fresh;
         if (this.tab === 'preview') paint();
       })
       .catch((e: Error) => {
         if (seq !== this.seq) return;
+        this.loading = null;
+        // Keep showing a preview that was already there; only a first load fails visibly.
+        if (cached) return;
         preview = `<div class="nc-empty">Could not load the preview: ${esc(e.message)}</div>`;
         if (this.tab === 'preview') paint();
       });
+  }
+
+  /** A realtime vault change: the loaded (or loading) preview is out of date when it names that note. */
+  private mutated(m: WsEvent): void {
+    const mine = this.doc?.path ?? this.loading;
+    if (!mine) return;
+    const paths = [m.path, m.to, m.new_path, m.old_path, m.from].filter((v): v is string => typeof v === 'string');
+    if (!paths.length || paths.includes(mine)) this.stale = true;
   }
 
   /** A folder (region, hull, frame): what is in it and what you can do. */

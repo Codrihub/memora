@@ -1,14 +1,14 @@
-// Tags view: a weighted tag index (built by reading every note once per
+// Tags view: a weighted tag index (built from the graph's per-note tags once per
 // session), multi-tag filtering (AND), related tags and the matching notes.
 
 import { apiGet } from '../api';
 import { $, attr, esc, useStyles } from '../dom';
-import { folderOf, hashColor, parseTags, relTs } from '../format';
+import { folderOf, hashColor, relTs } from '../format';
 import { hooks } from '../hooks';
 import { openPeek } from '../peek';
 import { state, allNotes } from '../state';
 import { clearTagIndex, readTagIndex, writeTagIndex } from '../storage';
-import type { NoteDoc, NoteRef } from '../types';
+import type { NoteRef } from '../types';
 
 /** Folder, name and path for one note carrying a tag. */
 interface TagEntry {
@@ -39,28 +39,28 @@ async function buildTagIndex(force: boolean, onProgress: (done: number, total: n
     state.tags.built = true;
     return restored;
   }
-  let done = 0;
-  const queue = notes.slice();
-  const worker = async (): Promise<void> => {
-    while (queue.length) {
-      const n = queue.shift()!;
-      try {
-        const d = await apiGet<NoteDoc>('/api/note?path=' + encodeURIComponent(n.path));
-        const tags = new Set([...(d.tags || []), ...parseTags(d.content)].map((t) => t.replace(/^#/, '')));
-        for (const t of tags) {
-          if (!t) continue;
-          if (!map.has(t)) map.set(t, []);
-          map.get(t)!.push({ path: n.path, name: n.name, folder: n.folder, mtime: n.mtime });
-        }
-      } catch {
-        /* a note that fails to read contributes no tags */
-      }
-      done++;
-      state.tags.progress = Math.round((done / Math.max(1, notes.length)) * 100);
-      onProgress(done, notes.length);
+  // One request: the graph carries every note's tags exactly as the note view
+  // reports them (inline #tags and frontmatter), so no note is fetched on its own.
+  let g: { nodes?: { path?: string; tags?: string[] }[] };
+  try {
+    g = await apiGet<typeof g>('/api/graph');
+  } catch {
+    // Nothing to show yet; the next visit (or Rebuild) tries again.
+    onProgress(notes.length, notes.length);
+    return map;
+  }
+  const tagsOf = new Map<string, string[]>();
+  for (const n of g.nodes || []) if (n.path) tagsOf.set(n.path, n.tags || []);
+  for (const n of notes) {
+    const tags = new Set((tagsOf.get(n.path) || []).map((t) => t.replace(/^#/, '')));
+    for (const t of tags) {
+      if (!t) continue;
+      if (!map.has(t)) map.set(t, []);
+      map.get(t)!.push({ path: n.path, name: n.name, folder: n.folder, mtime: n.mtime });
     }
-  };
-  await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+  }
+  state.tags.progress = 100;
+  onProgress(notes.length, notes.length);
   state.tags.index = map as unknown as Map<string, NoteRef[]>;
   state.tags.built = true;
   writeTagIndex(sig, Array.from(map.entries()));
