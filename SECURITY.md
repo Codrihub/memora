@@ -53,7 +53,19 @@ proxy. Relevant properties:
   unfinished, the instance locks and only recovery paths stay reachable.
 - The access stack can restrict access by IP, range, CIDR, and domain, with
   loopback always allowed to prevent lockout.
-- The local event intake (`POST /_bus`) accepts loopback only.
+- The local event intake (`POST /_bus`) accepts loopback only, and refuses
+  requests a browser marks as its own (`Origin`, `Sec-Fetch-*`).
+- Failed sign-ins are limited per IP: after 5 failures in 15 minutes that IP
+  waits 5, then 10, then 15 minutes. Failures from many IPs never lock the
+  owner out: 20 failures in 15 minutes across all IPs switch on a slow mode in
+  which every sign-in waits about a second and a single failure puts that IP on
+  its cooldown. A correct password from an IP without recent failures is still
+  accepted, and a successful sign-in ends slow mode.
+- A wrong setup code counts against that IP's budget of 3 wrong codes (then a
+  cooldown). The code stays single-use and the window time-limited; only 50
+  wrong codes in one window (from any IPs) close it early.
+- Dynamic OAuth client registration is limited per IP, and registered clients
+  that never complete an authorization are removed after an hour.
 
 ## Deployment guidance
 

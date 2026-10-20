@@ -169,16 +169,23 @@ pub fn connections(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(rows)
 }
 
-/// Drop expired codes, dynamic clients unused for 30 days and cached client
-/// metadata documents not fetched for 30 days, unless a grant uses them.
-/// Returns rows removed.
+/// How long a dynamic or metadata client may wait to complete its first
+/// authorization before it is removed. A real client finishes within minutes
+/// (and registers again if it comes back later), so registrations that never
+/// lead anywhere cannot fill [`MAX_CLIENTS`] for long.
+pub const UNUSED_CLIENT_TTL: i64 = 3600;
+
+/// Drop expired codes, and dynamic or metadata clients older than
+/// [`UNUSED_CLIENT_TTL`] that have no grant and no pending code. Returns rows
+/// removed.
 pub fn prune(tx: &Transaction<'_>, now: i64) -> Result<usize> {
     let codes = tx.execute("DELETE FROM oauth_code WHERE expires_at <= ?1", [now])?;
     let clients = tx.execute(
         "DELETE FROM oauth_client WHERE client_id NOT IN (SELECT client_id FROM oauth_grant)
+           AND client_id NOT IN (SELECT client_id FROM oauth_code)
            AND ((kind = 'dcr' AND created_at < ?1)
              OR (kind = 'cimd' AND COALESCE(fetched_at, created_at) < ?1))",
-        [now - 30 * 86_400],
+        [now - UNUSED_CLIENT_TTL],
     )?;
     Ok(codes + clients)
 }
@@ -199,15 +206,17 @@ mod tests {
         }
     }
 
-    /// Cached metadata clients (fetchable without signing in) age out like
-    /// dynamic registrations, so they cannot fill the table for good.
+    /// Clients that never complete an authorization (dynamic registrations and
+    /// cached metadata documents, both reachable without signing in) are
+    /// removed after an hour, so the client cap cannot be held full for long.
     #[test]
     fn prune_drops_stale_metadata_clients_too() {
         let db = Db::open_temp().unwrap();
         let now = 1_700_000_000;
-        let old = now - 31 * 86_400;
+        let old = now - UNUSED_CLIENT_TTL - 1;
         db.write(|tx| {
             put_client(tx, &client("dcr-old-client", "dcr", old, None))?;
+            put_client(tx, &client("dcr-new-client", "dcr", now - 60, None))?;
             put_client(tx, &client("https://a.example/old", "cimd", old, Some(old)))?;
             put_client(tx, &client("https://a.example/new", "cimd", old, Some(now)))?;
             put_client(tx, &client("manual-old-client", "manual", old, None))?;
@@ -224,6 +233,13 @@ mod tests {
                 Ok(rows)
             })
             .unwrap();
-        assert_eq!(left, ["https://a.example/new", "manual-old-client"]);
+        assert_eq!(
+            left,
+            [
+                "dcr-new-client",
+                "https://a.example/new",
+                "manual-old-client"
+            ]
+        );
     }
 }

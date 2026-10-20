@@ -278,9 +278,8 @@ async fn h_register(State(st): State<AppState>, Json(b): Json<Value>) -> Respons
     let full = st
         .db
         .write(|tx| {
-            if store::count_clients(tx)? >= store::MAX_CLIENTS {
-                store::prune(tx, now)?;
-            }
+            // Clients that never completed an authorization go first.
+            store::prune(tx, now)?;
             Ok(store::count_clients(tx)? >= store::MAX_CLIENTS)
         })
         .unwrap_or(true);
@@ -455,7 +454,11 @@ fn fetch_cimd(url: &str, now: i64) -> Result<Client, String> {
 }
 
 /// The client behind `client_id`: registered, or (an `https://` id) fetched and cached.
-async fn resolve_client(st: &AppState, client_id: &str) -> Result<Client, String> {
+async fn resolve_client(
+    st: &AppState,
+    headers: &HeaderMap,
+    client_id: &str,
+) -> Result<Client, String> {
     let now = memora_state::now();
     let known = st
         .db
@@ -470,6 +473,14 @@ async fn resolve_client(st: &AppState, client_id: &str) -> Result<Client, String
         .filter(|c| c.fetched_at.is_some_and(|t| now - t < CIMD_TTL))
     {
         return Ok(c.clone());
+    }
+    // A new metadata client adds a row, like a registration: same per-IP budget.
+    if known.is_none() {
+        if let Some(ip) = crate::guard::header_ip(headers) {
+            if st.guard.take(crate::guard::Bucket::Register, &ip).is_err() {
+                return Err("too many new clients from this address; try again later".into());
+            }
+        }
     }
     let id = client_id.to_string();
     let fetched = tokio::task::spawn_blocking(move || fetch_cimd(&id, now))
@@ -529,6 +540,7 @@ struct AuthError {
 
 async fn check_request(
     st: &AppState,
+    headers: &HeaderMap,
     q: &[(String, String)],
     base: &str,
 ) -> Result<AuthRequest, AuthError> {
@@ -537,7 +549,7 @@ async fn check_request(
         desc: desc.into(),
         redirect: None,
     };
-    let client = resolve_client(st, param(q, "client_id"))
+    let client = resolve_client(st, headers, param(q, "client_id"))
         .await
         .map_err(|e| fail("invalid_client", &e))?;
     let redirect_uri = param(q, "redirect_uri").to_string();
@@ -610,7 +622,7 @@ async fn h_request_info(State(st): State<AppState>, headers: HeaderMap, uri: Uri
     let q = pairs(uri.query().unwrap_or(""));
     let base = base_url(&headers);
     let signed = cache::session_of(&st, &headers).map(|s| s.user);
-    match check_request(&st, &q, &base).await {
+    match check_request(&st, &headers, &q, &base).await {
         Ok(r) => {
             let host = r
                 .redirect_uri
@@ -657,7 +669,7 @@ async fn h_approve(
             .trim_start_matches('?'),
     );
     let base = base_url(&headers);
-    let r = match check_request(&st, &q, &base).await {
+    let r = match check_request(&st, &headers, &q, &base).await {
         Ok(r) => r,
         Err(e) => return Json(json!({"ok": false, "error": e.error, "error_description": e.desc, "redirect": e.redirect})).into_response(),
     };

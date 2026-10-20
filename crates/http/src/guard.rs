@@ -78,6 +78,9 @@ pub enum Bucket {
     AuthRead,
     /// Every request from one IP.
     Global,
+    /// OAuth client registration (and client metadata fetches): each one
+    /// creates a client row, so one address may only add a few.
+    Register,
 }
 
 impl Bucket {
@@ -87,6 +90,7 @@ impl Bucket {
             Bucket::AuthWrite => (10.0, 10.0),
             Bucket::AuthRead => (30.0, 60.0),
             Bucket::Global => (300.0, 1200.0),
+            Bucket::Register => (10.0, 1.0),
         }
     }
     fn tag(self) -> &'static str {
@@ -94,6 +98,7 @@ impl Bucket {
             Bucket::AuthWrite => "w",
             Bucket::AuthRead => "r",
             Bucket::Global => "g",
+            Bucket::Register => "o",
         }
     }
 }
@@ -414,6 +419,7 @@ fn rate_for_key(k: &str) -> (f64, f64) {
     match k.split(':').next() {
         Some("w") => Bucket::AuthWrite.rate(),
         Some("r") => Bucket::AuthRead.rate(),
+        Some("o") => Bucket::Register.rate(),
         _ => Bucket::Global.rate(),
     }
 }
@@ -731,6 +737,20 @@ mod tests {
         }
         assert!(closed, "the window closes after {CODE_WINDOW_LIMIT} misses");
         assert!(!g.code_miss(&other, 200).1, "a new window starts over");
+    }
+
+    /// One address may register only a few OAuth clients.
+    #[test]
+    fn registration_bucket_is_small() {
+        let g = guard();
+        let ip: IpAddr = "203.0.113.30".parse().unwrap();
+        for _ in 0..10 {
+            assert!(g.take(Bucket::Register, &ip).is_ok());
+        }
+        assert!(g.take(Bucket::Register, &ip).is_err());
+        assert!(g
+            .take(Bucket::Register, &"203.0.113.31".parse().unwrap())
+            .is_ok());
     }
 
     #[test]

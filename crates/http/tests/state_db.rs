@@ -753,3 +753,44 @@ async fn failed_logins_from_many_ips_do_not_lock_out_the_owner() {
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
 }
+
+/// Dynamic client registration is open to anyone, so one address may only add
+/// a few clients (each is a row under the 500-client cap).
+#[tokio::test]
+async fn client_registration_is_limited_per_ip() {
+    let mut e = env("dcr");
+    let body = json!({"client_name": "x", "redirect_uris": ["https://e.example/cb"]});
+    let mut codes = Vec::new();
+    for _ in 0..12 {
+        let r = call(
+            &mut e,
+            Method::POST,
+            "/oauth/register",
+            Some(body.clone()),
+            Opts {
+                peer: Some("203.0.113.50"),
+                ..Default::default()
+            },
+        )
+        .await;
+        codes.push(r.status);
+    }
+    assert!(
+        codes[..10].iter().all(|c| *c == StatusCode::CREATED),
+        "{codes:?}"
+    );
+    assert_eq!(codes[11], StatusCode::TOO_MANY_REQUESTS);
+    // Another address still can.
+    let r = call(
+        &mut e,
+        Method::POST,
+        "/oauth/register",
+        Some(body),
+        Opts {
+            peer: Some("198.51.100.50"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+}

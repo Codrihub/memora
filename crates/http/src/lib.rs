@@ -258,6 +258,11 @@ async fn mw_guard(
         if let Err(wait) = st.guard.take(Bucket::AuthRead, &ip) {
             return guard::too_many(wait, false);
         }
+    } else if req.method() == axum::http::Method::POST && canon == "/oauth/register" {
+        // Each registration adds a client row.
+        if let Err(wait) = st.guard.take(Bucket::Register, &ip) {
+            return guard::too_many(wait, false);
+        }
     } else if (path.starts_with("/api/") || path.starts_with("/mcp"))
         && extract_key(req.headers()).is_some()
     {
