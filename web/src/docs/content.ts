@@ -225,6 +225,18 @@ curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/instal
   );
 }
 
+/** The update, uninstall and troubleshooting parts of INSTALL.md, so the commands match the install guide. */
+function updateGuide(c: PageCtx): string {
+  return (
+    calloutHTML(
+      'note',
+      'From the install guide',
+      p(`These sections are part of ${docLink('install', 'Install')}, which also covers installing from scratch. Not sure which version runs? ${code('memora --version')} and ${code('memora-cli --version')}.`),
+    ) +
+    c.md(part(installMd, 'Update', 'Uninstall with memora-cli', 'Uninstall by hand (versions before 1.3.2)', 'Troubleshooting'), 'docs/INSTALL.md')
+  );
+}
+
 const CURSOR_HEAD = '---\ndescription: Use Memora as long-term memory\nalwaysApply: true\n---\n\n';
 
 function agentInstructions(c: PageCtx): string {
@@ -506,7 +518,15 @@ export const SECTIONS: DocSection[] = [
   { slug: 'get-started', title: 'Get started', group: 'Getting started', lead: 'What Memora is and how to go from install to an agent that remembers.', source: 'README.md', render: getStarted },
   { slug: 'agent-instructions', title: 'Agent instructions', group: 'Getting started', lead: 'Ready-made prompts, in several styles, for agents that use Memora as their memory.', render: agentInstructions, mount: mountAgentInstructions },
   { slug: 'connect', title: 'Connect an agent', group: 'Getting started', lead: 'The MCP URL, API keys and ready-made client configs.', render: connect },
-  { slug: 'install', title: 'Install', group: 'Guides', lead: 'Native installer, Docker, npm, reverse proxy, backups and upgrades.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
+  { slug: 'install', title: 'Install', group: 'Guides', lead: 'npm, Docker, the native installer, updates, uninstall, reverse proxy and backups.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
+  {
+    slug: 'update',
+    title: 'Update & uninstall',
+    group: 'Guides',
+    lead: 'Update per install method, uninstall (also by hand on older versions) and fixes for common problems.',
+    source: 'docs/INSTALL.md',
+    render: updateGuide,
+  },
   { slug: 'configuration', title: 'Configuration', group: 'Guides', lead: 'Every setting and where it lives.', source: 'docs/CONFIGURATION.md', render: (c) => c.md(configMd, 'docs/CONFIGURATION.md') },
   { slug: 'mcp', title: 'MCP', group: 'Guides', lead: 'Transport, connecting clients, OAuth, results and errors.', source: 'docs/MCP.md', render: (c) => c.md(mcpMd, 'docs/MCP.md') },
   { slug: 'tool-reference', title: 'Tool reference', group: 'Reference', lead: 'The MCP tool catalog, switches and per-key permissions.', source: 'docs/contracts/tools-permissions.md', render: toolReference, mount: mountTools },
