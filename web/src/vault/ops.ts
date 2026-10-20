@@ -276,38 +276,40 @@ export async function deleteNotes(paths: string[]): Promise<number> {
   return ok;
 }
 
-/** Delete a folder. `keepNotes` moves its notes to the vault root first; otherwise they are deleted. */
-export async function deleteFolder(path: string, keepNotes: boolean): Promise<void> {
-  const notes = notesUnder(path);
-  if (keepNotes) {
+/** Where a folder's nodes go when it is deleted: a folder to move them into, or the trash. */
+export type FolderDeleteChoice = { mode: 'move'; into: string } | { mode: 'trash' };
+
+/**
+ * Delete a folder in one server call (POST /api/delete-folder). Moving keeps the
+ * sub folder structure below the deleted folder inside `into` ('' = the vault
+ * root) and rewrites links; trash moves every node to the vault's .Trash.
+ * Returns how many nodes were moved or trashed, or null when it failed.
+ */
+export async function deleteFolder(path: string, choice: FolderDeleteChoice): Promise<number | null> {
+  const notes = notesUnder(path).map((n) => n.path);
+  const body: Record<string, string> = { folder: path };
+  if (choice.mode === 'trash') body.mode = 'trash';
+  else body.into = choice.into || 'Root';
+  try {
+    const r = await apiPost<{ moved?: string[]; count?: number }>('/api/delete-folder', body);
+    const moved = new Set(r.moved || []);
     for (const n of notes) {
-      try {
-        await moveOne(n.path, '');
-      } catch {
-        /* reported by the count below */
-      }
+      // Moved nodes land at into/<path below the folder> (a clash adds -N).
+      const guess = choice.mode === 'move' ? joinPath(choice.into, n.slice(path.length + 1)) : '';
+      notePathChanged(n, moved.has(guess) ? guess : null);
     }
-  } else {
-    for (const n of notes) {
-      try {
-        await apiPost<OkResult>('/api/delete', { path: n.path });
-        notePathChanged(n.path, null);
-      } catch {
-        /* reported by the count below */
-      }
-    }
+    folderPathChanged(path, null);
+    await reload();
+    return choice.mode === 'trash' ? (r.count ?? notes.length) : moved.size;
+  } catch (e) {
+    undoToast('Could not delete the folder: ' + (e as Error).message, null, 'err');
+    await reload();
+    return null;
   }
-  // Only a top level folder can be removed with its metadata: the server's
-  // delete-folder treats nested paths as plain directories.
-  if (!path.includes('/')) {
-    try {
-      await apiPost<OkResult>('/api/delete-folder', { folder: path });
-    } catch {
-      /* the folder may already be gone */
-    }
-  }
-  folderPathChanged(path, null);
-  await reload();
+}
+
+function joinPath(dir: string, rest: string): string {
+  return dir ? dir + '/' + rest : rest;
 }
 
 export async function setFolderMeta(folder: string, patch: { color?: string; icon?: string }): Promise<void> {

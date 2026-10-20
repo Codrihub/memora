@@ -10,7 +10,7 @@ import { hooks } from '../hooks';
 import { allNotes, state } from '../state';
 import type { NoteDoc } from '../types';
 import { I } from './icons';
-import { askMoveNotes, confirmDeleteNotes, pinToggle } from './menus';
+import { askMoveNotes, confirmDeleteNotes, copyPath, copyWikilink, pinToggle } from './menus';
 import { nav } from './nav';
 import { createNote, onRelocate, relocating, renameNote, saveNote } from './ops';
 import { openContents } from './contents';
@@ -396,14 +396,8 @@ function moreMenu(path: string, at: HTMLElement): void {
         icon: I.link,
         run: () => copy(location.origin + nodeUrl(path), 'Link copied'),
       },
-      {
-        label: 'Copy wikilink',
-        icon: I.wiki,
-        run: () => {
-          const t = linkTextFor(path, '');
-          copy(`[[${t}]]`, 'Copied [[' + t + ']]');
-        },
-      },
+      { label: 'Copy path', icon: I.copy, run: () => copyPath(path) },
+      { label: 'Copy wikilink', icon: I.wiki, run: () => copyWikilink(path) },
       { label: 'New node in this folder', icon: I.newNote, run: () => nav.newNote(dirOf(path)) },
       { sep: true, label: '' },
       {
