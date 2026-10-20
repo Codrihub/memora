@@ -51,6 +51,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --release
 cargo test --workspace
+cargo audit                      # needs: cargo install cargo-audit --locked
+(cd web && npm audit --omit=dev)
 ```
 
 ## Code style

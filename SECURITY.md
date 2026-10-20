@@ -67,6 +67,22 @@ proxy. Relevant properties:
 - Rotate API keys periodically (web UI, `memora-cli` -> `/keys`, or
   `POST /api/keys/roll`).
 
+## Dependencies
+
+CI checks the dependency trees for published advisories on every push and pull
+request:
+
+- `cargo audit` checks `Cargo.lock` against the RustSec advisory database. A
+  vulnerability advisory fails the build; unmaintained, unsound and yanked
+  notices are shown as warnings. Advisories reviewed and found not to apply
+  are listed with their reason in `.cargo/audit.toml`.
+- `npm audit --omit=dev` checks the web UI packages that end up in the built
+  assets.
+
+Dependabot proposes updates for Cargo, npm, GitHub Actions and the Docker base
+images. GitHub Actions are pinned to full commit SHAs. These checks only cover
+advisories that have been published; they do not replace a review of the code.
+
 ## Out of scope
 
 - Misconfiguration of a reverse proxy or TLS termination.
