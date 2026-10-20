@@ -5,7 +5,8 @@
 import { apiGet } from '../api';
 import { on, type AgentActivity } from '../bus';
 import { esc } from '../dom';
-import { hashColor, noteName, relTs } from '../format';
+import { noteName, relTs } from '../format';
+import { agentColor } from '../control/agents';
 import { hooks } from '../hooks';
 import { Modal } from '../modal';
 import { colorOfFolder, folderNames, state } from '../state';
@@ -726,7 +727,7 @@ export class Board {
     const tags = ex ? ex.tags.slice(0, 3).map((t) => `<span>#${esc(t)}</span>`).join('') : '';
     const n = this.linkCount.get(c.path) || 0;
     const t = c.touch && Date.now() - c.touch.at < TOUCH_MS ? c.touch : null;
-    const ac = t ? hashColor(t.actor) : '';
+    const ac = t ? agentColor(t.actor) : '';
     e.style.setProperty('--fc', colorOfFolder(c.folder));
     if (ac) e.style.setProperty('--ac', ac);
     e.classList.toggle('touched', !!t);
@@ -2462,7 +2463,7 @@ export class Board {
     if (!cur) {
       const el = document.createElement('div');
       el.className = 'cv-cursor';
-      el.style.setProperty('--ac', hashColor(actor));
+      el.style.setProperty('--ac', agentColor(actor));
       el.style.opacity = '0';
       this.fg.appendChild(el);
       cur = { el, timer: 0 };

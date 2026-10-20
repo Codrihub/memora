@@ -63,7 +63,8 @@ export function fromLog(e: LogEvent): ActivityItem {
     source: isAgent ? 'agent' : 'vault',
     ok: typeof okRaw === 'boolean' ? okRaw : undefined,
     ms: typeof msRaw === 'number' ? msRaw : undefined,
-    running: isAgent && e.phase === 'start' ? true : undefined,
+    // A start that already carries its outcome (read-only tools log it after the call) is done.
+    running: isAgent && e.phase === 'start' && typeof okRaw !== 'boolean' ? true : undefined,
     raw: e as Record<string, unknown>,
   };
 }
@@ -101,8 +102,47 @@ export function fromBus(a: AgentActivity): ActivityItem {
     live: true,
     // Stored log rows carry the key id as `actor_id`; give live rows the same
     // field so every reader can tell same-named keys apart.
-    raw: { ...a, ...(a.actorId ? { actor_id: a.actorId } : {}) } as unknown as Record<string, unknown>,
+    raw: {
+      ...a,
+      ...(a.actorId ? { actor_id: a.actorId } : {}),
+      ...(a.callId ? { call_id: a.callId } : {}),
+    } as unknown as Record<string, unknown>,
   };
+}
+
+/** Calls whose `end` arrived live, by call id (the log stores only starts). */
+const ended = new Map<string, { ok?: boolean; ms?: number }>();
+const ENDED_MAX = 1000;
+
+/** Record a call's live `end`, so a start loaded from the log later is not shown as running. */
+export function noteCallEnd(callId: string, ok?: boolean, ms?: number): void {
+  ended.delete(callId);
+  ended.set(callId, { ok, ms });
+  if (ended.size > ENDED_MAX) ended.delete(ended.keys().next().value as string);
+}
+
+/** Close a running item whose end was seen live. Returns whether it did. */
+export function closeEnded(it: ActivityItem): boolean {
+  if (!it.running) return false;
+  const e = ended.get(str((it.raw as { call_id?: unknown }).call_id));
+  if (!e) return false;
+  it.running = false;
+  it.ok = e.ok ?? true;
+  if (e.ms != null) it.ms = e.ms;
+  return true;
+}
+
+/**
+ * Whether an item still counts as running, settling it first: its end was seen
+ * live, or it is too old to still be open (a start from the log for 30 s, since
+ * ends are never stored; a live start for 2 min). Readers call this when they
+ * paint, so a row and the Running filter count never disagree.
+ */
+export function settleRunning(it: ActivityItem, now = Date.now() / 1000): boolean {
+  if (!it.running) return false;
+  if (closeEnded(it)) return false;
+  if (now - it.ts > (it.live ? 120 : 30)) it.running = false;
+  return !!it.running;
 }
 
 /**
@@ -139,7 +179,7 @@ export function mergePhases(items: ActivityItem[]): ActivityItem[] {
   // `end` phases are realtime only (never persisted), so a stored start is
   // only "running" while it is fresh.
   const stale = Date.now() / 1000 - 30;
-  for (const it of out) if (it.running && it.ts < stale) it.running = false;
+  for (const it of out) if (!closeEnded(it) && it.running && it.ts < stale) it.running = false;
   return out.reverse();
 }
 

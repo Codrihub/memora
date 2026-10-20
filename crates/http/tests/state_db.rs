@@ -345,6 +345,12 @@ async fn setup_login_keys_mcp_and_cli_signout() {
     .await;
     assert_eq!(r.body["count"], 1);
     assert_eq!(r.body["keys"][0]["uses"], 3);
+    // The latest call is reported too (unix seconds), for the live panel.
+    assert!(
+        r.body["keys"][0]["last_used"].as_i64().unwrap_or(0) > 0,
+        "{}",
+        r.body
+    );
 
     // Trash and restore.
     let o = || Opts {

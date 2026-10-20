@@ -7,7 +7,7 @@
 import { apiGet } from '../api';
 import { on } from '../bus';
 import { esc } from '../dom';
-import { hashColor } from '../format';
+import { agentColor } from '../control/agents';
 import { readTagIndex } from '../storage';
 import type { GraphData } from '../types';
 import { Camera, type Box } from './camera';
@@ -1199,7 +1199,7 @@ ${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clea
   private addPulse(id: string, actor: string, ended: boolean): void {
     const now = performance.now();
     const list = (this.pulses.get(id) || []).filter((p) => p.actor !== actor);
-    list.push({ id, actor, color: hashColor(actor || 'agent'), start: now, end: ended ? now + 1200 : 0 });
+    list.push({ id, actor, color: agentColor(actor || 'agent'), start: now, end: ended ? now + 1200 : 0 });
     this.pulses.set(id, list.slice(-3));
     this.kick();
   }

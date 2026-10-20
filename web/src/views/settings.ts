@@ -11,7 +11,7 @@
 
 import { RELEASES_URL, takeSettingsSection, updateInfo } from '../version';
 import { apiGet, apiPost } from '../api';
-import { agentColor } from '../control/agents';
+import { agentColor, setAgentColors } from '../control/agents';
 import { setAccountName } from '../account';
 import { $, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
@@ -1254,6 +1254,8 @@ export async function renderSettings(): Promise<void> {
     .then((d) => {
       if (seq !== renderSeq) return;
       const rows = Array.isArray(d) ? d : d.keys || [];
+      // The dots use the same colours as the avatars everywhere else.
+      setAgentColors(rows);
       if (!rows.length) {
         tBox.innerHTML = '<span class="st-tk-empty">No API keys yet.</span>';
         return;

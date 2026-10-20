@@ -306,10 +306,15 @@ pub fn traced(
     if let Ok(v) = &res {
         add_result_paths(tool, v, &mut paths);
     }
-    if read_only {
-        hub.publish(start_event(caller, &call_id, tool, label, paths.as_slice()));
-    }
     let err = res.as_ref().err().map(|e| e.to_string());
+    if read_only {
+        // Published after the call, so the stored row (the log keeps only starts)
+        // already says how it went: readers never show a finished call as running.
+        let mut v = start_event(caller, &call_id, tool, label, paths.as_slice());
+        v["ok"] = json!(err.is_none());
+        v["ms"] = json!(ms);
+        hub.publish(v);
+    }
     hub.publish(end_event(
         caller,
         &call_id,

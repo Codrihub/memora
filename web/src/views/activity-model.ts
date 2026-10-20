@@ -3,7 +3,7 @@
 // the actors are sorted into agent classes (active now, seen recently, idle,
 // removed keys, people and system).
 
-import { rangeWindow, verb, type ActivityItem, type FeedRange, type Source } from '../control/feed';
+import { rangeWindow, settleRunning, verb, type ActivityItem, type FeedRange, type Source } from '../control/feed';
 import type { KeyRow } from '../types';
 
 export type Cat = 'read' | 'search' | 'write' | 'delete' | 'auth' | 'other';
@@ -97,7 +97,7 @@ export function catOf(it: ActivityItem): Cat {
 }
 
 export function stOf(it: ActivityItem): St {
-  if (it.running) return 'running';
+  if (settleRunning(it)) return 'running';
   return it.ok === false ? 'fail' : 'ok';
 }
 

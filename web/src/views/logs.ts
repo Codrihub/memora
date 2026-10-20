@@ -12,7 +12,7 @@
 import { $, attr, esc, useStyles } from '../dom';
 import { debounce } from '../format';
 import { apiGet } from '../api';
-import { avatarHTML } from '../control/agents';
+import { avatarHTML, setAgentColors } from '../control/agents';
 import { useActivityStyles, wireActRows } from '../control/activity';
 import { loadFeed, onLive, pushLive, verb, type ActivityItem, type Source } from '../control/feed';
 import { ICO, openMenu, plural, systemHeader, useControlStyles, whileVisible } from '../control/ui';
@@ -780,6 +780,7 @@ async function reload(soft = false): Promise<void> {
     const [fetched, ks] = await Promise.all([loadFeed(feedRange(), fetchLimit), keysP]);
     if (seq !== loadSeq) return;
     keys = ks;
+    setAgentColors(keys);
     // Keep live items newer than the server snapshot (the log can lag a bit).
     const newest = fetched.length ? fetched[0].ts : 0;
     const keep = items.filter(

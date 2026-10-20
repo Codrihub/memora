@@ -19,6 +19,8 @@ export interface PopAgent {
   keyed: boolean;
   /** Latest call seen live (ms epoch, 0 = none since this page loaded). */
   lastAt: number;
+  /** Latest call the server recorded for its key (ms epoch, 0 = never or unknown). */
+  lastUsed?: number;
   lastAction: string;
   lastLabel: string;
 }
@@ -99,9 +101,12 @@ let feed: ActivityItem[] | null = null;
 let feedAt = 0;
 let loading = false;
 
-function when(ms: number): string {
+/** "now" only while the agent counts as working, so a row never says "now" next to "Idle". */
+export function when(ms: number, active: boolean, now = Date.now()): string {
   if (!ms) return '';
-  return Date.now() - ms < 10_000 ? 'now' : relTs(Math.floor(ms / 1000));
+  if (active) return 'now';
+  // Coarse on purpose: the panel repaints only when its text changes.
+  return now - ms < 60_000 ? '< 1 min ago' : relTs(Math.floor(ms / 1000));
 }
 
 /** Forget the open agent: the panel starts on the overview next time. */
@@ -117,12 +122,14 @@ function mine(it: ActivityItem, a: PopAgent): boolean {
   return a.id && kid ? kid === a.id : it.actor === a.name;
 }
 
-/** Latest call per agent: live events win over the loaded history. */
+/** Latest call per agent: live events win over the loaded history, which wins over the
+ *  key's "last used" time (known before the history loads and beyond its window). */
 function latest(a: PopAgent): { at: number; action: string; label: string } | null {
   const h = feed?.find((it) => mine(it, a));
   const hAt = h ? h.ts * 1000 : 0;
   if (a.lastAt && a.lastAt >= hAt) return { at: a.lastAt, action: a.lastAction, label: a.lastLabel };
-  return h ? { at: hAt, action: h.action, label: h.label || h.paths[0] || '' } : null;
+  if (h) return { at: hAt, action: h.action, label: h.label || h.paths[0] || '' };
+  return a.lastUsed ? { at: a.lastUsed, action: '', label: '' } : null;
 }
 
 export function renderRtPop(pop: HTMLElement, d: PopData): void {
@@ -161,11 +168,13 @@ function overview(d: PopData): string {
       )}" title="${attr(a.name)}: recent activity">
       ${avatarHTML(a.name, 34, a.active ? 'live' : '', a.id)}
       <span class="rp2-main">
-        <span class="rp2-l1"><b>${esc(a.name)}</b>${l ? `<time>${esc(when(l.at))}</time>` : ''}</span>
+        <span class="rp2-l1"><b>${esc(a.name)}</b>${l ? `<time>${esc(when(l.at, a.active))}</time>` : ''}</span>
         <span class="rp2-l2">${
-          l
+          l && l.action
             ? `<em>${esc(verb(l.action))}</em>${l.label && l.label !== l.action ? `<span>${esc(trunc(l.label, 60))}</span>` : ''}`
-            : `<span>${a.keyed ? 'No activity yet' : 'Key removed'}</span>`
+            : l
+              ? `<span>${feed ? 'Last call' : 'Loading activity…'}</span>`
+              : `<span>${!feed ? 'Loading activity…' : a.keyed ? 'No activity yet' : 'Key removed'}</span>`
         }</span>
       </span>
       ${a.active ? `<span class="rp2-chip on">${icon('bolt')}Working</span>` : `<span class="rp2-chip">${icon('moon')}Idle</span>`}
@@ -206,11 +215,11 @@ function detail(a: PopAgent): string {
       }
     </div>
     <div class="rp2-who">${avatarHTML(a.name, 42, a.active ? 'live' : '', a.id)}<div style="min-width:0;flex:1"><b>${esc(a.name)}</b>
-      <small>${a.active ? 'Working now' : l ? 'Idle · last call ' + esc(when(l.at)) : 'Idle · no calls yet'}</small></div></div>
+      <small>${a.active ? 'Working now' : l ? 'Idle · last call ' + esc(when(l.at, false)) : feed ? 'Idle · no calls yet' : 'Idle'}</small></div></div>
     <div class="rp2-tiles">
       <div class="rp2-tile"><b>${feed ? today.length : '…'}</b><span>Calls 24h</span></div>
       <div class="rp2-tile"><b>${feed ? failed : '…'}</b><span>Failed</span></div>
-      <div class="rp2-tile"><b class="sm">${esc(l ? verb(l.action) : '-')}</b><span>Last action</span></div>
+      <div class="rp2-tile"><b class="sm">${esc(l && l.action ? verb(l.action) : '-')}</b><span>Last action</span></div>
     </div>
     <div class="rp2-sec">Recent activity</div>
     <div class="rp2-list rp2-acts">${

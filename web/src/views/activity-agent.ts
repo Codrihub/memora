@@ -10,9 +10,9 @@ import { apiGet } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { debounce, noteName } from '../format';
 import { hooks } from '../hooks';
-import { agentColor, avatarHTML } from '../control/agents';
+import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
 import { wireActRows } from '../control/activity';
-import { fromAuth, fromLog, mergePhases, pushLive, verb, type ActivityItem } from '../control/feed';
+import { fromAuth, fromLog, mergePhases, pushLive, settleRunning, verb, type ActivityItem } from '../control/feed';
 import { icon } from '../ui/icons';
 import { ago, copyText, download, ICO, openDrawer, openMenu, plural } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
@@ -53,6 +53,7 @@ const CSS = `
 .ad-top .btn{min-height:38px;gap:8px}
 .ad-id{display:flex;align-items:center;gap:22px;min-width:0}
 .ad-av{flex:none;display:grid}
+.ad-trim{font-size:inherit;font-weight:500;color:var(--muted)}
 .ad-av .ag-av{font-weight:760}
 .ad-who{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px}
 .ad-nm{margin:0;font-size:30px;font-weight:760;letter-spacing:-.5px;line-height:1.12;overflow-wrap:anywhere;color:var(--fg);width:fit-content;max-width:100%}
@@ -199,6 +200,7 @@ export function showAgent(el: HTMLElement, scroller: HTMLElement, s: string, o: 
   root = el;
   slug = s;
   keys = o.keys;
+  if (keys.length) setAgentColors(keys);
   all = [];
   lastSeen = 0;
   limit = PAGE;
@@ -267,6 +269,7 @@ async function start(): Promise<void> {
       .then((d) => (Array.isArray(d) ? d : d.keys || []))
       .catch(() => [] as KeyRow[]);
     if (my !== seq) return;
+    setAgentColors(keys);
     const again = resolve(slug, keys, opts?.items || []);
     if (again) who = again;
     else if (who?.id) who.key = keys.find((k) => k.id === who!.id) || null;
@@ -428,6 +431,21 @@ function scoped(): ActivityItem[] {
   return all.filter((x) => x.ts >= w.since && x.ts < w.until);
 }
 
+/**
+ * A count over events since `since`, as shown: with "+" when only the newest
+ * events are loaded (`trimmed`) and the oldest loaded one is newer than `since`,
+ * so older events in that window may exist. Exported for tests.
+ */
+export function atLeast(n: number, since: number, oldest: number, trimmed: boolean): string {
+  const s = n.toLocaleString('en-US');
+  return trimmed && oldest > since ? s + '+' : s;
+}
+
+/** The oldest event loaded (unix seconds), for the "+" on counts. */
+function oldestLoaded(): number {
+  return all.length ? all[all.length - 1].ts : Date.now() / 1000;
+}
+
 function narrowed(): boolean {
   return !!(D.q || D.cats.size || D.actions.size || D.status.size);
 }
@@ -572,7 +590,7 @@ function color(): string {
 function status(): { label: string; cls: string; dot: string } {
   const w = who!;
   const now = Date.now() / 1000;
-  const runningNow = all.some((x) => x.running);
+  const runningNow = all.some((x) => settleRunning(x));
   if (w.kind === 'removed') return { label: 'Removed key', cls: 'warn', dot: '' };
   if (w.key && w.key.enabled === false) return { label: 'Turned off', cls: 'warn', dot: '' };
   if (runningNow || (lastSeen && now - lastSeen < ACTIVE_SECS)) return { label: 'Active now', cls: 'ok', dot: '<span class="cc-dot ok"></span>' };
@@ -845,8 +863,10 @@ function kpis(rs: ActivityItem[]): string {
   const now = Date.now() / 1000;
   const mid = new Date();
   mid.setHours(0, 0, 0, 0);
-  const today = all.filter((x) => x.ts >= mid.getTime() / 1000).length;
-  const week = all.filter((x) => x.ts >= now - 7 * 86400).length;
+  const midTs = mid.getTime() / 1000;
+  const oldest = oldestLoaded();
+  const today = atLeast(all.filter((x) => x.ts >= midTs).length, midTs, oldest, older);
+  const week = atLeast(all.filter((x) => x.ts >= now - 7 * 86400).length, now - 7 * 86400, oldest, older);
   const fails = rs.filter((x) => x.ok === false).length;
   const nodes = new Set(rs.flatMap((x) => x.paths)).size;
   const w = win();
@@ -856,10 +876,10 @@ function kpis(rs: ActivityItem[]): string {
   const days = Math.max(1, Math.ceil((until - since) / 86400 - 0.01));
   const avg = rs.length / days;
   return `<div class="cc-stats ad-kpis">
-    ${statTile('Calls today', today, `${week.toLocaleString('en-US')} in the last 7 days`)}
-    ${statTile('Failed', fails, rs.length ? `${Math.round((fails / rs.length) * 100)}% of ${plural(rs.length, 'event')}` : 'Nothing in this range', fails > 0)}
+    ${statTile('Calls today', today, `${week} in the last 7 days`)}
+    ${statTile('Failed', fails, rs.length ? `${Math.round((fails / rs.length) * 100)}% of ${atLeast(rs.length, w.since, oldest, older)} ${rs.length === 1 ? 'event' : 'events'}` : 'Nothing in this range', fails > 0)}
     ${statTile('Nodes touched', nodes, labelOf(D))}
-    ${statTile('Average per day', avg >= 10 ? Math.round(avg) : avg.toFixed(1).replace(/\.0$/, ''), `Over ${plural(days, 'day')}`)}
+    ${statTile('Average per day', (avg >= 10 ? String(Math.round(avg)) : avg.toFixed(1).replace(/\.0$/, '')) + (older && oldest > since ? '+' : ''), `Over ${plural(days, 'day')}`)}
   </div>`;
 }
 
@@ -948,9 +968,15 @@ function paint(keepPlace = true): void {
   const sc = scoped();
   const rs = sc.filter((x) => match(x));
   const fails = rs.filter((x) => x.ok === false).length;
-  sum.innerHTML = `<span><b>${rs.length}</b> ${rs.length === 1 ? 'event' : 'events'}</span>${
-    fails ? `<span class="bad"><b>${fails}</b> failed</span>` : ''
-  }<button type="button" class="ax-tgl" id="adCompact" aria-pressed="${compact}" title="Collapse repeated calls"><i></i>Group repeats</button>`;
+  // Only the newest log entries are loaded: say so rather than show a capped total as exact.
+  const trimmed = older && oldestLoaded() > win().since;
+  sum.innerHTML = `<span${
+    trimmed
+      ? ` title="${attr(`Only the newest ${fetchLimit.toLocaleString('en-US')} log entries are loaded; older events are trimmed from these counts. Load older events at the end of the timeline.`)}"`
+      : ''
+  }><b>${atLeast(rs.length, win().since, oldestLoaded(), older)}</b> ${rs.length === 1 ? 'event' : 'events'}${
+    trimmed ? ' <small class="ad-trim">· older events not loaded</small>' : ''
+  }</span>${fails ? `<span class="bad"><b>${fails}</b> failed</span>` : ''}<button type="button" class="ax-tgl" id="adCompact" aria-pressed="${compact}" title="Collapse repeated calls"><i></i>Group repeats</button>`;
   const restore = keepPlace ? anchor() : () => {};
   body.innerHTML = `${kpis(rs)}${boardHTML(rs)}<h2 class="ad-tl-h">Timeline<span>${esc(labelOf(D))}</span></h2>${dayViewHTML({
     rows: rs,

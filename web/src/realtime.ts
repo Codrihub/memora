@@ -22,6 +22,7 @@ import { flyHome, flyIn } from './ui/agent-flight';
 import type { KeyRow, KeysResult, WsEvent } from './types';
 import { apiGet } from './api';
 import { AGENT_COLORS_EVENT, setAgentColors } from './control/agents';
+import { noteCallEnd } from './control/feed';
 
 const MUTATIONS = new Set(['node_created', 'node_updated', 'node_deleted', 'node_renamed']);
 /** Tools whose success toasts from the pins list instead of the activity event. */
@@ -92,7 +93,7 @@ function myName(): string {
 let wasActive = new Map<string, AgentInfo>();
 
 /** Enabled API keys: every agent that could be working. */
-let keyList: { id: string; name: string }[] | null = null;
+let keyList: { id: string; name: string; lastUsed: number }[] | null = null;
 let keysAt = 0;
 
 export async function loadKeys(): Promise<void> {
@@ -100,7 +101,9 @@ export async function loadKeys(): Promise<void> {
   try {
     const d = await apiGet<KeysResult | KeyRow[]>('/api/keys');
     const rows = Array.isArray(d) ? d : d.keys || [];
-    keyList = rows.filter((k) => k.enabled !== false).map((k) => ({ id: k.id, name: k.name || k.id }));
+    keyList = rows
+      .filter((k) => k.enabled !== false)
+      .map((k) => ({ id: k.id, name: k.name || k.id, lastUsed: (k.last_used || 0) * 1000 }));
     setAgentColors(rows);
     RT.paint();
   } catch {
@@ -369,6 +372,7 @@ export const RT = {
       at: Date.now(),
     };
     if (typeof d.actor_id === 'string') ev.actorId = d.actor_id;
+    if (typeof d.call_id === 'string' && d.call_id) ev.callId = d.call_id;
     if (typeof d.actor_kind === 'string') ev.kind = d.actor_kind;
     if (typeof d.ok === 'boolean') ev.ok = d.ok;
     if (typeof d.ms === 'number') ev.ms = d.ms;
@@ -397,6 +401,9 @@ export const RT = {
       if (ev.paths.length) a.lastPaths = ev.paths;
     } else {
       a.open = Math.max(0, a.open - 1);
+      // Remember the end: a page that reloads the log afterwards (where only the
+      // start is stored) still shows the call as finished.
+      if (ev.callId) noteCallEnd(ev.callId, ev.ok, ev.ms);
     }
     agents.set(slot, a);
 
@@ -481,10 +488,10 @@ export const RT = {
     // Every enabled key, plus agents seen recently whose key is gone.
     const known = new Set((keyList || []).flatMap((k) => [k.id, k.name]));
     const rows = [
-      ...(keyList || []).map((k) => ({ id: k.id, name: k.name, keyed: true })),
+      ...(keyList || []).map((k) => ({ id: k.id, name: k.name, keyed: true, lastUsed: k.lastUsed })),
       ...seen
         .filter((a) => !known.has(a.id || '') && !(keyList && !a.id && known.has(a.actor)))
-        .map((a) => ({ id: a.id || '', name: a.actor, keyed: !keyList })),
+        .map((a) => ({ id: a.id || '', name: a.actor, keyed: !keyList, lastUsed: 0 })),
     ];
     const agents: PopAgent[] = rows.map((r) => {
       // Older events carry no key id: fall back to the name.
@@ -495,12 +502,18 @@ export const RT = {
         active: !!a && isActive(a, now),
         keyed: r.keyed,
         lastAt: a?.lastAt || 0,
+        lastUsed: r.lastUsed,
         lastAction: a?.lastAction || '',
         lastLabel: a?.lastLabel || '',
       };
     });
     // Working agents first, then the most recently seen.
-    agents.sort((x, y) => Number(y.active) - Number(x.active) || y.lastAt - x.lastAt || x.name.localeCompare(y.name));
+    agents.sort(
+      (x, y) =>
+        Number(y.active) - Number(x.active) ||
+        Math.max(y.lastAt, y.lastUsed || 0) - Math.max(x.lastAt, x.lastUsed || 0) ||
+        x.name.localeCompare(y.name),
+    );
     renderRtPop($('#rtPop'), {
       state: this.state,
       agents,

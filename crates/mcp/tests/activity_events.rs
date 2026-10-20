@@ -91,7 +91,10 @@ fn key_call_carries_name_paths_and_end_event() {
     assert!(s["call_id"].as_str().is_some_and(|c| !c.is_empty()));
     assert_eq!(e["ok"], true);
     assert!(e["ms"].as_u64().is_some());
-    assert!(s.get("ok").is_none() && s.get("ms").is_none());
+    // A read-only call's start is published after it ran (it is the row the log
+    // keeps), so it already carries the outcome: no reader shows it as running.
+    assert_eq!(s["ok"], true);
+    assert!(s["ms"].as_u64().is_some());
 
     // A key without a name falls back to its id.
     let anon = Caller::key("k_actanon", KeyPermissions::default(), None).named("  ");
@@ -152,6 +155,8 @@ fn writes_start_before_and_end_with_result_paths() {
         "{evs:?}"
     );
     assert_eq!(evs[0]["paths"], json!([]));
+    // A write's start goes out before it runs: no outcome yet.
+    assert!(evs[0].get("ok").is_none() && evs[0].get("ms").is_none());
     let created = evs[2]["paths"][0].as_str().unwrap().to_string();
     assert!(created.ends_with("Fresh.md"), "{created}");
     assert_eq!(evs[1]["actor"], "writer-bot");

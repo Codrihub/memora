@@ -917,6 +917,11 @@ async fn h_keys(State(st): State<AppState>) -> Json<Value> {
             let last_ip = buf_use
                 .and_then(|u| u.last_ip.clone())
                 .or_else(|| db_use.and_then(|u| u.last_ip.clone()));
+            // Latest call (unix seconds), 0 = never: the live panel shows it before its
+            // history has loaded, and for agents whose calls are older than that history.
+            let last_used = db_use
+                .map_or(0, |u| u.last_used)
+                .max(buf_use.map_or(0, |u| u.last_used));
             // Oldest first.
             let mut used: Vec<String> = events
                 .remove(&k.id)
@@ -940,6 +945,7 @@ async fn h_keys(State(st): State<AppState>) -> Json<Value> {
                 // The secret can be shown again on the Agents page.
                 "revealable": sealed.contains(&k.id),
                 "uses": uses, "last_ip": last_ip,
+                "last_used": (last_used > 0).then_some(last_used),
                 // Routes / tools this key used recently.
                 "used_tools": used,
             })

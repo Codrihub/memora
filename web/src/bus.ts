@@ -22,6 +22,8 @@ export interface AgentActivity {
   at: number;
   /** API key id of an agent (tells same-named agents apart). */
   actorId?: string;
+  /** Pairs a call's `start` and `end` events. */
+  callId?: string;
   /** `agent` (API key) or `user` (browser). */
   kind?: string;
 }

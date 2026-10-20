@@ -6,7 +6,7 @@ import { hooks } from '../hooks';
 import { setKeysRoute } from '../router';
 import { icon } from '../ui/icons';
 import { agentColor, avatarHTML } from './agents';
-import { verb, type ActivityItem } from './feed';
+import { settleRunning, verb, type ActivityItem } from './feed';
 import { ago, clock, copyText, ICO, openDrawer, closeDrawer } from './ui';
 
 const CSS = `
@@ -62,7 +62,7 @@ export function useActivityStyles(): void {
 }
 
 export function statusHTML(it: ActivityItem): string {
-  if (it.running) return '<span class="act-st"><span class="cc-dot run"></span>running</span>';
+  if (settleRunning(it)) return '<span class="act-st"><span class="cc-dot run"></span>running</span>';
   if (it.ok === false) return '<span class="act-st" style="color:var(--danger)"><span class="cc-dot err"></span>failed</span>';
   if (it.ms != null) return `<span class="act-st"><span class="cc-dot ok" style="box-shadow:none"></span>${fmtMs(it.ms)}</span>`;
   return '';
@@ -78,6 +78,7 @@ const SRC_LABEL: Record<string, string> = { agent: 'mcp', vault: 'vault', auth: 
 export function actRowHTML(it: ActivityItem, opts: { fresh?: boolean; extra?: string } = {}): string {
   const kid = typeof it.raw.actor_id === 'string' ? it.raw.actor_id : null;
   const c = agentColor(it.actor, kid);
+  settleRunning(it);
   const paths = it.paths.slice(0, 3);
   const label = it.label && !it.paths.includes(it.label) ? it.label : '';
   return `<div class="act${it.ok === false ? ' fail' : ''}${opts.fresh ? ' new' : ''}" role="button" tabindex="0" data-act="${attr(
@@ -152,6 +153,7 @@ export function openAgentPage(keyId: string): void {
 /** The detail drawer of one activity item. */
 export function openActivity(it: ActivityItem, onFilterActor?: (actor: string) => void): void {
   useActivityStyles();
+  settleRunning(it);
   const status = it.running ? 'Running' : it.ok === false ? 'Failed' : it.ok === true || it.ms != null ? 'Succeeded' : 'Recorded';
   const stCls = it.running ? 'acc' : it.ok === false ? 'err' : it.ok === true || it.ms != null ? 'ok' : '';
   const raw = { ...it.raw };

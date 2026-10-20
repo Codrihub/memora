@@ -176,6 +176,8 @@ export interface KeyRow {
   scopes?: string[];
   uses?: number;
   last_ip?: string | null;
+  /** Latest call with this key (unix seconds); absent = never used. */
+  last_used?: number | null;
   /** "*" (or absent) = every tool; a list = only these tool names. */
   tools?: ToolAccess;
 }
