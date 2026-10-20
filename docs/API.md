@@ -272,7 +272,7 @@ that its `client_id` matches the URL, and caches it for 24 hours.
 | Method | Path | Auth | Returns |
 |---|---|---|---|
 | GET | `/ws` | Session only | WebSocket upgrade. The `Origin` must be same-origin (`403` otherwise). `503` when too many clients are connected. |
-| POST | `/_bus` | Loopback only | Publishes a JSON object (at most 64 KiB) into the event stream. Returns `{ok:true}`. `403` for callers that are not on the same machine or that come through a proxy (any forwarding header), `400` for a body that is not a JSON object, `413` for a body or event that is too large. |
+| POST | `/_bus` | Loopback only | Publishes a JSON object (at most 64 KiB) into the event stream. Returns `{ok:true}`. `403` for callers that are not on the same machine, that come through a proxy (any forwarding header) or that are a web page (an `Origin` or `Sec-Fetch-*` header), `400` for a body that is not a JSON object, `413` for a body or event that is too large. |
 
 On connect the server sends a `hello` event with the client count, replays the
 last 40 stored events (each marked `replay: true`), then streams live events.

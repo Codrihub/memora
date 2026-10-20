@@ -129,11 +129,12 @@ in this order, outermost first:
 4. A 30 second request timeout (`408`).
 5. Guard (`mw_guard`): requests for a host outside the domain allow list get a
    bare `404`. Forwarding headers from untrusted peers are dropped. The caller
-   IP is resolved (from `CF-Connecting-IP`, `X-Real-IP`, or the right-most
-   `X-Forwarded-For` entry, only when the peer is a trusted proxy). Per-IP
+   IP is resolved, only when the peer is a trusted proxy, from the right-most
+   `X-Forwarded-For` entry that is not a trusted proxy, else `CF-Connecting-IP`,
+   else `X-Real-IP`; a loopback address in a header is ignored. Per-IP
    token buckets apply to auth endpoints and to all traffic, and callers in a
    cooldown after failed logins or bad API keys get `429`. `/healthz` and
-   loopback callers are not rate limited.
+   direct loopback callers (no forwarding headers) are not rate limited.
 6. Access stack (`mw_access`): picks up changes from `memora-cli`, then
    evaluates the caller IP and the `Host` domain against the access rules. A
    block returns `403`. `/healthz` bypasses it.
@@ -189,7 +190,8 @@ The event hub lives in `memora-core::events` as a process-wide singleton.
   `replay: true`), then streams live events. When a client disconnects, a
   `presence` event announces the new count.
 - `POST /_bus` is the local intake: it publishes a JSON object, but only from a
-  loopback peer with no forwarding headers. Everyone else gets `403`.
+  loopback peer with no forwarding headers and no browser headers (`Origin`,
+  `Sec-Fetch-*`), so a web page cannot post to it. Everyone else gets `403`.
 
 The WebSocket and the intake bus share the single port. There is no second port
 to open or proxy.

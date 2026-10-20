@@ -102,14 +102,7 @@ async fn h_stop(
     headers: HeaderMap,
 ) -> Response {
     let resolved = crate::guard::header_ip(&headers).unwrap_or(peer.ip());
-    let forwarded = [
-        "forwarded",
-        "x-forwarded-for",
-        "x-real-ip",
-        "cf-connecting-ip",
-    ]
-    .iter()
-    .any(|h| headers.contains_key(*h));
+    let forwarded = crate::guard::forwarded(&headers);
     let sent = headers
         .get(STOP_TOKEN_HEADER)
         .and_then(|v| v.to_str().ok())

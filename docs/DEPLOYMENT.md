@@ -42,11 +42,13 @@ Bind `0.0.0.0` only when clients connect directly.
 
 On the proxy:
 
-- Forward `Host`, and the client IP in `X-Real-IP` or `X-Forwarded-For`.
-  Memora reads `CF-Connecting-IP`, then `X-Real-IP`, then the right-most
-  `X-Forwarded-For` entry, and only when the connection comes from a trusted
-  proxy. Loopback is always trusted; list any other proxy address in
-  `MEMORA_TRUSTED_PROXIES`.
+- Forward `Host`, and append the client IP to `X-Forwarded-For`.
+  Memora reads the right-most `X-Forwarded-For` entry that is not itself a
+  trusted proxy; only when there is none does it fall back to
+  `CF-Connecting-IP`, then `X-Real-IP`. Forwarding headers count only when the
+  connection comes from a trusted proxy. Loopback is always trusted; list any
+  other proxy address in `MEMORA_TRUSTED_PROXIES`. A loopback address in a
+  header is ignored, so no outside caller can pass as local.
 - Forward `X-Forwarded-Proto: https`. From a trusted proxy, it makes Memora mark
   the session cookie `Secure` and send HSTS.
 - Upgrade WebSockets on `/ws` and allow long-lived connections there.

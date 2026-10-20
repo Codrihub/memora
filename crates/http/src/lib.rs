@@ -224,7 +224,9 @@ async fn mw_guard(
     let ip = st.guard.client_ip(peer, req.headers());
     guard::set_header_ip(req.headers_mut(), &ip);
     let path = req.uri().path().to_string();
-    if path == "/healthz" || ip.is_loopback() {
+    // Only a direct local caller skips the limits: a loopback address that came
+    // with forwarding headers is a proxied request.
+    if path == "/healthz" || (ip.is_loopback() && !guard::forwarded(req.headers())) {
         return next.run(req).await;
     }
     if let Err(wait) = st.guard.take(Bucket::Global, &ip) {
@@ -1829,17 +1831,13 @@ pub(crate) fn ip_is_loopback(ip: std::net::IpAddr) -> bool {
 /// reverse proxy / tunnel (cloudflared) also connects from loopback, so the
 /// caller IP resolved by `mw_guard` from the forwarding headers must be
 /// loopback too. The body is capped at `BUS_MAX_BODY`.
+///
+/// A web page open in a browser on the same machine can also reach loopback,
+/// and a `text/plain` POST needs no CORS preflight, so requests a browser
+/// marks as its own (`Origin`, `Sec-Fetch-*`) are refused too: the intake is
+/// for local processes, never for pages.
 async fn h_bus(ConnectInfo(peer): ConnectInfo<SocketAddr>, req: Request) -> Response {
-    let resolved = guard::header_ip(req.headers()).unwrap_or(peer.ip());
-    let forwarded = [
-        "forwarded",
-        "x-forwarded-for",
-        "x-real-ip",
-        "cf-connecting-ip",
-    ]
-    .iter()
-    .any(|h| req.headers().contains_key(*h));
-    if !ip_is_loopback(peer.ip()) || !ip_is_loopback(resolved) || forwarded {
+    if !bus_caller_ok(peer, req.headers()) {
         return (StatusCode::FORBIDDEN, Json(json!({"error":"forbidden"}))).into_response();
     }
     let body = match axum::body::to_bytes(req.into_body(), BUS_MAX_BODY).await {
@@ -1869,9 +1867,42 @@ async fn h_bus(ConnectInfo(peer): ConnectInfo<SocketAddr>, req: Request) -> Resp
     }
 }
 
+/// Whether a `/_bus` caller is a local process: loopback peer and resolved IP,
+/// no forwarding header, and nothing a browser adds to its own requests.
+fn bus_caller_ok(peer: SocketAddr, headers: &axum::http::HeaderMap) -> bool {
+    let resolved = guard::header_ip(headers).unwrap_or(peer.ip());
+    let browser = headers.contains_key(header::ORIGIN)
+        || headers.keys().any(|k| k.as_str().starts_with("sec-fetch-"));
+    ip_is_loopback(peer.ip()) && ip_is_loopback(resolved) && !guard::forwarded(headers) && !browser
+}
+
 #[cfg(test)]
 mod ws_bus_tests {
-    use super::{ip_is_loopback, ws_mark_replay};
+    use super::{bus_caller_ok, ip_is_loopback, ws_mark_replay};
+    use axum::http::HeaderMap;
+
+    /// A page in a local browser can POST to loopback without a preflight; the
+    /// headers the browser adds must get it refused, while a plain local
+    /// process (curl, a hook script) is still accepted.
+    #[test]
+    fn bus_refuses_browsers_and_proxies() {
+        let local: std::net::SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let outside: std::net::SocketAddr = "192.168.1.2:5000".parse().unwrap();
+        assert!(bus_caller_ok(local, &HeaderMap::new()));
+        assert!(!bus_caller_ok(outside, &HeaderMap::new()));
+        for (k, v) in [
+            ("origin", "https://evil.example"),
+            ("origin", "null"),
+            ("sec-fetch-site", "cross-site"),
+            ("sec-fetch-mode", "no-cors"),
+            ("x-forwarded-for", "127.0.0.1"),
+            ("cf-connecting-ip", "127.0.0.1"),
+        ] {
+            let mut h = HeaderMap::new();
+            h.insert(k, v.parse().unwrap());
+            assert!(!bus_caller_ok(local, &h), "{k}: {v}");
+        }
+    }
 
     #[test]
     fn replay_marker_keeps_valid_json() {

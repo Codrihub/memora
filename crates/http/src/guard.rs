@@ -144,28 +144,49 @@ impl Guard {
     }
 
     /// The caller IP. Forwarding headers are honoured only from a trusted proxy.
+    ///
+    /// `X-Forwarded-For` comes first, read from the right past every hop that is
+    /// itself a trusted proxy: nginx (`$proxy_add_x_forwarded_for`), Caddy and
+    /// Cloudflare all append the address they saw, so that entry cannot be chosen
+    /// by the client. `CF-Connecting-IP` and `X-Real-IP` are only a fallback when
+    /// there is no such entry: a proxy that does not set them passes a
+    /// client-sent value straight through. A header never yields a loopback or
+    /// unspecified address, so no outside caller can claim to be local (and skip
+    /// the rate limits that local callers skip).
     pub fn client_ip(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
         let p = peer.ip();
         if !self.trusted_peer(peer) {
             return p;
         }
+        let usable = |ip: IpAddr| !is_local_ip(ip);
         let header_ip = |name: &str| {
             headers
                 .get(name)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.trim().parse::<IpAddr>().ok())
+                .filter(|ip| usable(*ip))
         };
-        // Cloudflare's own header first, then a single-value proxy header, then
-        // the right-most X-Forwarded-For entry (the one our proxy appended).
-        header_ip("cf-connecting-ip")
+        let forwarded = headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|s| s.split(','))
+            .collect::<Vec<_>>();
+        let mut from_xff = None;
+        for hop in forwarded.iter().rev() {
+            let Ok(ip) = hop.trim().parse::<IpAddr>() else {
+                break;
+            };
+            let hop_peer = SocketAddr::new(ip, 0);
+            if self.trusted_peer(hop_peer) || !usable(ip) {
+                continue;
+            }
+            from_xff = Some(ip);
+            break;
+        }
+        from_xff
+            .or_else(|| header_ip("cf-connecting-ip"))
             .or_else(|| header_ip("x-real-ip"))
-            .or_else(|| {
-                headers
-                    .get("x-forwarded-for")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.rsplit(',').next())
-                    .and_then(|s| s.trim().parse().ok())
-            })
             .unwrap_or(p)
     }
 
@@ -406,6 +427,27 @@ pub fn busy() -> Response {
         .into_response()
 }
 
+/// Whether the request carries any proxy forwarding header.
+pub fn forwarded(headers: &HeaderMap) -> bool {
+    [
+        "forwarded",
+        "x-forwarded-for",
+        "x-real-ip",
+        "cf-connecting-ip",
+    ]
+    .iter()
+    .any(|h| headers.contains_key(*h))
+}
+
+/// Loopback or unspecified, IPv4-mapped IPv6 included.
+fn is_local_ip(ip: IpAddr) -> bool {
+    let ip = match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+        v4 => v4,
+    };
+    ip.is_loopback() || ip.is_unspecified()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,8 +466,53 @@ mod tests {
         let local: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         assert_eq!(g.client_ip(local, &h).to_string(), "1.2.3.4");
         let proxy: SocketAddr = "10.0.0.9:5000".parse().unwrap();
+        let mut h = HeaderMap::new();
         h.insert("cf-connecting-ip", "5.6.7.8".parse().unwrap());
         assert_eq!(g.client_ip(proxy, &h).to_string(), "5.6.7.8");
+    }
+
+    /// Behind a proxy that passes client headers through (nginx and Caddy do
+    /// for `CF-Connecting-IP`, Caddy for `X-Real-IP`), an outside caller must
+    /// not pick its own address, least of all a loopback one: local callers
+    /// skip every rate limit, so that would allow unlimited password guessing.
+    #[test]
+    fn spoofed_forwarding_headers_cannot_choose_the_caller_ip() {
+        let g = guard();
+        let local: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        // nginx: client-sent CF-Connecting-IP passes through, XFF gets the
+        // real address appended.
+        let mut h = HeaderMap::new();
+        h.insert("cf-connecting-ip", "127.0.0.1".parse().unwrap());
+        h.insert("x-real-ip", "203.0.113.9".parse().unwrap());
+        h.insert("x-forwarded-for", "127.0.0.1, 203.0.113.9".parse().unwrap());
+        assert_eq!(g.client_ip(local, &h).to_string(), "203.0.113.9");
+        // Rotating a fake CF-Connecting-IP does not change the caller either.
+        h.insert("cf-connecting-ip", "198.51.100.1".parse().unwrap());
+        assert_eq!(g.client_ip(local, &h).to_string(), "203.0.113.9");
+        // Proxy hops (loopback, trusted proxies) are skipped from the right.
+        let mut h = HeaderMap::new();
+        h.insert(
+            "x-forwarded-for",
+            "203.0.113.9, 10.0.0.9, 127.0.0.1".parse().unwrap(),
+        );
+        assert_eq!(g.client_ip(local, &h).to_string(), "203.0.113.9");
+        // A header alone never makes a caller local.
+        for name in ["cf-connecting-ip", "x-real-ip", "x-forwarded-for"] {
+            for v in ["127.0.0.1", "::1", "::ffff:127.0.0.1", "0.0.0.0"] {
+                let mut h = HeaderMap::new();
+                h.insert(name, v.parse().unwrap());
+                let proxy: SocketAddr = "10.0.0.9:5000".parse().unwrap();
+                assert_eq!(
+                    g.client_ip(proxy, &h).to_string(),
+                    "10.0.0.9",
+                    "{name}: {v}"
+                );
+            }
+        }
+        // Without X-Forwarded-For the single-value headers still work.
+        let mut h = HeaderMap::new();
+        h.insert("x-real-ip", "203.0.113.5".parse().unwrap());
+        assert_eq!(g.client_ip(local, &h).to_string(), "203.0.113.5");
     }
 
     #[test]
