@@ -1142,8 +1142,12 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
     out = re_embed()
         .replace_all(&out, |c: &regex::Captures| {
             let detoked = detok(c.get(0).unwrap().as_str());
-            let c2 = re_embed().captures(&detoked).unwrap();
-            match embed_html(&c2, ctx, false) {
+            // A code span restored inside the target (`![[a`]`b]]`) can stop the
+            // text from matching again: leave it as written rather than panic.
+            match re_embed()
+                .captures(&detoked)
+                .and_then(|c2| embed_html(&c2, ctx, false))
+            {
                 Some(h) => park(&mut frags, h),
                 None => c.get(0).unwrap().as_str().to_string(),
             }
@@ -6267,6 +6271,40 @@ mod image_render_tests {
             h.contains(r#"href="https://e.com/a&quot;onmouseover=&quot;alert(1""#),
             "{h}"
         );
+    }
+
+    /// Code spans inside image/embed syntax used to panic the renderer (a
+    /// re-match after restoring the code text failed); with `panic = "abort"`
+    /// one such note took the whole server down on every view.
+    #[test]
+    fn code_spans_inside_embeds_never_panic() {
+        let pieces = [
+            "![[", "]]", "`]`", "`|`", "`", "|", "![", "](", ")", "a", "\\", "[[", "&lt;",
+        ];
+        let resolve = |_: &str| Some("x.md".to_string());
+        let fixed = [
+            "![[a`]`b]]",
+            "![[a`|`b]]",
+            "![[`]]`]]",
+            "![a`)`b](c.png)",
+            "![[a`]`b|300]]",
+            "[x](https://e.com/`)`)",
+        ];
+        for t in fixed {
+            let (h, _, _) = render_markdown(t, &resolve);
+            assert!(!h.contains("<script"), "{h}");
+        }
+        // Every short combination of the tricky pieces renders without panicking.
+        for a in pieces {
+            for b in pieces {
+                for c in pieces {
+                    for d in pieces {
+                        let t = format!("{a}{b}{c}{d}");
+                        let _ = render_markdown(&t, &resolve);
+                    }
+                }
+            }
+        }
     }
 
     /// Raw HTML in a note is text, never markup: the web reader inserts this
