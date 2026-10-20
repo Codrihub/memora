@@ -257,6 +257,36 @@ export function pushLive(list: ActivityItem[], it: ActivityItem, max = 2000): Ac
   return list;
 }
 
+/**
+ * Live items held while a stream is paused. Only the newest `max` are kept (a live
+ * list never shows more, see `pushLive`), so a paused page left open under heavy agent
+ * traffic does not grow without end; `length` still counts every item that arrived.
+ */
+export class PausedQueue {
+  private items: ActivityItem[] = [];
+  private count = 0;
+
+  constructor(private readonly max = 2000) {}
+
+  get length(): number {
+    return this.count;
+  }
+
+  push(it: ActivityItem): void {
+    this.items.push(it);
+    this.count++;
+    if (this.items.length > this.max) this.items.splice(0, this.items.length - this.max);
+  }
+
+  /** Every kept item, oldest first, and empty the queue. */
+  take(): ActivityItem[] {
+    const out = this.items;
+    this.items = [];
+    this.count = 0;
+    return out;
+  }
+}
+
 /** Subscribe to live agent activity; returns the unsubscribe function. */
 export function onLive(fn: (it: ActivityItem) => void): () => void {
   return on('activity', (a) => fn(fromBus(a)));

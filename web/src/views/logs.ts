@@ -14,7 +14,7 @@ import { debounce } from '../format';
 import { apiGet } from '../api';
 import { avatarHTML, setAgentColors } from '../control/agents';
 import { useActivityStyles, wireActRows } from '../control/activity';
-import { loadFeed, onLive, pushLive, verb, type ActivityItem, type Source } from '../control/feed';
+import { loadFeed, onLive, PausedQueue, pushLive, verb, type ActivityItem, type Source } from '../control/feed';
 import { ICO, openMenu, plural, systemHeader, useControlStyles, whileVisible } from '../control/ui';
 import type { KeyRow, KeysResult } from '../types';
 import { toast } from '../toast';
@@ -316,7 +316,7 @@ function slugFromUrl(): string | null {
   const m = /^\/activity\/([A-Za-z0-9_-]{1,64})\/?$/.exec(location.pathname);
   return m ? m[1] : null;
 }
-let pending: ActivityItem[] = [];
+const pending = new PausedQueue();
 const fresh = new Set<string>();
 let view: ViewKind = loadView();
 let limit = PAGE;
@@ -737,8 +737,7 @@ function ingest(it: ActivityItem): void {
 }
 
 function flushPending(): void {
-  const p = pending;
-  pending = [];
+  const p = pending.take();
   p.forEach(ingest);
 }
 

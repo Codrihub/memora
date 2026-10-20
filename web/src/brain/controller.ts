@@ -454,6 +454,9 @@ export class BrainController {
     clearTimeout(this.refreshTimer);
     clearInterval(this.chromeTimer);
     this.chrome?.destroy();
+    // The card listens on the bus; left alive it would keep this whole controller
+    // (scene arrays, map chrome, DOM) reachable after every visit.
+    this.card?.destroy();
     this.scene?.dispose();
     this.scene = null;
     this.root.remove();

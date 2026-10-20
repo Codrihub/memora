@@ -12,7 +12,7 @@ import { debounce, noteName } from '../format';
 import { hooks } from '../hooks';
 import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
 import { wireActRows } from '../control/activity';
-import { fromAuth, fromLog, mergePhases, pushLive, settleRunning, verb, type ActivityItem } from '../control/feed';
+import { fromAuth, fromLog, mergePhases, PausedQueue, pushLive, settleRunning, verb, type ActivityItem } from '../control/feed';
 import { icon } from '../ui/icons';
 import { ago, copyText, download, ICO, openDrawer, openMenu, plural } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
@@ -169,7 +169,7 @@ let fetchLimit = FETCH;
 let older = false;
 let compact = true;
 let live = true;
-let pending: ActivityItem[] = [];
+const pending = new PausedQueue();
 const fresh = new Set<string>();
 let paintQueued = false;
 let hostWired = false;
@@ -206,7 +206,7 @@ export function showAgent(el: HTMLElement, scroller: HTMLElement, s: string, o: 
   limit = PAGE;
   fetchLimit = FETCH;
   older = false;
-  pending = [];
+  pending.take();
   fresh.clear();
   live = true;
   D.time = o.time?.time || '7d';
@@ -402,8 +402,7 @@ function paintLive(): void {
 
 function resume(): void {
   live = true;
-  const p = pending;
-  pending = [];
+  const p = pending.take();
   p.forEach(ingest);
   paintLive();
 }
