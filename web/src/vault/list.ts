@@ -777,6 +777,8 @@ function onRowsKey(e: KeyboardEvent, rows: HTMLElement, list: NoteRef[], host: H
 
 /** Folder tiles and crumbs accept dropped notes and folders too. */
 export function wireFolderDrop(b: HTMLElement, path: string): void {
+  // Pointer drags from the tree find it by this (see TreeView.targetAt).
+  b.dataset.dropFolder = path;
   b.ondragover = (e) => {
     const d = drag.cur;
     if (!d) return;

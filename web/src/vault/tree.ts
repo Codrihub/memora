@@ -3,19 +3,35 @@
 // and notes).
 //
 // Features: animated expand/collapse, folder color/icon and recursive counts,
-// drag and drop (notes and folders into folders, anything into Pinned, pin
-// reordering) with drop indicators and hover auto-expand, inline rename (F2 or
-// double click), context menus, full keyboard navigation (ARIA tree).
+// drag and drop with pointer events (mouse, pen, touch after a short hold; see
+// drag.ts): notes and folders into folders or to the top level after a
+// confirm, anything into Pinned, pin reordering, hover auto-expand and
+// auto-scroll; inline rename (F2 or double click), context menus, full
+// keyboard navigation (ARIA tree). Deep trees stop indenting after
+// INDENT_CAP levels and show the level instead.
 
 import { el, esc, attr } from '../dom';
+import { Modal } from '../modal';
 import { noteName } from '../format';
 import { state } from '../state';
 import type { NoteRef } from '../types';
 import { I, folderGlyph } from './icons';
 import { lockMark } from '../ui/privacy';
-import { confirmDeleteFolder, confirmDeleteNotes, confirmFolderMove, confirmUnpin, folderMenu, noteMenu, pinToggle } from './menus';
-import { drag, endDrag, nav, startDrag } from './nav';
-import { moveNotes, renameFolder, renameNote } from './ops';
+import { confirmDeleteFolder, confirmDeleteNotes, confirmUnpin, folderMenu, noteMenu, pinToggle } from './menus';
+import { drag, endDrag, nav, type DragPayload } from './nav';
+import { moveNotes, relocateFolder, renameFolder, renameNote } from './ops';
+import {
+  confirmTitle,
+  dragging,
+  indentLevel,
+  payloadLabel,
+  pressDrag,
+  resolveDrop,
+  scrollParent,
+  showsDepthBadge,
+  type DragSpec,
+  type DropTarget,
+} from './drag';
 import {
   baseName,
   dirOf,
@@ -108,8 +124,31 @@ function moreBtn(name: string): string {
 
 function branchGroup(depth: number): HTMLElement {
   const g = el('div', 'vx-kids-inner');
-  g.style.setProperty('--gx', depth * 14 + 'px');
+  g.style.setProperty('--gx', indentLevel(depth) * 14 + 'px');
+  if (showsDepthBadge(depth)) g.classList.add('capped');
   return g;
+}
+
+/** Past the indent cap, a row shows its level instead of moving further right. */
+function depthBadge(depth: number): string {
+  return showsDepthBadge(depth) ? `<span class="vx-lvl" title="Level ${depth}" aria-hidden="true">${depth}</span>` : '';
+}
+
+/** A move confirmed: what it moves, from where, to which full path. */
+function moveBody(d: DragPayload, dest: string): string {
+  const { count, folder } = payloadLabel(d);
+  const paths = d.kind === 'notes' ? d.paths : d.kind === 'folder' ? [d.path] : [d.item.key];
+  const froms = Array.from(new Set(paths.map((p) => (folder ? p : dirOf(p)))));
+  const show = (p: string): string => (p === '' ? 'Top level' : p);
+  const from = folder ? show(paths[0]) : froms.length === 1 ? show(froms[0]) : `${froms.length} folders`;
+  const to = folder ? show((dest ? dest + '/' : '') + baseName(paths[0])) : show(dest);
+  const what = folder
+    ? 'The folder moves with everything in it; links to its nodes are updated and pins follow.'
+    : `${count > 1 ? 'They move' : 'It moves'}; links to ${count > 1 ? 'them' : 'it'} are updated and pins follow.`;
+  return `<div class="vx-mv">
+    <div class="vx-mv-row"><span class="vx-mv-k">From</span><span class="vx-mv-p mono" title="${attr(from)}">${esc(from)}</span></div>
+    <div class="vx-mv-row"><span class="vx-mv-k">To</span><span class="vx-mv-p mono to" title="${attr(to)}">${esc(to)}</span></div>
+  </div><p class="panel-sub" style="margin:10px 0 0">${what}</p>`;
 }
 
 /** Two chevrons meeting in the middle: close every open subfolder. */
@@ -189,11 +228,15 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
   const added = rows.filter((r) => !before.has(r.dataset.key!) && !r.dataset.key!.startsWith('pin:'));
   const gone = Array.from(before.entries()).filter(([k]) => !now.has(k));
   if (added.length > 12 || gone.length > 12) return;
-  // Shifted rows glide from their old place.
+  // Shifted rows glide from their old place (only rows on screen: a big
+  // open tree would otherwise start hundreds of animations nobody sees).
+  const vh = window.innerHeight;
   for (const r of rows) {
     const was = before.get(r.dataset.key!);
     if (!was) continue;
-    const dy = was.top - r.getBoundingClientRect().top;
+    const top = r.getBoundingClientRect().top;
+    if ((top > vh || top + was.height < 0) && (was.top > vh || was.top + was.height < 0)) continue;
+    const dy = was.top - top;
     if (Math.abs(dy) > 1) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 280, easing: EASE });
   }
   // New rows come in: open up, slide from the left, a short accent glow.
@@ -319,6 +362,8 @@ export class TreeView {
     this.opts = opts;
     host.classList.add('vx-treehost');
     instances.add(this);
+    // One listener for every row (rows are redrawn, the host stays).
+    host.addEventListener('pointerdown', (e) => this.onPress(e));
     this.render();
   }
 
@@ -329,6 +374,10 @@ export class TreeView {
 
   render(): void {
     const scroll = this.host.scrollTop;
+    // Emptying the host shrinks the sidebar's scroll box, which clamps its
+    // scroll position: keep it across the redraw.
+    const box = scrollParent(this.host, true);
+    const boxScroll = box ? box.scrollTop : 0;
     const active = document.activeElement as HTMLElement | null;
     if (active && this.host.contains(active) && active.dataset.key) this.focusKey = active.dataset.key;
     const before = this.drawn ? snapshot(this.host) : null;
@@ -336,6 +385,7 @@ export class TreeView {
     if (this.opts.showPins) this.host.appendChild(this.pinSection());
     this.host.appendChild(this.folderSection());
     this.host.scrollTop = scroll;
+    if (box) box.scrollTop = boxScroll;
     if (before && this.opts.showPins) this.pinDepartures(before);
     if (before) animateChanges(this.host, before);
     if (this.opts.showPins) this.pinArrivals();
@@ -346,6 +396,44 @@ export class TreeView {
       : null;
     if (keyed && active && this.host.contains(active) === false && document.activeElement === document.body) keyed.focus();
     this.roving();
+    if (dragging() && this.dragKeys.length) {
+      for (const k of this.dragKeys) this.host.querySelector(`[data-key="${CSS.escape(k)}"]`)?.classList.add('vx-dragsrc');
+    }
+    // A note opened (from anywhere): its folders are open, bring its row into view.
+    if (state.note && state.note !== this.shownNote && this.opts.showNotes) {
+      const row = this.host.querySelector<HTMLElement>(`.vx-nrow[data-path="${CSS.escape(state.note)}"]`);
+      if (row && row.offsetParent !== null) {
+        this.shownNote = state.note;
+        requestAnimationFrame(() => this.reveal(row, false));
+      }
+    }
+  }
+
+  /** The note last scrolled into view. */
+  private shownNote: string | null = null;
+  /** Row keys of the item being dragged (kept dim across redraws). */
+  private dragKeys: string[] = [];
+
+  /** Scroll a row into view inside the sidebar's scroll box (never the page). */
+  reveal(row: HTMLElement, flash: boolean): void {
+    const box = scrollParent(row);
+    if (box) {
+      const b = box.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      const pad = 48;
+      if (r.top < b.top + pad) box.scrollTop -= b.top + pad - r.top;
+      else if (r.bottom > b.bottom - pad) box.scrollTop += r.bottom - (b.bottom - pad);
+    }
+    if (flash && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      row.animate(
+        [
+          { backgroundColor: 'color-mix(in srgb, var(--accent) 30%, transparent)' },
+          { backgroundColor: 'color-mix(in srgb, var(--accent) 30%, transparent)', offset: 0.4 },
+          { backgroundColor: 'transparent' },
+        ],
+        { duration: 1200, easing: EASE },
+      );
+    }
   }
 
   // ---------------------------------------------------------------- pins
@@ -432,7 +520,8 @@ export class TreeView {
       el('div', 'vx-pin-empty' + (items.length ? ' slim' : ''), items.length ? `${I.pin}Drop here to pin` : 'Drag nodes or folders here to pin them'),
     );
 
-    // Drop: pin a dragged note/folder, or reorder a pin.
+    // HTML5 drop (drags from the node list): pin a dragged note/folder. Drags
+    // that start in the tree use pointer events (see onPress).
     const indexAt = (y: number): number => {
       const rows = Array.from(list.querySelectorAll<HTMLElement>('.vx-pin'));
       for (let i = 0; i < rows.length; i++) {
@@ -493,7 +582,7 @@ export class TreeView {
     row.tabIndex = -1;
     row.dataset.key = 'pin:' + it.kind + ':' + it.key;
     row.dataset.nav = '1';
-    row.draggable = true;
+    row.dataset.pin = String(i);
     const color = isNote ? folderColor(dirOf(it.key)) : folderColor(it.key);
     const active = isNote ? state.note === it.key : prefs.folder === it.key && state.page === 'vault' && !state.note;
     if (active) row.classList.add('active');
@@ -541,14 +630,6 @@ export class TreeView {
         pinAt(it, i + (e.key === 'ArrowUp' ? -1 : 1));
         this.host.querySelector<HTMLElement>(`[data-key="${CSS.escape(row.dataset.key || '')}"]`)?.focus();
       }
-    };
-    row.ondragstart = (e) => {
-      startDrag(e, { kind: 'pin', id: row.dataset.key || '', item: it }, isNote ? noteName(it.key) : baseName(it.key));
-      row.classList.add('vx-dragsrc');
-    };
-    row.ondragend = () => {
-      row.classList.remove('vx-dragsrc');
-      endDrag();
     };
     row.oncontextmenu = (e) => {
       e.preventDefault();
@@ -627,8 +708,8 @@ export class TreeView {
     row.dataset.key = 'f:' + f.path;
     row.dataset.folder = f.path;
     row.dataset.nav = '1';
-    row.draggable = !isRoot;
-    row.style.setProperty('--depth', String(f.depth));
+    row.style.setProperty('--depth', String(indentLevel(f.depth)));
+    row.classList.toggle('deep', showsDepthBadge(f.depth));
     const color = folderColor(f.path);
     row.style.setProperty('--fc', color);
     const selected = state.page === 'vault' && (prefs.folder || '') === f.path;
@@ -636,8 +717,8 @@ export class TreeView {
     row.setAttribute('aria-selected', String(selected));
     const here = f.total ? agentsAt(f.path, true) : [];
     row.innerHTML = `<span class="vx-twist${hasKids && !isRoot ? '' : ' none'}" aria-hidden="true">${I.caret}</span>
-      <span class="vx-fico">${isRoot ? I.vault : folderGlyph(folderIcon(f.path), open && hasKids)}</span>
-      <span class="vx-fname">${esc(isRoot ? 'All nodes' : f.name)}</span>${isRoot ? '' : lockMark('folder', f.path)}
+      ${depthBadge(f.depth)}<span class="vx-fico">${isRoot ? I.vault : folderGlyph(folderIcon(f.path), open && hasKids)}</span>
+      <span class="vx-fname"${isRoot ? '' : ` title="${attr(f.path)}"`}>${esc(isRoot ? 'All nodes' : f.name)}</span>${isRoot ? '' : lockMark('folder', f.path)}
       ${coinsHTML(here)}
       <span class="vx-end"><span class="vx-count">${f.total}</span>${moreBtn(isRoot ? 'All nodes' : f.name)}</span>`;
 
@@ -666,16 +747,6 @@ export class TreeView {
       folderMenu(f.path, { x: e.clientX, y: e.clientY }, () => this.renameFolderInline(row, f.path));
     };
 
-    if (!isRoot) {
-      row.ondragstart = (e) => {
-        startDrag(e, { kind: 'folder', path: f.path }, `${f.name} (${f.total})`);
-        row.classList.add('vx-dragsrc');
-      };
-      row.ondragend = () => {
-        row.classList.remove('vx-dragsrc');
-        endDrag();
-      };
-    }
     this.wireDrop(row, f.path, hasKids && !isRoot);
     return row;
   }
@@ -730,10 +801,7 @@ export class TreeView {
       endDrag();
       this.hoverPath = null;
       clearTimeout(this.hoverTimer);
-      if (d.kind === 'notes') void moveNotes(d.paths, path);
-      else if (d.kind === 'folder') confirmFolderMove(d.path, path);
-      else if (d.item.kind === 'note') void moveNotes([d.item.key], path);
-      else confirmFolderMove(d.item.key, path);
+      this.confirmMove(d, path);
     };
   }
 
@@ -745,16 +813,16 @@ export class TreeView {
     row.dataset.key = 'n:' + n.path;
     row.dataset.path = n.path;
     row.dataset.nav = '1';
-    row.draggable = true;
-    row.style.setProperty('--depth', String(depth));
+    row.style.setProperty('--depth', String(indentLevel(depth)));
+    row.classList.toggle('deep', showsDepthBadge(depth));
     row.style.setProperty('--fc', folderColor(dirOf(n.path)));
     const isActive = state.note === n.path;
     row.classList.toggle('active', isActive);
     row.classList.toggle('sel', selection.has(n.path));
     row.setAttribute('aria-selected', String(isActive || selection.has(n.path)));
-    row.innerHTML = `<span class="vx-twist none"></span><span class="vx-nico">${I.note}</span><span class="vx-fname">${esc(
-      n.name,
-    )}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(n.name)}</span>`;
+    row.innerHTML = `<span class="vx-twist none"></span>${depthBadge(depth)}<span class="vx-nico">${I.note}</span><span class="vx-fname" title="${attr(
+      n.path,
+    )}">${esc(n.name)}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(n.name)}</span>`;
     row.onclick = (e) => {
       const more = (e.target as HTMLElement).closest<HTMLElement>('.vx-row-more');
       if (more) {
@@ -782,16 +850,155 @@ export class TreeView {
       const paths = selection.has(n.path) && selection.size > 1 ? Array.from(selection) : [n.path];
       noteMenu(paths, { x: e.clientX, y: e.clientY }, () => this.renameNoteInline(row, n.path));
     };
-    row.ondragstart = (e) => {
-      const paths = selection.has(n.path) && selection.size > 1 ? Array.from(selection) : [n.path];
-      startDrag(e, { kind: 'notes', paths }, paths.length > 1 ? `${paths.length} nodes` : n.name);
-      row.classList.add('vx-dragsrc');
-    };
-    row.ondragend = () => {
-      row.classList.remove('vx-dragsrc');
-      endDrag();
-    };
     return row;
+  }
+
+  // ---------------------------------------------------- pointer drag
+
+  /** A press on a row may become a drag (drag.ts runs the gesture). */
+  private onPress(e: PointerEvent): void {
+    const t = e.target as HTMLElement;
+    if (t.closest('.vx-row-more,.vx-pin-x,input,textarea,button')) return;
+    const row = t.closest<HTMLElement>('.vx-frow[data-folder],.vx-nrow[data-path],.vx-pin[data-pin]');
+    if (!row || !this.host.contains(row) || row.dataset.folder === '' || row.classList.contains('missing')) return;
+    pressDrag(e, () => this.dragSpec(row));
+  }
+
+  private dragSpec(row: HTMLElement): DragSpec | null {
+    let payload: DragPayload;
+    let icon: string;
+    if (row.dataset.folder) {
+      payload = { kind: 'folder', path: row.dataset.folder };
+      icon = folderGlyph(folderIcon(row.dataset.folder), false);
+    } else if (row.dataset.path) {
+      const p = row.dataset.path;
+      payload = { kind: 'notes', paths: selection.has(p) && selection.size > 1 ? Array.from(selection) : [p] };
+      icon = I.note;
+    } else {
+      const it = pinnedItems()[Number(row.dataset.pin)];
+      if (!it || it.missing) return null;
+      payload = { kind: 'pin', id: row.dataset.key || '', item: { kind: it.kind, key: it.key } };
+      icon = it.kind === 'note' ? I.note : folderGlyph(folderIcon(it.key), false);
+    }
+    this.dragKeys =
+      payload.kind === 'notes' ? payload.paths.map((p) => 'n:' + p) : [row.dataset.key || ''];
+    for (const k of this.dragKeys) this.host.querySelector(`[data-key="${CSS.escape(k)}"]`)?.classList.add('vx-dragsrc');
+    return {
+      payload,
+      source: row,
+      icon,
+      scroller: () => scrollParent(this.host, true),
+      targetAt: (x, y) => this.targetAt(x, y),
+      canOpen: (t) => {
+        if (t.kind !== 'folder' || openFolders.has(t.path)) return null;
+        const f = folderAt(t.path);
+        return f && (f.children.length || (this.opts.showNotes && f.notes.length)) ? t.path : null;
+      },
+      open: (path) => this.toggle(path, true),
+      drop: (t, v) => {
+        if (t.kind === 'pins') this.dropOnPins(payload, t.index);
+        else this.confirmMove(payload, v.dest);
+      },
+      held: (x, y) => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y })),
+    };
+  }
+
+  /** The place under a point: a folder, a note (its folder), Pinned, or the top level. */
+  private targetAt(x: number, y: number): { target: DropTarget; el: HTMLElement | null } | null {
+    const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!hit) return null;
+    const pins = hit.closest<HTMLElement>('.vx-treehost .vx-pins');
+    if (pins) {
+      const rows = Array.from(pins.querySelectorAll<HTMLElement>('.vx-pin[data-pin]'));
+      let index = rows.length;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) {
+          index = i;
+          break;
+        }
+      }
+      return { target: { kind: 'pins', index }, el: pins };
+    }
+    const frow = hit.closest<HTMLElement>('.vx-treehost .vx-frow[data-folder]');
+    if (frow) {
+      const path = frow.dataset.folder || '';
+      return { target: path ? { kind: 'folder', path } : { kind: 'root' }, el: frow };
+    }
+    const nrow = hit.closest<HTMLElement>('.vx-treehost .vx-nrow[data-path]');
+    if (nrow) return { target: { kind: 'note', path: nrow.dataset.path! }, el: nrow };
+    // Folder tiles and crumbs in the node list take drops too.
+    const tile = hit.closest<HTMLElement>('[data-drop-folder]');
+    if (tile) {
+      const path = tile.dataset.dropFolder || '';
+      return { target: path ? { kind: 'folder', path } : { kind: 'root' }, el: tile };
+    }
+    // The empty part of the folder tree: the top level (the "All nodes" row lights up).
+    const sec = hit.closest<HTMLElement>('.vx-treehost .vx-folders');
+    if (sec) return { target: { kind: 'root' }, el: sec.querySelector<HTMLElement>('.vx-frow.root') };
+    return null;
+  }
+
+  /** Pin a dragged note or folder at a place in Pinned, or move a pin there. */
+  private dropOnPins(d: DragPayload, at: number): void {
+    if (d.kind === 'pin') {
+      const cur = pinnedItems().findIndex((p) => p.kind === d.item.kind && p.key === d.item.key);
+      pinAt(d.item, cur >= 0 && cur < at ? at - 1 : at);
+    } else if (d.kind === 'notes') {
+      d.paths.forEach((p, k) => pinAt({ kind: 'note', key: p }, at + k));
+    } else {
+      pinAt({ kind: 'folder', key: d.path }, at);
+    }
+  }
+
+  /** Ask "Move X to Y?", then move (links are rewritten, pins follow). */
+  confirmMove(d: DragPayload, dest: string): void {
+    const v = resolveDrop(d, dest === '' ? { kind: 'root' } : { kind: 'folder', path: dest });
+    if (!v.ok) return;
+    Modal.open({
+      title: confirmTitle(d, dest),
+      body: moveBody(d, dest),
+      actions: [
+        { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+        {
+          label: 'Move',
+          cls: 'primary',
+          run: async () => {
+            Modal.close();
+            await this.doMove(d, dest);
+          },
+        },
+      ],
+    });
+  }
+
+  private async doMove(d: DragPayload, dest: string): Promise<void> {
+    const notes = d.kind === 'notes' ? d.paths : d.kind === 'pin' && d.item.kind === 'note' ? [d.item.key] : null;
+    // The destination opens, so the moved item stays in sight.
+    for (let p = dest; p; p = dirOf(p)) openFolders.add(p);
+    saveOpen();
+    if (notes) {
+      const done = await moveNotes(notes, dest);
+      if (!done.length) return;
+      selection.clear();
+      done.forEach((m) => selection.add(m.to));
+      refreshTrees();
+      this.revealLater('n:' + done[0].to);
+      return;
+    }
+    const src = d.kind === 'folder' ? d.path : d.kind === 'pin' ? d.item.key : '';
+    const to = (dest ? dest + '/' : '') + baseName(src);
+    if (await relocateFolder(src, to, 'Moved')) this.revealLater('f:' + to);
+  }
+
+  /** After the redraw that follows a move: scroll to the row and flash it. */
+  private revealLater(key: string): void {
+    setTimeout(() => {
+      for (const t of Array.from(instances)) {
+        const row = t.host.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
+        if (row && row.offsetParent !== null) t.reveal(row, true);
+      }
+    }, 380);
   }
 
   // ----------------------------------------------------------- behavior
@@ -852,6 +1059,19 @@ export class TreeView {
       };
       kids.addEventListener('transitionend', done);
       setTimeout(done, 320);
+      // The children slide and fade in, one after another (the first dozen).
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const items = Array.from(kids.firstElementChild?.children || []).slice(0, 12) as HTMLElement[];
+        items.forEach((c, k) =>
+          c.animate(
+            [
+              { opacity: 0, transform: 'translateY(-6px)' },
+              { opacity: 1, transform: 'none' },
+            ],
+            { duration: 260, delay: 30 + k * 22, easing: EASE, fill: 'backwards' },
+          ),
+        );
+      }
     } else {
       kids.style.height = kids.scrollHeight + 'px';
       requestAnimationFrame(() => {
@@ -871,18 +1091,14 @@ export class TreeView {
   private async renameFolderInline(row: HTMLElement, path: string): Promise<void> {
     const name = row.querySelector<HTMLElement>('.vx-fname');
     if (!name) return;
-    row.draggable = false;
     const v = await inlineEdit(name, baseName(path));
-    row.draggable = true;
     if (v) await renameFolder(path, v);
   }
 
   private async renameNoteInline(row: HTMLElement, path: string): Promise<void> {
     const name = row.querySelector<HTMLElement>('.vx-fname');
     if (!name) return;
-    row.draggable = false;
     const v = await inlineEdit(name, noteName(path));
-    row.draggable = true;
     if (v) await renameNote(path, v);
   }
 

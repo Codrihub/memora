@@ -140,6 +140,41 @@ kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:5px;b
 .vx-kids.open{height:auto}
 .vx-row.vx-drop-into{background:color-mix(in srgb,var(--accent) 18%,transparent);box-shadow:inset 0 0 0 1.5px var(--accent)}
 .vx-dragsrc{opacity:.45}
+/* pointer drag (drag.ts): the carried item, the place under it, a folder about to open */
+.vx-treehost{-webkit-touch-callout:none}
+body.vx-pdrag,body.vx-pdrag *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
+body.vx-pdrag-no,body.vx-pdrag-no *{cursor:not-allowed!important}
+body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-no){background:none}
+.vx-row.vx-drop-near{background:color-mix(in srgb,var(--accent) 9%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
+.vx-row.vx-drop-no{background:color-mix(in srgb,var(--danger) 8%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--danger) 45%,transparent)}
+.vx-pghost{position:fixed;left:0;top:0;z-index:10000;pointer-events:none;display:flex;flex-direction:column;gap:3px;max-width:min(280px,calc(100vw - 24px));
+  padding:7px 11px 7px 9px;border-radius:11px;background:var(--panel);color:var(--fg);border:1px solid var(--line-strong);
+  box-shadow:0 14px 34px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.18);font:600 12.5px/1.35 system-ui,sans-serif;
+  animation:vxLift .16s cubic-bezier(.2,.8,.2,1);will-change:transform}
+@keyframes vxLift{from{opacity:0;scale:.92}to{opacity:1;scale:1}}
+.vx-pghost.touch{font-size:13.5px;padding:9px 13px 9px 11px}
+.vx-pghost-main{display:flex;align-items:center;gap:7px;min-width:0}
+.vx-pghost-main .vx-i{width:15px;height:15px;flex:none;color:var(--accent)}
+.vx-pghost-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vx-pghost-hint{font-size:11px;font-weight:550;color:var(--muted);padding-left:22px}
+.vx-pghost.ok{border-color:color-mix(in srgb,var(--accent) 55%,var(--line-strong))}
+.vx-pghost.ok .vx-pghost-hint{color:var(--accent)}
+.vx-pghost.no .vx-pghost-hint{color:var(--danger)}
+.vx-pghost.no .vx-pghost-hint::before{content:"⊘ "}
+.vx-opening .vx-fico{animation:vxLid .6s cubic-bezier(.3,.7,.4,1) forwards}
+@keyframes vxLid{0%{transform:none}35%{transform:translateY(-1px) rotate(-9deg) scale(1.12)}70%{transform:translateY(-1px) rotate(4deg) scale(1.16)}100%{transform:scale(1.18)}}
+@media (prefers-reduced-motion:reduce){.vx-pghost{animation:none}.vx-opening .vx-fico{animation:none;transform:scale(1.15)}}
+/* rows deeper than the indent cap show their level instead of moving right
+   (the badge takes the place of one indent step) */
+.vx-row.deep{padding-left:calc(var(--depth,0) * 14px - 14px)}
+.vx-lvl{flex:none;display:inline-grid;place-items:center;min-width:17px;height:15px;padding:0 4px;box-sizing:border-box;border-radius:5px;
+  font-size:9.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);margin-right:-2px}
+/* the move confirm: from and to as full paths */
+.vx-mv{display:grid;gap:6px}
+.vx-mv-row{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:baseline;gap:8px}
+.vx-mv-k{font-size:11px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.vx-mv-p{font-size:12.5px;padding:5px 8px;border-radius:7px;background:var(--panel-2);overflow-wrap:anywhere}
+.vx-mv-p.to{background:var(--accent-soft);color:var(--fg)}
 .vx-ghost{position:fixed;top:-100px;left:-100px;padding:5px 11px;border-radius:8px;background:var(--accent);color:#04201c;
   font:600 12px/1.4 system-ui,sans-serif;box-shadow:var(--shadow);pointer-events:none}
 .vx-rename{width:100%;font:inherit;font-size:13px;padding:3px 6px;border-radius:6px;border:1px solid var(--accent);
