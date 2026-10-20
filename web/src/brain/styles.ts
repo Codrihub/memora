@@ -44,6 +44,8 @@ export const BRAIN_CSS = `
   color:var(--fg,#e6e9ef);padding:3px 8px 3px 3px;border-radius:999px;background:color-mix(in srgb,var(--c) 18%,var(--glass));
   border:1px solid color-mix(in srgb,var(--c) 55%,transparent);box-shadow:0 0 18px color-mix(in srgb,var(--c) 35%,transparent);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+/* Swapped to the left of its head while the right side is under a control. */
+.bl-agent.flip{translate:calc(-100% - 14px) -130%}
 .bl-agent b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--c);color:#0b0e14;font-size:9.5px;letter-spacing:.02em}
 .bl-agent.busy b{animation:bl-ping 1.1s ease-out infinite}
 @keyframes bl-ping{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c) 70%,transparent)}100%{box-shadow:0 0 0 9px transparent}}

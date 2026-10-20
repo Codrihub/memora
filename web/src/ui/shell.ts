@@ -175,8 +175,10 @@ export const SHELL_CSS = `
 .pb-stats,.pb-live{position:absolute;inset:0;overflow:hidden;text-overflow:ellipsis;transition:opacity .35s,transform .35s cubic-bezier(.2,.8,.2,1)}
 .pb-stats{display:flex;justify-content:space-between}
 .pb-stats i{font-style:normal;opacity:.5}
-.pb-live{color:var(--accent);opacity:0;transform:translateY(8px);text-align:center}
-.side-meta.flip .pb-stats{opacity:0;transform:translateY(-8px)}
+/* The two lines swap like a ticker: each moves a full line height in step with the other,
+   so they are always exactly one line apart and never overlap mid-switch. */
+.pb-live{color:var(--accent);opacity:0;transform:translateY(100%);text-align:center}
+.side-meta.flip .pb-stats{opacity:0;transform:translateY(-100%)}
 .side-meta.flip .pb-live{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.pb-stats,.pb-live{transition:none}}
 .pb-chev{width:16px;height:16px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-out)}

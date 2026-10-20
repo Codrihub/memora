@@ -193,6 +193,41 @@ export function findNode(path: string): string | null {
   return hit ? hit.path : null;
 }
 
+/** A URL that leads nowhere: what was asked for, as the not-found page names it. */
+export interface RouteMissing {
+  what: 'page' | 'node';
+  /** The node path (or the raw address when it was malformed) or page address. */
+  label: string;
+}
+
+/** What a parsed URL shows: a page, an existing node, or the not-found page. */
+export type RouteTarget = { kind: 'page'; page: Page } | { kind: 'node'; path: string } | { kind: 'missing'; missing: RouteMissing };
+
+/**
+ * Decide what a parsed route shows. Pure: `pathname` is the address as typed
+ * (shown for unknown and malformed addresses) and `find` maps a URL node path
+ * to a node of the loaded tree (`findNode`). Unknown addresses and node paths
+ * that are malformed or name no node lead to the not-found page, never to
+ * another page.
+ */
+export function resolveRoute(r: Route, pathname: string, find: (path: string) => string | null): RouteTarget {
+  if (r.unknown) return { kind: 'missing', missing: { what: 'page', label: pathname } };
+  if (r.page === 'vault' && (r.badNode || r.node)) {
+    const path = r.node ? find(r.node) : null;
+    if (path) return { kind: 'node', path };
+    let label = r.node || pathname.replace(/^\/node\/?/, '');
+    if (!r.node) {
+      try {
+        label = decodeURIComponent(label);
+      } catch {
+        /* keep it as typed */
+      }
+    }
+    return { kind: 'missing', missing: { what: 'node', label: label || pathname } };
+  }
+  return { kind: 'page', page: r.page };
+}
+
 /** Where the next navigation to the docs lands (set by `openDocs`). */
 let docsTarget: string | null = null;
 

@@ -22,7 +22,20 @@ import { loadCore } from './core-data';
 import { hooks } from './hooks';
 import { PWA } from './pwa';
 import { RT, onAgents } from './realtime';
-import { PAGES, findNode, go, openDocs, paintTitle, parseLocation, refreshPage, registerView, replaceHistory, type Route } from './router';
+import {
+  PAGES,
+  findNode,
+  go,
+  onNavigate,
+  openDocs,
+  paintTitle,
+  parseLocation,
+  refreshPage,
+  registerView,
+  replaceHistory,
+  resolveRoute,
+  type Route,
+} from './router';
 import { closeDrawer, initSidebar, isMobile, mountSidebarTree, renderTree, setLiveAgents, toggleCollapsed } from './sidebar';
 import { closePalette, openPalette, registerCommands, wireSearch } from './search';
 import { state } from './state';
@@ -46,7 +59,7 @@ import { showVaultOnboarding } from './views/onboarding';
 import { maybeWelcome, openWelcome } from './views/welcome';
 import { initPullRefresh } from './ui/pull-refresh';
 import { initToTop } from './ui/totop';
-import { closeNotFound, showNotFound } from './ui/notfound';
+import { closeNotFound, isNotFoundOpen, showNotFound } from './ui/notfound';
 import { initToasts, notify, toast } from './toast';
 import { markUpdateNoticeSeen, updateNoticeSeen } from './storage';
 import { installStyles } from './ui';
@@ -165,40 +178,39 @@ function wireShell(): void {
     closePalette(false);
     applyRoute(parseLocation());
   });
+  // Any navigation (palette, shortcuts) leaves the not-found page.
+  onNavigate(() => closeNotFound());
 }
 
 /** Show what a URL names. Node paths only select nodes in the loaded tree. */
 function applyRoute(r: Route): void {
   closeNotFound();
-  if (r.unknown) {
-    // An address that leads nowhere: say so, then Overview (3 s or the button).
-    showNotFound('page', location.pathname, () => go('home'));
+  const to = resolveRoute(r, location.pathname, findNode);
+  if (to.kind === 'missing') {
+    // An address or node that leads nowhere: say so and stay (the URL keeps
+    // what was asked for) until the user goes back or to Overview.
+    if (r.page === 'vault') state.note = null;
+    // Back only when there is an earlier page of this app to return to.
+    const canBack = booted || (!!document.referrer && document.referrer.startsWith(location.origin + '/'));
+    showNotFound(to.missing, () => go('home'), canBack && history.length > 1 ? () => history.back() : undefined);
     return;
   }
-  if (r.page === 'vault' && (r.badNode || r.node)) {
-    const path = r.node ? findNode(r.node) : null;
-    if (!path) {
-      replaceHistory();
-      state.note = null;
-      replaceHistory();
-      showNotFound('node', r.node || location.pathname, () => go('home'));
-      return;
-    }
+  if (to.kind === 'node') {
     replaceHistory();
-    state.note = path;
+    state.note = to.path;
     if (state.page !== 'vault') {
       replaceHistory();
       go('vault', true);
     }
-    hooks.openNote(path);
+    hooks.openNote(to.path);
     return;
   }
-  if (r.page === 'vault') {
+  if (to.page === 'vault') {
     replaceHistory();
     state.note = null;
   }
   replaceHistory();
-  go(r.page);
+  go(to.page);
 }
 
 /** Open the note behind any [data-path] row in `scope` on click, Enter or Space. */
@@ -402,7 +414,7 @@ async function boot(): Promise<void> {
   if (shell) shell.classList.remove('hidden');
   applyRoute(parseLocation());
   booted = true;
-  paintTitle();
+  if (!isNotFoundOpen()) paintTitle();
   markReady();
   await anim;
   dropSplash();

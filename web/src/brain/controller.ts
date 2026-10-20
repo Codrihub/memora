@@ -35,6 +35,8 @@ interface Region {
 type GraphNodeX = GraphNode & { tags?: unknown; title?: unknown; name?: unknown };
 
 const PREFS_KEY = 'memora.brain';
+/** Overlaid controls that on-canvas labels keep clear of (closed drawers and sheets sit off screen). */
+const BRAIN_OBSTACLES = '.vc-tl > *, .vc-tr, .vc-panel, .vc-tab, .vc-drawer, .vc-dock > *, .vc-mini, .vc-sheet';
 
 interface Prefs {
   /** Note name labels. */
@@ -132,6 +134,8 @@ export class BrainController {
           onHover: (i, x, y) => this.hover(i, x, y),
           onPick: (i) => this.pick(i),
           labelOf: (i) => this.notes[i]?.name || '',
+          // The map controls (search and switcher, Reset / Filter, side tabs, zoom dock, minimap).
+          obstacles: () => this.root.querySelectorAll(BRAIN_OBSTACLES),
         },
         this.reduced,
       );

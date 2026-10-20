@@ -21,6 +21,7 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { agentColor, agentInitials } from '../control/agents';
+import { agentSide, blockerBoxes, clearOf, labelBox, type Box, type LabelKind } from './label-avoid';
 import { hexToRgb } from './palette';
 import { hashStr, rng, sampleShell, type Vec3 } from './shape';
 import { HOME_DIR, HOME_FOV_DEG, HOME_TARGET, homeDistance, type BrainView } from './home-view';
@@ -46,6 +47,8 @@ export interface SceneCallbacks {
   onPick: (index: number) => void;
   /** Text for an on-canvas note label. */
   labelOf: (index: number) => string;
+  /** Controls laid over the canvas; labels keep clear of them. */
+  obstacles?: () => Iterable<Element>;
 }
 
 const HIST = 110;
@@ -343,6 +346,11 @@ export class BrainScene {
   private noteLabels: { el: HTMLElement; index: number }[] = [];
   private reticle: HTMLElement;
   private showLabels = true;
+  /** Control boxes (label-layer px) labels avoid, refreshed a few times a second. */
+  private blockers: Box[] = [];
+  private blockersAt = -1e9;
+  /** Label sizes, measured once each (their text does not change). */
+  private labelSize = new WeakMap<HTMLElement, [number, number]>();
 
   // state
   private raf = 0;
@@ -1334,17 +1342,55 @@ export class BrainScene {
     this.pickNoteLabels();
   }
 
+  /** Size of a label, measured on first sight; null while it is not laid out. */
+  private sizeOf(el: HTMLElement): [number, number] | null {
+    let sz = this.labelSize.get(el);
+    if (!sz) {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (!w || !h) return null;
+      sz = [w, h];
+      this.labelSize.set(el, sz);
+    }
+    return sz;
+  }
+
+  /** Re-read where the overlaid controls are (they move with panels and breakpoints). */
+  private refreshBlockers(): void {
+    const now = performance.now();
+    if (!this.cb.obstacles || now - this.blockersAt < 250) return;
+    this.blockersAt = now;
+    this.blockers = blockerBoxes(this.labels.getBoundingClientRect(), this.cb.obstacles());
+  }
+
   private placeLabels(): void {
+    // Reads first (control boxes, label sizes), then the style writes below.
+    this.refreshBlockers();
+    const sized = (el: HTMLElement): [number, number] | null => (this.blockers.length ? this.sizeOf(el) : null);
     const camDist = this.camera.position.distanceTo(this.controls.target);
     const center = this.controls.target;
     const camPos = this.camera.position;
     const boxes: number[] = [];
-    const place = (el: HTMLElement, p: Vec3, extra = 1, avoid = false): void => {
+    const place = (el: HTMLElement, p: Vec3, extra = 1, avoid = false, kind?: LabelKind, size?: [number, number] | null): void => {
       const s = this.project(p);
       if (!s || s.x < -50 || s.y < -20 || s.x > this.width + 50 || s.y > this.height + 20) {
         el.style.opacity = '0';
         return;
       }
+      if (kind && size) {
+        // Keep clear of the controls: agents swap sides first, other labels just hide.
+        if (kind === 'agent') {
+          const side = agentSide(s.x, s.y, size[0], size[1], this.blockers);
+          el.classList.toggle('flip', side === 'left');
+          if (side === 'hidden') {
+            el.style.opacity = '0';
+            return;
+          }
+        } else if (!clearOf(labelBox(kind, s.x, s.y, size[0], size[1]), this.blockers)) {
+          el.style.opacity = '0';
+          return;
+        }
+      } else if (kind === 'agent') el.classList.remove('flip');
       if (avoid) {
         // Skip a label that would overlap one already placed.
         for (let k = 0; k < boxes.length; k += 2) {
@@ -1362,18 +1408,22 @@ export class BrainScene {
       el.style.opacity = String((1 - back * 0.7) * extra);
       el.style.transform = `translate3d(${s.x.toFixed(1)}px,${s.y.toFixed(1)}px,0)`;
     };
+    const agents = Array.from(this.agents.values());
+    const agentSizes = agents.map((a) => sized(a.el));
     if (this.showLabels) {
-      for (const l of this.regionLabels) {
+      const regionSizes = this.regionLabels.map((l) => sized(l.el));
+      const noteSizes = this.noteLabels.map((l) => sized(l.el));
+      this.regionLabels.forEach((l, k) => {
         if (this.hiddenRegions.has(l.name)) l.el.style.opacity = '0';
-        else place(l.el, l.anchor, camDist < 1.2 ? 0.35 : 1, true);
-      }
-      for (const l of this.noteLabels) {
-        if (l.index >= this.n) continue;
-        place(l.el, this.positionOf(l.index), (1 - this.dim[l.index]) * Math.min(1, this.grow[l.index]), true);
-      }
+        else place(l.el, l.anchor, camDist < 1.2 ? 0.35 : 1, true, 'region', regionSizes[k]);
+      });
+      this.noteLabels.forEach((l, k) => {
+        if (l.index >= this.n) return;
+        place(l.el, this.positionOf(l.index), (1 - this.dim[l.index]) * Math.min(1, this.grow[l.index]), true, 'note', noteSizes[k]);
+      });
     }
     if (this.selected >= 0) place(this.reticle, this.positionOf(this.selected));
-    this.agents.forEach((a) => place(a.el, a.head, a.fade));
+    agents.forEach((a, k) => place(a.el, a.head, a.fade, false, 'agent', agentSizes[k]));
   }
 
   // ------------------------------------------------------------ frame

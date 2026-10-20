@@ -14,7 +14,7 @@ import { state, allNotes, colorOfFolder } from '../state';
 import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
 import { connectOnLoad } from './keys';
 import { useActivityStyles, wireActRows } from '../control/activity';
-import { loadFeed, onLive, pushLive, verb, type ActivityItem } from '../control/feed';
+import { loadFeed, onLive, pushLive, settleRunning, verb, type ActivityItem } from '../control/feed';
 import { ago, copyText, ICO, plural, sparkSVG, useControlStyles, whileVisible } from '../control/ui';
 import { RT } from '../realtime';
 import type { KeyRow, KeysResult } from '../types';
@@ -268,8 +268,11 @@ let conn: 'on' | 'connecting' | 'off' | '' = '';
 let presence = 0;
 let queued = false;
 let loaded = false;
-/** Bumped per load(); an older response that resolves late is dropped. */
-let loadSeq = 0;
+/** The key list has arrived at least once (the Agents count is known). */
+let keysLoaded = false;
+/** A load is running; callers waiting for the next one to finish. */
+let loading = false;
+let waiting: (() => void)[] = [];
 
 export async function renderHome(): Promise<void> {
   useControlStyles();
@@ -388,15 +391,45 @@ function queue(): void {
   }, 150);
 }
 
-async function load(): Promise<void> {
-  const seq = ++loadSeq;
+/**
+ * Fetch keys, feed and OAuth links. One request set at a time: calls made
+ * while one runs share the next run, and each resolves once a run that
+ * started after it has landed. (Dropping the older response instead meant a
+ * busy vault, whose every write repaints this page, kept restarting the load
+ * on a slow link and the Agents count never arrived.)
+ */
+function load(): Promise<void> {
+  return new Promise((done) => {
+    waiting.push(done);
+    if (!loading) void pump();
+  });
+}
+
+async function pump(): Promise<void> {
+  loading = true;
+  while (waiting.length) {
+    const batch = waiting;
+    waiting = [];
+    try {
+      await loadOnce();
+    } catch (e) {
+      console.warn('overview: load failed', e);
+    }
+    batch.forEach((done) => done());
+  }
+  loading = false;
+}
+
+async function loadOnce(): Promise<void> {
   const [k, f, o] = await Promise.all([
     apiGet<KeysResult | KeyRow[]>('/api/keys').catch(() => null),
     loadFeed('1d', 500).catch(() => [] as ActivityItem[]),
     apiGet<{ connections?: { key_id: string }[] }>('/api/oauth/clients').catch(() => null),
   ]);
-  if (seq !== loadSeq) return;
-  if (k) keys = Array.isArray(k) ? k : k.keys || [];
+  if (k) {
+    keys = Array.isArray(k) ? k : k.keys || [];
+    keysLoaded = true;
+  }
   setAgentColors(keys);
   oauth = new Set((o?.connections || []).map((c) => c.key_id));
   feed = f;
@@ -471,10 +504,19 @@ function regionColor(f: string): string {
 }
 
 /** Fill one KPI tile: value, optional visual and hint. */
-function setKpi(id: string, value: number, viz: string, hint: string): void {
+/** A KPI tile; `value` null = still loading (a placeholder, never a misleading 0), NaN = could not load. */
+function setKpi(id: string, value: number | null, viz: string, hint: string): void {
   const b = document.getElementById(id);
   if (!b) return;
-  (b.querySelector('[data-v]') as HTMLElement).textContent = value.toLocaleString();
+  const v = b.querySelector('[data-v]') as HTMLElement;
+  if (value == null) {
+    b.setAttribute('aria-busy', 'true');
+    setHTML(v, '<span class="sk" style="display:inline-block;width:1.4ch;height:.9em;vertical-align:-.05em"></span>');
+  } else {
+    b.removeAttribute('aria-busy');
+    delete v.dataset.html;
+    v.textContent = Number.isNaN(value) ? '–' : value.toLocaleString();
+  }
   setHTML(b.querySelector('[data-viz]') as HTMLElement, viz);
   setHTML(b.querySelector('[data-h]') as HTMLElement, hint);
 }
@@ -556,13 +598,17 @@ function paintAgentKpi(): void {
   const active = rows.filter((r) => r.active).length;
   const agentTimes = feed.filter((x) => x.source === 'agent').map((x) => x.ts);
   const calls = agentTimes.length;
+  // Until the key list arrives the count is unknown: show a placeholder, not 0
+  // (the header pill may already say agents are working).
   setKpi(
     'ovKAgents',
-    enabled,
+    keysLoaded ? enabled : loaded ? NaN : null,
     miniBars(buckets(agentTimes, 24, 3600), 'Agent calls per hour, last 24 hours'),
     !loaded
       ? '&nbsp;'
-      : active
+      : !keysLoaded
+        ? 'Could not load agents'
+        : active
         ? `<span class="cc-dot ok"></span><b>${active}</b> active now`
         : calls
           ? `<b>${calls.toLocaleString()}</b> ${calls === 1 ? 'call' : 'calls'} in 24h`
@@ -807,7 +853,7 @@ function paintActivity(): void {
                   x.paths.length > 1 ? `<span class="sep">+${x.paths.length - 1}</span>` : ''
                 }`
               : `<span>${esc(label || (x.source === 'agent' ? 'over MCP' : 'vault'))}</span>`;
-            const st = x.running
+            const st = settleRunning(x)
               ? '<span class="ov-st"><span class="cc-dot run"></span>running</span>'
               : x.ok === false
                 ? '<span class="ov-st off">failed</span>'
