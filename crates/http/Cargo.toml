@@ -20,7 +20,7 @@ tracing-subscriber.workspace = true
 # Fetches OAuth client metadata documents (CIMD) for remote MCP clients.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # Seals API key secrets so the owner can show them again (Agents page).
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 # gzip for the UI bundle (already in the tree via zip).
 flate2 = "1"
 
