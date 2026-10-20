@@ -563,6 +563,13 @@ pub fn inline_tag_spans(body: &str) -> Vec<std::ops::Range<usize>> {
             }
         }
         let end = name.start() + name.as_str().trim_end_matches('/').len();
+        // Like Obsidian, a tag needs at least one non-digit: `PR #2` or `#2026` is not a tag.
+        if masked[name.start()..end]
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '/')
+        {
+            continue;
+        }
         out.push(name.start()..end);
     }
     out
@@ -7350,6 +7357,15 @@ mod inline_tag_tests {
         assert_eq!(tags("a ` lone #tick"), ["tick"]);
         // A code span does not run across a blank line.
         assert_eq!(tags("open `\n\n#para"), ["para"]);
+    }
+
+    #[test]
+    fn all_digit_words_are_not_tags() {
+        assert_eq!(
+            tags("merged PR #2 and issue #42 in #2026"),
+            Vec::<String>::new()
+        );
+        assert_eq!(tags("#2026q1 #v2 #1/2 #ok"), ["2026q1", "v2", "ok"]);
     }
 
     #[test]
