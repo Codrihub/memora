@@ -26,7 +26,7 @@
 
 # ---------------------------------------------------------------- build stage
 # Pinned toolchain for reproducible image builds.
-FROM rust:1.99-slim-bookworm AS builder
+FROM rust:1.99-slim-trixie AS builder
 
 ENV CARGO_TERM_COLOR=never \
     CARGO_NET_RETRY=5
@@ -60,7 +60,7 @@ RUN find crates -name '*.rs' -exec touch {} + \
  && cargo build --release --locked
 
 # -------------------------------------------------------------- runtime stage
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git tini \
