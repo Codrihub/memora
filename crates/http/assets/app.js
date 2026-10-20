@@ -10192,6 +10192,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-10-20
+
+### Fixed
+
+- Memora slowed to a crawl under steady agent traffic: with a few hundred notes
+  and a few MCP calls per second, the web UI (tree, notes, agents) took tens of
+  seconds to answer. Tag lookups (\`search_by_tag\`, \`list_tags\`) re-rendered every
+  note while holding the vault lock, MCP calls and vault reads blocked the
+  server's async workers, and the note view walked the vault once per link. Tag
+  lookups now read the note cache, reads run off the async workers on a snapshot
+  of the vault, and a write refreshes only the note it changed. Under the same
+  traffic the tree and note requests answer in about 20 ms instead of 20-35 s.
+- The node card in Brain, Graph and Canvas no longer flashes its loading state
+  and refetches the note on every realtime update; it refreshes only when that
+  note changes.
+- The Tags page builds its index in one request instead of one per note.
+
 ## [1.3.4] - 2026-10-20
 
 Every MCP tool was tested against bad, missing, hidden and extreme input. This
@@ -10592,6 +10609,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.5]: https://github.com/Codrihub/memora/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Codrihub/memora/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Codrihub/memora/releases/tag/v1.3.3
 [1.3.2]: https://github.com/Codrihub/memora/releases/tag/v1.3.2
