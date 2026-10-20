@@ -36,7 +36,10 @@ sudo memora-cli setup --minutes 15
 - [Docker](#docker)
 - [npm](#npm)
 - [Start, stop and restart](#start-stop-and-restart)
+- [Update](#update)
 - [Uninstall with memora-cli](#uninstall-with-memora-cli)
+- [Uninstall by hand (versions before 1.3.2)](#uninstall-by-hand-versions-before-132)
+- [Troubleshooting](#troubleshooting)
 - [Reverse proxy](#reverse-proxy)
 - [Backups](#backups)
 - [Automation: `--check` and `--upgrade`](#automation---check-and---upgrade)
@@ -423,6 +426,35 @@ process starts it again (systemd `Restart=always`, Docker
 `--restart unless-stopped`); the installer's unit uses `Restart=on-failure`, so
 it stays stopped. API keys cannot shut the server down.
 
+## Update
+
+Check what you run first: `memora --version` and `memora-cli --version`.
+`memora-cli update` (or `/update` in the console) works out how this copy was
+installed and prints, or runs, the right steps. By install method:
+
+| Install | Update with | Then |
+|---|---|---|
+| npm (Windows, Linux) | `npm install -g @codrihub/memora@latest` | `memora-cli restart`, or Ctrl+C the running `memora` and start it again |
+| Docker Compose | `docker compose pull && docker compose up -d` | nothing: the container is re-created |
+| Docker run | `docker pull ghcr.io/codrihub/memora:latest`, then `docker rm -f memora` and the same `docker run` again (same volumes) | nothing |
+| Native (systemd) | `sudo memora-cli update` (runs `install.sh --upgrade`) | nothing: the service is restarted |
+| Source | `git pull && cargo build --release` | `memora-cli restart` |
+
+Settings, accounts and notes stay; the server migrates `memora.db` on start.
+Take a `memora-cli db backup` first if you are unsure.
+
+**Release zip (older Windows installs).** Windows now installs with npm. To
+switch, stop the old server (Ctrl+C in its window), run
+`npm install -g @codrihub/memora`, and start `memora` with the same folders so
+everything carries over, for example in PowerShell:
+
+```powershell
+$env:MEMORA_STATE = 'C:\Users\you\memora\state'; $env:MEMORA_VAULT = 'C:\Users\you\memora\vault'; memora
+```
+
+Then delete the old program folder (only the `.exe` files and `assets`, not
+your state or vault folders).
+
 ## Uninstall with memora-cli
 
 ```bash
@@ -451,6 +483,105 @@ never deleted.
 
 Without a terminal it needs `--yes` and deletes only what the flags say:
 `memora-cli uninstall --yes [--delete-config] [--delete-vault]`.
+
+On a version older than 1.3.2 there is no `uninstall` command: see
+[Uninstall by hand](#uninstall-by-hand-versions-before-132).
+
+## Uninstall by hand (versions before 1.3.2)
+
+`memora-cli uninstall` arrived in 1.3.2. On an older version it answers
+``unknown command `uninstall` ``. Either update first and then run
+`memora-cli uninstall` (npm: `npm install -g @codrihub/memora@latest`), or
+remove Memora by hand with the steps below. They only touch Memora: never use
+wildcards, and never delete a parent folder or your home folder.
+
+**1. Check the version.** `memora --version` and `memora-cli --version`.
+
+**2. Find the folders.** Memora keeps two folders:
+
+- the **state folder** (settings, accounts, keys): `MEMORA_STATE`, or by
+  default `state` inside the folder where you started `memora` (for example
+  `C:\Users\you\state` or `~/memora/state`);
+- the **vault folder**: your notes, wherever you chose.
+
+The server prints both when it starts:
+`Memora HTTP server starting vault=... state=...`. `memora-cli status`, run in
+the same folder, shows the state folder too.
+
+**3. Stop Memora.** Press Ctrl+C in the window where `memora` runs (or close
+that window). Then make sure it is gone:
+
+| Shell | Check | Stop if still running |
+|---|---|---|
+| PowerShell | `Get-Process memora -ErrorAction SilentlyContinue` | `Stop-Process -Name memora` |
+| cmd | `tasklist /FI "IMAGENAME eq memora.exe"` | `taskkill /IM memora.exe` |
+| Linux, macOS | `pgrep -ax memora` | `pkill -x memora` |
+
+**4. Remove the program.**
+
+| Install | Commands |
+|---|---|
+| npm (any OS) | `npm uninstall -g @codrihub/memora`, then `npm ls -g --depth=0`: if `@codrihub/memora-win32-x64` (or `-linux-x64`, `-linux-arm64`) is still listed, `npm uninstall -g` that exact name |
+| Docker run | `docker rm -f memora`, then `docker image rm ghcr.io/codrihub/memora:latest` |
+| Docker Compose | `docker compose down` in the folder of `docker-compose.yml` (no `-v`) |
+| Native (systemd) | `sudo /usr/local/share/memora/install.sh --uninstall` (keeps `/var/lib/memora`) |
+| Release zip | delete the folder that holds `memora.exe`, `memora-cli.exe` and `assets` (check its contents first, as below) |
+
+**5. Delete the state folder (optional).** Look inside first: it should hold
+`memora.db` (and maybe `memora.log`, `memora.pid`, `stop.token`, `backups`).
+Then delete that exact path:
+
+```powershell
+# Windows, PowerShell
+Get-ChildItem -LiteralPath 'C:\Users\you\state'
+Remove-Item -LiteralPath 'C:\Users\you\state' -Recurse -Confirm
+```
+
+```bat
+:: Windows, cmd
+dir "C:\Users\you\state"
+rmdir /S "C:\Users\you\state"
+```
+
+```sh
+# Linux, macOS
+ls -la ~/memora/state
+rm -rI -- ~/memora/state
+```
+
+Docker: `docker volume ls`, then remove the exact names,
+`docker volume rm memora-state`. Compose: check and delete the `./state`
+folder next to `docker-compose.yml`. Native: `/var/lib/memora/state`
+(or `install.sh --uninstall --purge`, which also deletes the notes, see below).
+
+**6. The vault folder: only if you are sure.** It holds your notes. It is
+optional to delete it; copy it somewhere safe first (it is plain Markdown).
+Use the same two steps on its exact path: look inside (`Get-ChildItem` /
+`ls`), then `Remove-Item -LiteralPath '<vault>' -Recurse -Confirm` or
+`rm -rI -- <vault>`. Docker: `docker volume rm memora-data`, or the `./data`
+folder with Compose. Native: `sudo /usr/local/share/memora/install.sh
+--uninstall --purge` deletes `/var/lib/memora` with the notes, the account
+and the `memora` user.
+
+## Troubleshooting
+
+**``memora-cli: unknown command `uninstall` ``** (or `start`, `stop`,
+`restart`). You run a version older than 1.3.2. Update, then run the command
+again: `npm install -g @codrihub/memora@latest`, then `memora-cli uninstall`.
+Or remove it by hand: [Uninstall by hand](#uninstall-by-hand-versions-before-132).
+
+**`/update` says "not installed with install.sh (built from source)" on an
+npm install.** Older versions could miss an npm install. Update with npm,
+`npm install -g @codrihub/memora@latest`, and restart the server; newer
+versions detect npm reliably. Never run `cargo build` for an npm install.
+
+**`/restart` says "systemctl restart" on npm or Windows.** Same cause (older
+version). Stop the server with Ctrl+C in its window and run `memora` again, or
+update and use `memora-cli restart`.
+
+**Which version do I have?** `memora --version` and `memora-cli --version`.
+The latest release is on
+[GitHub Releases](https://github.com/Codrihub/memora/releases).
 
 ## Reverse proxy
 

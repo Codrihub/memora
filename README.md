@@ -284,6 +284,16 @@ commands (`docker start / stop / restart memora`). Uninstall asks, with a
 checklist, whether to also delete your settings and your vault; both are kept
 unless you tick them. Details: [docs/INSTALL.md](docs/INSTALL.md#uninstall-with-memora-cli).
 
+### Update, uninstall, troubleshooting
+
+`memora-cli update` prints the right steps for your install (npm:
+`npm install -g @codrihub/memora@latest`, then `memora-cli restart`). Check
+your version with `memora --version`. Per install method, and for older
+versions without `memora-cli uninstall` (before 1.3.2), see
+[Update](docs/INSTALL.md#update),
+[Uninstall by hand](docs/INSTALL.md#uninstall-by-hand-versions-before-132) and
+[Troubleshooting](docs/INSTALL.md#troubleshooting).
+
 The owner can also **shut the server down from the browser**: Settings, Server,
 Shut down. Every browser and agent is disconnected until it is started again on
 the server. When a supervisor restarts it on its own (systemd `Restart=always`,
@@ -309,7 +319,7 @@ Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 | Document | Contents |
 |---|---|
-| [docs/INSTALL.md](docs/INSTALL.md) | Native installer, Docker, npm, reverse proxy, backups |
+| [docs/INSTALL.md](docs/INSTALL.md) | Native installer, Docker, npm, updates, uninstall, troubleshooting, reverse proxy, backups |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every setting and where it lives |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment and hardening |
 | [docs/MCP.md](docs/MCP.md) | Connecting agents, OAuth, tool reference |

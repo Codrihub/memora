@@ -106,12 +106,12 @@ pub(crate) const TOPICS: &[Topic] = &[
     Topic {
         id: "manage",
         title: "Run & manage the server",
-        summary: "start, stop, restart, uninstall per install",
+        summary: "start, stop, restart, uninstall; by hand for old versions",
     },
     Topic {
         id: "troubleshooting",
         title: "Troubleshooting",
-        summary: "401, -32003, unreachable server, locked",
+        summary: "401, -32003, unreachable server, locked, old versions",
     },
     Topic {
         id: "more",
@@ -680,12 +680,17 @@ fn backups_updates() -> Vec<Block> {
             in `state/backups`."),
         code("sudo systemctl stop memora\nsudo memora-cli db restore state/backups/memora-<time>.db\nsudo systemctl start memora"),
         h("Update"),
-        li("`/update` (or `sudo memora-cli update`) checks GitHub Releases, shows what is new, \
-            then downloads, verifies the checksum, swaps the binary and restarts the server. \
-            Your data stays."),
+        li("Check the version first: `memora --version`, `memora-cli --version`. `/update` (or \
+            `memora-cli update`) works out how Memora was installed and runs or prints the \
+            right steps. Your data stays; the database is migrated on start."),
+        Def("npm".into(), "`npm install -g @codrihub/memora@latest`, then `memora-cli restart`".into()),
+        Def("Docker".into(), "`docker compose pull && docker compose up -d`".into()),
+        Def("Native".into(), "`sudo memora-cli update` (install.sh --upgrade)".into()),
+        Def("Source".into(), "`git pull && cargo build --release`, then `memora-cli restart`".into()),
+        li("Release zip (older Windows installs): Windows now installs with npm. Stop the old \
+            server, run `npm install -g @codrihub/memora`, start `memora` with the same \
+            MEMORA_STATE and MEMORA_VAULT folders, then delete the old program folder."),
         code("memora-cli update --check"),
-        li("Installed with npm? Update the package instead, then restart the server."),
-        code("npm install -g @codrihub/memora@latest"),
         h("Docker"),
         li("Update by pulling the new image; the data stays in `./data` and `./state`."),
         code("docker compose pull && docker compose up -d\ndocker compose exec gateway memora-cli db backup\ndocker compose exec gateway memora-cli db check"),
@@ -773,6 +778,43 @@ fn manage() -> Vec<Block> {
             "memora-cli uninstall --yes\n\
               memora-cli uninstall --delete-config --delete-vault --yes",
         ),
+        h("Uninstall by hand (versions before 1.3.2)"),
+        p("Older versions answer: unknown command `uninstall`. Update first \
+           (`npm install -g @codrihub/memora@latest`, then `memora-cli uninstall`), or remove \
+           Memora by hand. Only touch Memora: no wildcards, never a parent or home folder."),
+        li("1. Check the version: `memora --version`, `memora-cli --version`."),
+        li("2. Find the folders. State: MEMORA_STATE, or `state` inside the folder where you \
+            started `memora` (e.g. C:\\Users\\you\\state). Vault: the folder you chose. The \
+            server prints both at start: `Memora HTTP server starting vault=... state=...`."),
+        li("3. Stop Memora: Ctrl+C in its window (or close it). Check it is gone:"),
+        code(
+            "Get-Process memora -ErrorAction SilentlyContinue   # PowerShell; Stop-Process -Name memora\n\
+              tasklist /FI \"IMAGENAME eq memora.exe\"           # cmd; taskkill /IM memora.exe\n\
+              pgrep -ax memora                                   # Linux; pkill -x memora",
+        ),
+        li("4. Remove the program:"),
+        code(
+            "npm uninstall -g @codrihub/memora\n\
+              npm ls -g --depth=0        # still lists @codrihub/memora-<platform>? uninstall that exact name\n\
+              docker rm -f memora        # Docker run (Compose: docker compose down, no -v)\n\
+              sudo /usr/local/share/memora/install.sh --uninstall   # native, keeps /var/lib/memora",
+        ),
+        li("Release zip: delete the folder holding memora.exe, memora-cli.exe and assets."),
+        li("5. State folder (optional): look inside first; it should hold memora.db (and \
+            maybe memora.log, backups). Then delete that exact path. PowerShell:"),
+        code(
+            "Get-ChildItem -LiteralPath 'C:\\Users\\you\\state'\n\
+              Remove-Item -LiteralPath 'C:\\Users\\you\\state' -Recurse -Confirm",
+        ),
+        li("cmd:"),
+        code("dir \"C:\\Users\\you\\state\"\nrmdir /S \"C:\\Users\\you\\state\""),
+        li("Linux, macOS:"),
+        code("ls -la ~/memora/state\nrm -rI -- ~/memora/state"),
+        li("Docker: `docker volume rm memora-state` (Compose: the ./state folder next to \
+            docker-compose.yml). Native: /var/lib/memora/state."),
+        li("6. Vault folder: your notes. Optional; copy it somewhere safe first and delete it \
+            only if you are sure, the same way on its exact path (Docker: \
+            `docker volume rm memora-data`; native: `install.sh --uninstall --purge`)."),
     ]
 }
 
@@ -803,6 +845,14 @@ fn troubleshooting(base: &str) -> Vec<Block> {
             `/unlock` only lifts the lock."),
         li("Too many failed sign-ins: wait 5 to 15 minutes, or `/cooldowns` if it was you."),
         li("Forgot the password: `/reset`."),
+        h("Older versions"),
+        li("unknown command `uninstall` (or start, stop, restart): the version is older than \
+            1.3.2. Update with `npm install -g @codrihub/memora@latest`, or remove it by hand: \
+            `/docs manage`."),
+        li("`/update` says \"built from source\" on an npm install, or `/restart` says \
+            systemctl: an older version guessed wrong. Update with npm as above, then restart \
+            (Ctrl+C and run `memora` again). Never `cargo build` an npm install."),
+        li("Check the version: `memora --version`, `memora-cli --version`."),
         h("Still stuck"),
         li("`/db check` and `/status`, then the server log (`journalctl -u memora` or \
             `docker compose logs gateway`)."),
@@ -817,7 +867,10 @@ fn more(base: &str) -> Vec<Block> {
             "Repository".into(),
             "https://github.com/Codrihub/memora/tree/main/docs".into(),
         ),
-        li("INSTALL.md: native and Docker installs, upgrades, uninstall."),
+        li(
+            "INSTALL.md: npm, Docker and native installs, updates, uninstall (also by hand), \
+            troubleshooting.",
+        ),
         li("CONFIGURATION.md: every setting and environment variable."),
         li("MCP.md: the protocol, every tool, errors and permissions."),
         li("API.md, DATABASE.md, DEPLOYMENT.md, ARCHITECTURE.md."),
