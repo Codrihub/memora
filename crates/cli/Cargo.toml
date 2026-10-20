@@ -15,5 +15,5 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dialoguer = { version = "0.11", default-features = false, features = ["password"] }
-console = "0.15"
+console = "0.16"
 libc = "0.2"
