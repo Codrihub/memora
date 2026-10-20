@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-10-21
+
+### Added
+
+- Drag and drop in the sidebar tree, with the mouse, a pen or touch (hold for a
+  moment, then drag): drop on a folder to move into it, on a note to move into
+  that note's folder, or on "All nodes" to move to the top level. A hint says
+  where the item will go, places it cannot go are marked, the list scrolls when
+  you drag near its top or bottom edge, and a closed folder opens when you hold
+  over it. Every drop asks "Move "X" to "Y"?" first; Escape cancels a drag.
+- A folder picker shaped like the sidebar tree in New node, Move to, Move
+  contents to and the folder delete dialog: expand and collapse, keyboard
+  navigation, and a search that finds folders by name or path at any depth.
+- `GET /api/folders` lists every folder you can see, empty ones included.
+
+### Changed
+
+- Very deep folder trees stay readable: indentation stops growing after six
+  levels and deeper rows show their level; long names end with an ellipsis and
+  show the full path on hover.
+
+### Fixed
+
+- A new subfolder could not be chosen in New node (it only listed top-level
+  folders), and empty folders were missing from the sidebar, Move to and the
+  folder delete dialog.
+- A word made only of digits after `#` (for example "PR #2") was read as a tag.
+- The sidebar kept jumping back to the top when the tree redrew.
+
 ## [1.3.6] - 2026-10-21
 
 ### Added
@@ -480,6 +509,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[1.3.7]: https://github.com/Codrihub/memora/releases/tag/v1.3.7
 [1.3.6]: https://github.com/Codrihub/memora/releases/tag/v1.3.6
 [1.3.5]: https://github.com/Codrihub/memora/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Codrihub/memora/releases/tag/v1.3.4
