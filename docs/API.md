@@ -157,12 +157,12 @@ unmatched request is `404 {"error":"not found"}`.
 | POST | `/api/create` | Session or key (`write`, +CSRF) | `{ok, path}`. Body: `{title, folder?, content?}`. |
 | POST | `/api/rename` | Session or key (`write`, +CSRF) | `{ok, path}` with the new path. Body: `{path, name}`. |
 | POST | `/api/move` | Session or key (`write`, +CSRF) | `{ok, path}` with the new path. Body: `{path, folder?}`. |
-| POST | `/api/delete` | Session or key (`write`, +CSRF) | `{ok:true}`. Body: `{path}`. |
+| POST | `/api/delete` | Session or key (`write`, +CSRF) | `{ok:true}`. Body: `{path}`. Deletes the note file for good (no trash); with version history on, `restore_memory` can bring it back. |
 | POST | `/api/folder` | Session or key (`write`, +CSRF) | `{ok, path}`. Body: `{name}`. |
 | POST | `/api/folder/rename` | Session or key (`write`, +CSRF) | `{ok, from, to, notes}`. Body: `{folder, name}`. |
 | POST | `/api/folder/move` | Session or key (`write`, +CSRF) | Moves a folder and everything in it. `{ok, from, to, notes}`. Body: `{folder, into}`; `into` empty or `Root` means the top level. |
 | POST | `/api/folder/move-contents` | Session or key (`write`, +CSRF) | Moves everything inside a folder into another one, then removes the emptied folder. Name clashes get a `-N` suffix. `{ok, from, to, moved}`. Body: `{folder, into}`; `into` empty or `Root` means the top level. |
-| POST | `/api/delete-folder` | Session or key (`write`, +CSRF) | Deletes a folder and moves its notes to the top level. `{ok, deleted_folder, moved_to_root}` where `moved_to_root` lists the new note paths. Body: `{folder}`. |
+| POST | `/api/delete-folder` | Session or key (`write`, +CSRF) | Deletes a folder. Body: `{folder, into?, mode?}`. By default its notes move to the folder's parent (the top level for a top-level folder), keeping the sub folder structure below it, and wikilinks are rewritten: `{ok, deleted_folder, moved_to, moved, links_updated}` (`moved` lists the new paths; `moved_to_root` repeats it when they went to the top level). `into` names another existing folder for the notes (`Root` = top level). `mode: "trash"` moves every note to `.Trash` instead (restorable with the MCP tools `list_trash` / `restore_trash`): `{ok, deleted_folder, mode, count, trashed}`. Other files in the folder are deleted. |
 | POST | `/api/folder-meta` | Session or key (`write`, +CSRF) | `{ok, folder}`. Body: `{folder, color?, icon?, desc?}`. |
 
 The three folder operations also publish a `folder_changed` realtime event so

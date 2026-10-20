@@ -276,6 +276,18 @@ mod tests {
         // A visible folder that holds a hidden note cannot be moved or deleted.
         assert!(s.rename_folder_impl("Notes", "Renamed").is_err());
         assert!(s.delete_folder_impl("Notes").is_err());
+        assert!(s.delete_folder_with("Notes", None, Some("trash")).is_err());
+        // A hidden destination is refused exactly like a missing one.
+        let hidden = s
+            .delete_folder_with("Public", Some("Private"), None)
+            .unwrap_err();
+        let missing = s
+            .delete_folder_with("Public", Some("Nope"), None)
+            .unwrap_err();
+        assert_eq!(
+            hidden.0.replace("Private", "X"),
+            missing.0.replace("Nope", "X")
+        );
         assert!(s.move_folder_contents_impl("Notes", "Public").is_err());
         assert!(s.soft_delete_impl("Notes/secret.md").is_err());
         assert!(s.get_note_at_impl("Notes/secret.md", "HEAD").is_err());

@@ -955,7 +955,9 @@ async fn h_api_folder_op(
     }
 }
 
-/// `POST /api/delete-folder` `{folder}` -> `{ok:true,moved_to,moved,links_updated,moved_to_root?}`
+/// `POST /api/delete-folder` `{folder, into?, mode?}` -> `{ok:true,moved_to,moved,links_updated,moved_to_root?}`;
+/// `into` = destination folder for the notes (default: the parent; `Root` = top level),
+/// `mode: "trash"` = move every note to `.Trash` instead (`{ok,mode,count,trashed}`).
 async fn h_api_delete_folder(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -968,7 +970,13 @@ async fn h_api_delete_folder(
     let Some(folder) = body_str(&b, "folder") else {
         return bad("folder is required");
     };
-    match crate::store_as(&st, key.as_deref()).delete_folder_impl(&folder) {
+    let into = body_str(&b, "into");
+    let mode = body_str(&b, "mode");
+    match crate::store_as(&st, key.as_deref()).delete_folder_with(
+        &folder,
+        into.as_deref(),
+        mode.as_deref(),
+    ) {
         Ok(v) => {
             let mut out = json!({"ok": true});
             if let (Some(o), Some(src)) = (out.as_object_mut(), v.as_object()) {

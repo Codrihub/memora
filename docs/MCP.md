@@ -270,7 +270,9 @@ sessions are never filtered.
 
 R = read-only (needs only the `mcp` scope). W = changes the vault or server
 state (also needs the `write` scope). Unless marked required, arguments are
-optional. Paths are vault-relative, for example `Projects/Plan.md`.
+optional. Paths are vault-relative, for example `Projects/Plan.md`. A path
+copied in the web app (Copy path in a note or folder menu) works as is as the
+`path` argument of `read_memory` and the other tools.
 
 ### Notes (`note`)
 
@@ -322,7 +324,7 @@ optional. Paths are vault-relative, for example `Projects/Plan.md`.
 | `rename_folder` | W | `folder` (string, required), `name` (string, required, one segment) | Renames a folder in place. Notes, sub folders, color and icon move along. |
 | `move_folder` | W | `folder` (string, required), `into` (string; empty or `Root` = top level) | Moves a folder with everything in it. |
 | `move_folder_contents` | W | `folder` (string, required), `into` (string; empty = top level) | Moves everything inside a folder into another folder, then removes the empty folder. Name clashes get a `-N` suffix. |
-| `delete_folder` | W | `folder` (string, required) | Deletes a folder. Its notes move to Root. |
+| `delete_folder` | W | `folder` (string, required), `into` (string), `mode` (`move` or `trash`) | Deletes a folder. By default its notes (at any depth) move to the folder's parent (Root for a top-level folder), keeping the sub folder structure below it; wikilinks to them are rewritten. `into` sends them to another existing folder instead (`Root` = top level). `mode: "trash"` moves every note to `.Trash` instead (`list_trash` / `restore_trash` bring them back) and cannot be combined with `into`. Other files in the folder are deleted. |
 | `folder_stats` | R | `folder` (string, required) | Note count and metadata for one folder. |
 | `get_folder_meta` | R | `folder` (string) | Color, icon and description of one folder, or of every folder. |
 | `set_folder_meta` | W | `folder` (string, required), `color`, `icon`, `desc` (strings) | Sets folder display metadata. A field sent as an empty string is cleared. |

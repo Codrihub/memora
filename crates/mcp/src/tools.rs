@@ -504,9 +504,9 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "delete_folder",
             "ops",
-            "Delete a folder. Its notes (at any depth) move up to the folder's parent (Root for a top-level folder), keeping the sub folder structure below it: deleting A/B moves A/B/n.md to A/n.md and A/B/C/m.md to A/C/m.md. Clashing names get a -N suffix; other files in the folder are deleted; wikilinks to the moved notes are rewritten. The result lists moved (new paths) and moved_to.",
+            "Delete a folder. By default its notes (at any depth) move up to the folder's parent (Root for a top-level folder), keeping the sub folder structure below it: deleting A/B moves A/B/n.md to A/n.md and A/B/C/m.md to A/C/m.md. `into` moves them into another existing folder instead (same structure below it). Clashing names get a -N suffix; other files in the folder are deleted; wikilinks to the moved notes are rewritten. The result lists moved (new paths) and moved_to. mode \"trash\" moves every note to .Trash instead (list_trash / restore_trash bring them back; links are left as they are) and lists them in trashed.",
             "To clear folder structure you no longer use.",
-            json!({"folder":{"type":"string"}}),
+            json!({"folder":{"type":"string"},"into":{"type":"string","description":"Existing folder that receives the notes; omit for the folder's parent, 'Root' = top level. Not with mode trash."},"mode":{"type":"string","enum":["move","trash"],"description":"move (default): keep the notes by moving them; trash: move every note to .Trash"}}),
             &["folder"],
         ),
     ]
@@ -879,7 +879,14 @@ pub fn call_extra(
             "validate_memory" => store.validate_memory_impl(&s("path"))?,
 
             // ---------------- misc ----------------
-            "delete_folder" => folder_changed(actor, store.delete_folder_impl(&s("folder"))?),
+            "delete_folder" => folder_changed(
+                actor,
+                store.delete_folder_with(
+                    &s("folder"),
+                    opt("into").as_deref(),
+                    opt("mode").as_deref(),
+                )?,
+            ),
             "rename_folder" => {
                 folder_changed(actor, store.rename_folder_impl(&s("folder"), &s("name"))?)
             }
@@ -999,6 +1006,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn delete_folder_takes_into_and_trash_mode() {
+        use serde_json::json;
+        let d = tmp("delfolder");
+        for (f, body) in [("A/B/n.md", "n"), ("Keep/k.md", "k"), ("T/S/t.md", "t")] {
+            let p = d.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        let store = memora_core::MemoryStore::new(&d);
+        let call = |args: serde_json::Value| {
+            super::call_extra(&store, "delete_folder", &args, "test", &d.join("x")).unwrap()
+        };
+        let v = call(json!({"folder": "A/B", "into": "Keep"})).unwrap();
+        assert_eq!(v["moved_to"], "Keep");
+        assert!(d.join("Keep/n.md").is_file() && !d.join("A/B").exists());
+        assert!(call(json!({"folder": "T", "mode": "wipe"})).is_err());
+        assert!(call(json!({"folder": "T", "into": "Keep", "mode": "trash"})).is_err());
+        let v = call(json!({"folder": "T", "mode": "trash"})).unwrap();
+        assert_eq!(v["count"], 1);
+        assert!(!d.join("T").exists() && d.join(".Trash/t.md").is_file());
+        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]

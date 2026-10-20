@@ -3254,6 +3254,28 @@ impl MemoryStore {
     /// `A/C/n.md` when `A/B` is deleted); a clashing name gets a `-N` suffix. Other
     /// files in the folder are deleted with it.
     pub fn delete_folder_impl(&self, folder: &str) -> MResult<Value> {
+        self.delete_folder_with(folder, None, None)
+    }
+
+    /// [`MemoryStore::delete_folder_impl`] with options. `into` moves the notes into
+    /// that existing folder instead of the parent (`Root` = top level), still keeping
+    /// the sub folder structure below the deleted folder. `trash` moves every note to
+    /// `.Trash` instead (recorded in `.Trash/.index.json`, so `restore_trash` brings
+    /// each back to where it was); `into` cannot be combined with it. `mode` is
+    /// `move` (the default when `None` or empty) or `trash`.
+    pub fn delete_folder_with(
+        &self,
+        folder: &str,
+        into: Option<&str>,
+        mode: Option<&str>,
+    ) -> MResult<Value> {
+        let trash = match mode.map(|m| m.trim().to_ascii_lowercase()).as_deref() {
+            None | Some("") | Some("move") => false,
+            Some("trash") => true,
+            Some(other) => {
+                return err(format!("mode must be move or trash, got {other}"));
+            }
+        };
         let folder = folder_arg(folder)?;
         if folder.is_empty() || folder == "Root" {
             return err("cannot delete Root");
@@ -3268,8 +3290,32 @@ impl MemoryStore {
         if !self.subtree_visible(&fdir) {
             return err(PROTECTED_INSIDE);
         }
-        let parent = parent_folder(&folder).to_string();
+        let into = into.map(str::trim).filter(|i| !i.is_empty());
+        if trash && into.is_some() {
+            return err("give either into (move the notes) or mode trash, not both");
+        }
         let prefix = format!("{folder}/");
+        let parent = match into {
+            None => parent_folder(&folder).to_string(),
+            Some(i) if is_root_alias(i) => String::new(),
+            Some(i) => {
+                let dest = folder_arg(i)?;
+                if dest == folder || dest.starts_with(&prefix) {
+                    return err(format!(
+                        "into must be outside the folder being deleted ({folder})"
+                    ));
+                }
+                // A hidden destination answers exactly like a missing one.
+                let missing = || err(format!("destination folder not found: {dest}"));
+                if !self.visible(&dest) {
+                    return missing();
+                }
+                match self.resolve(&dest) {
+                    Ok(d) if d.is_dir() => dest,
+                    _ => return missing(),
+                }
+            }
+        };
         let before = self.all_note_paths();
         let notes: Vec<String> = self
             .walk()
@@ -3277,16 +3323,21 @@ impl MemoryStore {
             .filter(|(rel, _, _)| rel.starts_with(&prefix))
             .map(|(rel, _, _)| rel)
             .collect();
+        if trash {
+            return self.trash_folder(&folder, &fdir, notes);
+        }
         let base = folder.rsplit('/').next().unwrap_or(&folder);
         let mut moves: HashMap<String, String> = HashMap::new();
         let mut moved = Vec::new();
         let mut failed = Vec::new();
         for rel in notes {
             let mut rest = rel[prefix.len()..].to_string();
-            // A sub folder named like the deleted one (`A/A/x.md`, `A` deleted) would
-            // land back inside it: it becomes `A-1`.
-            if let Some(tail) = rest.strip_prefix(&format!("{base}/")) {
-                rest = format!("{base}-1/{tail}");
+            // A sub folder named like the deleted one (`A/A/x.md`, `A` deleted, moving
+            // to A's parent) would land back inside it: it becomes `A-1`.
+            if parent == parent_folder(&folder) {
+                if let Some(tail) = rest.strip_prefix(&format!("{base}/")) {
+                    rest = format!("{base}-1/{tail}");
+                }
             }
             let up = if parent.is_empty() {
                 rest
@@ -3358,6 +3409,59 @@ impl MemoryStore {
             v["moved_to_root"] = v["moved"].clone();
         }
         Ok(v)
+    }
+
+    /// Delete-folder in trash mode: every note goes to `.Trash` (remembering its
+    /// path), then the folder and its other files are removed. When a note cannot be
+    /// trashed the folder is kept and the error lists what already went.
+    fn trash_folder(&self, folder: &str, fdir: &Path, notes: Vec<String>) -> MResult<Value> {
+        let mut trashed = Vec::new();
+        let mut failed = None;
+        for rel in notes {
+            match self.move_to_trash(&rel) {
+                Ok(to) => trashed.push(json!({"path": rel, "to": to})),
+                Err(e) => {
+                    failed = Some(format!("{rel}: {}", e.0));
+                    break;
+                }
+            }
+        }
+        if let Some(why) = failed {
+            let _ = self.reindex();
+            if !trashed.is_empty() {
+                self.git_commit(&format!(
+                    "delete folder {folder}: {} notes moved to .Trash",
+                    trashed.len()
+                ));
+            }
+            return err(format!(
+                "could not move {why} to the trash, so the folder was kept; already in the trash: {}",
+                if trashed.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    trashed
+                        .iter()
+                        .filter_map(|t| t["path"].as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            ));
+        }
+        fs::remove_dir_all(fdir).ok();
+        self.path_event(PathEvent::Deleted {
+            path: folder.to_string(),
+        });
+        self.rekey_folder_meta(folder, None);
+        let _ = self.reindex();
+        self.git_commit(&format!(
+            "delete folder {folder} ({} notes moved to .Trash)",
+            trashed.len()
+        ));
+        Ok(json!({
+            "ok": true, "deleted_folder": folder, "mode": "trash",
+            "count": trashed.len(), "trashed": trashed,
+            "note": "the notes are in .Trash: list_trash shows them, restore_trash brings one back",
+        }))
     }
 
     pub fn duplicate_memory_impl(&self, path: &str) -> MResult<String> {
@@ -6783,6 +6887,71 @@ mod folder_tests {
         assert_eq!(v["moved_to"], "Root");
         assert_eq!(v["moved_to_root"].as_array().unwrap().len(), 4, "{v}");
         assert!(d.join("C/two.md").is_file() && d.join("one.md").is_file());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn deleting_a_folder_into_another_folder_keeps_structure() {
+        let (d, s) = vault(
+            "delete-into",
+            &[
+                ("A/B/one.md", "1"),
+                ("A/B/C/two.md", "2"),
+                ("Keep/one.md", "clash"),
+                ("x.md", "[[A/B/C/two]]"),
+            ],
+        );
+        assert!(s.delete_folder_with("A/B", Some("A/B/C"), None).is_err());
+        assert!(s.delete_folder_with("A/B", Some("Nope"), None).is_err());
+        assert!(s
+            .delete_folder_with("A/B", Some("Keep"), Some("trash"))
+            .is_err());
+        assert!(
+            d.join("A/B/one.md").is_file(),
+            "refused calls change nothing"
+        );
+        let v = s.delete_folder_with("A/B", Some("Keep"), None).unwrap();
+        assert_eq!(v["moved_to"], "Keep");
+        assert!(d.join("Keep/one-1.md").is_file() && read(&d, "Keep/one.md") == "clash");
+        assert!(d.join("Keep/C/two.md").is_file());
+        assert!(!d.join("A/B").exists() && d.join("A").is_dir());
+        assert_eq!(read(&d, "x.md"), "[[Keep/C/two]]");
+        fs::create_dir_all(d.join("A/Z")).unwrap();
+        fs::write(d.join("A/Z/z.md"), "z").unwrap();
+        let v = s.delete_folder_with("A/Z", Some("Root"), None).unwrap();
+        assert_eq!(v["moved_to"], "Root");
+        assert!(d.join("z.md").is_file());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn deleting_a_folder_in_trash_mode_trashes_every_note() {
+        let (d, s) = vault(
+            "delete-trash",
+            &[
+                ("A/one.md", "1"),
+                ("A/B/one.md", "1b"),
+                ("A/B/img.png", "png"),
+                ("x.md", "[[A/one]]"),
+            ],
+        );
+        let v = s.delete_folder_with("A", None, Some("trash")).unwrap();
+        assert_eq!(v["mode"], "trash");
+        assert_eq!(v["count"], 2, "{v}");
+        assert!(!d.join("A").exists());
+        assert!(d.join(".Trash/one.md").is_file() && d.join(".Trash/one-1.md").is_file());
+        let originals: BTreeSet<String> = s
+            .list_trash_impl()
+            .iter()
+            .filter_map(|t| t["original"].as_str().map(String::from))
+            .collect();
+        assert_eq!(
+            originals,
+            BTreeSet::from(["A/one.md".to_string(), "A/B/one.md".to_string()])
+        );
+        assert_eq!(read(&d, "x.md"), "[[A/one]]", "links are left alone");
+        s.restore_trash_impl("one-1.md", "").unwrap();
+        assert!(d.join("A/B/one.md").is_file());
         fs::remove_dir_all(&d).ok();
     }
 
