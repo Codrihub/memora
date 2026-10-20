@@ -492,25 +492,195 @@ pub fn render_markdown_ctx(text: &str, ctx: &RenderCtx) -> (String, Vec<String>,
     (html, tags, Value::Object(fm))
 }
 
-/// Inline `#tags` of `body` (lines indented by four spaces are code and skipped), then
-/// the frontmatter `tags` list, without duplicates.
+/// Inline `#tags` of `body`, then the frontmatter `tags` list, without
+/// duplicates (ignoring case; the first spelling stays).
 fn body_and_fm_tags(body: &str, fm: &Map<String, Value>) -> Vec<String> {
-    let scannable: String = body
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("    "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut tags: Vec<String> = re_tag()
-        .captures_iter(&scannable)
-        .map(|c| c.get(1).unwrap().as_str().to_string())
-        .collect();
+    let mut tags = inline_tags(body);
     for t in fm_tag_values(fm) {
         let t = t.trim_start_matches('#').trim();
-        if !t.is_empty() && !tags.iter().any(|x| x == t) {
+        if !t.is_empty() {
             tags.push(t.to_string());
         }
     }
+    let mut seen = HashSet::new();
+    tags.retain(|t| seen.insert(t.to_lowercase()));
     tags
+}
+
+/// Inline `#tags` of a note body in first-seen order, without duplicates
+/// (ignoring case; the first spelling stays). See [`inline_tag_spans`] for
+/// what counts as a tag.
+pub fn inline_tags(body: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    inline_tag_spans(body)
+        .into_iter()
+        .map(|r| body[r].to_string())
+        .filter(|t| seen.insert(t.to_lowercase()))
+        .collect()
+}
+
+/// Byte ranges of the names (after the `#`) of every inline `#tag` in `body`,
+/// in order, repeats included. The one tag scanner behind note tags, the
+/// search cache and tag renames.
+///
+/// A tag is `#` + a letter/digit/`_` + letters, digits, `_`, `-`, `/` (a
+/// trailing `/` is not part of it). The `#` must start a line or follow a
+/// space or punctuation such as `(` `,` `*` `"`; it never counts after a
+/// letter, digit or one of `_ / \ # & = + @ . - : ) ] } % $ ^`. `# Heading`
+/// is no tag. Nothing inside fenced code blocks (```` ``` ```` / `~~~`), inline
+/// code spans, markdown link targets, `<autolinks>`, bare URLs or
+/// `[[wikilinks]]` counts, so `[[Note#Heading]]` and `https://x.y/#frag` give
+/// no tag.
+pub fn inline_tag_spans(body: &str) -> Vec<std::ops::Range<usize>> {
+    let masked = tag_scan_mask(body);
+    let mut out = Vec::new();
+    for c in re_tag().captures_iter(&masked) {
+        let (whole, name) = (c.get(0).unwrap(), c.get(1).unwrap());
+        if let Some(p) = masked[..whole.start()].chars().next_back() {
+            let blocked = p.is_alphanumeric()
+                || matches!(
+                    p,
+                    '_' | '/'
+                        | '\\'
+                        | '#'
+                        | '&'
+                        | '='
+                        | '+'
+                        | '@'
+                        | '.'
+                        | '-'
+                        | ':'
+                        | ')'
+                        | ']'
+                        | '}'
+                        | '%'
+                        | '$'
+                        | '^'
+                        | '`'
+                );
+            if blocked {
+                continue;
+            }
+        }
+        let end = name.start() + name.as_str().trim_end_matches('/').len();
+        out.push(name.start()..end);
+    }
+    out
+}
+
+/// `text` with every place that cannot hold an inline tag blanked to spaces
+/// (newlines kept, same byte length, so offsets match `text`): fenced code
+/// blocks, inline code spans, then link targets, autolinks, bare URLs and
+/// wikilinks.
+fn tag_scan_mask(text: &str) -> String {
+    fn blank(b: &mut [u8], ranges: &[std::ops::Range<usize>]) {
+        for r in ranges {
+            for x in &mut b[r.clone()] {
+                if *x != b'\n' {
+                    *x = b' ';
+                }
+            }
+        }
+    }
+    let mut b = text.as_bytes().to_vec();
+    blank(&mut b, &fence_ranges(text));
+    let spans = code_span_ranges(&b);
+    blank(&mut b, &spans);
+    // Every blanked range starts and ends on an ASCII byte or a line edge, so
+    // the bytes stay valid UTF-8.
+    let s = String::from_utf8(b).unwrap_or_else(|_| text.to_string());
+    let links = static_re!(
+        r"(?i)\]\([^)\n]*\)|<[a-z][a-z0-9+.-]{1,31}:[^\s<>]*>|<[^\s<>@]+@[^\s<>]+>|\b[a-z][a-z0-9+.-]*://[^\s<>]*|\bwww\.[^\s<>]*|\b(?:mailto|tel):[^\s<>]*|!?\[\[[^\]\n]*\]\]"
+    );
+    let ranges: Vec<_> = links.find_iter(&s).map(|m| m.range()).collect();
+    let mut b = s.into_bytes();
+    blank(&mut b, &ranges);
+    String::from_utf8(b).unwrap_or_else(|_| text.to_string())
+}
+
+/// Byte ranges of fenced code blocks (```` ``` ```` or `~~~`, three or more,
+/// also inside lists and blockquotes), fences included. An unclosed fence runs
+/// to the end of the text.
+fn fence_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let mut open: Option<(u8, usize, usize)> = None; // (fence char, length, start)
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let start = pos;
+        pos += line.len();
+        let t = line.trim_start_matches([' ', '\t', '>']);
+        let ch = t.bytes().next();
+        let run = match ch {
+            Some(c @ (b'`' | b'~')) => t.bytes().take_while(|&x| x == c).count(),
+            _ => 0,
+        };
+        match open {
+            None if run >= 3 => {
+                let c = ch.unwrap_or(b'`');
+                // A backtick fence's info string holds no backtick.
+                if c == b'~' || !t[run..].contains('`') {
+                    open = Some((c, run, start));
+                }
+            }
+            Some((c, n, s)) if ch == Some(c) && run >= n && t[run..].trim().is_empty() => {
+                out.push(s..pos);
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some((_, _, s)) = open {
+        out.push(s..text.len());
+    }
+    out
+}
+
+/// Byte ranges of inline code spans: a run of N backticks up to the next run of
+/// exactly N, not across a blank line. A run without a closer is literal text.
+fn code_span_ranges(b: &[u8]) -> Vec<std::ops::Range<usize>> {
+    let blank_line_after = |j: usize| {
+        let mut k = j + 1;
+        while k < b.len() && matches!(b[k], b' ' | b'\t' | b'\r') {
+            k += 1;
+        }
+        k == b.len() || b[k] == b'\n'
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && b[i] == b'`' {
+            i += 1;
+        }
+        let n = i - start;
+        if start > 0 && b[start - 1] == b'\\' {
+            continue;
+        }
+        let mut j = i;
+        while j < b.len() {
+            if b[j] == b'`' {
+                let k = j;
+                while j < b.len() && b[j] == b'`' {
+                    j += 1;
+                }
+                if j - k == n {
+                    out.push(start..j);
+                    i = j;
+                    break;
+                }
+                continue;
+            }
+            if b[j] == b'\n' && blank_line_after(j) {
+                break;
+            }
+            j += 1;
+        }
+    }
+    out
 }
 
 /// A note's tags exactly as [`render_markdown`] reports them (inline `#tags` plus
@@ -1893,9 +2063,27 @@ impl MemoryStore {
                 c = format!("---\n{}---\n{body}", fm.render());
             }
         }
-        let re = Regex::new(&format!(r"(?i)#{}([^\w-]|$)", regex::escape(old))).unwrap();
-        re.replace_all(&c, |cap: &regex::Captures| format!("#{new}{}", &cap[1]))
-            .to_string()
+        // Inline tags: only where the shared scanner sees a tag (not in code,
+        // URLs or wikilinks); `#old/sub` keeps its `/sub`.
+        let body_at = c.len() - split_frontmatter(&c).1.len();
+        let mut out = String::with_capacity(c.len());
+        let mut last = 0;
+        for r in inline_tag_spans(&c[body_at..]) {
+            let r = body_at + r.start..body_at + r.end;
+            let name = &c[r.clone()];
+            let cut = name
+                .match_indices('/')
+                .map(|(i, _)| i)
+                .chain([name.len()])
+                .find(|&i| name[..i].to_lowercase() == okey);
+            if let Some(i) = cut {
+                out.push_str(&c[last..r.start]);
+                out.push_str(new);
+                last = r.start + i;
+            }
+        }
+        out.push_str(&c[last..]);
+        out
     }
 
     /// Rename (or merge) tag `old` into `new` across the vault, ignoring case.
@@ -7135,5 +7323,106 @@ mod folder_tests {
             .set_folder_meta_impl("Work", None, None, Some(&"d".repeat(500)))
             .is_ok());
         fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[cfg(test)]
+mod inline_tag_tests {
+    use super::*;
+
+    fn tags(body: &str) -> Vec<String> {
+        inline_tags(body)
+    }
+
+    #[test]
+    fn inline_code_spans_give_no_tags() {
+        assert_eq!(tags("color `#5eead4` here #real"), ["real"]);
+        assert_eq!(tags("``a ` #nope`` and #yes"), ["yes"]);
+        assert_eq!(tags("span `across\n#line` #after"), ["after"]);
+        // An unmatched backtick is literal text, so the tag still counts.
+        assert_eq!(tags("a ` lone #tick"), ["tick"]);
+        // A code span does not run across a blank line.
+        assert_eq!(tags("open `\n\n#para"), ["para"]);
+    }
+
+    #[test]
+    fn fenced_code_blocks_give_no_tags() {
+        let src = "#before\n```css\n.a { color: #5eead4; }\n#inside\n```\n#after\n";
+        assert_eq!(tags(src), ["before", "after"]);
+        let tilde = "~~~\n#inside\n~~~\n#after";
+        assert_eq!(tags(tilde), ["after"]);
+        // A longer fence only closes with one at least as long.
+        let long = "````\n```\n#inside\n```\n````\n#after";
+        assert_eq!(tags(long), ["after"]);
+        // A fence in a list item, and an unclosed fence running to the end.
+        assert_eq!(tags("- item\n  ```\n  #in\n  ```\n- #out"), ["out"]);
+        assert_eq!(tags("#a\n```\n#b\n#c"), ["a"]);
+    }
+
+    #[test]
+    fn url_fragments_give_no_tags() {
+        assert!(tags("see https://github.com/Codrihub/memora#install").is_empty());
+        assert!(tags("https://x.y/#frag and www.x.y/#w").is_empty());
+        assert!(tags("[docs](https://x.y/a#install) [h](#section)").is_empty());
+        assert!(tags("<https://x.y/#auto>").is_empty());
+        assert!(tags("[[Note#Heading]] [[#Local]] ![[img#x]] [[N#H|alias]]").is_empty());
+        assert!(tags("&#123; a#b x/#c").is_empty());
+        assert_eq!(tags("[label #in-text](https://x.y#frag)"), ["in-text"]);
+    }
+
+    #[test]
+    fn repeated_tags_are_listed_once() {
+        let src = "#install https://github.com/Codrihub/memora#install\n\
+                   https://github.com/Codrihub/memora#install #Install #b #install";
+        assert_eq!(tags(src), ["install", "b"]);
+        let fm: Map<String, Value> =
+            serde_json::from_value(json!({"tags": ["B", "#new", "install"]})).unwrap();
+        assert_eq!(
+            body_and_fm_tags("#b #install", &fm),
+            ["b", "install", "new"]
+        );
+    }
+
+    #[test]
+    fn normal_tags_still_count() {
+        assert_eq!(tags("#start"), ["start"]);
+        assert_eq!(tags("text #mid end"), ["mid"]);
+        assert_eq!(
+            tags("(#paren) a,#comma *#bold* \"#q\""),
+            ["paren", "comma", "bold", "q"]
+        );
+        assert_eq!(
+            tags("#catatan #日本語 #café"),
+            ["catatan", "日本語", "café"]
+        );
+        assert_eq!(
+            tags("#a/b #proj/memora/ui #v-2 #a/"),
+            ["a/b", "proj/memora/ui", "v-2", "a"]
+        );
+        assert_eq!(tags("日本語、#タグ"), ["タグ"]);
+    }
+
+    #[test]
+    fn headings_are_not_tags() {
+        assert!(tags("# Heading\n## Sub\n### Third").is_empty());
+        assert_eq!(tags("# Heading #tag"), ["tag"]);
+    }
+
+    #[test]
+    fn note_tags_and_render_share_the_scanner() {
+        let src = "---\ntags: [fm]\n---\n`#code` #body https://x.y/#frag\n";
+        assert_eq!(note_tags(src), ["body", "fm"]);
+        let (_, rendered, _) = render_markdown(src, &|_| None);
+        assert_eq!(rendered, ["body", "fm"]);
+    }
+
+    #[test]
+    fn retag_skips_code_and_urls() {
+        let src = "#old `#old` https://x.y/#old [[N#old]] #old/sub #older x#old\n```\n#old\n```\n";
+        assert_eq!(
+            MemoryStore::retag(src, "old", "new"),
+            "#new `#old` https://x.y/#old [[N#old]] #new/sub #older x#old\n```\n#old\n```\n"
+        );
+        assert_eq!(MemoryStore::retag("#OLD #a/b/c", "a/b", "z"), "#OLD #z/c");
     }
 }
