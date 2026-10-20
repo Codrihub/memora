@@ -106,7 +106,7 @@ const byPath = new Map<string, FolderNode>();
 
 export function folderTree(): FolderNode {
   const notes = allNotes();
-  const sig = Object.keys(state.tree).join('|') + '#' + notes.map((n) => n.path).join('|');
+  const sig = Object.keys(state.tree).join('|') + '#' + state.folders.join('|') + '#' + notes.map((n) => n.path).join('|');
   // The payload is replaced on every reload, so identity catches mtime changes
   // that leave the paths alone; the signature catches in-place edits.
   if (cachedRoot && cachedTree === state.tree && sig === cachedSig) return cachedRoot;
@@ -131,6 +131,8 @@ export function folderTree(): FolderNode {
   };
   // Top level folders from the payload even when the walk saw no note in them.
   for (const f of Object.keys(state.tree)) if (f !== 'Root') ensure(f);
+  // Every folder the server knows, empty and nested ones too (a new folder shows at once).
+  for (const f of state.folders) ensure(f);
   for (const n of notes) ensure(dirOf(n.path)).notes.push(n);
   const count = (f: FolderNode): number => {
     f.children.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
