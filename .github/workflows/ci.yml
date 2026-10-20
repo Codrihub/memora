@@ -61,7 +61,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --target x86_64-pc-windows-msvc
+        run: cargo test --workspace --no-fail-fast --target x86_64-pc-windows-msvc
 
       - name: Smoke test the server
         shell: pwsh

@@ -1964,7 +1964,7 @@ impl MemoryStore {
             self.resolve(&format!("{stem}.md")).ok()
         };
         if let Some(full) = full.filter(|f| f.is_file()) {
-            let rel = self.rel_of(&full);
+            let rel = self.disk_spelling(&self.rel_of(&full));
             // Notes inside hidden folders (the trash) are not part of the graph.
             if self.walk_has(&rel) {
                 return Ok((Self::base_name(&rel), rel));
@@ -1983,6 +1983,25 @@ impl MemoryStore {
     }
 
     /// Whether `rel` is a note [`MemoryStore::walk`] lists (no hidden segment).
+    /// `rel` as the vault lists it: on a case-insensitive filesystem (Windows,
+    /// macOS) a path found with another spelling is mapped to the stored one when
+    /// exactly one note matches; otherwise `rel` is returned unchanged.
+    fn disk_spelling(&self, rel: &str) -> String {
+        if !cfg!(any(windows, target_os = "macos")) {
+            return rel.to_string();
+        }
+        let all: Vec<String> = self.walk().into_iter().map(|(r, _, _)| r).collect();
+        if all.iter().any(|r| r == rel) {
+            return rel.to_string();
+        }
+        let lower = rel.to_lowercase();
+        let hits: Vec<&String> = all.iter().filter(|r| r.to_lowercase() == lower).collect();
+        match hits.as_slice() {
+            [one] => (*one).clone(),
+            _ => rel.to_string(),
+        }
+    }
+
     fn walk_has(&self, rel: &str) -> bool {
         rel.ends_with(".md") && !rel.split('/').any(|s| s.starts_with('.'))
     }
@@ -4635,26 +4654,24 @@ impl MemoryStore {
         if ap.is_dir() {
             return err(format!("{p} is a folder; locks are taken on single notes"));
         }
-        if ap.is_file() && p.to_lowercase().ends_with(".md") {
-            return Ok(self.rel_of(&ap));
-        }
         let with_md = if p.to_lowercase().ends_with(".md") {
             p.to_string()
         } else {
             format!("{p}.md")
         };
-        if let Ok(ap) = self.resolve(&with_md) {
-            if ap.is_file() {
-                return Ok(self.rel_of(&ap));
-            }
-        }
+        // The note as spelled on disk: an exact match first, then one that differs
+        // only in case. (On Windows and macOS `is_file` is true for any spelling,
+        // so the lookup goes through the vault listing.)
         let want = with_md.replace('\\', "/");
-        let want = want.trim_start_matches('/').to_lowercase();
-        let hits: Vec<String> = self
-            .walk()
+        let want = want.trim_start_matches('/');
+        let all: Vec<String> = self.walk().into_iter().map(|(rel, _, _)| rel).collect();
+        if all.iter().any(|rel| rel == want) {
+            return Ok(want.to_string());
+        }
+        let lower = want.to_lowercase();
+        let hits: Vec<String> = all
             .into_iter()
-            .map(|(rel, _, _)| rel)
-            .filter(|rel| rel.to_lowercase() == want)
+            .filter(|rel| rel.to_lowercase() == lower)
             .collect();
         match hits.as_slice() {
             [one] => Ok(one.clone()),
