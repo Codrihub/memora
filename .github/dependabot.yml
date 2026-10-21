@@ -1,18 +1,32 @@
-# Weekly update pull requests for dependencies. Security updates are opened
-# as soon as an advisory is published, independent of this schedule.
+# Weekly update pull requests for dependencies, one grouped pull request per
+# ecosystem for minor and patch versions. Major versions are left for a
+# planned upgrade. Security updates are opened as soon as an advisory is
+# published, independent of this schedule.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    groups:
+      web:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Actions are pinned to commit SHAs; Dependabot updates the SHA and the
   # version comment together.
@@ -20,13 +34,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 1
 
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    open-pull-requests-limit: 1
