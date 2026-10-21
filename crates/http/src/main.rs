@@ -233,10 +233,12 @@ fn main() -> anyhow::Result<()> {
 /// and the request limit (1024 at once) plus the database, logs and git need more than
 /// the usual soft limit of 1024. Past it, accept fails ("Too many open files") and the
 /// server stops answering until clients give up.
+#[cfg_attr(not(unix), allow(dead_code))]
 const WANT_OPEN_FILES: u64 = 16_384;
 
 /// The soft open-file limit to set given the current `soft` and `hard` limits, or `None`
 /// to leave it: never lowered, never above the hard limit.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn open_file_target(soft: u64, hard: u64) -> Option<u64> {
     let want = WANT_OPEN_FILES.min(hard);
     (want > soft).then_some(want)
