@@ -1,72 +1,46 @@
-// The map finder: the search under the view chrome's field in Brain, Graph
-// and Canvas. One engine, one dropdown, so the three maps search alike.
-//
-// What you can type:
-//   text         one whole string, as in the global search (ui/match.ts):
-//                names first (exact, starts with, a word, anywhere), then
-//                tags, then folders; "did you mean" when nothing contains it
-//   #tag         only nodes with a tag starting like that
-//   in:folder    only nodes in a folder whose path contains that
-// Tokens combine: `#idea in:projects launch`.
-//
-// Every result says why it matched (a short badge, the full reason on
-// hover) and highlights the matching letters in the name, tag or folder.
-// While something is typed the map lights the matches and dims the rest.
+// Query syntax: plain text, `#tag` (tag prefix) and `in:folder` (path substring); tokens combine.
 
 import { attr, esc, useStyles } from '../dom';
 import { matchAt, score, similar } from './match';
+import { noteTitle } from '../state';
 
-export interface FindItem {
-  /** Unique key; the vault path. */
+interface FindItem {
+  /** The vault path. */
   id: string;
   name: string;
-  /** Full parent folder ('' or 'Root' for the vault root). */
+  /** '' or 'Root' for the vault root. */
   folder: string;
-  /** The map's own grouping (region, hull, frame) for `folder` callbacks. */
+  /** The map's own grouping (region, hull, frame). */
   region: string;
   color: string;
   tags: string[];
-  /** Links; ranks ties and fills "Most connected". */
   degree: number;
 }
 
 export interface FindSource {
-  /** "node" or "card": used in the summary. */
   noun?: string;
   items(): FindItem[];
-  /** Items in a region hidden from the map are left out (and counted). */
   hidden?(region: string): boolean;
-  /** Light these on the map and dim the rest; null clears. */
+  /** null clears. */
   highlight(ids: Set<string> | null): void;
-  /** A result was chosen: fly to it and open it. */
   pick(item: FindItem): void;
-  /** A folder result was chosen: show that part of the map. */
   folder?(region: string): void;
 }
 
-/** What the input field reports back (count next to the field). */
-export interface FindHost {
+interface FindHost {
   input: HTMLInputElement;
   setCount(text: string): void;
-  /** Where the dropdown is laid over (the map's root). */
   root: HTMLElement;
-  /** The search field box the dropdown hangs under. */
   anchor(): HTMLElement | null;
-  /** True on phones: the dropdown spans the width. */
   compact(): boolean;
 }
-
-// ───────────────────────────── engine ─────────────────────────────
 
 type Range = [number, number];
 
 interface Why {
   score: number;
-  /** Badge text. */
   badge: string;
-  /** Full sentence on hover. */
   text: string;
-  /** Which part matched, for highlighting. */
   field: 'name' | 'tag' | 'folder' | 'none';
   ranges: Range[];
   tag?: string;
@@ -78,7 +52,6 @@ interface Query {
   words: string[];
   tags: string[];
   folders: string[];
-  /** The token being typed, when it is a #tag or in: (for suggestions). */
   partial: { kind: 'tag' | 'folder'; value: string } | null;
 }
 
@@ -109,14 +82,15 @@ const WORD_START = /[\s\-_./()[\]]/;
 
 const folderLabel = (f: string): string => (!f || f === 'Root' ? 'the vault root' : f);
 
-/**
- * Why `it` matches the free text, or null. The text is one string, matched
- * whole as in the global search (ui/match.ts): the name first (exact, starts
- * with, a word, anywhere), then a tag, then the folder.
- */
 function matchText(it: FindItem, q: Query): Why | null {
   const t = q.text;
   if (!t) return { score: 1, badge: '', text: '', field: 'none', ranges: [] };
+  // The file name counts too when the title differs (Index.md titled Root Brain).
+  const file = (it.id.split('/').pop() || '').replace(/\.md$/i, '');
+  if (file && file.toLowerCase() !== it.name.toLowerCase() && !matchAt(it.name, t) && matchAt(file, t)) {
+    const exact = file.toLowerCase() === t || file.toLowerCase().replace(/[_-]+/g, ' ') === t;
+    return { score: exact ? 95 : 72 + score(file, t) / 100, badge: 'File name', text: `The file is named “${file}.md”`, field: 'none', ranges: [] };
+  }
   const n = it.name.toLowerCase();
   const at = matchAt(it.name, t);
   if (at) {
@@ -152,7 +126,6 @@ interface Hit {
   why: Why;
 }
 
-/** Every item that matches `q`, best first, plus how many hidden regions held back. */
 function runQuery(items: FindItem[], q: Query, hidden?: (r: string) => boolean): { hits: Hit[]; held: number } {
   const hits: Hit[] = [];
   let held = 0;
@@ -171,7 +144,6 @@ function runQuery(items: FindItem[], q: Query, hidden?: (r: string) => boolean):
   return { hits, held };
 }
 
-/** "Did you mean" for a query nothing contains, as the global search offers it. */
 function nearNames(items: FindItem[], text: string): Hit[] {
   const out: Hit[] = [];
   for (const it of items) {
@@ -182,8 +154,6 @@ function nearNames(items: FindItem[], text: string): Hit[] {
   }
   return out.sort((a, b) => b.why.score - a.why.score || b.item.degree - a.item.degree).slice(0, 4);
 }
-
-// ───────────────────────────── view ─────────────────────────────
 
 const RECENT_KEY = 'memora.find.recent';
 const MAX_NODES = 30;
@@ -201,7 +171,7 @@ function remember(id: string): void {
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify([id, ...recent().filter((x) => x !== id)].slice(0, 6)));
   } catch {
-    /* private mode: no recents */
+    /* private mode */
   }
 }
 
@@ -221,27 +191,27 @@ const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}
 
 const CSS = `
 .mf{position:absolute;z-index:9;display:flex;flex-direction:column;max-height:min(520px,calc(100% - 80px));overflow:hidden;
-  border-radius:14px;background:var(--panel,#12161f);border:1px solid var(--vc-ctl-line,var(--line));color:var(--fg,#e6e9ef);
-  box-shadow:0 18px 50px -12px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.25);animation:mf-in .16s ease}
-:root[data-theme=light] .mf{box-shadow:0 18px 40px -14px rgba(15,23,42,.28)}
+  border-radius:12px;background:var(--ovl-bg);-webkit-backdrop-filter:var(--ovl-filter);backdrop-filter:var(--ovl-filter);
+  border:1px solid var(--vc-ctl-line,var(--line));color:var(--fg,#e6e9ef);box-shadow:none;animation:mf-in .16s ease}
 .mf[hidden]{display:none}
 @keyframes mf-in{from{opacity:0;transform:translateY(-4px)}}
-.mf-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line,#232a38);font-size:12px;color:var(--muted,#8b98ad)}
+.mf-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line,#232a38);font-size:12.5px;color:var(--muted,#8b98ad)}
 .mf-head b{color:var(--fg,#e6e9ef);font-weight:650}
 .mf-head .grow{flex:1}
-.mf-chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 4px 0 8px;border-radius:999px;font-size:11.5px;font-weight:600;
-  color:var(--accent,#5eead4);background:color-mix(in srgb,var(--accent,#5eead4) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent,#5eead4) 30%,transparent)}
+.mf-chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 4px 0 8px;border-radius:6px;font-size:12px;font-weight:600;
+  color:var(--accent,#5eead4);background:var(--accent-soft,rgba(94,234,212,.11))}
 .mf-chip button{all:unset;display:grid;place-items:center;width:16px;height:16px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1}
 .mf-chip button:hover{background:color-mix(in srgb,var(--accent,#5eead4) 25%,transparent)}
-.mf-try{all:unset;cursor:pointer;height:22px;padding:0 8px;border-radius:7px;font:600 11.5px var(--mono,monospace);color:var(--fg,#e6e9ef);
-  background:var(--surface-2,#151a24);border:1px solid var(--line,#232a38)}
+.mf-try{all:unset;cursor:pointer;height:24px;padding:0 8px;border-radius:6px;font:600 12px var(--mono,monospace);color:var(--fg,#e6e9ef);
+  background:var(--vc-tint,rgba(148,163,184,.08))}
 .mf-try:hover,.mf-try:focus-visible{border-color:var(--accent,#5eead4);color:var(--accent,#5eead4)}
-.mf-list{overflow:auto;padding:6px;scrollbar-width:thin;overscroll-behavior:contain}
-.mf-sec{margin:8px 10px 4px;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted,#8b98ad);display:flex;gap:6px}
-.mf-sec span{font-weight:600;letter-spacing:0;text-transform:none}
-.mf-row{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:7px 10px;border-radius:10px;cursor:pointer}
-.mf-row[aria-selected=true]{background:color-mix(in srgb,var(--c,var(--accent,#5eead4)) 14%,transparent)}
-.mf-row>i{width:9px;height:9px;border-radius:50%;background:var(--c,var(--accent));box-shadow:0 0 8px var(--c,transparent)}
+.mf-list{overflow:auto;padding:4px;scrollbar-width:thin;overscroll-behavior:contain}
+.mf-sec{margin:10px 10px 4px;font-size:12px;font-weight:650;color:var(--text-2,#a3afc2);display:flex;gap:6px}
+.mf-sec span{font-weight:500;color:var(--muted,#8b98ad)}
+.mf-row{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.mf-row:hover{background:var(--vc-tint,rgba(148,163,184,.08))}
+.mf-row[aria-selected=true]{background:var(--accent-soft,rgba(94,234,212,.11))}
+.mf-row>i{width:9px;height:9px;border-radius:50%;background:var(--c,var(--accent));box-shadow:none}
 .mf-row>i.sq{border-radius:3px;box-shadow:none}
 .mf-row>i.tg{background:none;box-shadow:none;width:auto;height:auto;font-style:normal;font-weight:700;color:var(--accent,#5eead4);font-size:13px}
 .mf-main{min-width:0}
@@ -250,17 +220,17 @@ const CSS = `
 .mf-sub>span{overflow:hidden;text-overflow:ellipsis}
 .mf-sub .t{flex:none;padding:0 6px;border-radius:999px;background:var(--surface-2,#151a24);color:var(--text-2,#a3afc2)}
 .mf mark{background:color-mix(in srgb,var(--accent,#5eead4) 26%,transparent);color:inherit;border-radius:3px;padding:0 1px}
-.mf-why{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap;color:var(--text-2,#a3afc2);border:1px solid var(--line,#232a38)}
+.mf-why{font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px;white-space:nowrap;color:var(--text-2,#a3afc2);border:1px solid var(--line,#232a38)}
 .mf-why.top{color:var(--accent,#5eead4);border-color:color-mix(in srgb,var(--accent,#5eead4) 35%,transparent)}
 .mf-n{font-size:11.5px;color:var(--muted,#8b98ad);white-space:nowrap}
 .mf-more{margin:6px 10px 4px;font-size:11.5px;color:var(--muted,#8b98ad)}
 .mf-empty{padding:14px 12px 6px;font-size:13px;color:var(--muted,#8b98ad);line-height:1.5}
 .mf-empty b{color:var(--fg,#e6e9ef)}
-.mf-tip{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:center;padding:7px 10px;border-radius:10px;cursor:pointer;font-size:12.5px;color:var(--muted,#8b98ad)}
+.mf-tip{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:center;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--muted,#8b98ad)}
 .mf-tip code{font:600 12px var(--mono,monospace);color:var(--fg,#e6e9ef)}
 .mf-tip[aria-selected=true]{background:color-mix(in srgb,var(--accent,#5eead4) 10%,transparent)}
-.mf-foot{display:flex;gap:14px;padding:8px 12px;border-top:1px solid var(--line,#232a38);font-size:11px;color:var(--muted,#8b98ad)}
-.mf-foot kbd{font:600 10px/1 var(--mono,monospace);padding:2px 5px;border-radius:5px;border:1px solid var(--line,#232a38);margin-right:3px}
+.mf-foot{display:flex;gap:14px;padding:8px 12px;border-top:1px solid var(--line,#232a38);font-size:11.5px;color:var(--muted,#8b98ad)}
+.mf-foot kbd{height:auto;min-width:0;padding:0;border:0;background:none;box-shadow:none;font:600 11px/1 var(--font);color:var(--text-2,#a3afc2);margin-right:4px}
 @media (max-width:760px){
   .mf{max-height:min(62vh,calc(100% - 70px))}
   .mf-foot{display:none}
@@ -268,7 +238,6 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.mf{animation:none}}
 `;
 
-/** One selectable row in the dropdown. */
 type Act = { kind: 'node'; item: FindItem } | { kind: 'tag'; tag: string } | { kind: 'folder'; folder: string; region: string } | { kind: 'query'; q: string };
 
 export class MapFind {
@@ -293,7 +262,6 @@ export class MapFind {
     host.root.appendChild(this.box);
     this.head = this.box.querySelector('.mf-head')!;
     this.list = this.box.querySelector('.mf-list')!;
-    // Clicks keep the focus in the field.
     this.box.addEventListener('pointerdown', (e) => {
       if (!(e.target as HTMLElement).closest('input')) e.preventDefault();
     });
@@ -319,7 +287,6 @@ export class MapFind {
     host.input.setAttribute('aria-expanded', 'false');
   }
 
-  /** The dropdown (clicks in it count as inside the search). */
   get el(): HTMLElement {
     return this.box;
   }
@@ -328,7 +295,6 @@ export class MapFind {
     return !this.box.hidden;
   }
 
-  /** The field changed. */
   input(): void {
     clearTimeout(this.timer);
     this.timer = window.setTimeout(() => {
@@ -337,7 +303,6 @@ export class MapFind {
     }, 60);
   }
 
-  /** The field got focus. */
   show(): void {
     this.place();
     if (this.box.hidden) {
@@ -352,12 +317,10 @@ export class MapFind {
     this.host.input.setAttribute('aria-expanded', 'false');
   }
 
-  /** Data changed under an open search (live updates). */
   update(): void {
     if (this.query.raw) this.refresh();
   }
 
-  /** Clear the search and the map's highlight. */
   clear(): void {
     this.host.input.value = '';
     this.refresh();
@@ -368,7 +331,7 @@ export class MapFind {
     this.box.remove();
   }
 
-  /** Keys from the field; true when handled. */
+  /** True when handled. */
   key(e: KeyboardEvent): boolean {
     const n = this.acts.length;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -399,8 +362,6 @@ export class MapFind {
     return false;
   }
 
-  // ─────────── internals ───────────
-
   private place(): void {
     const a = this.host.anchor();
     if (!a) return;
@@ -427,7 +388,6 @@ export class MapFind {
     this.show();
   }
 
-  /** Replace the token being typed with `tok` (and a space to go on). */
   private complete(tok: string): void {
     const raw = this.host.input.value;
     const parts = raw.split(/(\s+)/);
@@ -463,8 +423,11 @@ export class MapFind {
     const raw = this.host.input.value;
     this.query = parseQuery(raw);
     const q = this.query;
-    const items = this.src.items();
-    const noun = this.src.noun || 'node';
+    const items = this.src.items().map((it) => {
+      const title = noteTitle(it.id);
+      return title && title !== it.name ? { ...it, name: title } : it;
+    });
+    const noun = this.src.noun || 'note';
     this.acts = [];
     this.active = 0;
     const rows: string[] = [];
@@ -487,7 +450,6 @@ export class MapFind {
         <div class="mf-main"><span class="mf-name">${name}</span><div class="mf-sub"><span>${folder}</span>${tagHtml}</div></div>${badge}</div>`;
     };
 
-    // Counts of tags and folders over every item (for suggestions).
     const tagCount = new Map<string, number>();
     const folderCount = new Map<string, { n: number; region: string; color: string }>();
     for (const it of items) {
@@ -499,7 +461,6 @@ export class MapFind {
     }
 
     if (!raw.trim()) {
-      // Nothing typed: recent picks, the most connected, and how to search.
       this.src.highlight(null);
       this.host.setCount('');
       const byId = new Map(items.map((it) => [it.id, it]));
@@ -525,8 +486,8 @@ export class MapFind {
         `<button type="button" class="mf-try" data-try="${attr(q)}" title="${attr(title)}">${esc(label)}</button>`;
       this.head.innerHTML =
         `<span>Try</span>` +
-        tip('#' + (topTag || 'tag'), topTag ? `#${topTag} ` : '#', 'Nodes with a tag; the start of the tag is enough') +
-        tip('in:' + (leaf || 'folder'), leaf ? `in:${leaf} ` : 'in:', 'Nodes inside a folder') +
+        tip('#' + (topTag || 'tag'), topTag ? `#${topTag} ` : '#', 'Notes with a tag; the start of the tag is enough') +
+        tip('in:' + (leaf || 'folder'), leaf ? `in:${leaf} ` : 'in:', 'Notes inside a folder') +
         tip('name words', '', 'Plain words match names first, then tags and folders') +
         `<span class="grow"></span><span>Matches light up on the map</span>`;
       this.paint(rows);
@@ -537,7 +498,6 @@ export class MapFind {
     this.src.highlight(new Set(hits.map((h) => h.item.id)));
     this.host.setCount(hits.length ? String(hits.length) : 'none');
 
-    // Head: what is being searched, as removable chips, and the result count.
     const chips = [
       ...q.tags.map((t) => ['#' + t, `#${t}`]),
       ...q.folders.map((f) => ['in:' + f, `in: ${f}`]),
@@ -548,10 +508,9 @@ export class MapFind {
     this.head.innerHTML =
       chips +
       `<span>${hits.length ? `<b>${plural(hits.length, noun)}</b>${what} lit on the map` : `No ${noun}s${what}`}${
-        held ? ` · ${held} more in hidden regions` : ''
+        held ? ` · ${held} more in hidden folders` : ''
       }</span>`;
 
-    // Suggestions for the token being typed: tags or folders.
     const p = q.partial;
     if (p?.kind === 'tag' || (!p && q.text && !q.tags.length)) {
       const v = p?.kind === 'tag' ? p.value : q.text;
@@ -586,8 +545,6 @@ export class MapFind {
     }
 
     if (hits.length) {
-      const by = new Map<string, number>();
-      hits.forEach((h) => by.set(h.why.badge, (by.get(h.why.badge) || 0) + 1));
       rows.push(`<div class="mf-sec">${noun[0].toUpperCase() + noun.slice(1)}s <span>${hits.length > MAX_NODES ? `top ${MAX_NODES} of ${hits.length}` : ''}</span></div>`);
       for (const h of hits.slice(0, MAX_NODES)) push({ kind: 'node', item: h.item }, nodeRow(h, h.item));
       if (hits.length > MAX_NODES) rows.push(`<div class="mf-more">${hits.length - MAX_NODES} more are lit on the map. Add a word, a #tag or in:folder to narrow.</div>`);
@@ -595,7 +552,7 @@ export class MapFind {
       const near = nearNames(items, q.text);
       rows.push(
         `<div class="mf-empty">Nothing matches${q.text ? ` “<b>${esc(q.text)}</b>”` : ''}${q.tags.length || q.folders.length ? ' with these filters' : ''}.` +
-          `${held ? ` ${held} ${noun}s match in hidden regions: show them in Regions.` : ''}</div>`,
+          `${held ? ` ${held} ${noun}s match in hidden folders: show them in Folders.` : ''}</div>`,
       );
       if (near.length) {
         rows.push('<div class="mf-sec">Did you mean</div>');
@@ -606,7 +563,6 @@ export class MapFind {
         push({ kind: 'query', q: q.text }, `<div class="mf-tip" role="option" data-k><code>no filters</code><span>search “${esc(q.text || '…')}” without #tag and in:</span></div>`);
       }
     }
-    // Land on the first node when there is one, not on a suggestion.
     const firstNode = this.acts.findIndex((a) => a.kind === 'node');
     if (firstNode > 0 && !p) this.active = firstNode;
     this.paint(rows);

@@ -1,8 +1,6 @@
-// Graph view data model: simulation nodes and links, shared by the physics,
-// the renderer and the UI. Positions live in world units; the camera maps them
-// to screen pixels.
+// Positions are in world units; the camera maps them to screen pixels.
 
-export type NodeKind = 'note' | 'folder';
+type NodeKind = 'note' | 'folder';
 
 export interface GNode {
   id: string;
@@ -30,12 +28,12 @@ export interface GNode {
   /** Layout target for radial and cluster modes. */
   tx: number;
   ty: number;
-  /** Animation clocks (ms timestamps, 0 when idle). */
+  /** ms timestamps, 0 when idle. */
   born: number;
   dying: number;
   /** Highlight blend 0..1, eased every frame. */
   fade: number;
-  /** Index in the node array, refreshed on rebuild. */
+  /** Index in the node array. */
   i: number;
 }
 
@@ -44,7 +42,6 @@ export interface GLink {
   t: GNode;
   /** 'tree' = folder to child, 'ref' = wikilink. */
   kind: 'tree' | 'ref';
-  /** Spring strength and rest length, precomputed. */
   k: number;
   len: number;
   bias: number;
@@ -57,7 +54,7 @@ export interface Pulse {
   actor: string;
   color: string;
   start: number;
-  /** Active while the agent call runs; set when `end` arrives. */
+  /** 0 while the agent call runs. */
   end: number;
 }
 

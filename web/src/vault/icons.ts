@@ -22,6 +22,8 @@ export const I = {
   palette: svg('<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.4-.5-.8-.5-1.2 0-.9.8-1.7 1.7-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>'),
   link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
   back: svg('<path d="M15 6l-6 6 6 6"/>'),
+  foldUp: svg('<path d="M6 15l6-6 6 6"/>'),
+  foldDown: svg('<path d="M6 9l6 6 6-6"/>'),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
   more: svg('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>'),
   bot: svg('<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16h5"/>'),
@@ -39,6 +41,7 @@ export const I = {
   toc: svg('<path d="M4 6h16M4 12h10M4 18h13"/>'),
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
+  history: svg('<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>'),
 };
 
 /** Optional per-folder icons (folder-meta `icon`). Anything else is drawn as text (emoji). */
@@ -106,8 +109,7 @@ export function folderIconKey(icon: string): string {
 export function folderGlyph(icon: string, open: boolean): string {
   const key = icon ? folderIconKey(icon) : '';
   if (key) return svg(FOLDER_ICONS[key]);
-  // Only an emoji (or a short symbol) is drawn as text. An icon name this UI
-  // does not know (letters, digits, dashes) falls back to the folder glyph.
+  // Only an emoji or short symbol is drawn as text; an unknown icon name falls back to the folder glyph.
   const txt = icon.trim();
   if (txt && !/[A-Za-z0-9]/.test(txt) && [...txt].length <= 4) {
     return `<span class="vx-emoji">${txt.replace(/[<>&"']/g, '')}</span>`;

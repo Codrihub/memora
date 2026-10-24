@@ -1,5 +1,4 @@
-// Lazy note excerpts for cards: fetched only for cards on screen, a few at a
-// time, cached per path and mtime (memory + sessionStorage).
+// Fetched only for cards on screen, a few at a time, cached per path and mtime.
 
 import { apiGet } from '../api';
 import { parseTags } from '../format';
@@ -45,7 +44,6 @@ function persist(): void {
   }, 800);
 }
 
-/** Plain text preview of a markdown note. */
 export function toExcerpt(md: string): string {
   return String(md || '')
     .replace(/^---[\s\S]*?\n---\s*/, '')
@@ -81,7 +79,7 @@ export function moveExcerpt(from: string, to: string): void {
   }
 }
 
-/** Ask for an excerpt; resolves through the listener when it lands. */
+/** Resolves through the listener when it lands. */
 export function want(path: string, mtime: number): void {
   const e = cache.get(path);
   if (e && e.m >= mtime) return;
@@ -90,12 +88,11 @@ export function want(path: string, mtime: number): void {
   pump();
 }
 
-/** Drop queued requests for cards no longer visible. */
 export function keepOnly(paths: Set<string>): void {
   for (let i = queue.length - 1; i >= 0; i--) if (!paths.has(queue[i].path)) queue.splice(i, 1);
 }
 
-/** Hold excerpt fetches while a vault write runs (the server serializes both). */
+/** Hold fetches while a vault write runs (the server serializes both). */
 export function holdExcerpts(on: boolean): void {
   holds = Math.max(0, holds + (on ? 1 : -1));
   if (!holds) pump();

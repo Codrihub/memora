@@ -1,11 +1,5 @@
-// Render the favicon and the PWA icons from the brand mark in src/brand.ts.
-//
-//   node scripts/icons.ts            # writes into crates/http/assets
-//   MEMORA_ASSETS_OUT=./icons-out node scripts/icons.ts
-//
-// PNGs are screenshots of the SVG taken with headless Chrome at the exact
-// pixel size (override the binary with CHROME=...). File names are fixed: the
-// server whitelists them.
+// Render the favicon and the PWA icons from src/brand.ts with headless Chrome (CHROME=... overrides the binary).
+// Usage: [MEMORA_ASSETS_OUT=dir] node scripts/icons.ts. File names are fixed: the server whitelists them.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';

@@ -1,12 +1,5 @@
-// The application shell. Rendered by scripts/build-pages.mjs into
-// crates/http/assets/index.html, with src/app.css injected.
-//
-// Do not edit the generated file: change this module and rebuild.
-//
-// The shell look lives in web/src/ui/* (CSS strings injected at boot). Only
-// the splash and the pre-boot gate are styled here, because they paint before
-// the script runs. This module is loaded without bundling, so sibling modules
-// are loaded with createRequire (see below).
+// The application shell, rendered by scripts/build-pages.mjs into crates/http/assets/index.html.
+// Only what paints before app.js (the splash) is styled here; the shell look lives in web/src/ui/*.
 
 import type * as BrandFontModule from '../brand-font';
 import type * as BrandModule from '../brand';
@@ -16,57 +9,54 @@ declare const process: {
   getBuiltinModule(id: 'node:module'): { createRequire(path: string): (id: string) => unknown };
 };
 
-// build-pages.mjs imports this module from a data: URL, where relative imports
-// cannot resolve: load siblings relative to the build script instead.
+// Imported from a data: URL by build-pages.mjs, so siblings load relative to the build script.
 const load = process.getBuiltinModule('node:module').createRequire(process.argv[1] ?? '');
 const { BRAND_FONT, BRAND_FONT_CSS } = load('../src/brand-font.ts') as typeof BrandFontModule;
 const { markSvg } = load('../src/brand.ts') as typeof BrandModule;
 
-// Theme choice, per device: localStorage `memora.theme` = dark | light | system
-// (missing or invalid means dark). Runs first in <head> so the page never
-// paints in the wrong theme; web/src/theme.ts keeps it live afterwards and the
-// login page reads the same key.
-const THEME_BOOT = `(function(){var p='dark';try{var v=localStorage.getItem('memora.theme');if(v==='light'||v==='dark'||v==='system')p=v}catch(e){}if(p==='system'){try{p=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){p='dark'}}document.documentElement.dataset.theme=p})();`;
+// Runs first in <head> so the page never paints in the wrong theme (web/src/theme.ts owns the key).
+const THEME_BOOT = `(function(){var p='system';try{var v=localStorage.getItem('memora.theme');if(v==='light'||v==='dark'||v==='system')p=v}catch(e){}if(p==='system'){try{p=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){p='dark'}}document.documentElement.dataset.theme=p})();`;
 
-// Paints before app.js: the splash, and the shell kept hidden until boot.
+// Splash colours copy the app tokens (ui/tokens.ts), which arrive with app.js; the system face avoids a font swap mid-boot.
+const SYS = `system-ui,-apple-system,'Segoe UI',Roboto,sans-serif`;
 const CRITICAL_CSS = `
 html,body{margin:0;height:100%;background:#07090e;color:#e8ecf3;overflow:hidden;
-  font:14px/1.55 "Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  font:14px/1.55 "Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root[data-theme=light] body{background:#f4f6fa;color:#0f172a}
 .hidden{display:none !important}
 #appShell{display:contents}
-/* The static splash matches the particle splash's first frame (same size and
-   place, see brain/splash.ts: mark 0.3/19 x 24 of min(w,h), centred 2% above
-   the middle), so the boot crossfades into the grains instead of cutting. */
-.splash{position:fixed;inset:0;z-index:100;
-  background:#07090e;transition:opacity .4s ease}
-:root[data-theme=light] .splash{background:#f4f6fa}
+.splash{--sp-bg:#07090e;--sp-fg:#e8ecf3;--sp-muted:#8592a8;--sp-track:rgba(148,163,184,.16);--sp-bar:#08c6d4;
+  position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:24px 16px;
+  background:var(--sp-bg);color:var(--sp-fg);transition:opacity .18s ease-out;will-change:opacity}
+:root[data-theme=light] .splash{--sp-bg:#f4f6fa;--sp-fg:#0f172a;--sp-muted:#5b6880;--sp-track:rgba(15,23,42,.09)}
 .splash.gone{opacity:0;pointer-events:none}
-.splash-mark{position:absolute;left:50%;top:calc(50% - 2vmin);width:37.9vmin;height:37.9vmin;translate:-50% -50%}
-.splash-name{position:absolute;left:0;right:0;top:calc(50% + 18vmin);text-align:center;font:700 36px/1 ${BRAND_FONT};color:#e6e9ef}
-:root[data-theme=light] .splash-name{color:#0f172a}
-.splash-by{position:absolute;left:0;right:0;top:calc(50% + 18vmin + 46px);text-align:center;font:700 11px/1 system-ui,-apple-system,'Segoe UI',sans-serif;
-  letter-spacing:.22em;text-indent:.22em;text-transform:uppercase;color:#8b98ad}
-.splash-msg{position:absolute;left:0;right:0;bottom:max(40px,9vh);text-align:center;font:500 13px/1 system-ui,-apple-system,'Segoe UI',sans-serif;color:#8592a8}
-/* Boot progress: creeps on its own while the bundle downloads (there is no
-   script yet to report it), then main.ts fills it the moment the app runs. */
-.splash-bar{position:absolute;left:50%;bottom:calc(max(40px,9vh) - 18px);width:min(180px,40vw);height:3px;translate:-50% 0;border-radius:99px;
-  overflow:hidden;background:rgba(133,146,168,.18)}
-:root[data-theme=light] .splash-bar{background:rgba(15,23,42,.08)}
-.splash-bar i{display:block;height:100%;width:0;border-radius:inherit;background:#08c6d4;animation:splash-creep 8s cubic-bezier(.1,.7,.2,1) forwards}
-.splash-bar.done i{width:100% !important;animation:none;transition:width .25s ease-out}
-@keyframes splash-creep{0%{width:0}6%{width:28%}25%{width:62%}60%{width:82%}100%{width:92%}}
-@media (prefers-reduced-motion:reduce){.splash-bar i{animation-duration:.01s}}
+.splash-in{display:flex;flex-direction:column;align-items:center;width:min(300px,100%);margin-top:-4vh;text-align:center}
+.splash-mark{width:56px;height:56px;display:block}
+.splash-name{margin-top:10px;font:700 34px/1.15 ${BRAND_FONT};letter-spacing:0}
+.splash-bar{margin-top:26px;width:140px;max-width:60vw;height:2px;border-radius:2px;background:var(--sp-track);overflow:hidden}
+.splash-bar i{display:block;height:100%;background:var(--sp-bar);transform-origin:0 50%;transform:scaleX(var(--p,.08));
+  transition:transform .4s cubic-bezier(.22,.61,.36,1)}
+.splash-msg{margin:12px 0 0;min-height:20px;font:500 13px/20px ${SYS};color:var(--sp-muted)}
+.splash-help{margin-top:14px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.splash-help[hidden]{display:none}
+.splash-hint{margin:0;font:400 13px/1.45 ${SYS};color:var(--sp-fg)}
+.splash[data-state=failed] .splash-bar{visibility:hidden}
+.splash[data-state=failed] .splash-msg{color:var(--sp-fg);font-weight:600}
+.splash[data-state=failed] .splash-hint{color:var(--sp-muted)}
+.splash-reload{height:36px;min-width:96px;padding:0 16px;border:0;border-radius:8px;background:var(--sp-bar);color:#03252a;
+  font:600 14px/36px ${SYS};cursor:pointer}
+.splash-reload:hover{background:#2dd8e4}
+.splash-reload:focus-visible{outline:2px solid var(--sp-bar);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){.splash,.splash-bar i{transition:none}}
 `;
 
-// The Memora mark, from web/src/brand.ts (self-coloured).
-const MARK = (cls: string): string => markSvg(cls);
-
-export function indexPage(css: string): string {
+/** `splashJs` is web/src/boot-splash.ts compiled; it runs right after the splash markup, before app.js downloads. */
+export function indexPage(css: string, splashJs: string): string {
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<meta name="memora-build" content="__MEMORA_BUILD__">
 <script>${THEME_BOOT}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
@@ -93,13 +83,19 @@ ${CRITICAL_CSS}
 </head>
 <body>
 <div id="app">
-  <div id="splash" class="splash" role="status" aria-live="polite">
-    ${MARK('splash-mark')}
-    <div class="splash-name">Memora</div>
-    <div class="splash-by">by Codrihub Tech</div>
-    <div class="splash-msg" id="splashMsg">Checking your session...</div>
-    <div class="splash-bar" id="splashBar" role="progressbar" aria-label="Loading Memora"><i></i></div>
+  <div id="splash" class="splash">
+    <div class="splash-in">
+      ${markSvg('splash-mark')}
+      <div class="splash-name" aria-hidden="true">Memora</div>
+      <div class="splash-bar" id="splashBar" role="progressbar" aria-label="Loading Memora" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><i></i></div>
+      <p class="splash-msg" id="splashMsg" role="status" aria-live="polite">Loading Memora…</p>
+      <div class="splash-help" id="splashHelp" hidden>
+        <p class="splash-hint" id="splashHint"></p>
+        <button class="splash-reload" id="splashReload" type="button">Reload</button>
+      </div>
+    </div>
   </div>
+  <script>${splashJs}</script>
 
   <div id="appShell" class="app-shell">
 
@@ -110,22 +106,28 @@ ${CRITICAL_CSS}
     <div class="side-head">
       <div class="brand-wrap">
         <button id="brandHome" class="brand" type="button" aria-label="Memora, open Overview" data-tip="Overview">
-          <span class="brand-tile">${MARK('brand-mark')}</span>
+          <span class="brand-tile">${markSvg('brand-mark')}</span>
           <span class="brand-text">Memora</span>
         </button>
         <button id="brandVersion" class="brand-ver" type="button" title="Memora by Codrihub Tech" aria-label="Version, open Settings">
           <span id="brandVault">second brain</span><span class="brand-upd" id="brandUpd" hidden>Update</span>
         </button>
       </div>
+      <button id="sideNewNode" class="side-tool side-new" type="button" aria-label="New note" title="New note" data-tip="New note">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V12"/><path d="M18.4 3.6a2 2 0 0 1 2.9 2.9L13 14.8l-3.6.8.8-3.6z"/></svg><span class="side-new-label">New note</span>
+      </button>
+      <button id="sideCollapseTop" class="side-tool side-collapse" type="button" title="Collapse sidebar ([)" aria-label="Collapse sidebar" aria-controls="sidebar">
+        <svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg>
+      </button>
       <button id="sideClose" class="icon-btn side-close" type="button" title="Close menu" aria-label="Close menu">
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </div>
 
     <div class="side-actions">
-      <button id="sideNewNode" class="side-new" type="button" aria-label="New node" data-tip="New node">
-        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>
-        <span class="side-new-label">New node</span>
+      <button id="sideSearchBtn" class="side-find" type="button" aria-label="Search notes, pages and actions" aria-haspopup="dialog" data-tip="Search" data-kbd="Ctrl K">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.3-4.3"/></svg>
+        <span class="side-new-label">Search notes</span><kbd data-kbd-mod aria-hidden="true">Ctrl K</kbd>
       </button>
     </div>
 
@@ -149,7 +151,7 @@ ${CRITICAL_CSS}
           </div>
           <div class="side-search">
             <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
-            <input id="sideSearch" type="search" placeholder="Filter folders and nodes" aria-label="Filter folders and nodes" autocomplete="off" spellcheck="false">
+            <input id="sideSearch" type="search" placeholder="Filter folders and notes" aria-label="Filter folders and notes" autocomplete="off" spellcheck="false">
             <button id="sideSearchClear" class="ss-clear hidden" type="button" aria-label="Clear filter">
               <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
@@ -159,20 +161,21 @@ ${CRITICAL_CSS}
     </div>
 
     <div class="side-foot">
-      <button id="sideStats" class="side-stats" type="button" aria-label="Vault size" aria-expanded="false" aria-controls="sideStatsPop" data-tip="Vault size">
+      <button id="sideStats" class="side-stats" type="button" aria-label="How many notes" aria-expanded="false" aria-controls="sideStatsPop" data-tip="Your notes in numbers">
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></svg>
       </button>
-      <div id="sideStatsPop" class="side-stats-pop" role="dialog" aria-label="Vault size" hidden></div>
-      <button id="sideCollapse" class="side-collapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="sidebar" aria-expanded="true">
-        <svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m11.5 7-5 5 5 5"/><path d="m17.5 7-5 5 5 5"/></svg>
-        <span class="sc-label">Collapse</span>
-      </button>
-      <button id="profileBtn" class="profile-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu" data-tip="Account and settings">
+      <div id="sideStatsPop" class="side-stats-pop" role="dialog" aria-label="Your notes in numbers" hidden></div>
+      <nav class="side-links" aria-label="Trash and settings">
+        <button id="sideCollapse" class="nav-item side-collapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="sidebar" aria-expanded="true"><span class="ni-tile"><svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></span><span class="ni-label sc-label">Collapse sidebar</span></button>
+        <button class="nav-item" type="button" data-act="trash" data-page="trash" data-tip="Trash" aria-label="Trash"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 1.8h7a2 2 0 0 0 2-1.8l1-12M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7"/></svg></span><span class="ni-label">Trash</span></button>
+        <button class="nav-item" type="button" data-page="settings" data-tip="Settings" aria-label="Settings"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span class="ni-label">Settings</span></button>
+      </nav>
+      <button id="profileBtn" class="profile-btn" type="button" aria-label="Account, settings, help and theme" aria-haspopup="menu" aria-expanded="false" aria-controls="profileMenu" data-tip="Settings, help and theme">
         <span class="user-avatar" data-avatar>?</span>
-        <span class="pb-main"><span class="pb-name" data-username>account</span><span class="pb-sub">Settings, Agents, Theme</span></span>
-        <svg class="i pb-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m7 15 5-5 5 5"/></svg>
+        <span class="pb-main"><span class="pb-name" data-username>account</span><span class="side-meta" id="profileSub"><span class="pb-stats">Account and settings</span><span class="pb-live" id="profileLive" aria-live="polite"></span></span></span>
+        <svg class="i pb-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9.5 4-4 4 4M8 14.5l4 4 4-4"/></svg>
       </button>
-      <div class="side-meta" id="profileSub"><span class="pb-stats" aria-label="Vault size"><span id="statNotes">0 nodes</span><i>·</i><span id="statLinks">0 links</span><i>·</i><span id="statFolders">0 folders</span></span><span class="pb-live" id="profileLive" aria-live="polite"></span></div>
+
     </div>
   </aside>
   <div id="sideScrim" aria-hidden="true"></div>
@@ -180,8 +183,8 @@ ${CRITICAL_CSS}
   <!-- ░░ MAIN ░░ -->
   <main id="main">
     <header id="topbar">
-      <button id="sideToggle" class="icon-btn" type="button" title="Open menu" aria-label="Open menu" aria-controls="sidebar">
-        <span class="brand-tile sm">${MARK('brand-mark')}</span>
+      <button id="sideToggle" class="tb-menu" type="button" title="Open menu" aria-label="Open menu" aria-controls="sidebar">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg>
       </button>
       <div class="tb-title">
         <div id="crumb" class="crumb">Brain</div>
@@ -189,7 +192,7 @@ ${CRITICAL_CSS}
       <div class="grow"></div>
       <button id="searchBtn" class="tb-search" type="button" aria-label="Search notes, pages and actions" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K /">
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.3-4.3"/></svg>
-        <span class="tb-search-label">Search nodes, pages, actions</span>
+        <span class="tb-search-label">Search notes, pages, actions</span>
         <kbd data-kbd-mod>Ctrl K</kbd>
       </button>
       <button id="rtPill" class="rt" type="button" data-state="connecting" aria-haspopup="dialog" aria-expanded="false" aria-label="Realtime: connecting">
@@ -207,7 +210,7 @@ ${CRITICAL_CSS}
       <section id="view-brain" class="view hidden" data-page="brain" aria-label="Brain"></section>
       <section id="view-canvas" class="view hidden" data-page="canvas" aria-label="Canvas"></section>
       <section id="view-home" class="view hidden" data-page="home" aria-label="Overview"></section>
-      <section id="view-vault" class="view hidden" data-page="vault" aria-label="Vault"></section>
+      <section id="view-vault" class="view hidden" data-page="vault" aria-label="Notes"></section>
       <section id="view-graph" class="view hidden" data-page="graph" aria-label="Graph">
         <canvas id="graph"></canvas>
         <div id="gTip" class="gtip hidden"></div>
@@ -229,6 +232,7 @@ ${CRITICAL_CSS}
       <section id="view-access" class="view hidden" data-page="access" aria-label="Access"></section>
       <section id="view-settings" class="view hidden" data-page="settings" aria-label="Settings"></section>
       <section id="view-docs" class="view hidden" data-page="docs" aria-label="Documentation"></section>
+      <section id="view-trash" class="view hidden" data-page="trash" aria-label="Trash"></section>
     </div>
   </main>
 
@@ -248,13 +252,14 @@ ${CRITICAL_CSS}
     <div id="peekBody" class="peek-body note-body"></div>
   </aside>
 
-  <div id="rtPop" class="rt-pop hidden" role="dialog" aria-label="Realtime status"></div>
+  <div id="rtPop" class="rt-pop hidden" role="dialog" aria-label="Agents"></div>
+  <div class="rt-scrim" aria-hidden="true"></div>
   <div id="pmScrim" class="pm-scrim hidden" aria-hidden="true"></div>
   <div id="profileMenu" class="pmenu hidden" role="menu" aria-label="Account and settings"></div>
   <div id="palette" class="palette hidden"></div>
   <div id="navTip" class="nav-tip" role="tooltip" aria-hidden="true"></div>
   <div id="modalHost" class="modal-host hidden"></div>
-  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <div id="toasts" class="toasts" role="region" aria-label="Notifications" aria-live="polite"></div>
   </div>
 </div>
 <script src="/app.js"></script>

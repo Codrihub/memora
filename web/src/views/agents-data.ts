@@ -1,10 +1,5 @@
-// The Agents area's shared data and actions: the keys, the OAuth sign-ins,
-// each agent's app and usage (last call, calls in 24h, hourly sparkline), and
-// the few actions that need a confirmation (new key, show key, delete). The
-// list (views/keys.ts), an agent's own page (views/agent-page.ts) and the
-// new-agent page (views/agent-new.ts) all read from here and repaint when it
-// changes. Create, permissions, roll, rename, disable and delete keep the
-// server contract of docs/contracts/tools-permissions.md.
+// The Agents area's shared data (keys, OAuth sign-ins, apps, usage) and its confirmed actions; keys.ts,
+// agent-page.ts and agent-new.ts read from here and repaint on change (docs/contracts/tools-permissions.md).
 
 import { apiGet, apiPost, updateKeyPermissions } from '../api';
 import { $, esc } from '../dom';
@@ -47,7 +42,7 @@ export interface Usage {
 
 export type Status = 'active' | 'idle' | 'never' | 'off';
 
-export interface AgentsData {
+interface AgentsData {
   keys: KeyRowFull[];
   /** Keys an AI app got by signing in over OAuth, with the app's client name. */
   oauth: Map<string, string>;
@@ -71,7 +66,7 @@ export function usageOf(k: KeyRow): Usage | undefined {
   return data.usage.get('id:' + k.id) || data.usage.get(agentKey(nameOf(k)));
 }
 
-export interface AppInfo {
+interface AppInfo {
   id: string;
   label: string;
   /** Guessed from the name or the OAuth client, not chosen yet. */
@@ -94,10 +89,8 @@ export function statusOf(k: KeyRowFull, now = Date.now() / 1000): { st: Status; 
 }
 
 export function connectKey(k: KeyRowFull): ConnectKey {
-  return { id: k.id, name: nameOf(k), revealable: k.revealable, oauth: data.oauth.has(k.id), perms: permsOf(k) };
+  return { id: k.id, name: nameOf(k), revealable: k.revealable, oauth: data.oauth.has(k.id), perms: permsOf(k), used: (k.uses || 0) > 0 };
 }
-
-// ── loading ─────────────────────────────────────────────────────────────
 
 const listeners = new Set<() => void>();
 
@@ -191,8 +184,6 @@ export function bumpSeen(seen: { kind: string; id?: string | null; actor: string
   return changed;
 }
 
-// ── addresses ───────────────────────────────────────────────────────────
-
 /** Go to an address inside the Agents page: '' (the list), 'new', 'new/<client>', '<id>' or '<id>/<tab>'. */
 export function navAgents(sub = '', replace = false): void {
   setKeysRoute(sub ? '/agents/' + sub : null);
@@ -215,14 +206,6 @@ export function wireAgentLinks(scope: HTMLElement): void {
     };
   });
 }
-
-/** One agent's own Activity page (the full one, with charts and export). */
-export function goActivity(k: KeyRow): void {
-  history.pushState(null, '', '/activity/' + encodeURIComponent(k.id));
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
-// ── actions ─────────────────────────────────────────────────────────────
 
 export async function createAgent(name: string, p: Permissions): Promise<{ key: ConnectKey; secret: string } | null> {
   try {
@@ -377,8 +360,6 @@ export async function restoreKey(id: string): Promise<void> {
   }
 }
 
-// ── shared bits ─────────────────────────────────────────────────────────
-
 const svg = (d: string): string => `<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 export const ICO_EDIT = svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>');
 export const ICO_TRASH = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
@@ -389,6 +370,7 @@ export const ICO_BACK = svg('<path d="M19 12H5M11 6l-6 6 6 6"/>');
 export const ICO_RESTORE = svg('<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/>');
 export const ICO_LOCK = svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>');
 export const ICO_ACTIVITY = svg('<path d="M3 12h4l3-8 4 16 3-8h4"/>');
+export const ICO_INFO = svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>');
 
 /** Styles the small sheets above share (secret, reveal). */
 export const SHEET_CSS = `

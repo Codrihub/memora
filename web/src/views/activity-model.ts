@@ -1,36 +1,33 @@
-// Activity page state: the filters (time, action type, source, agents,
-// status, search), how an event is classified (action type, status) and how
-// the actors are sorted into agent classes (active now, seen recently, idle,
-// removed keys, people and system).
+// Activity page state: filters, event classification and agent classes.
 
 import { rangeWindow, settleRunning, verb, type ActivityItem, type FeedRange, type Source } from '../control/feed';
+import { isSystem, problemOf, sentenceText } from '../control/sentence';
 import type { KeyRow } from '../types';
 
 export type Cat = 'read' | 'search' | 'write' | 'delete' | 'auth' | 'other';
 export type St = 'ok' | 'fail' | 'running';
 export type TimeKey = '1h' | 'today' | '1d' | '7d' | '30d' | 'all' | 'custom';
-export type ViewKind = 'day' | 'agent' | 'board';
-export type AgentClass = 'active' | 'recent' | 'idle' | 'removed' | 'people';
+type AgentClass = 'active' | 'recent' | 'idle' | 'removed' | 'people';
 
 export const CATS: { id: Cat; label: string; hint: string }[] = [
-  { id: 'read', label: 'Reads', hint: 'Opened, listed or inspected' },
-  { id: 'search', label: 'Searches', hint: 'Search, query and similar' },
-  { id: 'write', label: 'Writes', hint: 'Created, edited, moved, tagged' },
-  { id: 'delete', label: 'Deletes', hint: 'Deleted or trashed' },
-  { id: 'auth', label: 'Sign-in & keys', hint: 'Sessions, keys, access rules' },
+  { id: 'read', label: 'Reads', hint: 'Opened or looked through notes' },
+  { id: 'search', label: 'Searches', hint: 'Searched or looked for similar notes' },
+  { id: 'write', label: 'Changes', hint: 'Created, edited, moved, tagged' },
+  { id: 'delete', label: 'Deletes', hint: 'Deleted or moved to Trash' },
+  { id: 'auth', label: 'Sign-in & keys', hint: 'Sign-ins, AI keys, access rules' },
   { id: 'other', label: 'Other', hint: 'Everything else' },
 ];
 
 export const SRCS: { id: Source; label: string; hint: string }[] = [
-  { id: 'agent', label: 'MCP', hint: 'Agent tool calls' },
-  { id: 'vault', label: 'Vault', hint: 'Node changes' },
-  { id: 'auth', label: 'Gateway', hint: 'Sign-in, keys, access' },
+  { id: 'agent', label: 'AI apps', hint: 'What your connected AIs did' },
+  { id: 'vault', label: 'Note changes', hint: 'Notes changed in the app or in the folder' },
+  { id: 'auth', label: 'Sign-in & keys', hint: 'Sign-ins, AI keys and access' },
 ];
 
 export const STATUSES: { id: St; label: string }[] = [
-  { id: 'ok', label: 'OK' },
-  { id: 'fail', label: 'Failed' },
-  { id: 'running', label: 'Running' },
+  { id: 'ok', label: 'Done' },
+  { id: 'fail', label: 'Failed or refused' },
+  { id: 'running', label: 'Working' },
 ];
 
 export const TIMES: { id: TimeKey; label: string; short: string }[] = [
@@ -46,8 +43,8 @@ export const CLASSES: { id: AgentClass; label: string }[] = [
   { id: 'active', label: 'Active now' },
   { id: 'recent', label: 'Seen recently' },
   { id: 'idle', label: 'Idle' },
-  { id: 'removed', label: 'Removed keys' },
-  { id: 'people', label: 'People & system' },
+  { id: 'removed', label: 'No longer connected' },
+  { id: 'people', label: 'People & server' },
 ];
 
 export interface Filters {
@@ -60,6 +57,8 @@ export interface Filters {
   srcs: Set<Source>;
   agents: Set<string>;
   status: Set<St>;
+  /** Show server, sign-in and other system lines too. */
+  system: boolean;
   q: string;
 }
 
@@ -72,6 +71,7 @@ export const F: Filters = {
   srcs: new Set(),
   agents: new Set(),
   status: new Set(),
+  system: false,
   q: '',
 };
 
@@ -98,7 +98,7 @@ export function catOf(it: ActivityItem): Cat {
 
 export function stOf(it: ActivityItem): St {
   if (settleRunning(it)) return 'running';
-  return it.ok === false ? 'fail' : 'ok';
+  return problemOf(it) ? 'fail' : 'ok';
 }
 
 /** Local `YYYY-MM-DD` of a unix-seconds time. */
@@ -113,11 +113,10 @@ function midnight(day: string, plusDays = 0): number {
   return d.getTime() / 1000;
 }
 
-/** Range the server is asked for. A custom span loads everything and is cut client side. */
-export function feedRange(): FeedRange['range'] {
-  if (F.time !== 'custom') return F.time;
-  if (F.from && F.from === F.to) return `day:${F.from}`;
-  return 'all';
+/** Range the server is asked for; short ranges load 7 days and the window is cut client side. */
+export function feedRange(t: Pick<Filters, 'time'> = F): FeedRange['range'] {
+  if (t.time === '30d' || t.time === 'all') return t.time;
+  return t.time === 'custom' ? 'all' : '7d';
 }
 
 /** `[since, until)` of the selected time, unix seconds. */
@@ -150,11 +149,12 @@ export function labelOf(t: Pick<Filters, 'time' | 'from' | 'to'>): string {
 export function searchText(it: ActivityItem): string {
   const r = it.raw as Record<string, unknown>;
   const extra = [r.detail, r.error, r.event, r.call_id].filter((v) => typeof v === 'string').join(' ');
-  return `${it.actor} ${it.action} ${verb(it.action)} ${it.label} ${it.paths.join(' ')} ${it.ip || ''} ${extra}`.toLowerCase();
+  return `${sentenceText(it)} ${it.actor} ${it.action} ${verb(it.action)} ${it.label} ${it.paths.join(' ')} ${it.ip || ''} ${extra}`.toLowerCase();
 }
 
 /** Whether an event passes every filter (time excluded), optionally skipping one facet. */
 export function matches(it: ActivityItem, skip?: Facet): boolean {
+  if (isSystem(it) && !systemShown(it, skip)) return false;
   if (skip !== 'cats' && (F.cats.size || F.actions.size)) {
     if (!F.cats.has(catOf(it)) && !F.actions.has(it.action)) return false;
   }
@@ -173,9 +173,43 @@ export function inWindow(items: ActivityItem[]): ActivityItem[] {
   return items.filter((x) => x.ts >= w.since && x.ts < w.until);
 }
 
-/** Filters set besides time and search. */
+/** System lines show when asked for, or when a filter (or the facet being counted) points at them. */
+export function systemShown(it: ActivityItem, skip?: Facet): boolean {
+  if (F.system) return true;
+  if (it.source === 'auth' && (F.srcs.has('auth') || F.cats.has('auth') || skip === 'srcs' || skip === 'cats')) return true;
+  // A note event repeating an AI's own call only shows with everything else.
+  return !it.echo && (F.agents.has(it.actor) || skip === 'agents');
+}
+
+/** Filters set besides time and search (time has its own control). */
 export function activeCount(): number {
-  return F.cats.size + F.actions.size + F.srcs.size + F.agents.size + F.status.size + (F.time === '7d' ? 0 : 1);
+  return F.cats.size + F.actions.size + F.srcs.size + F.agents.size + F.status.size + (F.system ? 1 : 0);
+}
+
+/** The quick filter pills above the list: each sets the action types and status at once. */
+export type Quick = 'all' | 'write' | 'read' | 'search' | 'fail';
+export const QUICK: { id: Quick; label: string; cats: Cat[]; status: St[] }[] = [
+  { id: 'all', label: 'All', cats: [], status: [] },
+  { id: 'write', label: 'Changes', cats: ['write', 'delete'], status: [] },
+  { id: 'read', label: 'Reads', cats: ['read'], status: [] },
+  { id: 'search', label: 'Searches', cats: ['search'], status: [] },
+  { id: 'fail', label: 'Problems', cats: [], status: ['fail'] },
+];
+
+type QuickState = { cats: Set<Cat>; status: Set<St>; actions: Set<string> };
+
+/** The pill the current action types and status match exactly, or null for another mix. */
+export function quickOf(f: QuickState = F): Quick | null {
+  if (f.actions.size) return null;
+  const same = <T>(a: Set<T>, b: T[]): boolean => a.size === b.length && b.every((x) => a.has(x));
+  return QUICK.find((q) => same(f.cats, q.cats) && same(f.status, q.status))?.id ?? null;
+}
+
+export function setQuick(id: Quick, f: QuickState = F): void {
+  const q = QUICK.find((x) => x.id === id)!;
+  f.cats = new Set(q.cats);
+  f.status = new Set(q.status);
+  f.actions = new Set();
 }
 
 export function clearFilters(keepTime = false): void {
@@ -184,13 +218,12 @@ export function clearFilters(keepTime = false): void {
   F.srcs.clear();
   F.agents.clear();
   F.status.clear();
+  F.system = false;
   if (!keepTime) {
     F.time = '7d';
     F.from = F.to = '';
   }
 }
-
-// ── agents ──────────────────────────────────────────────────────────────
 
 export interface AgentInfo {
   name: string;
@@ -209,11 +242,7 @@ export interface AgentInfo {
 const ACTIVE_SECS = 300;
 const RECENT_SECS = 86400;
 
-/**
- * Every actor that shows up in the loaded events plus every key, classified.
- * `all` is everything loaded; `scoped` the events of the selected range that
- * match the other filters.
- */
+/** Every actor in the loaded events (`all`) plus every key, classified; counts come from `scoped`. */
 export function classifyAgents(all: ActivityItem[], scoped: ActivityItem[], keys: KeyRow[]): AgentInfo[] {
   const now = Date.now() / 1000;
   const byName = new Map<string, AgentInfo>();
@@ -265,26 +294,4 @@ export function classifyAgents(all: ActivityItem[], scoped: ActivityItem[], keys
   return [...byName.values()].sort(
     (x, y) => order.indexOf(x.cls) - order.indexOf(y.cls) || y.n - x.n || y.lastTs - x.lastTs || x.name.localeCompare(y.name),
   );
-}
-
-// ── persistence of per-viewer conveniences ──────────────────────────────
-
-const VIEW_KEY = 'memora.activity.view';
-
-export function loadView(): ViewKind {
-  try {
-    const v = localStorage.getItem(VIEW_KEY);
-    if (v === 'day' || v === 'agent' || v === 'board') return v;
-  } catch {
-    /* storage blocked */
-  }
-  return 'day';
-}
-
-export function saveView(v: ViewKind): void {
-  try {
-    localStorage.setItem(VIEW_KEY, v);
-  } catch {
-    /* storage blocked */
-  }
 }

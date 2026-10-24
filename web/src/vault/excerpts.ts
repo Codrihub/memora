@@ -1,6 +1,4 @@
-// Lazy one-line excerpts and tags for the node list: fetched only for rows
-// on screen, a few at a time, cached per path and mtime (memory and
-// sessionStorage, so going back to a folder paints at once).
+// Lazy excerpts and tags for the node list, cached per path and mtime in memory and sessionStorage.
 
 import { apiGet } from '../api';
 import { parseTags } from '../format';

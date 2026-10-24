@@ -1,5 +1,3 @@
-// Camera: world <-> screen mapping, smooth animated moves, pan inertia.
-
 export interface Box {
   x0: number;
   y0: number;
@@ -88,7 +86,7 @@ export class Camera {
       const a = this.anim;
       const t = Math.min(1, (now - a.t0) / a.ms);
       const e = ease(t);
-      // Interpolate zoom geometrically so the move feels even.
+      // Geometric zoom interpolation so the move feels even.
       this.k = a.k0 * Math.pow(a.k1 / a.k0, e);
       this.x = a.x0 + (a.x1 - a.x0) * e;
       this.y = a.y0 + (a.y1 - a.y0) * e;

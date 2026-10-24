@@ -1,14 +1,8 @@
-// Agent identity shared by every view: one color and one set of initials per
-// actor name (the API key name for agents, the username for the browser).
-// Brain, graph, canvas and the control pages import `agentColor` from here so
-// an agent looks the same everywhere.
+// Agent identity shared by every view: one color and one set of initials per actor name.
 
 import { esc } from '../dom';
 
-/**
- * Agent palette. Twelve hues spread around the wheel, mid lightness so each
- * reads on both the dark (#0b0e14) and the light (#f5f6f8) background.
- */
+/** Mid-lightness hues that read on both the dark and the light background. */
 export const AGENT_PALETTE = [
   '#2dd4bf', // teal
   '#60a5fa', // blue
@@ -42,6 +36,12 @@ export function agentKey(name?: string | null): string {
 // Colors picked for API keys (Agents & keys, REST or the MCP tool set_my_color).
 const colorById = new Map<string, string>();
 const colorByName = new Map<string, string>();
+let keyIds: Set<string> | null = null;
+
+/** Whether a key id is still connected: true, false (removed), or null when not known yet. */
+export function keyExists(id: string): boolean | null {
+  return keyIds ? keyIds.has(id) : null;
+}
 
 /** Fired on window when key colors change, so views can repaint. */
 export const AGENT_COLORS_EVENT = 'memora:agent-colors';
@@ -49,6 +49,7 @@ export const AGENT_COLORS_EVENT = 'memora:agent-colors';
 /** Load the chosen key colors. A name shared by keys with different colors maps by id only. */
 export function setAgentColors(keys: { id: string; name?: string; color?: string | null }[]): void {
   const before = JSON.stringify([...colorById]);
+  keyIds = new Set(keys.map((k) => k.id));
   colorById.clear();
   colorByName.clear();
   const seen = new Map<string, string | null>();
@@ -62,10 +63,7 @@ export function setAgentColors(keys: { id: string; name?: string; color?: string
   if (JSON.stringify([...colorById]) !== before) window.dispatchEvent(new Event(AGENT_COLORS_EVENT));
 }
 
-/**
- * The color of an agent (or user): the key's chosen color (by key id when known,
- * else by name), otherwise a stable hue from the name. Same agent, same color.
- */
+/** The key's chosen color (by id, else by name), otherwise a stable hue from the name. */
 export function agentColor(name?: string | null, id?: string | null): string {
   if (id && colorById.has(id)) return colorById.get(id)!;
   const k = agentKey(name);

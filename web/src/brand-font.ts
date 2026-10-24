@@ -1,8 +1,5 @@
-// The Memora wordmark font: Dancing Script Bold (SIL Open Font License 1.1,
-// https://github.com/googlefonts/DancingScript), a lively connected script that
-// stays readable at small sizes. Cut down to the letters of "Memora" and
-// "by Codrihub Tech" and embedded, because the page CSP only allows fonts
-// from the server itself or data URIs.
+// Wordmark font: Dancing Script Bold (SIL OFL 1.1, https://github.com/googlefonts/DancingScript),
+// subset to "Memora" and "by Codrihub Tech"; embedded because the page CSP only allows same-origin or data: fonts.
 
 export const BRAND_FONT = "'Memora Script', 'Segoe Script', cursive";
 

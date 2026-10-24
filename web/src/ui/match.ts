@@ -1,10 +1,4 @@
-// The one way Memora matches a typed query, shared by the global search
-// (Ctrl K), the map finder (Brain, Graph, Canvas) and the Nodes filter.
-//
-// The query is one string, matched whole: "a lam" finds "A lamp", never
-// "A ... lam ... a". Ranking: exact, starts with, at a word start, anywhere.
-// When nothing contains it, `similar` offers "did you mean" titles: a word
-// one or two letters off, or one that starts almost the same way.
+// Shared query matching: the query is matched whole ("a lam" finds "A lamp", never "A ... lam ... a").
 
 export function score(text: string, q: string): number {
   const t = text.toLowerCase();
@@ -35,16 +29,11 @@ function lev(a: string, b: string, max: number): number {
 
 export interface Near {
   s: number;
-  /** The word in the title that comes close, as written there. */
   word: string;
   why: string;
 }
 
-/**
- * "Did you mean": how close a title comes to the query when it does not
- * contain it: a word one or two edits away (a typo), or one that starts that
- * way. Null when not similar; a higher `s` is closer.
- */
+/** "Did you mean" closeness of a title that does not contain the query; null when not similar. */
 export function similar(text: string, q: string): Near | null {
   if (q.length < 3) return null;
   if (q.includes(' ')) return similarWords(text, q);
@@ -80,10 +69,7 @@ export function normQuery(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-/**
- * Several words ("lunch pla"): every word must come close to a word of the
- * title, in order (the last one may be just its start), e.g. "Launch plan".
- */
+/** Every query word must come close to a title word, in order; the last may be a prefix. */
 function similarWords(text: string, q: string): Near | null {
   const qs = q.split(' ').filter(Boolean);
   const ws = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);

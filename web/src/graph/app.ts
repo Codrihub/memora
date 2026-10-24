@@ -1,8 +1,4 @@
-// The graph view controller: owns the DOM, the simulation, the camera, input
-// (mouse, touch, pinch, keyboard), the side card, filters, persistence and the
-// live bus subscriptions. One instance lives for the page session; leaving the
-// view suspends it (no frames, no listeners) and coming back resumes it with
-// positions intact.
+// One instance lives for the page session; suspend() drops frames and listeners, positions stay.
 
 import { apiGet } from '../api';
 import { on } from '../bus';
@@ -22,24 +18,10 @@ import { helpHTML, sliderHTML, toggleHTML, ViewChrome } from '../ui/view-chrome'
 import { NodeCard, type CardLink } from '../ui/node-card';
 
 const ICON: Record<string, string> = {
-  brain:
-    '<path d="M9.5 4.5A2.5 2.5 0 0 0 7 7a2.6 2.6 0 0 0-2.5 3.2A3 3 0 0 0 5 15.6 2.8 2.8 0 0 0 9.5 19.5V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.6 2.6 0 0 1 2.5 3.2 3 3 0 0 1-.5 5.4 2.8 2.8 0 0 1-4.5 3.9V4.5z"/>',
-  graph:
-    '<circle cx="6" cy="17" r="2.4"/><circle cx="17.5" cy="6.5" r="2.4"/><circle cx="17.5" cy="17.5" r="2.2"/><path d="M7.9 15.3 15.4 8.4M8.8 17.4h6.3"/>',
-  canvas:
-    '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><rect x="6.5" y="7" width="5" height="4" rx="1"/><rect x="12.5" y="12.5" width="5" height="4.5" rx="1"/>',
   force: '<circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="7" r="1.6"/><circle cx="7" cy="19" r="1.6"/><path d="M10 10.5 6.3 7M14 11l3.6-3M10.4 14 8 17.6"/>',
   radial: '<circle cx="12" cy="12" r="2"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="9"/>',
   clusters: '<circle cx="7.5" cy="8" r="3.5"/><circle cx="16.5" cy="9" r="3"/><circle cx="11" cy="17" r="3.5"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.3-4.3"/>',
-  filter: '<path d="M4 5h16M7 12h10M10 19h4"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  minus: '<path d="M5 12h14"/>',
-  fit: '<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>',
-  open: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   pin: '<path d="M9 4h6l-1 5 3 3H7l3-3zM12 15v5"/>',
-  target: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/>',
-  map: '<path d="m9 5-5 2v12l5-2 6 2 5-2V5l-5 2z"/><path d="M9 5v12M15 7v12"/>',
 };
 const svg = (n: string) => `<svg viewBox="0 0 24 24">${ICON[n] || ''}</svg>`;
 
@@ -118,9 +100,6 @@ export class GraphApp {
     this.wireCanvas();
   }
 
-  // ── lifecycle ────────────────────────────────────────────────────────
-
-  /** Client position of a note's node, when it is in the graph. */
   clientPoint(path: string): { x: number; y: number } | null {
     const n = this.nodes.find((x) => x.path === path);
     if (!n || !this.root.isConnected) return null;
@@ -129,7 +108,7 @@ export class GraphApp {
     return { x: r.left + s.x, y: r.top + s.y };
   }
 
-  /** Show (or refresh) the view. Safe to call repeatedly. */
+  /** Safe to call repeatedly. */
   show(): void {
     this.chrome.shown();
     const back = !this.active;
@@ -138,7 +117,6 @@ export class GraphApp {
       void this.load(false);
     } else {
       this.refreshSoon(150);
-      // Every visit opens on the whole graph, centred.
       if (back) {
         this.userMoved = false;
         window.setTimeout(() => this.fitAll(500), 60);
@@ -154,6 +132,11 @@ export class GraphApp {
     this.readTheme();
     this.model.recolor(this.theme.light);
     this.resize();
+    const dots = () => {
+      this.dirty = true;
+      this.kick();
+    };
+    window.addEventListener('memora:dots', dots);
     const ro = new ResizeObserver(() => this.resize());
     ro.observe(this.root);
     const mo = new MutationObserver(() => {
@@ -179,13 +162,13 @@ export class GraphApp {
       () => mo.disconnect(),
       () => document.removeEventListener('visibilitychange', vis),
       () => window.removeEventListener('keydown', key),
+      () => window.removeEventListener('memora:dots', dots),
       on('mutation', (ev) => this.onMutation(ev as Record<string, unknown>)),
       on('activity', (a) => this.onActivity(a.actor, a.phase, a.paths || [])),
     );
     this.kick();
   }
 
-  /** Stop frames and listeners; positions stay in memory. */
   suspend(): void {
     this.active = false;
     cancelAnimationFrame(this.raf);
@@ -234,8 +217,7 @@ export class GraphApp {
       if (first) {
         seedPositions(this.nodes);
         this.applyMode(false);
-        // Warm start: settle the coarse shape before the first frame, leave
-        // the last stretch of annealing visible so the graph breathes in.
+        // Warm start: settle the coarse shape, leave the last stretch of annealing visible.
         const warm = Math.min(220, Math.floor(400000 / Math.max(200, this.nodes.length)));
         for (let i = 0; i < warm && this.sim.alpha > 0.12; i++) this.sim.tick();
         this.fitAll(0);
@@ -246,7 +228,8 @@ export class GraphApp {
       this.renderPanel();
       this.updateHud();
       if (this.selected) this.paintCard(this.selected);
-      this.showEmpty(this.model.all.size ? '' : 'No nodes yet', 'Nodes and their [[wikilinks]] show up here.');
+      this.showEmpty('', '');
+      this.chrome.setEmpty(!Array.from(this.model.all.values()).some((n) => n.kind === 'note'));
       this.kick();
     })().finally(() => {
       this.loading = null;
@@ -259,7 +242,6 @@ export class GraphApp {
     this.refreshTimer = window.setTimeout(() => void this.load(true), ms);
   }
 
-  /** Recompute the visible set after data or filter changes. */
   private rebuild(): void {
     const { nodes, links } = this.model.visible(this.filters);
     this.nodes = nodes;
@@ -282,13 +264,10 @@ export class GraphApp {
     this.dirty = true;
   }
 
-  // ── layout modes ─────────────────────────────────────────────────────
-
   private computeTargets(): void {
     if (this.prefs.mode === 'radial') this.rings = radialTargets(this.nodes).rings;
     else if (this.prefs.mode === 'clusters') clusterTargets(this.nodes);
     else return;
-    // Spacing of the ring and cluster layouts: spread the targets out.
     const k = this.prefs.spacingBy[this.prefs.mode];
     if (k === 1) return;
     for (const n of this.nodes) {
@@ -306,7 +285,6 @@ export class GraphApp {
     if (m !== 'force') this.computeTargets();
     this.sim.alpha = 1;
     this.renderer.hullsDirty = true;
-    this.root.querySelectorAll<HTMLElement>('.gx-layouts button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
     if (animate) {
       if (m !== 'force') {
         const b = this.bounds(true);
@@ -323,7 +301,7 @@ export class GraphApp {
     this.applyMode(true);
   }
 
-  /** Height of the floating toolbar (canvas pixels it covers at the top). */
+  /** Canvas pixels covered by the floating toolbar at the top. */
   private topInset(): number {
     const top = this.root.querySelector('.vc-search') as HTMLElement | null;
     return top ? top.getBoundingClientRect().bottom - this.root.getBoundingClientRect().top + 4 : 56;
@@ -354,8 +332,6 @@ export class GraphApp {
     this.kick();
   }
 
-  // ── frame loop ───────────────────────────────────────────────────────
-
   private kick(): void {
     if (!this.active || this.raf || document.hidden) return;
     this.raf = requestAnimationFrame((t) => this.frameStep(t));
@@ -365,14 +341,13 @@ export class GraphApp {
     this.raf = 0;
     if (!this.active) return;
     if (!this.root.isConnected || this.root.offsetParent === null) {
-      // Hidden by the router without a stop() call: sleep until shown again.
+      // Hidden by the router without suspend(): sleep until shown again.
       return;
     }
     this.frame++;
     let moving = false;
     if (this.sim.running && this.nodes.length) {
-      // Big graphs: when a tick costs more than ~half a frame, simulate on
-      // every other frame so panning and dragging stay smooth.
+      // When a tick costs more than ~half a frame, simulate every other frame.
       if (this.tickMs < 9 || this.frame % 2 === 0) {
         const t0 = performance.now();
         this.sim.tick();
@@ -404,11 +379,10 @@ export class GraphApp {
       try {
         this.fading = this.draw(now);
       } catch (e) {
-        // Never let one bad frame stop the loop.
         console.error('graph draw failed', e);
         this.fading = false;
       }
-      if (this.chrome.prefs.minimap && (this.frame % 4 === 0 || this.dirty)) this.drawMini();
+      if (this.chrome.prefs.minimap && (this.frame % 4 === 0 || this.dirty)) this.chrome.redrawMini();
       this.dirty = false;
     }
     if (moving || animating || flows || this.fading) this.kick();
@@ -445,10 +419,6 @@ export class GraphApp {
     return Math.abs(after - before) > 0.01;
   }
 
-  private drawMini(): void {
-    this.chrome.redrawMini();
-  }
-
   private resize(): void {
     const r = this.root.getBoundingClientRect();
     if (!r.width || !r.height) return;
@@ -475,7 +445,7 @@ export class GraphApp {
       accent: v('--accent', light ? '#0d9488' : '#5eead4'),
       panel: v('--panel', light ? '#ffffff' : '#12161f'),
     };
-    // Canvas needs concrete colours; resolve anything that is not hex/rgb.
+    // Canvas needs concrete colours.
     for (const k of ['bg', 'ink', 'muted', 'accent', 'panel'] as const) {
       const c = this.theme[k];
       if (!/^#|^rgb/.test(c)) {
@@ -485,8 +455,6 @@ export class GraphApp {
     }
     this.dirty = true;
   }
-
-  // ── DOM ──────────────────────────────────────────────────────────────
 
   private q(sel: string): HTMLElement {
     return (this.root.querySelector(sel) as HTMLElement) || document.createElement('div');
@@ -500,13 +468,12 @@ export class GraphApp {
 `;
   }
 
-  /** The chrome shared with Brain and Canvas. */
   private buildChrome(): ViewChrome {
     return new ViewChrome({
       page: 'graph',
       root: this.root,
       search: {
-        placeholder: 'Find a node, #tag or in:folder',
+        placeholder: 'Find a note, #tag or in:folder',
         find: {
           items: () =>
             this.nodes
@@ -552,8 +519,8 @@ export class GraphApp {
           this.kick();
         },
         help: {
-          nodes: 'Names next to the nodes. The node under the pointer and its neighbours always show theirs.',
-          folders: 'Folder names: the hub of each folder and the title over each folder hull.',
+          nodes: 'Names next to the notes. The note under the pointer and its neighbours always show theirs.',
+          folders: 'Folder names: the point of each folder and the title over the area its notes fill.',
         },
       },
       filter: (host) => this.renderPanel(host),
@@ -599,7 +566,6 @@ export class GraphApp {
           this.userMoved = true;
           this.fitAll();
         },
-        // Arrows move the view that way (the map slides the other way).
         nudge: (dx, dy) => {
           this.userMoved = true;
           this.cam.animateTo(this.cam.x + (dx * this.cam.w * 0.16) / this.cam.k, this.cam.y + (dy * this.cam.h * 0.16) / this.cam.k, this.cam.k, 200);
@@ -631,7 +597,6 @@ export class GraphApp {
     });
   }
 
-  /** Fit the camera to one folder's nodes. */
   private focusGroup(g: string): void {
     const ns = this.nodes.filter((n) => !n.dying && n.group === g);
     if (!ns.length) return;
@@ -644,7 +609,7 @@ export class GraphApp {
     }
     this.userMoved = true;
     this.cam.fit(b, 60, 700, 1.8, this.topInset(), 10);
-    // Light the folder for a moment (the rest dims), then back to normal.
+    // Light the folder for a moment, then back to normal.
     this.focus = new Set(ns);
     this.dirty = true;
     clearTimeout(this.flashTimer);
@@ -663,8 +628,6 @@ export class GraphApp {
     this.chrome.setBadge(this.filters.tags.size);
     this.chrome.refreshRegions();
   }
-
-  // ── search, focus, hover ─────────────────────────────────────────────
 
   private updateFocus(): void {
     const center = this.dragging || this.hover || this.selected;
@@ -695,8 +658,6 @@ export class GraphApp {
     this.cv.classList.toggle('pointing', !!n);
     this.updateFocus();
   }
-
-  // ── input ────────────────────────────────────────────────────────────
 
   private local(e: { clientX: number; clientY: number }): { x: number; y: number } {
     const r = this.cv.getBoundingClientRect();
@@ -860,7 +821,7 @@ export class GraphApp {
     cv.addEventListener('dblclick', (e) => e.preventDefault());
   }
 
-  /** While dragging near the edge, nudge the camera so the node can travel. */
+  /** Near the edge while dragging, nudge the camera so the node can travel. */
   private edgePan(x: number, y: number): void {
     const m = 36;
     const dx = x < m ? m - x : x > this.cam.w - m ? this.cam.w - m - x : 0;
@@ -949,8 +910,6 @@ export class GraphApp {
     else if ((e.key === 'p' || e.key === 'P') && this.selected) this.togglePin(this.selected);
   }
 
-  // ── side card ────────────────────────────────────────────────────────
-
   select(n: GNode, center: boolean): void {
     this.selected = n;
     this.chrome.close();
@@ -972,7 +931,6 @@ export class GraphApp {
     this.updateFocus();
   }
 
-  /** Top-level group of a folder path (what hulls, regions and filters use). */
   private groupDir(g: string): string {
     return this.nodes.find((n) => n.kind === 'folder' && n.group === g && !n.dir)?.path ?? g;
   }
@@ -993,7 +951,6 @@ export class GraphApp {
     this.card.showFolder(folder, color);
   }
 
-  /** The shared node and folder card (ui/node-card.ts). */
   private paintCard(n: GNode): void {
     if (n.kind === 'note') this.card.showNote(n.path, n.label, n.dir || 'Root', n.color, this.model.tagsByPath.get(n.path) || n.tags);
     else this.card.showFolder(n.path, n.color);
@@ -1060,8 +1017,6 @@ export class GraphApp {
     });
   }
 
-  // ── filters panel ────────────────────────────────────────────────────
-
   private applyFilters(): void {
     this.rebuild();
     this.sim.reheat(0.5);
@@ -1072,7 +1027,6 @@ export class GraphApp {
     this.kick();
   }
 
-  /** The graph's own section of the Filter panel: how the graph is drawn. */
   private renderPanel(host?: HTMLElement): void {
     if (!host) {
       this.chrome.renderPanel();
@@ -1082,12 +1036,12 @@ export class GraphApp {
       `<button type="button" data-mode="${m}" class="${this.prefs.mode === m ? 'on' : ''}" title="${label} layout (${m === 'force' ? 1 : m === 'radial' ? 2 : 3})">${svg(m)}${label}</button>`;
     const mode = this.prefs.mode;
     const layHelp: Record<LayoutMode, string> = {
-      force: 'Force: linked nodes pull together and the rest push apart, so clusters form by themselves.',
+      force: 'Force: linked notes pull together and the rest push apart, so clusters form by themselves.',
       radial: 'Radial: folders sit on rings around the vault, their notes fanned out beneath them.',
       clusters: 'Clusters: each folder gathers into its own island.',
     };
     const spHelp: Record<LayoutMode, string> = {
-      force: 'How hard nodes push each other apart in the Force layout.',
+      force: 'How hard notes push each other apart in the Force layout.',
       radial: 'How far apart the rings of the Radial layout are.',
       clusters: 'How far apart the folder islands of the Clusters layout are.',
     };
@@ -1096,11 +1050,11 @@ export class GraphApp {
 <div class="vc-seg" role="group" aria-label="Layout">${lay('force', 'Force')}${lay('radial', 'Radial')}${lay('clusters', 'Clusters')}</div>
 ${sliderHTML('spacing', 'Spacing', 0.4, 2.5, 0.05, this.prefs.spacingBy[mode], spHelp[mode])}
 <h4>Graph</h4>
-${toggleHTML('folders', 'Folder hubs', this.prefs.folders, 'A node for every folder, linked to the notes inside it.')}
+${toggleHTML('folders', 'Folder hubs', this.prefs.folders, 'A point for every folder, linked to the notes inside it.')}
 ${toggleHTML('hulls', 'Folder hulls', this.prefs.hulls, 'A soft shape around the notes of each folder (Force and Clusters).')}
 ${toggleHTML('orphans', 'Nodes without links', this.prefs.orphans, 'Notes that link nowhere and are linked from nowhere.')}
 ${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clear tag filter (${this.filters.tags.size})</button>` : ''}
-<div class="vc-hint">Drag nodes · double-click to pin · / search · #tag finds tags · F fit · 1 2 3 layouts</div>`;
+<div class="vc-hint">Drag notes · double-click to pin · / search · #tag finds tags · F fit · 1 2 3 layouts</div>`;
     host.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => {
       b.onclick = () => {
         this.setMode(b.dataset.mode as LayoutMode);
@@ -1145,7 +1099,7 @@ ${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clea
     });
   }
 
-  /** Reuse the Tags view's session cache when it matches the vault. */
+  /** Reuse the Tags view's session cache. */
   private importCachedTags(): void {
     const c = readTagIndex();
     if (!c || !Array.isArray(c.tags)) return;
@@ -1163,8 +1117,6 @@ ${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clea
     });
   }
 
-  // ── live ─────────────────────────────────────────────────────────────
-
   private nodeForPath(p: string): GNode | undefined {
     const clean = p.replace(/^\/+/, '');
     return this.model.byPath.get(clean) || this.model.byPath.get(clean + '.md') || this.model.all.get(this.model.byName.get(clean.replace(/\.md$/, '').split('/').pop() || '') || '');
@@ -1175,7 +1127,7 @@ ${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clea
     const actor = typeof ev.actor === 'string' ? ev.actor : '';
     const path = [ev.path, ev.to, ev.new_path].find((x) => typeof x === 'string') as string | undefined;
     if (actor && path && ev.type !== 'node_deleted') {
-      // Brief flash for the writer; the node may only exist after the refresh.
+      // The node may only exist after the refresh.
       window.setTimeout(() => {
         const n = this.nodeForPath(path);
         if (n) this.addPulse(n.id, actor, true);

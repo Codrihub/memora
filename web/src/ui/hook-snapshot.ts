@@ -1,7 +1,4 @@
-// Snapshot of the hooks.ts defaults, taken before any other module runs (it is
-// the first import of main.ts). The shell uses it to tell whether another
-// package (the Vault tree) already installed its own tree renderer, so the
-// shell's fallback never overwrites it.
+// First import of main.ts: lets the shell tell whether the Vault tree already replaced the default renderer.
 
 import { hooks } from '../hooks';
 

@@ -1,10 +1,5 @@
-// A small, safe Markdown renderer for the documentation page.
-//
-// Everything is escaped; raw HTML in the source shows up as text. Supported:
-// ATX headings, paragraphs, nested lists, fenced code, inline code, links
-// (inline, reference and bare http(s) URLs), tables, blockquotes (with
-// note / warning callouts), horizontal rules, bold and italic. Images are
-// dropped: the docs page never loads remote or repository files.
+// A small, safe Markdown renderer for the documentation page. Everything is escaped, so raw HTML shows as text;
+// images are dropped because the docs page never loads remote or repository files.
 
 import { esc } from '../dom';
 
@@ -27,7 +22,7 @@ export interface MdOptions {
 export const HEADING_PREFIX = 'd-';
 
 /** GitHub-style heading anchor: lower case, punctuation dropped, spaces to dashes. */
-export function slugify(text: string): string {
+function slugify(text: string): string {
   return text
     .trim()
     .toLowerCase()
@@ -62,8 +57,6 @@ export function codeBlockHTML(code: string, lang = '', label = ''): string {
 export function calloutHTML(kind: 'note' | 'warning' | 'tip', title: string, body: string): string {
   return `<aside class="dc-callout ${kind}" role="note"><b class="dc-callout-t">${esc(title)}</b><div>${body}</div></aside>`;
 }
-
-/* ───────────────────────── inline ───────────────────────── */
 
 type Refs = Map<string, string>;
 
@@ -107,7 +100,7 @@ export function inline(src: string, o: MdOptions, refs: Refs = new Map(), inLink
       if (/^ .* $/.test(code) && code.trim()) code = code.slice(1, -1);
       out += `<code>${esc(code)}</code>`;
     } else if (m[4] !== undefined) {
-      // Image: dropped on purpose (see the module comment).
+      // Image: dropped.
     } else if (m[7] !== undefined) {
       const text = m[7];
       const href = m[8] ?? (m[9] !== undefined ? refs.get((m[9] || text).toLowerCase()) : refs.get(text.toLowerCase()));
@@ -143,8 +136,6 @@ export function plainText(src: string): string {
     .replace(/\\(.)/g, '$1')
     .trim();
 }
-
-/* ───────────────────────── blocks ───────────────────────── */
 
 const FENCE = /^(\s*)(`{3,}|~{3,})\s*([\w+#.-]*)[^`]*$/;
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;

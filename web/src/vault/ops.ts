@@ -1,12 +1,9 @@
-// Vault write operations on the existing endpoints, with undo where it is
-// possible. A folder "move" or "rename" moves every note below it (the server
-// has no folder move), so the old directory is left empty on disk and drops
-// out of the tree.
+// Vault write operations, with undo where possible.
 
 import { apiPost } from '../api';
-import { noteName } from '../format';
+import { noteName, stemTitle } from '../format';
 import { hooks } from '../hooks';
-import { state } from '../state';
+import { noteTitle, state } from '../state';
 import type { OkResult } from '../types';
 import {
   apiFolder,
@@ -17,6 +14,7 @@ import {
   notePathChanged,
   notesUnder,
   openFolders,
+  ROOT_LABEL,
   saveOpen,
 } from './store';
 import { undoToast } from './ui';
@@ -30,8 +28,7 @@ export function onRefresh(fn: Refresher): () => void {
   return () => refreshers.delete(fn);
 }
 
-// Nodes being renamed or moved right now. The reader keeps showing the node
-// (with a "Renaming…" state) and never reports it as missing meanwhile.
+// Notes being renamed or moved right now: the reader keeps showing them instead of "missing".
 const moving = new Map<string, string>();
 const relocListeners = new Set<(path: string, verb: string | null) => void>();
 
@@ -69,7 +66,7 @@ export async function reload(): Promise<void> {
 }
 
 /** Strip characters that cannot be part of one path segment. */
-export function cleanSegment(name: string): string {
+function cleanSegment(name: string): string {
   return name
     .replace(/[\\/:*?"<>|#^[\]]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -112,8 +109,8 @@ export async function moveNotes(paths: string[], folder: string, withUndo = true
   done.forEach((m) => markMoving(m.to, null));
   if (errors.length) undoToast(`${errors.length} could not be moved. ${errors[0]}`, null, 'err');
   if (done.length && withUndo) {
-    const label = done.length === 1 ? `"${noteName(done[0].from)}"` : `${done.length} nodes`;
-    undoToast(`Moved ${label} to ${folder || 'Vault'}`, async () => {
+    const label = done.length === 1 ? `"${noteTitle(done[0].from)}"` : `${done.length} notes`;
+    undoToast(`Moved ${label} to ${folder || ROOT_LABEL}`, async () => {
       for (const m of done.slice().reverse()) {
         try {
           await moveOne(m.to, dirOf(m.from));
@@ -128,11 +125,7 @@ export async function moveNotes(paths: string[], folder: string, withUndo = true
   return done;
 }
 
-/**
- * Move and/or rename the folder `src` to the path `dest` on the server (one
- * directory move: sub folders, empty ones and the folder look come along).
- * Used for both "move folder into" and "rename folder".
- */
+/** Move and/or rename the folder `src` to the path `dest` (sub folders and folder look come along). */
 export async function relocateFolder(src: string, dest: string, verb: string, withUndo = true): Promise<boolean> {
   if (!src || src === dest || isInside(dest, src)) return false;
   const go = async (from: string, to: string): Promise<void> => {
@@ -181,7 +174,7 @@ export async function moveFolderContents(src: string, into: string): Promise<boo
     saveOpen();
     await reload();
     const n = (r && r.moved && r.moved.length) || 0;
-    undoToast(`Moved ${n} item${n === 1 ? '' : 's'} from "${baseName(src)}" to ${into || 'the top level'}`, null, 'info');
+    undoToast(`Moved ${n} item${n === 1 ? '' : 's'} from "${baseName(src)}" to ${into || ROOT_LABEL}`, null, 'info');
     return true;
   } catch (e) {
     undoToast('Could not move the contents: ' + (e as Error).message, null, 'err');
@@ -191,7 +184,8 @@ export async function moveFolderContents(src: string, into: string): Promise<boo
 
 export async function renameNote(path: string, name: string): Promise<string | null> {
   const clean = cleanSegment(name);
-  if (!clean || clean === noteName(path)) return null;
+  // The rename box starts with `_` shown as spaces: keeping that is no rename.
+  if (!clean || clean === noteName(path) || clean === stemTitle(noteName(path))) return null;
   markMoving(path, 'Renaming');
   try {
     const r = await apiPost<OkResult>('/api/rename', { path, name: clean });
@@ -229,14 +223,15 @@ export async function renameFolder(path: string, name: string): Promise<boolean>
 }
 
 export async function createNote(folder: string, title: string): Promise<string | null> {
-  const clean = cleanSegment(title);
+  // The server makes the file name; the title stays as typed for the note's heading.
+  const clean = title.replace(/[\\/]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean) return null;
   try {
     const r = await apiPost<OkResult>('/api/create', { title: clean, folder: apiFolder(folder) });
     await reload();
     return (r && r.path) || null;
   } catch (e) {
-    undoToast('Could not create the node: ' + (e as Error).message, null, 'err');
+    undoToast('Could not create the note: ' + (e as Error).message, null, 'err');
     return null;
   }
 }
@@ -260,31 +255,38 @@ export async function createFolder(parent: string, name: string): Promise<string
   }
 }
 
-/** Delete notes for real. No undo: the server keeps a git history only. */
-export async function deleteNotes(paths: string[]): Promise<number> {
-  let ok = 0;
+/** A note moved to the Trash: where it was and its name in the Trash. */
+interface Trashed {
+  path: string;
+  name: string;
+}
+
+/** Move notes to the Trash (restorable from the Trash view or with Undo). */
+export async function trashNotes(paths: string[]): Promise<Trashed[]> {
+  const done: Trashed[] = [];
   for (const p of paths) {
     try {
-      await apiPost<OkResult>('/api/delete', { path: p });
+      const r = await apiPost<{ to?: string }>('/api/delete', { path: p, mode: 'trash' });
       notePathChanged(p, null);
-      ok++;
+      done.push({ path: p, name: baseName(r.to || p) });
     } catch (e) {
-      undoToast(noteName(p) + ': ' + (e as Error).message, null, 'err');
+      undoToast(`Could not move "${noteTitle(p)}" to the Trash: ${(e as Error).message}`, null, 'err');
     }
   }
   await reload();
-  return ok;
+  return done;
 }
 
-/** Where a folder's nodes go when it is deleted: a folder to move them into, or the trash. */
-export type FolderDeleteChoice = { mode: 'move'; into: string } | { mode: 'trash' };
+/** Bring a note back from the Trash; returns where it landed. */
+export async function restoreTrashed(name: string, into?: string): Promise<string> {
+  const r = await apiPost<{ path?: string }>('/api/trash/restore', into == null ? { name } : { name, into });
+  return r.path || '';
+}
 
-/**
- * Delete a folder in one server call (POST /api/delete-folder). Moving keeps the
- * sub folder structure below the deleted folder inside `into` ('' = the vault
- * root) and rewrites links; trash moves every node to the vault's .Trash.
- * Returns how many nodes were moved or trashed, or null when it failed.
- */
+/** Where a folder's notes go when it is deleted: a folder to move them into, or the Trash. */
+type FolderDeleteChoice = { mode: 'move'; into: string } | { mode: 'trash' };
+
+/** Delete a folder, moving its notes into `into` ('' = root) or to the Trash; returns the count moved, or null on failure. */
 export async function deleteFolder(path: string, choice: FolderDeleteChoice): Promise<number | null> {
   const notes = notesUnder(path).map((n) => n.path);
   const body: Record<string, string> = { folder: path };

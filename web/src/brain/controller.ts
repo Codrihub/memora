@@ -1,18 +1,15 @@
-// Brain view controller: builds the overlay UI, loads /api/graph, lays the
-// notes out into folder regions and wires the bus (activity, mutation).
 // One instance lives while #view-brain is visible; `destroy()` releases all.
 
 import { apiGet } from '../api';
 import { on, type AgentActivity } from '../bus';
 import { attr, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
-import { state } from '../state';
+import { state, noteTitle } from '../state';
 import type { GraphLink, GraphNode, WsEvent } from '../types';
 import { regionColor } from './palette';
 import { BrainScene, type ParticleSpec, type RegionLabel } from './scene';
 import { notePoint, regionAnchors, regionSpread, type Vec3 } from './shape';
 import { BRAIN_CSS } from './styles';
-import type { BrainView } from './home-view';
 import { toggleHTML, ViewChrome } from '../ui/view-chrome';
 import { setFlightTarget } from '../ui/agent-flight';
 import { NodeCard, type CardLink } from '../ui/node-card';
@@ -35,18 +32,14 @@ interface Region {
 type GraphNodeX = GraphNode & { tags?: unknown; title?: unknown; name?: unknown };
 
 const PREFS_KEY = 'memora.brain';
-/** Overlaid controls that on-canvas labels keep clear of (closed drawers and sheets sit off screen). */
+/** Overlaid controls that on-canvas labels keep clear of. */
 const BRAIN_OBSTACLES = '.vc-tl > *, .vc-tr, .vc-panel, .vc-tab, .vc-drawer, .vc-dock > *, .vc-mini, .vc-sheet';
 
 interface Prefs {
-  /** Note name labels. */
   labels: boolean;
-  /** Region (folder) name labels. */
   regionLabels: boolean;
   rotate: boolean;
-  /** Regions accordion expanded. */
   regions: boolean;
-  /** Regions whose notes are hidden. */
   hidden: string[];
 }
 
@@ -78,7 +71,7 @@ function savePrefs(p: Prefs): void {
   }
 }
 
-/** Lookup key for a path or note name: lower case, no .md, no leading slash. */
+/** Lookup key: lower case, no .md, no leading slash. */
 function norm(p: string): string {
   return p.replace(/^\/+/, '').replace(/\.md$/i, '').toLowerCase();
 }
@@ -89,11 +82,6 @@ function baseName(p: string): string {
 }
 
 export class BrainController {
-  /** The live camera, for the boot splash hand-off; null until the scene is on screen. */
-  view(): BrainView | null {
-    return this.scene?.cameraView() ?? null;
-  }
-
   readonly root: HTMLElement;
   private section: HTMLElement;
   private scene: BrainScene | null = null;
@@ -134,7 +122,6 @@ export class BrainController {
           onHover: (i, x, y) => this.hover(i, x, y),
           onPick: (i) => this.pick(i),
           labelOf: (i) => this.notes[i]?.name || '',
-          // The map controls (search and switcher, Reset / Filter, side tabs, zoom dock, minimap).
           obstacles: () => this.root.querySelectorAll(BRAIN_OBSTACLES),
         },
         this.reduced,
@@ -146,13 +133,11 @@ export class BrainController {
       this.els.stage.querySelector<HTMLElement>('[data-go]')!.onclick = () => hooks.go('graph');
       return;
     }
-    // Agents come out of the header pill into the brain and fly back to it when idle.
     this.scene.setDock(() => {
       const el = document.querySelector('#rtAgents .i') || document.getElementById('rtPill');
       const r = el?.getBoundingClientRect();
       return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
     });
-    // Agents waking up fly to the note they touch, or to their head in the brain.
     setFlightTarget('brain', (actor, _id, paths) => {
       const scene = this.scene;
       if (!scene || !this.alive()) return null;
@@ -171,7 +156,6 @@ export class BrainController {
     this.scene.setLabels(this.prefs.labels, this.prefs.regionLabels);
     this.scene.setAutoRotate(this.prefs.rotate);
 
-    // Theme changes, visibility of the tab and of the view.
     const themeObs = new MutationObserver(() =>
       this.scene?.setTheme(document.documentElement.dataset.theme === 'light'),
     );
@@ -186,13 +170,11 @@ export class BrainController {
       on('mutation', (m) => this.onMutation(m)),
     );
 
-    // Show what the shell already loaded at once, then fetch fresh data.
     if (state.graph.nodes.length) this.apply(state.graph.nodes, state.graph.links);
     this.syncRunning();
     void this.refresh();
   }
 
-  /** True while this controller still owns a live view. */
   alive(): boolean {
     return !this.destroyed && this.section.contains(this.root);
   }
@@ -202,7 +184,7 @@ export class BrainController {
 <div class="brain-stage" data-el="stage"></div>
 <div class="brain-labels" data-el="labels"></div>
 <div class="brain-tip hidden" data-el="tip"></div>
-<div class="brain-foot"><span class="brain-hint" data-el="hint">Drag to orbit · scroll to zoom · click a node</span></div>`;
+<div class="brain-foot"><span class="brain-hint" data-el="hint">Drag to turn · scroll to zoom · click a point to open its note</span></div>`;
   }
 
   private chrome!: ViewChrome;
@@ -215,7 +197,7 @@ export class BrainController {
       page: 'brain',
       root: this.root,
       search: {
-        placeholder: 'Find a node, #tag or in:folder',
+        placeholder: 'Find a note, #tag or in:folder',
         find: {
           items: () =>
             this.notes.map((n) => ({
@@ -248,8 +230,8 @@ export class BrainController {
           this.scene?.setLabels(this.prefs.labels, this.prefs.regionLabels);
         },
         help: {
-          nodes: 'Names next to the nodes in the brain. The node under the pointer and the selected one always show theirs.',
-          folders: 'Region names (one region per folder) floating over the brain.',
+          nodes: 'Names next to the most linked notes in the brain. The note under the pointer and the selected one always show theirs.',
+          folders: 'Folder names floating over the part of the brain that holds their notes.',
         },
       },
       filter: (host) => this.renderFilter(host),
@@ -268,7 +250,6 @@ export class BrainController {
         );
       },
       reset: () => {
-        // As in Graph and Canvas, the search and any open card are cleared too.
         this.chrome.finder?.clear();
         this.card.close(true);
         const keepOpen = this.prefs.regions;
@@ -294,7 +275,6 @@ export class BrainController {
       nav: {
         zoom: (f) => this.scene?.zoomBy(f),
         fit: () => this.scene?.resetView(),
-        // Left/right turn the brain that way; up/down tilt it.
         nudge: (dx, dy) => this.scene?.orbitBy(-dx * 0.26, -dy * 0.2),
         home: () => {
           this.select(-1);
@@ -309,7 +289,6 @@ export class BrainController {
       },
     });
     this.card = this.buildCard();
-    // The globe and minimap follow the camera.
     this.chromeTimer = window.setInterval(() => {
       if (!this.scene || document.hidden) return;
       const o = this.scene.orientation();
@@ -317,7 +296,6 @@ export class BrainController {
       this.chrome.redrawMini();
     }, 120);
 
-    // "/" or Ctrl/Cmd+F inside the brain jumps to the search field.
     this.root.addEventListener('keydown', (ev) => {
       const t = ev.target as HTMLElement;
       if (t.closest('input,textarea,select')) return;
@@ -327,21 +305,19 @@ export class BrainController {
         this.chrome.focusSearch();
       }
     });
-    // The usage hint fades once the brain has been explored a little.
     window.setTimeout(() => e.hint.classList.add('gone'), 7000);
     this.root.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape' && this.selected >= 0) this.select(-1);
     });
   }
 
-  /** The brain's own section of the Filter panel. */
   private renderFilter(host: HTMLElement): void {
     host.innerHTML =
       '<h4>Brain</h4>' +
       (this.reduced
         ? ''
         : toggleHTML('rotate', 'Rotate when idle', this.prefs.rotate, 'The brain turns slowly by itself two seconds after you stop moving it. Only the 3D brain has this.')) +
-      '<div class="vc-hint">Drag to orbit · scroll to zoom · click a node · / to search · #tag finds tags</div>';
+      '<div class="vc-hint">Drag to turn · scroll to zoom · click a point to open its note · / to search · #tag finds tags</div>';
     const b = host.querySelector<HTMLElement>('[data-t=rotate]');
     if (b)
       b.onclick = () => {
@@ -352,7 +328,7 @@ export class BrainController {
       };
   }
 
-  /** Top-down map of the brain: every note, and the camera looking in. */
+  /** Top-down map: every note, and the camera looking in. */
   private drawMini(cv: HTMLCanvasElement, w: number, h: number, dpr: number): void {
     const g = cv.getContext('2d');
     const scene = this.scene;
@@ -374,14 +350,12 @@ export class BrainController {
       g.fillRect(cx + x * S - 1, cy + z * S - 1, 2, 2);
     }
     g.globalAlpha = 1;
-    // Outline of the brain from above.
     g.strokeStyle = light ? 'rgba(15,23,42,.18)' : 'rgba(230,233,239,.16)';
     g.lineWidth = 1;
     g.beginPath();
     g.ellipse(cx, cy, 1.25 * S, 1.05 * S, 0, 0, Math.PI * 2);
     g.stroke();
-    // The camera: a marker on a ring around the brain, on the side it looks
-    // from, with the wedge it sees.
+    // Camera marker on a ring, with the wedge it sees.
     const v = scene.cameraView();
     if (!v) return;
     const ang = Math.atan2(v.eye[2] - v.target[2], v.eye[0] - v.target[0]);
@@ -416,7 +390,6 @@ export class BrainController {
     g.fill();
   }
 
-  /** A click on the minimap: look at the brain from that side. */
   private miniNav(fx: number, fy: number): void {
     const scene = this.scene;
     const v = scene?.cameraView();
@@ -429,13 +402,10 @@ export class BrainController {
     scene.orbitTo(Math.atan2(x - v.target[0], z - v.target[2]), undefined, 0.6);
   }
 
-  // ------------------------------------------------------------ lifecycle
-
   private syncRunning = (): void => {
     if (!this.scene) return;
     const visible = !document.hidden && !this.section.classList.contains('hidden');
     if (this.section.classList.contains('hidden')) {
-      // The view was left: release the GPU and every listener.
       this.destroy();
       return;
     }
@@ -454,15 +424,14 @@ export class BrainController {
     clearTimeout(this.refreshTimer);
     clearInterval(this.chromeTimer);
     this.chrome?.destroy();
-    // The card listens on the bus; left alive it would keep this whole controller
-    // (scene arrays, map chrome, DOM) reachable after every visit.
+    // The card listens on the bus; left alive it would keep this controller reachable.
     this.card?.destroy();
     this.scene?.dispose();
     this.scene = null;
     this.root.remove();
   }
 
-  /** Fetch /api/graph and update the particles (coalesces concurrent calls). */
+  /** Coalesces concurrent calls. */
   refresh(): Promise<void> {
     if (this.loading) return this.loading;
     this.loading = (async () => {
@@ -481,19 +450,17 @@ export class BrainController {
     return this.loading;
   }
 
-  // ------------------------------------------------------------ data
-
   private apply(nodes: GraphNodeX[], links: GraphLink[]): void {
     if (!this.scene) return;
     const selKey = this.selected >= 0 ? this.notes[this.selected]?.path : '';
     const tagIndex = this.tagIndex();
     const notes: Note[] = nodes.map((n) => {
       const path = String(n.path || n.id);
-      const name = typeof n.title === 'string' && n.title ? n.title : String(n.id || baseName(path).replace(/\.md$/i, ''));
+      const name = noteTitle(path) || (typeof n.title === 'string' && n.title ? n.title : String(n.id || baseName(path).replace(/\.md$/i, '')));
       const tags = Array.isArray(n.tags) ? n.tags.map(String) : tagIndex.get(path) || [];
       return { path, name, folder: n.folder || 'Root', tags, degree: n.degree || 0 };
     });
-    // Folders become regions: biggest folders get the first anchors.
+    // Biggest folders get the first anchors.
     const counts = new Map<string, number>();
     notes.forEach((n) => counts.set(n.folder, (counts.get(n.folder) || 0) + 1));
     const folders = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -510,7 +477,7 @@ export class BrainController {
       });
     });
 
-    // Index by path and by note name (links and agents may use either).
+    // Links and agents may use a path or a note name.
     this.index = new Map();
     const byName = new Map<string, number>();
     notes.forEach((n, i) => {
@@ -568,12 +535,13 @@ export class BrainController {
     }));
     this.scene.setDim(null);
     this.scene.setData(specs, pairs, regionLabels);
+    this.scene.setEmpty(!notes.length);
+    this.chrome.setEmpty(!notes.length);
+    this.els.hint.hidden = !notes.length;
     if (this.selected >= 0) this.selected = -1;
 
-    // Keep only hidden regions that still exist.
     if (this.prefs.hidden.length) this.hidden = new Set(this.prefs.hidden.filter((n) => this.regions.has(n)));
     this.renderRegions();
-    // A search that is still typed follows the new data.
     this.chrome?.finder?.update();
     this.applyFilter(false);
     this.scene.refreshNoteLabels();
@@ -588,7 +556,6 @@ export class BrainController {
     }
   }
 
-  /** Tags from the Tags view index, when it has been built. */
   private tagIndex(): Map<string, string[]> {
     const out = new Map<string, string[]>();
     const idx = state.tags.index;
@@ -604,9 +571,7 @@ export class BrainController {
     return out;
   }
 
-  // ------------------------------------------------------------ finder
-
-  /** Paths the shared finder lit (ui/map-find.ts); null while nothing is typed. */
+  /** null while nothing is typed. */
   private findHit: Set<string> | null = null;
 
   private renderRegions(): void {
@@ -626,7 +591,6 @@ export class BrainController {
     // A hidden region has to be shown before the camera can fly to it.
     if (!r || !this.scene || this.hidden.has(name)) return;
     this.scene.focus(r.anchor, 1.9);
-    // Light the region's notes so it is clear which one it is.
     let lit = 0;
     for (let i = 0; i < this.notes.length && lit < 80; i++) {
       if (this.notes[i].folder !== name) continue;
@@ -634,8 +598,6 @@ export class BrainController {
       lit++;
     }
   }
-
-  // ------------------------------------------------------------ filters
 
   private matches(i: number): boolean {
     const n = this.notes[i];
@@ -651,8 +613,6 @@ export class BrainController {
     this.scene.setDim(any ? (i) => (this.matches(i) ? 0 : 1) : null);
     if (refreshLabels) this.scene.refreshNoteLabels();
   }
-
-  // ------------------------------------------------------------ hover / select
 
   private hover(i: number, x: number, y: number): void {
     if (i >= 0 && this.hidden.has(this.notes[i]?.folder)) i = -1; // hidden regions are inert
@@ -698,7 +658,6 @@ export class BrainController {
     if (focus && this.scene) this.scene.focus(this.scene.positionOf(i), 1.15);
   }
 
-  /** A folder (region) from Regions or the finder: fly there and show its card. */
   private openFolder(name: string): void {
     this.focusRegion(name);
     if (!this.regions.has(name)) return;
@@ -710,7 +669,6 @@ export class BrainController {
     this.card.showFolder(name, this.regions.get(name)!.color, this.regions.get(name)!.count);
   }
 
-  /** The shared node and folder card (ui/node-card.ts). */
   private buildCard(): NodeCard {
     const link = (j: number): CardLink => {
       const m = this.notes[j];
@@ -752,8 +710,6 @@ export class BrainController {
     });
   }
 
-  // ------------------------------------------------------------ live events
-
   private onActivity(a: AgentActivity): void {
     if (!this.scene) return;
     const idx: number[] = [];
@@ -770,7 +726,7 @@ export class BrainController {
     this.scheduleRefresh();
   }
 
-  /** Coalesce bursts of mutations (and shell refreshes) into one fetch. */
+  /** Coalesce bursts of mutations into one fetch. */
   scheduleRefresh(): void {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => void this.refresh(), 450);

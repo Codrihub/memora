@@ -1,6 +1,5 @@
-// The recommended instructions for an AI agent that uses Memora as its
-// long-term memory. Shown in the docs page, the connect guide and the TUI
-// (crates/cli keeps the same text in docs.rs); keep them in sync.
+// Instructions for an AI agent that uses Memora as its memory. crates/cli/src/tui/docs.rs mirrors both Balanced
+// prompts, every short prompt and SECRETS_WARNING; its test reads them here by their `export const` lines.
 
 /** One short paragraph for clients with a small instructions field. */
 export const AGENT_PROMPT_SHORT = `Use Memora (MCP server "memora") as your long-term memory. Before answering, search_memory for the topic and read_memory the relevant notes. When you learn something worth keeping (a decision, a preference, a fact about me or my projects, a fix), save it with patch_memory or create_memory as short Markdown with [[wikilinks]] and #tags. Search before creating, update instead of duplicating, and never store secrets.`;
@@ -25,19 +24,14 @@ Rules
 - Do not save small talk or anything I ask you not to remember.
 - At the end of a longer session, append a two or three line summary to the project's note.`;
 
-/* ───────────────────────── other styles ─────────────────────────
- * The two prompts above are the "Balanced" style. Each style below has a
- * full and a short version; crates/cli/src/tui/docs.rs mirrors the short ones
- * (and a test checks they match this file). Keep every prompt free of
- * backticks and "${", so the text reads the same in Rust raw strings.
- */
+// The prompts above are the "Balanced" style. Keep every prompt free of backticks and "${" (Rust raw strings).
 
 /** Shown with the "Remember everything" style, in the prompt and on the page. */
 export const SECRETS_WARNING = `Notes are plain Markdown on the server: anyone with access to the vault, or an API key with read scope, can read them. Keep secrets in one folder (for example Secrets/), hide that folder from other agents with Memora's privacy rules (the folder's Privacy menu in the vault, or the privacy_set tool), and only do this on a self-hosted Memora you trust.`;
 
 export const AGENT_PROMPT_EVERYTHING_SHORT = `Use Memora (MCP server "memora") as your long-term memory and remember everything useful. Before answering, search_memory for the topic and read_memory the relevant notes. Save as you go with patch_memory or create_memory, as short Markdown with [[wikilinks]] and #tags: decisions, preferences, personal details, small talk that tells you about me, facts about my projects and people, fixes and todos. When I share a password, API key or token, save it only in the Secrets/ folder and never copy it into other notes. Warning: notes are plain Markdown on the server, and anyone with vault access or a key with read scope can read them. Search before creating and update instead of duplicating.`;
 
-export const AGENT_PROMPT_EVERYTHING = `From now on, use Memora as your second brain and remember everything useful: a shared, long-term memory that you and my other AI agents read and write through the Memora MCP server.
+const AGENT_PROMPT_EVERYTHING = `From now on, use Memora as your second brain and remember everything useful: a shared, long-term memory that you and my other AI agents read and write through the Memora MCP server.
 
 Warning: Notes are plain Markdown on the server: anyone with access to the vault, or an API key with read scope, can read them. Keep secrets in one folder (for example Secrets/), hide that folder from other agents with Memora's privacy rules (the folder's Privacy menu in the vault, or the privacy_set tool), and only do this on a self-hosted Memora you trust.
 
@@ -61,7 +55,7 @@ Rules
 
 export const AGENT_PROMPT_PRIVATE_SHORT = `Use Memora (MCP server "memora") as your long-term memory, but write to it only when I say so. Before answering, search_memory for the topic and read_memory the relevant notes. Save something only when I explicitly ask you to remember it; if something seems worth keeping, ask me first. Before writing, say which note you will change, and prefer patch_memory on an existing note over create_memory. Never store secrets (passwords, API keys, tokens) or personal data about other people.`;
 
-export const AGENT_PROMPT_PRIVATE = `From now on, use Memora as your long-term memory: a shared memory that you and my other AI agents reach through the Memora MCP server. Recall freely, but write only when I tell you to.
+const AGENT_PROMPT_PRIVATE = `From now on, use Memora as your long-term memory: a shared memory that you and my other AI agents reach through the Memora MCP server. Recall freely, but write only when I tell you to.
 
 Recall
 - At the start of a task, search_memory for the topic, project, person or error you are working on, then read_memory the most relevant notes before you answer.
@@ -83,7 +77,7 @@ Rules
 
 export const AGENT_PROMPT_JOURNAL_SHORT = `Use Memora (MCP server "memora") as your long-term memory and keep a session journal in it. At the start of every session, read_memory the latest note in Journal/ and the project note, summarize where things stand, and review the open todos from last time. During the session, search_memory before answering and patch_memory the project note when something is decided. At the end, create_memory a note Journal/YYYY-MM-DD <topic> with a summary, decisions, open todos (- [ ] ...) and [[wikilinks]] to the notes involved. Never store secrets.`;
 
-export const AGENT_PROMPT_JOURNAL = `From now on, use Memora as your second brain and keep a session journal in it: a shared, long-term memory that you and my other AI agents read and write through the Memora MCP server.
+const AGENT_PROMPT_JOURNAL = `From now on, use Memora as your second brain and keep a session journal in it: a shared, long-term memory that you and my other AI agents read and write through the Memora MCP server.
 
 Start of every session
 - Find the latest entry in the Journal folder (list_memory the folder, or search_memory "Journal") and read_memory it.
@@ -111,7 +105,7 @@ Rules
 
 export const AGENT_PROMPT_READONLY_SHORT = `Use Memora (MCP server "memora") only to look things up. Before answering, search_memory for the topic and read_memory the relevant notes; follow related notes with search_by_tag and get_neighbors, and say which note an answer comes from. Never write to Memora: do not use save_memory, create_memory, patch_memory or any other tool that changes notes. If something seems worth remembering, tell me instead.`;
 
-export const AGENT_PROMPT_READONLY = `From now on, use Memora as a reference: a shared, long-term memory that my AI agents keep through the Memora MCP server. You may only read it.
+const AGENT_PROMPT_READONLY = `From now on, use Memora as a reference: a shared, long-term memory that my AI agents keep through the Memora MCP server. You may only read it.
 
 Look things up
 - At the start of a task, search_memory for the topic, project, person or error you are working on, then read_memory the most relevant notes before you answer.

@@ -1,21 +1,14 @@
-// Folder browser: one calm column per folder. A compact header (breadcrumb,
-// title, one meta line, New node / New folder), the sub folders as tiles,
-// then the nodes as an even list (title, one-line excerpt, updated time, up
-// to two tags). "All nodes" (the vault root) lists every node with its folder.
-//
-// A folder lists its own nodes; a quick filter or a list filter searches its
-// sub folders too. Rows keep multi-select, drag and drop, context menus and
-// keyboard navigation.
+// Folder browser: header, toolbar, active filters, sub folder tiles, then the notes as a table or grid.
 
 import { attr, el, esc } from '../dom';
-import { fmtTs, hashColor, relTs } from '../format';
+import { fmtTs, hashColor, relTs, stemTitle } from '../format';
 import { Modal } from '../modal';
-import { state } from '../state';
+import { noteTitle, state } from '../state';
 import type { NoteRef } from '../types';
 import { excerptOf, keepExcerpts, onExcerpt, wantExcerpt } from './excerpts';
 import { I, folderGlyph } from './icons';
 import { lockMark } from '../ui/privacy';
-import { askMoveNotes, confirmDeleteNotes, confirmFolderMove, folderMenu, noteMenu, pinToggle } from './menus';
+import { askMoveNotes, confirmFolderMove, deleteNotesToTrash, folderMenu, noteMenu, pinToggle } from './menus';
 import { drag, endDrag, nav, startDrag } from './nav';
 import { moveNotes, renameNote } from './ops';
 import {
@@ -33,11 +26,12 @@ import {
   savePrefs,
   selection,
   touched,
+  ROOT_LABEL,
   type FolderNode,
   type ListFilter,
   type SortKey,
 } from './store';
-import { inlineEdit } from './ui';
+import { emptyState, inlineEdit, openMenu } from './ui';
 import { normQuery, score, similar } from '../ui/match';
 import { mountSelect, type SelectOption } from '../ui/select';
 
@@ -53,7 +47,6 @@ let observer: IntersectionObserver | null = null;
 
 const FILTERS: { k: ListFilter; label: string }[] = [
   { k: 'all', label: 'All' },
-  { k: 'agents', label: 'Agent activity' },
   { k: 'recent', label: 'Last 24 hours' },
   { k: 'pinned', label: 'Pinned' },
 ];
@@ -73,15 +66,14 @@ function visibleNotes(): NoteRef[] {
   const folder = prefs.folder || '';
   let notes = deep(folder) ? notesUnder(folder) : (folderAt(folder)?.notes || []).slice();
   const now = Date.now() / 1000;
-  if (prefs.filter === 'agents') notes = notes.filter((n) => touched.has(n.path));
-  else if (prefs.filter === 'recent') notes = notes.filter((n) => now - (n.mtime || 0) < 86400);
+  if (prefs.filter === 'recent') notes = notes.filter((n) => now - (n.mtime || 0) < 86400);
   else if (prefs.filter === 'pinned') notes = notes.filter((n) => isPinned('note', n.path));
   // The same matching as the global search: the query is one string.
   const q = normQuery(query);
   if (q) {
     const rank = new Map<string, number>();
     for (const n of notes) {
-      const s = score(n.name, q) || (n.path.toLowerCase().includes(q) ? 10 : 0);
+      const s = Math.max(score(noteTitle(n.path), q), score(n.name, q)) || (n.path.toLowerCase().includes(q) ? 10 : 0);
       if (s) rank.set(n.path, s);
     }
     return notes.filter((n) => rank.has(n.path)).sort((a, b) => rank.get(b.path)! - rank.get(a.path)! || a.name.localeCompare(b.name));
@@ -89,13 +81,11 @@ function visibleNotes(): NoteRef[] {
   const d = prefs.dir;
   const by: Record<SortKey, (a: NoteRef, b: NoteRef) => number> = {
     mtime: (a, b) => ((a.mtime || 0) - (b.mtime || 0)) * d,
-    name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) * d,
+    name: (a, b) => noteTitle(a.path).localeCompare(noteTitle(b.path), undefined, { numeric: true }) * d,
     folder: (a, b) =>
-      dirOf(a.path).localeCompare(dirOf(b.path)) * d || a.name.localeCompare(b.name, undefined, { numeric: true }),
+      dirOf(a.path).localeCompare(dirOf(b.path)) * d ||
+      noteTitle(a.path).localeCompare(noteTitle(b.path), undefined, { numeric: true }),
   };
-  if (prefs.filter === 'agents') {
-    return notes.sort((a, b) => (touched.get(b.path)?.at || 0) - (touched.get(a.path)?.at || 0));
-  }
   return notes.sort(by[prefs.sort]);
 }
 
@@ -115,7 +105,7 @@ function didYouMean(folder: string): string {
     .slice(0, 4);
   if (!near.length) return '';
   return `<div class="vx-near"><span>Did you mean</span>${near
-    .map(({ n, near: m }) => `<button type="button" class="vx-near-b" data-open="${attr(n.path)}" title="${attr(m!.why)}">${esc(n.name)}</button>`)
+    .map(({ n, near: m }) => `<button type="button" class="vx-near-b" data-open="${attr(n.path)}" title="${attr(m!.why)}">${esc(noteTitle(n.path))}</button>`)
     .join('')}</div>`;
 }
 
@@ -139,47 +129,42 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   sc.appendChild(page);
   host.appendChild(sc);
 
-  // Header: where am I, what is this, what can I do.
   const crumbs = folder ? folder.split('/').map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
-  const head = el('header', 'vx-bhead');
-  const meta: string[] = [plural(all.length, 'node')];
+  const head = el('header', 'vx-phead');
+  const meta: string[] = [plural(all.length, 'note')];
   if (subs.length) meta.push(plural(subs.length, 'folder'));
   if (!folder && state.stats.links) meta.push(plural(state.stats.links, 'link'));
   const upd = latest(all);
   if (upd) meta.push(`<span title="${attr(fmtTs(upd))}">updated ${esc(relTs(upd))}</span>`);
+  const sep = '<span class="vx-crumb-sep" aria-hidden="true">/</span>';
   head.innerHTML = `${
     folder
       ? `<nav class="vx-crumbs" aria-label="Folder path">
       <button class="vx-icon-btn vx-up" data-f="${attr(dirOf(folder))}" aria-label="Up to ${attr(
-        dirOf(folder) ? baseName(dirOf(folder)) : 'all nodes',
+        dirOf(folder) ? baseName(dirOf(folder)) : ROOT_LABEL,
       )}" title="Up one folder">${I.back}</button>
-      <button class="vx-crumb" data-f="">All nodes</button>${crumbs
+      <button class="vx-crumb" data-f="">${ROOT_LABEL}</button>${crumbs
         .slice(0, -1)
-        .map(
-          (c) =>
-            `<span class="vx-crumb-sep" aria-hidden="true">/</span><button class="vx-crumb" data-f="${attr(c)}"><span>${esc(
-              baseName(c),
-            )}</span></button>`,
-        )
-        .join('')}</nav>`
+        .map((c) => `${sep}<button class="vx-crumb" data-f="${attr(c)}"><span>${esc(baseName(c))}</span></button>`)
+        .join('')}${sep}<span class="vx-crumb cur" aria-current="page"><span>${esc(baseName(folder))}</span></span></nav>`
       : ''
   }
     <div class="vx-btitle">
-      <span class="vx-bico" style="color:${attr(folderColor(folder))}">${folder ? folderGlyph(folderIcon(folder), true) : I.vault}</span>
-      <h1>${esc(folder ? baseName(folder) : 'All nodes')}</h1>
-      ${folder ? `<button class="vx-icon-btn vx-fmenu" data-fmenu aria-label="Folder actions" title="Folder actions">${I.more}</button>` : ''}
-      <span class="vx-grow"></span>
+      <span class="vx-bico${folder ? '' : ' brand'}" style="--fc:${attr(folderColor(folder))}">${
+        folder ? folderGlyph(folderIcon(folder), true) : I.vault
+      }</span>
+      <div class="vx-btext"><h1>${esc(folder ? baseName(folder) : ROOT_LABEL)}</h1>
+      <p class="vx-bmeta">${meta.join('<span class="vx-dot-sep" aria-hidden="true">·</span>')}</p></div>
       <div class="vx-bacts">
-        <button class="btn" data-new-folder title="New folder${folder ? ' in ' + attr(baseName(folder)) : ''}">${I.newFolder}<span>New folder</span></button>
-        <button class="btn primary" data-new title="New node${folder ? ' in ' + attr(baseName(folder)) : ''} (N)">${I.plus}<span>New node</span></button>
+        <button class="btn ghost" data-new-folder aria-label="New folder" title="New folder${folder ? ' in ' + attr(baseName(folder)) : ''}">${I.newFolder}<span>New folder</span></button>
+        <button class="btn primary" data-new aria-label="New note" title="New note${folder ? ' in ' + attr(baseName(folder)) : ''} (N)">${I.plus}<span>New note</span></button>
+        <button class="vx-icon-btn vx-round" data-more aria-label="${folder ? 'Folder actions' : 'More'}" title="${folder ? 'Folder actions' : 'More'}">${I.more}</button>
       </div>
-    </div>
-    <p class="vx-bmeta">${meta.join('<span class="vx-dot-sep" aria-hidden="true">·</span>')}</p>`;
+    </div>`;
   page.appendChild(head);
 
-  // Search: one full-width row of its own, always there (placed under the tabs).
-  const search = el('div', 'vx-searchrow');
-  search.innerHTML = `<label class="vx-search${query ? ' has' : ''}">${I.search}<input class="vx-list-q" type="search" placeholder="Search nodes…" aria-label="Search nodes${
+  const tbar = el('div', 'vx-tbar');
+  tbar.innerHTML = `<label class="vx-search${query ? ' has' : ''}">${I.search}<input class="vx-list-q" type="search" placeholder="Search notes" aria-label="Search notes${
     folder ? ' in ' + attr(baseName(folder)) : ''
   }" value="${attr(query)}" spellcheck="false" autocomplete="off"><button type="button" class="vx-search-x" aria-label="Clear the search" title="Clear">${I.close}</button></label>`;
 
@@ -189,9 +174,10 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   if (tabbed) {
     const tabs = el('div', 'vx-tabs');
     tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Show');
     tabs.style.setProperty('--i', showTab === 'folders' ? '0' : '1');
-    tabs.innerHTML = `<span class="vx-tabs-pill" aria-hidden="true"></span><button type="button" role="tab" data-tab="folders" aria-selected="${showTab === 'folders'}">${I.folder}<span>Folders</span><b>${subs.length}</b></button>
-      <button type="button" role="tab" data-tab="nodes" aria-selected="${showTab === 'nodes'}">${I.note}<span>Nodes</span><b>${notes.length}</b></button>`;
+    tabs.innerHTML = `<span class="vx-tabs-pill" aria-hidden="true"></span><button type="button" role="tab" data-tab="folders" aria-selected="${showTab === 'folders'}"><span>Folders</span><b>${subs.length}</b></button>
+      <button type="button" role="tab" data-tab="nodes" aria-selected="${showTab === 'nodes'}"><span>Notes</span><b>${notes.length}</b></button>`;
     tabs.querySelectorAll<HTMLElement>('[data-tab]').forEach(
       (b) =>
         (b.onclick = () => {
@@ -206,46 +192,76 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
       const next = e.key === 'ArrowLeft' ? 'folders' : 'nodes';
       if (next !== showTab) switchTab(host, mobile, tabs, next);
     };
-    page.appendChild(tabs);
+    tbar.appendChild(tabs);
   }
-  // Tabs first (what am I looking at), then the search over it.
-  page.appendChild(search);
+  const cards = prefs.view === 'cards';
+  if (showTab === 'nodes') {
+    tbar.insertAdjacentHTML(
+      'beforeend',
+      `<span class="vx-grow"></span><div class="vx-pills" role="group" aria-label="Filter">${FILTERS.map(
+        (x) =>
+          `<button type="button" class="vx-pill" data-filter="${x.k}" aria-pressed="${prefs.filter === x.k}">${esc(x.label)}</button>`,
+      ).join('')}</div>
+    <div class="vx-seg" role="group" aria-label="Layout">
+      <button type="button" data-view="list" aria-pressed="${!cards}" aria-label="List" title="List">${LIST_ICON}</button>
+      <button type="button" data-view="cards" aria-pressed="${cards}" aria-label="Grid" title="Grid">${CARDS_ICON}</button>
+    </div>`,
+    );
+  }
+  page.appendChild(tbar);
 
-  // Sub folders as tiles (drop targets, draggable, context menu).
+  const chips: string[] = [];
+  if (folder)
+    chips.push(
+      `<span class="vx-chip" style="--fc:${attr(folderColor(folder))}" title="${attr(folder)}"><i></i><span>${esc(folder)}</span><button type="button" data-x="folder" aria-label="Show all notes, not only ${attr(baseName(folder))}" title="Back to All notes">${I.close}</button></span>`,
+    );
+  if (prefs.filter !== 'all')
+    chips.push(
+      `<span class="vx-chip"><span>${esc(FILTERS.find((x) => x.k === prefs.filter)?.label || '')}</span><button type="button" data-x="filter" aria-label="Remove the filter" title="Remove the filter">${I.close}</button></span>`,
+    );
+  if (query.trim())
+    chips.push(
+      `<span class="vx-chip"><span>“${esc(query.trim())}”</span><button type="button" data-x="query" aria-label="Clear the search" title="Clear the search">${I.close}</button></span>`,
+    );
+  if (chips.length) {
+    const act = el('div', 'vx-active');
+    act.setAttribute('aria-label', 'Showing');
+    act.innerHTML = `<span class="vx-active-k">Showing</span>${chips.join('')}<button type="button" class="vx-active-all" data-x="all">${I.vault}<span>All notes</span></button>`;
+    page.appendChild(act);
+  }
+
   if (subs.length && showTab === 'folders') {
     const sec = el('section', 'vx-bsec vx-tabbody');
     if (tabAnim) sec.classList.add('in-' + tabAnim);
-    sec.innerHTML = `<h2 class="vx-label">Folders<span>${subs.length}</span></h2>`;
+    sec.setAttribute('aria-label', 'Folders');
     const tiles = el('div', 'vx-tiles');
     for (const c of subs) tiles.appendChild(folderTile(c));
     sec.appendChild(tiles);
     page.appendChild(sec);
   }
 
-  // Nodes: label, quiet controls, then the list.
   const sec = el('section', 'vx-bsec vx-bsec-nodes vx-tabbody');
   if (showTab !== 'nodes') sec.hidden = true;
   else if (tabAnim) sec.classList.add('in-' + tabAnim);
   tabAnim = '';
+  const card = el('div', 'vx-lcard' + (cards ? ' is-cards' : ''));
   const tools = el('div', 'vx-ltools');
-  const nAgents = countTouched(folder);
   tools.innerHTML = `<h2 class="vx-label">${
-    prefs.filter === 'all' ? 'Nodes' : esc(FILTERS.find((x) => x.k === prefs.filter)?.label || 'Nodes')
+    prefs.filter === 'all' ? 'Notes' : esc(FILTERS.find((x) => x.k === prefs.filter)?.label || 'Notes')
   }<span>${notes.length}</span>${folder && isDeep ? '<em>including sub folders</em>' : ''}</h2>
     <span class="vx-grow"></span>
-    <span data-vx-sel="filter"></span><span data-vx-sel="sort"></span>
+    <span data-vx-sel="sort"></span>
     <button class="vx-icon-btn vx-dir${prefs.dir < 0 ? ' desc' : ''}" aria-label="Sort direction: ${
       prefs.dir < 0 ? 'descending' : 'ascending'
-    }" title="${prefs.dir < 0 ? 'Descending' : 'Ascending'}, click to reverse">${ARROW}</button>
-    ${mobile ? '' : `<button class="vx-icon-btn" data-keys aria-label="Keyboard shortcuts" title="Keyboard shortcuts">${KBD_ICON}</button>`}`;
-  sec.appendChild(tools);
+    }" title="${prefs.dir < 0 ? 'Descending' : 'Ascending'}, click to reverse">${ARROW}</button>`;
+  card.appendChild(tools);
 
   if (selection.size > 1) {
     const bulk = el('div', 'vx-bulk');
     bulk.innerHTML = `<span><b>${selection.size}</b> selected</span><span class="vx-grow"></span>
       <button class="btn sm" data-bulk="move">${I.move}Move</button>
       <button class="btn sm" data-bulk="pin">${I.pin}Pin</button>
-      <button class="btn sm danger" data-bulk="del">${I.trash}Delete</button>
+      <button class="btn sm danger" data-bulk="del">${I.trash}Move to Trash</button>
       <button class="btn sm ghost" data-bulk="clear">Clear</button>`;
     bulk.querySelectorAll<HTMLElement>('[data-bulk]').forEach((b) => {
       b.onclick = () => {
@@ -255,36 +271,46 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
         else if (k === 'pin') {
           paths.forEach((p) => pinAt({ kind: 'note', key: p }));
           nav.selectFolder(prefs.folder || '');
-        } else if (k === 'del') confirmDeleteNotes(paths, () => selection.clear());
+        } else if (k === 'del') void deleteNotesToTrash(paths, () => selection.clear());
         else {
           selection.clear();
           renderList(host, mobile);
         }
       };
     });
-    sec.appendChild(bulk);
+    card.appendChild(bulk);
+  }
+  if (!cards && notes.length) {
+    const ranked = !!normQuery(query);
+    const col = (k: SortKey, label: string): string => {
+      const on = !ranked && prefs.sort === k;
+      return `<button type="button" data-sort="${k}" class="${on ? 'on' : ''}" aria-pressed="${on}" title="Sort by ${label.toLowerCase()}">${label}${
+        on ? `<span class="vx-th-dir${prefs.dir < 0 ? ' desc' : ''}" aria-hidden="true">${ARROW}</span>` : ''
+      }</button>`;
+    };
+    card.insertAdjacentHTML(
+      'beforeend',
+      `<div class="vx-thead" role="group" aria-label="Sort by column">${col('name', 'Title')}${col('folder', 'Folder')}${col('mtime', 'Updated')}<span></span></div>`,
+    );
   }
 
-  const rows = el('div', 'vx-rows');
+  const rows = el('div', 'vx-rows' + (cards ? ' cards' : ''));
   rows.setAttribute('role', 'listbox');
-  rows.setAttribute('aria-label', 'Nodes');
+  rows.setAttribute('aria-label', 'Notes');
   rows.setAttribute('aria-multiselectable', 'true');
   if (!notes.length) {
     rows.classList.add('empty');
-    rows.innerHTML = `<div class="vx-empty">${
-      query
-        ? `${I.search}<p>No node matches “${esc(query)}”.</p>${didYouMean(folder)}`
-        : prefs.filter === 'agents'
-          ? `${I.bot}<p>No agent touched a node here in this session yet.<br>Agent reads and writes show up live.</p>`
-          : prefs.filter !== 'all'
-            ? `${I.note}<p>Nothing here with this filter.</p><button class="btn sm" data-filter-all>Show all nodes</button>`
-            : subs.length
-              ? `<p>No nodes directly in this folder. Open a folder above, or start one here.</p><button class="btn sm" data-new>${I.plus}New node</button>`
-              : `${I.note}<p>This folder is empty.</p><button class="btn sm primary" data-new>${I.plus}New node</button>`
-    }</div>`;
+    rows.innerHTML = query
+      ? emptyState(I.search, 'No matches', `No note matches “${esc(query)}”.`, didYouMean(folder))
+      : prefs.filter !== 'all'
+        ? emptyState(I.note, 'Nothing here', 'No note here matches this filter.', '<button class="btn sm" data-filter-all>Show all notes</button>')
+        : subs.length
+          ? emptyState(I.folder, 'No notes in this folder', 'Its notes are in its folders. You can also start one here.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`)
+          : folder
+            ? emptyState(I.note, 'This folder is empty', 'Start the first note in it.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`)
+            : emptyState(I.note, 'No notes yet', 'A note is a page of text you and your AI agents can read and add to.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`);
   }
-  const showFolder = isDeep;
-  const groups = showFolder && prefs.sort === 'folder' && prefs.filter !== 'agents';
+  const groups = isDeep && prefs.sort === 'folder' && !cards;
   const frag = document.createDocumentFragment();
   let lastGroup: string | null = null;
   for (const n of notes.slice(0, 1500)) {
@@ -292,25 +318,44 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
       lastGroup = dirOf(n.path);
       const g = el('div', 'vx-group');
       g.style.setProperty('--fc', folderColor(lastGroup));
-      g.innerHTML = `<i></i>${esc(lastGroup || 'Vault root')}`;
+      g.innerHTML = `<i></i>${esc(lastGroup || ROOT_LABEL)}`;
       frag.appendChild(g);
     }
-    frag.appendChild(noteRow(n, folder, notes, host, mobile, showFolder && !groups));
+    frag.appendChild(noteRow(n, folder, notes, host, mobile));
   }
+  const add =
+    notes.length && !query && prefs.filter === 'all'
+      ? `<button type="button" class="vx-addrow" data-new>${I.plus}<span>New note${folder ? ' in ' + esc(baseName(folder)) : ''}</span></button>`
+      : '';
   rows.appendChild(frag);
-  sec.appendChild(rows);
+  if (add && cards) rows.insertAdjacentHTML('beforeend', add);
+  card.appendChild(rows);
+  if (add && !cards) card.insertAdjacentHTML('beforeend', add);
+  sec.appendChild(card);
   page.appendChild(sec);
   sc.scrollTop = scroll;
-  watchExcerpts(rows, sc);
+  // The table shows no excerpts: only grid cards ask the server for them.
+  if (cards) watchExcerpts(rows, sc);
+  else observer?.disconnect();
 
-  // Wiring
   head.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
     b.onclick = () => nav.selectFolder(b.dataset.f || '');
     wireFolderDrop(b, b.dataset.f || '');
   });
-  head.querySelector<HTMLElement>('[data-fmenu]')?.addEventListener('click', (e) => {
-    folderMenu(folder, e.currentTarget as HTMLElement);
-  });
+  head.querySelector<HTMLElement>('[data-more]')!.onclick = (e) => {
+    const at = e.currentTarget as HTMLElement;
+    const keys = mobile ? [] : [{ sep: true, label: '' }, { label: 'Keyboard shortcuts', icon: KBD_ICON, run: showKeys }];
+    if (folder) folderMenu(folder, at, undefined, keys);
+    else
+      openMenu(
+        [
+          { label: 'New folder', icon: I.newFolder, run: () => nav.newFolder('') },
+          { label: 'Trash', icon: I.trash, run: () => nav.openTrash() },
+          ...keys,
+        ],
+        at,
+      );
+  };
   host.querySelectorAll<HTMLElement>('[data-new]').forEach((b) => (b.onclick = () => nav.newNote(folder)));
   head.querySelector<HTMLElement>('[data-new-folder]')!.onclick = () => nav.newFolder(folder);
   host.querySelector<HTMLElement>('[data-filter-all]')?.addEventListener('click', () => {
@@ -318,10 +363,54 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     savePrefs();
     renderList(host, mobile);
   });
-  tools.querySelector<HTMLElement>('[data-keys]')?.addEventListener('click', showKeys);
+  tbar.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => {
+    b.onclick = () => {
+      prefs.filter = b.dataset.filter as ListFilter;
+      savePrefs();
+      renderList(host, mobile);
+    };
+  });
+  tbar.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => {
+    b.onclick = () => {
+      prefs.view = b.dataset.view === 'cards' ? 'cards' : 'list';
+      savePrefs();
+      renderList(host, mobile);
+    };
+  });
   host.querySelectorAll<HTMLElement>('[data-open]').forEach((b) => (b.onclick = () => nav.openNote(b.dataset.open || '')));
-  const q = search.querySelector<HTMLInputElement>('.vx-list-q')!;
-  search.querySelector<HTMLElement>('.vx-search-x')!.onclick = (e) => {
+  page.querySelectorAll<HTMLElement>('.vx-active [data-x]').forEach((b) => {
+    b.onclick = () => {
+      const k = b.dataset.x;
+      if (k === 'query') {
+        query = '';
+        renderList(host, mobile);
+        host.querySelector<HTMLInputElement>('.vx-list-q')?.focus();
+        return;
+      }
+      if (k === 'filter' || k === 'all') {
+        prefs.filter = 'all';
+        savePrefs();
+      }
+      if (k === 'folder' || k === 'all') nav.selectFolder('');
+      else renderList(host, mobile);
+    };
+  });
+  card.querySelectorAll<HTMLElement>('.vx-thead [data-sort]').forEach((b) => {
+    b.onclick = () => {
+      const k = b.dataset.sort as SortKey;
+      if (normQuery(query)) query = '';
+      if (prefs.sort === k) prefs.dir = prefs.dir < 0 ? 1 : -1;
+      else {
+        prefs.sort = k;
+        prefs.dir = k === 'mtime' ? -1 : 1;
+      }
+      savePrefs();
+      renderList(host, mobile);
+      host.querySelector<HTMLElement>(`.vx-thead [data-sort=${k}]`)?.focus();
+    };
+  });
+  const q = tbar.querySelector<HTMLInputElement>('.vx-list-q')!;
+  tbar.querySelector<HTMLElement>('.vx-search-x')!.onclick = (e) => {
     e.preventDefault();
     query = '';
     renderList(host, mobile);
@@ -346,21 +435,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     nq?.focus();
     nq?.setSelectionRange(query.length, query.length);
   }
-  const label = (o: SelectOption | undefined, lead = ''): string => `${lead}<span>${esc(o?.label || '')}</span>`;
-  mountSelect(tools.querySelector('[data-vx-sel=filter]'), {
-    label: 'Show',
-    className: 'vx-select',
-    align: 'end',
-    minWidth: 180,
-    value: prefs.filter,
-    options: FILTERS.map((x) => ({ value: x.k, label: x.label, hint: x.k === 'agents' && nAgents ? `${nAgents} touched by agents` : undefined })),
-    render: (o) => label(o, FUNNEL),
-    onChange: (v) => {
-      prefs.filter = v as ListFilter;
-      savePrefs();
-      renderList(host, mobile);
-    },
-  }).el.title = 'Show';
+  const label = (o: SelectOption | undefined): string => `<span>${esc(o?.label || '')}</span>`;
   mountSelect(tools.querySelector('[data-vx-sel=sort]'), {
     label: 'Sort by',
     className: 'vx-select',
@@ -368,7 +443,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     minWidth: 160,
     value: prefs.sort,
     options: SORTS.map((x) => ({ value: x.k, label: x.label })),
-    render: (o) => label(o),
+    render: label,
     onChange: (v) => {
       prefs.sort = v as SortKey;
       prefs.dir = prefs.sort === 'mtime' ? -1 : 1;
@@ -392,7 +467,6 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   };
 
   rows.onkeydown = (e) => onRowsKey(e, rows, notes, host, mobile);
-  // Roving tab stop.
   const list = Array.from(rows.querySelectorAll<HTMLElement>('.vx-note'));
   const cur = list.find((r) => r.dataset.path === focusPath) || list.find((r) => r.classList.contains('active')) || list[0];
   if (cur) cur.tabIndex = 0;
@@ -402,10 +476,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
 /** The "opens" arrow rows and tiles show on hover and keyboard focus. */
 const GO = `<span class="vx-go" aria-hidden="true"><svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>`;
 
-/**
- * Folders | Nodes: the pill slides first, the old list fades out toward the
- * side it leaves to, then the new one slides in from the other side.
- */
+/** Folders | Notes: the old list fades out toward the side it leaves, then the new one renders. */
 function switchTab(host: HTMLElement, mobile: boolean, tabs: HTMLElement, next: 'nodes' | 'folders'): void {
   tab = next;
   if (next === 'folders') query = '';
@@ -431,7 +502,8 @@ function switchTab(host: HTMLElement, mobile: boolean, tabs: HTMLElement, next: 
   );
 }
 
-const FUNNEL = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z"/></svg>`;
+const LIST_ICON = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>`;
+const CARDS_ICON = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>`;
 const ARROW = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>`;
 const KBD_ICON = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M8 14h8"/></svg>`;
 
@@ -442,26 +514,20 @@ function showKeys(): void {
     title: 'Keyboard shortcuts',
     body: `<dl class="vx-keys">
       ${k(['↑', '↓'], 'Move in the tree or list')}${k(['←', '→'], 'Collapse or expand a folder')}
-      ${k(['Enter'], 'Open')}${k(['N'], 'New node here')}${k(['F2'], 'Rename')}${k(['P'], 'Pin or unpin')}
-      ${k(['M'], 'Move selected nodes')}${k(['Del'], 'Delete')}${k(['Ctrl', 'A'], 'Select all nodes')}
-      ${k(['Shift', 'F10'], 'Context menu')}${k(['E'], 'Edit the open node')}${k(['Ctrl', 'E'], 'Switch read and edit')}
-      ${k(['Esc'], 'Stop editing')}${k(['F6'], 'Next pane')}</dl>
-      <p class="vx-muted">Drag nodes or folders onto a folder to move them, onto Pinned to pin them.</p>`,
+      ${k(['Enter'], 'Open')}${k(['N'], 'New note here')}${k(['F2'], 'Rename')}${k(['P'], 'Pin or unpin')}
+      ${k(['M'], 'Move selected notes')}${k(['Del'], 'Move to Trash')}${k(['Ctrl', 'A'], 'Select all notes')}
+      ${k(['Shift', 'F10'], 'Context menu')}${k(['E'], 'Edit the open note')}${k(['Ctrl', 'E'], 'Switch read and edit')}
+      ${k(['Esc'], 'Stop editing (asks before dropping changes)')}${k(['Ctrl', 'S'], 'Save')}${k(['F6'], 'Next pane')}</dl>
+      <p class="vx-muted">Drag notes or folders onto a folder to move them, onto Pinned to pin them.</p>`,
     actions: [{ label: 'Close', cls: 'primary', run: () => Modal.close() }],
   });
-}
-
-function countTouched(folder: string): number {
-  let n = 0;
-  for (const p of touched.keys()) if (isInside(dirOf(p), folder)) n++;
-  return n;
 }
 
 function folderTile(c: FolderNode): HTMLElement {
   const b = el('button', 'vx-tile');
   b.dataset.folder = c.path;
   b.style.setProperty('--fc', folderColor(c.path));
-  const bits = [plural(c.total, 'node')];
+  const bits = [plural(c.total, 'note')];
   if (c.children.length) bits.push(plural(c.children.length, 'folder'));
   b.innerHTML = `<span class="vx-tile-ico">${folderGlyph(folderIcon(c.path), false)}</span>
     <span class="vx-tile-txt"><b>${esc(c.name)}${lockMark('folder', c.path)}</b><small>${bits.join(' · ')}</small></span>${GO}`;
@@ -484,7 +550,17 @@ function folderTile(c: FolderNode): HTMLElement {
   return b;
 }
 
-function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement, mobile: boolean, showFolder: boolean): HTMLElement {
+/** A folder cell: colour dot, then the path; a long path is cut at its start, never at the name. */
+function folderPath(sub: string, rel: string): string {
+  const shown = rel || (sub ? baseName(sub) : ROOT_LABEL);
+  const cut = shown.lastIndexOf('/');
+  const pre = cut > 0 ? `<span class="vx-fp-pre">${esc(shown.slice(0, cut))}</span><span class="vx-fp-sep" aria-hidden="true">/</span>` : '';
+  return `<span class="vx-note-folder" title="${attr(sub || ROOT_LABEL)}"><i></i>${pre}<span class="vx-fp-leaf">${esc(shown.slice(cut + 1))}</span></span>`;
+}
+
+type RenameRow = HTMLElement & { _rename?: () => void };
+
+function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement, mobile: boolean): HTMLElement {
   const row = el('div', 'vx-note');
   row.setAttribute('role', 'option');
   row.tabIndex = -1;
@@ -500,38 +576,43 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
   const rel = folder ? sub.slice(folder.length).replace(/^\//, '') : sub;
   const t = touched.get(n.path);
   row.style.setProperty('--fc', folderColor(sub));
-  row.innerHTML = `<span class="vx-note-main">
-      <span class="vx-note-l1"><span class="vx-note-name">${esc(n.name)}</span>${lockMark('node', n.path)}${
-        isPinned('note', n.path) ? `<span class="vx-note-pin" title="Pinned">${I.pin}</span>` : ''
-      }${
-        showFolder && rel
-          ? `<span class="vx-note-folder" title="${attr(sub)}"><i></i><span>${esc(rel)}</span></span>`
-          : ''
-      }</span>
+  const lock = lockMark('node', n.path);
+  const pin = isPinned('note', n.path) ? `<span class="vx-note-pin" title="Pinned">${I.pin}</span>` : '';
+  const when = `<time title="${attr(fmtTs(n.mtime))}">${esc(relTs(n.mtime))}</time>`;
+  const by = t
+    ? `<span class="vx-agent sm" style="--ac:${hashColor(t.actor)}" title="${attr(
+        `${t.actor} · ${t.action.replace(/_/g, ' ')} · ${relTs(t.at / 1000)}`,
+      )}">${esc(initials(t.actor))}</span>`
+    : '';
+  const more = `<button class="vx-row-more" tabindex="-1" aria-label="Note actions" title="Actions">${I.more}</button>`;
+  const lead = `<span class="vx-note-lead" aria-hidden="true">${I.note}<span class="vx-note-thumb"></span></span>`;
+  const place = folderPath(sub, rel);
+  if (prefs.view === 'cards') {
+    row.classList.add('card');
+    row.innerHTML = `<span class="vx-card-top">${lead}<span class="vx-note-name">${esc(noteTitle(n.path))}</span>${lock}${pin}${more}</span>
       <span class="vx-note-ex"></span>
-      <span class="vx-note-meta">${
-        showFolder && rel ? `<span class="vx-note-mf" title="${attr(sub)}"><i></i><span>${esc(rel)}</span></span>` : ''
-      }<time>${esc(relTs(n.mtime))}</time><span class="vx-note-mtags"></span></span>
-    </span>
-    <span class="vx-note-side">
-      <span class="vx-note-top">${
-        t
-          ? `<span class="vx-agent sm" style="--ac:${hashColor(t.actor)}" title="${attr(
-              `${t.actor} · ${t.action.replace(/_/g, ' ')} · ${relTs(t.at / 1000)}`,
-            )}">${esc(initials(t.actor))}</span>`
-          : ''
-      }<time title="${attr(fmtTs(n.mtime))}">${esc(relTs(n.mtime))}</time></span>
-      <span class="vx-note-tags"></span>
-    </span>
-    <span class="vx-note-thumb" aria-hidden="true"></span>${GO}
-    <button class="vx-row-more" tabindex="-1" aria-label="Node actions">${I.more}</button>`;
+      <dl class="vx-props">
+        <dt>Folder</dt><dd>${folderPath(sub, sub)}</dd>
+        <dt>Tags</dt><dd class="vx-note-tags"><span class="vx-none">None</span></dd>
+        <dt>Updated</dt><dd>${when}</dd>
+        ${t ? `<dt>By</dt><dd>${by}<span>${esc(t.actor)}</span></dd>` : ''}
+      </dl>`;
+  } else {
+    // A table row on wide screens, stacked on phones.
+    const leaf = sub ? baseName(sub) : ROOT_LABEL;
+    row.innerHTML = `${lead}<span class="vx-note-main">
+      <span class="vx-note-l1"><span class="vx-note-name">${esc(noteTitle(n.path))}</span>${lock}${pin}</span>
+      <span class="vx-note-meta"><span class="vx-note-mf" title="${attr(sub || ROOT_LABEL)}"><i></i><span>${esc(leaf)}</span></span><time title="${attr(fmtTs(n.mtime))}">${esc(relTs(n.mtime))}</time>${by}</span>
+    </span><span class="vx-note-fcol">${place}</span>
+    <span class="vx-note-top">${by}${when}</span>${more}`;
+  }
   paintExcerpt(row);
 
   const rename = (): void => {
     const name = row.querySelector<HTMLElement>('.vx-note-name');
     if (!name) return;
     row.draggable = false;
-    void inlineEdit(name, n.name).then((v) => {
+    void inlineEdit(name, stemTitle(n.name)).then((v) => {
       row.draggable = true;
       if (v) void renameNote(n.path, v);
     });
@@ -581,14 +662,14 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
   };
   row.ondragstart = (e) => {
     const paths = sel && selection.size > 1 ? Array.from(selection) : [n.path];
-    startDrag(e, { kind: 'notes', paths }, paths.length > 1 ? `${paths.length} nodes` : n.name);
+    startDrag(e, { kind: 'notes', paths }, paths.length > 1 ? `${paths.length} notes` : noteTitle(n.path));
     row.classList.add('vx-dragsrc');
   };
   row.ondragend = () => {
     row.classList.remove('vx-dragsrc');
     endDrag();
   };
-  (row as HTMLElement & { _rename?: () => void })._rename = rename;
+  (row as RenameRow)._rename = rename;
   return row;
 }
 
@@ -603,14 +684,10 @@ function paintExcerpt(row: HTMLElement): void {
     return;
   }
   ex.classList.toggle('none', !e.text);
-  ex.textContent = e.text || 'Empty node';
-  tg.innerHTML = e.tags
-    .slice(0, 2)
-    .map((x) => `<span class="vx-chip-tag" style="--tc:${hashColor(x)}">#${esc(x)}</span>`)
-    .join('');
-  const mt = row.querySelector<HTMLElement>('.vx-note-mtags');
-  if (mt) mt.innerHTML = e.tags.slice(0, 2).map((x) => `<span style="--tc:${hashColor(x)}" title="#${attr(x)}">#${esc(x)}</span>`).join('');
-  // A small thumbnail when the node has an image (hidden again if it fails to load).
+  ex.textContent = e.text || 'Empty note';
+  // Only grid cards have an excerpt and tags, so a row that gets here is a card.
+  const shown = e.tags.slice(0, 3);
+  if (shown.length) tg.innerHTML = shown.map((x) => `<span class="vx-chip-tag" style="--tc:${hashColor(x)}"><i></i>${esc(x)}</span>`).join('');
   const th = row.querySelector<HTMLElement>('.vx-note-thumb');
   if (th && e.img && !th.firstChild) {
     const img = document.createElement('img');
@@ -628,14 +705,7 @@ function paintExcerpt(row: HTMLElement): void {
   }
 }
 
-/**
- * Ask for excerpts of the rows that are (nearly) on screen. Rows stay watched
- * until their excerpt lands, both ways: a row that scrolls away leaves the
- * set of wanted rows and its queued request is dropped (it is asked for again
- * if it comes back). Otherwise every row scrolled past stays queued, and after
- * a long scroll (a Folder sorted list with its group headers is the longest)
- * the rows on screen wait behind all of them.
- */
+/** Ask for excerpts of rows (nearly) on screen; rows that scroll away drop their queued request so on-screen rows never wait behind them. */
 function watchExcerpts(rows: HTMLElement, scroller: HTMLElement): void {
   observer?.disconnect();
   const onScreen = new Set<string>();
@@ -657,7 +727,7 @@ function watchExcerpts(rows: HTMLElement, scroller: HTMLElement): void {
       }
       keepExcerpts(onScreen);
     },
-    // The list scrolls inside its own box: measure against it, so the margin preloads the next rows.
+    // Measure against the list's own scroll box so the margin preloads the next rows.
     { root: scroller, rootMargin: '300px 0px' },
   );
   rows.querySelectorAll<HTMLElement>('.vx-note').forEach((r) => {
@@ -740,11 +810,11 @@ function onRowsKey(e: KeyboardEvent, rows: HTMLElement, list: NoteRef[], host: H
       break;
     case 'F2':
       e.preventDefault();
-      (row as HTMLElement & { _rename?: () => void })._rename?.();
+      (row as RenameRow)._rename?.();
       break;
     case 'Delete':
       e.preventDefault();
-      confirmDeleteNotes(selection.size > 1 && selection.has(path) ? Array.from(selection) : [path], () =>
+      void deleteNotesToTrash(selection.size > 1 && selection.has(path) ? Array.from(selection) : [path], () =>
         selection.clear(),
       );
       break;
@@ -767,7 +837,7 @@ function onRowsKey(e: KeyboardEvent, rows: HTMLElement, list: NoteRef[], host: H
       noteMenu(
         selection.size > 1 && selection.has(path) ? Array.from(selection) : [path],
         row,
-        (row as HTMLElement & { _rename?: () => void })._rename,
+        (row as RenameRow)._rename,
       );
       break;
     default:
@@ -776,8 +846,8 @@ function onRowsKey(e: KeyboardEvent, rows: HTMLElement, list: NoteRef[], host: H
 }
 
 /** Folder tiles and crumbs accept dropped notes and folders too. */
-export function wireFolderDrop(b: HTMLElement, path: string): void {
-  // Pointer drags from the tree find it by this (see TreeView.targetAt).
+function wireFolderDrop(b: HTMLElement, path: string): void {
+  // Pointer drags from the tree find it by this (TreeView.targetAt).
   b.dataset.dropFolder = path;
   b.ondragover = (e) => {
     const d = drag.cur;
@@ -806,4 +876,10 @@ export function wireFolderDrop(b: HTMLElement, path: string): void {
 export function resetListQuery(): void {
   query = '';
   anchor = null;
+}
+
+/** Back to the plain list ("Notes" in the menu): the Notes tab, no search. */
+export function resetListView(): void {
+  resetListQuery();
+  tab = 'nodes';
 }

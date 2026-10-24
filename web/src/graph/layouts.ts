@@ -1,9 +1,6 @@
-// Layout targets for the radial (concentric folder tree) and cluster modes,
-// plus seeding positions for nodes that have none yet.
-
 import type { GNode } from './model';
 
-export interface RadialGuides {
+interface RadialGuides {
   rings: number[];
 }
 
@@ -59,7 +56,6 @@ export function radialTargets(nodes: GNode[]): RadialGuides {
       rings.add(r);
     }
     const total = Math.max(1, d.weight - (d.folder ? 1 : 0));
-    // The folder's own notes take a share of the sector, centred.
     const share = (span * d.notes.length) / total;
     const kidsSpan = span - share;
     let a = a0;
@@ -109,7 +105,6 @@ export function clusterTargets(nodes: GNode[]): void {
     list.push(n);
     byDir.set(n.dir, list);
   }
-  // Order islands by top-level group so related folders sit together.
   const groups = Array.from(byDir.entries()).sort(
     (a, b) => a[0].split('/')[0].localeCompare(b[0].split('/')[0]) || b[1].length - a[1].length,
   );
@@ -133,14 +128,13 @@ export function clusterTargets(nodes: GNode[]): void {
     placed.push({ x, y, r: R });
     centres.set(dir, { x, y });
     list.forEach((n, i) => {
-      // Phyllotaxis: evenly filled disc, hubs first at the centre.
+      // Phyllotaxis: evenly filled disc, hubs at the centre.
       const rr = Math.sqrt(i + 0.5) * Math.sqrt(area / Math.PI / Math.max(1, list.length));
       const a = i * 2.399963;
       n.tx = x + Math.cos(a) * rr;
       n.ty = y + Math.sin(a) * rr;
     });
   }
-  // Folder nodes: their own island's centre, or the mean of their children.
   const fpaths = Array.from(folders.keys()).sort((a, b) => b.split('/').length - a.split('/').length);
   for (const p of fpaths) {
     const f = folders.get(p)!;

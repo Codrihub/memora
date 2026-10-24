@@ -1,6 +1,3 @@
-// Canvas-2D painting: wikilink connectors (and cards themselves at the lowest
-// zoom level), plus the minimap. Pure functions over the board model.
-
 import { CARD_H, CARD_W, frameBox, type Box, type Cam, type Card, type Frame } from './model';
 import { route, strokeRounded, type Pt, type Rect } from './route';
 
@@ -9,14 +6,14 @@ export interface LinkPair {
   b: Card;
 }
 
-export interface LinkPaint {
+interface LinkPaint {
   cam: Cam;
   w: number;
   h: number;
   dpr: number;
   links: LinkPair[];
   showLinks: boolean;
-  /** Paths whose links are emphasised (selection or hover); others dim. */
+  /** Paths whose links are emphasised; others dim. */
   focus: Set<string> | null;
   /** Lowest level of detail: cards are painted here instead of the DOM. */
   paintCards: boolean;
@@ -34,12 +31,10 @@ function hexA(hex: string, a: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-/** Routed wires, reused until a card or frame moves. */
 const routes = new Map<string, { sig: string; ends: string; pts: Pt[] }>();
 /** New routes worked out per frame; the rest follow on the next frames. */
 const ROUTE_BUDGET = 60;
 
-/** One string that changes whenever any card or frame moves. */
 function layoutSig(frames: Frame[]): string {
   let h = 0;
   for (const f of frames) {
@@ -65,7 +60,7 @@ function obstaclesFor(fa: Frame, fb: Frame, a: Card, b: Card, frames: Frame[]): 
   return out;
 }
 
-/** Paints the board's wires; true when some routes are still to be worked out. */
+/** True when some routes are still to be worked out. */
 export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean {
   const { cam, w, h, dpr } = p;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -92,7 +87,6 @@ export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean
         ctx.fill();
         ctx.fillStyle = hexA(fc, 0.9);
         ctx.fillRect(x, y + 12, 5, CARD_H - 24);
-        // Greeked title and two text lines.
         ctx.fillStyle = p.light ? 'rgba(15,23,42,.5)' : 'rgba(230,233,239,.55)';
         ctx.fillRect(x + 20, y + 22, CARD_W * 0.62, 16);
         ctx.fillStyle = ink;
@@ -142,8 +136,7 @@ export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean
           routes.set(key, r);
         } else {
           pending = true;
-          // Over budget: keep the old path while its cards stay put, else a
-          // plain elbow until the full route is ready.
+          // Over budget: keep the old path while its cards stay put, else a plain elbow.
           if (!r || r.ends !== ends) r = { sig: '', ends, pts: route(A, B, []) };
           routes.set(key, r);
         }
@@ -162,7 +155,6 @@ export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean
       ctx.lineWidth = hot ? lw * 1.9 : lw;
       ctx.lineJoin = 'round';
       strokeRounded(ctx, pts, 14);
-      // Arrow head at the target, pointing into the card.
       const ah = (hot ? 9 : 6) * Math.max(1, 1 / cam.z) * 0.9;
       const ang = Math.atan2(-edy, -edx);
       ctx.fillStyle = hexA(col, hot ? 1 : alpha + 0.1);
@@ -172,7 +164,6 @@ export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean
       ctx.lineTo(ex - Math.cos(ang + 0.45) * ah, ey - Math.sin(ang + 0.45) * ah);
       ctx.closePath();
       ctx.fill();
-      // Source port dot.
       ctx.beginPath();
       ctx.arc(sx, sy, (hot ? 3.2 : 2.2) * Math.max(1, 1 / cam.z) * 0.8, 0, Math.PI * 2);
       ctx.fill();
@@ -182,7 +173,7 @@ export function paintLinks(ctx: CanvasRenderingContext2D, p: LinkPaint): boolean
   return pending;
 }
 
-export interface MiniPaint {
+interface MiniPaint {
   w: number;
   h: number;
   dpr: number;

@@ -1,23 +1,14 @@
-// Folder tree with the pinned section. One component, mounted in the vault
-// view (folders only) and, through mountTree(), in the shell sidebar (folders
-// and notes).
-//
-// Features: animated expand/collapse, folder color/icon and recursive counts,
-// drag and drop with pointer events (mouse, pen, touch after a short hold; see
-// drag.ts): notes and folders into folders or to the top level after a
-// confirm, anything into Pinned, pin reordering, hover auto-expand and
-// auto-scroll; inline rename (F2 or double click), context menus, full
-// keyboard navigation (ARIA tree). Deep trees stop indenting after
-// INDENT_CAP levels and show the level instead.
+// Folder tree with the Pinned section: mounted in the vault view and, through mountTree(), in the shell sidebar.
 
 import { el, esc, attr } from '../dom';
 import { Modal } from '../modal';
-import { noteName } from '../format';
-import { state } from '../state';
+import { noteTitle, state } from '../state';
+import { stemTitle } from '../format';
+
 import type { NoteRef } from '../types';
 import { I, folderGlyph } from './icons';
 import { lockMark } from '../ui/privacy';
-import { confirmDeleteFolder, confirmDeleteNotes, confirmUnpin, folderMenu, noteMenu, pinToggle } from './menus';
+import { confirmDeleteFolder, confirmUnpin, deleteNotesToTrash, folderMenu, noteMenu, pinToggle } from './menus';
 import { drag, endDrag, nav, type DragPayload } from './nav';
 import { moveNotes, relocateFolder, renameFolder, renameNote } from './ops';
 import {
@@ -51,6 +42,7 @@ import {
   selection,
   agentsAt,
   unpin,
+  ROOT_LABEL,
   type FolderNode,
   type PinItem,
 } from './store';
@@ -114,14 +106,13 @@ window.addEventListener('memora:sections-toggle', () => {
 });
 window.addEventListener('memora:sections-ask', () => announceSections());
 
-/** A group of rows one level down; `--gx` places its branch line under the
- * parent's chevron (rows indent 14px per level, see .vx-row). */
 /** The "more" button at the end of a tree row: opens the same menu as a right-click. */
 function moreBtn(name: string): string {
   const label = `More actions for ${name}`;
   return `<button class="vx-row-more" type="button" tabindex="-1" aria-label="${attr(label)}" title="More actions">${I.more}</button>`;
 }
 
+/** A group of rows one level down; `--gx` places its branch line under the parent's chevron. */
 function branchGroup(depth: number): HTMLElement {
   const g = el('div', 'vx-kids-inner');
   g.style.setProperty('--gx', indentLevel(depth) * 14 + 'px');
@@ -139,11 +130,11 @@ function moveBody(d: DragPayload, dest: string): string {
   const { count, folder } = payloadLabel(d);
   const paths = d.kind === 'notes' ? d.paths : d.kind === 'folder' ? [d.path] : [d.item.key];
   const froms = Array.from(new Set(paths.map((p) => (folder ? p : dirOf(p)))));
-  const show = (p: string): string => (p === '' ? 'Top level' : p);
+  const show = (p: string): string => (p === '' ? ROOT_LABEL : p);
   const from = folder ? show(paths[0]) : froms.length === 1 ? show(froms[0]) : `${froms.length} folders`;
   const to = folder ? show((dest ? dest + '/' : '') + baseName(paths[0])) : show(dest);
   const what = folder
-    ? 'The folder moves with everything in it; links to its nodes are updated and pins follow.'
+    ? 'The folder moves with everything in it; links to its notes are updated and pins follow.'
     : `${count > 1 ? 'They move' : 'It moves'}; links to ${count > 1 ? 'them' : 'it'} are updated and pins follow.`;
   return `<div class="vx-mv">
     <div class="vx-mv-row"><span class="vx-mv-k">From</span><span class="vx-mv-p mono" title="${attr(from)}">${esc(from)}</span></div>
@@ -190,14 +181,8 @@ window.addEventListener('memora:collapse-folders', () => {
   refreshTrees();
 });
 
-// Row motion between redraws -------------------------------------------------
-//
-// A redraw replaces the rows. Compared by data-key with the rows before it:
-// new rows (a new node, or a renamed one under its new name) slide in with a
-// short highlight, rows that shifted glide from where they were, and rows
-// that went away fade and slide out where they stood. Only rows on screen
-// (at the root or in an open folder) take part; bulk changes (opening a
-// folder, a vault switch) and reduced motion skip it.
+// Row motion between redraws, compared by data-key: new rows slide in, shifted rows glide, removed rows fade out.
+// Bulk changes and reduced motion skip it.
 
 interface Was {
   top: number;
@@ -228,8 +213,7 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
   const added = rows.filter((r) => !before.has(r.dataset.key!) && !r.dataset.key!.startsWith('pin:'));
   const gone = Array.from(before.entries()).filter(([k]) => !now.has(k));
   if (added.length > 12 || gone.length > 12) return;
-  // Shifted rows glide from their old place (only rows on screen: a big
-  // open tree would otherwise start hundreds of animations nobody sees).
+  // Only rows on screen glide: a big open tree would otherwise start hundreds of animations.
   const vh = window.innerHeight;
   for (const r of rows) {
     const was = before.get(r.dataset.key!);
@@ -239,7 +223,6 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
     const dy = was.top - top;
     if (Math.abs(dy) > 1) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 280, easing: EASE });
   }
-  // New rows come in: open up, slide from the left, a short accent glow.
   for (const r of added) {
     r.animate(
       [
@@ -250,7 +233,6 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
       { duration: 900, easing: EASE },
     );
   }
-  // Rows that went away: a ghost where they stood fades and slides out.
   if (!gone.length) return;
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   const hb = host.getBoundingClientRect();
@@ -279,13 +261,7 @@ function animateChanges(host: HTMLElement, before: Map<string, Was>): void {
   }
 }
 
-// Pin arrivals -----------------------------------------------------------------
-//
-// A pin that just arrived (pinned here, by an agent over MCP, or in another
-// browser) drops into the Pinned list: the row slides down into place under a
-// short accent highlight with an accent edge, its icon lands like a pushpin and
-// the count ticks up. A redraw meanwhile picks the effect up where it was (the
-// age comes from the store). Reduced motion keeps only the highlight.
+// A pin that just arrived slides in with a highlight; a redraw resumes the effect at its age (from the store).
 
 const pinGlow = (pct: number): string => `color-mix(in srgb, var(--accent) ${pct}%, transparent)`;
 const PIN_EDGE = 'inset 3px 0 0 var(--accent)';
@@ -367,15 +343,9 @@ export class TreeView {
     this.render();
   }
 
-  destroy(): void {
-    instances.delete(this);
-    this.host.innerHTML = '';
-  }
-
   render(): void {
     const scroll = this.host.scrollTop;
-    // Emptying the host shrinks the sidebar's scroll box, which clamps its
-    // scroll position: keep it across the redraw.
+    // Emptying the host clamps the sidebar's scroll position: keep it across the redraw.
     const box = scrollParent(this.host, true);
     const boxScroll = box ? box.scrollTop : 0;
     const active = document.activeElement as HTMLElement | null;
@@ -390,11 +360,10 @@ export class TreeView {
     if (before) animateChanges(this.host, before);
     if (this.opts.showPins) this.pinArrivals();
     this.drawn = true;
-    // Keep keyboard focus across redraws.
     const keyed = this.focusKey
       ? this.host.querySelector<HTMLElement>(`[data-key="${CSS.escape(this.focusKey)}"]`)
       : null;
-    if (keyed && active && this.host.contains(active) === false && document.activeElement === document.body) keyed.focus();
+    if (keyed && active && !this.host.contains(active) && document.activeElement === document.body) keyed.focus();
     this.roving();
     if (dragging() && this.dragKeys.length) {
       for (const k of this.dragKeys) this.host.querySelector(`[data-key="${CSS.escape(k)}"]`)?.classList.add('vx-dragsrc');
@@ -436,19 +405,13 @@ export class TreeView {
     }
   }
 
-  // ---------------------------------------------------------------- pins
-
   /** Pins shown last draw (the count bumps when it grows). */
   private pinCount = -1;
 
   /** Pin rows on their way out, kept in the list across redraws until they finish. */
   private pinGhosts: { el: HTMLElement; at: number }[] = [];
 
-  /**
-   * Pins that went away fade and slide out where they stood, then fold shut, so the
-   * rows under them close the gap smoothly (instead of the row-motion ghost, which
-   * floats over the drop slot). Takes them out of `before`.
-   */
+  /** Removed pins fade out and fold shut in place (not the floating row-motion ghost); takes them out of `before`. */
   private pinDepartures(before: Map<string, Was>): void {
     const list = this.host.querySelector<HTMLElement>('.vx-pin-list');
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -509,19 +472,16 @@ export class TreeView {
     sec.classList.toggle('folded', !secOpen.pins);
     sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.pin}<span>Pinned</span><span class="vx-sec-count">${items.length}</span></span><span class="vx-fold-caret">${I.caret}</span></header>`;
     foldable(sec.querySelector('header')!, secOpen.pins, () => setSections({ pins: !secOpen.pins }));
-    // The pins branch off the title; the drop slot always shows under them
-    // (right under the title while the list is folded), so Pinned clearly
-    // takes drags.
+    // The drop slot always shows (even while folded), so Pinned clearly takes drags.
     const list = el('div', 'vx-pin-list');
     list.setAttribute('role', 'list');
     items.forEach((it, i) => list.appendChild(this.pinRow(it, i)));
     sec.appendChild(foldBody(list, secOpen.pins));
     sec.appendChild(
-      el('div', 'vx-pin-empty' + (items.length ? ' slim' : ''), items.length ? `${I.pin}Drop here to pin` : 'Drag nodes or folders here to pin them'),
+      el('div', 'vx-pin-empty' + (items.length ? ' slim' : ''), items.length ? `${I.pin}Drag a note here to pin it` : 'Drag notes or folders here to pin them'),
     );
 
-    // HTML5 drop (drags from the node list): pin a dragged note/folder. Drags
-    // that start in the tree use pointer events (see onPress).
+    // HTML5 drop (drags from the note list); drags that start in the tree use pointer events (onPress).
     const indexAt = (y: number): number => {
       const rows = Array.from(list.querySelectorAll<HTMLElement>('.vx-pin'));
       for (let i = 0; i < rows.length; i++) {
@@ -560,22 +520,14 @@ export class TreeView {
       e.preventDefault();
       const at = indexAt(e.clientY);
       endDrag();
-      if (d.kind === 'pin') {
-        const cur = pinnedItems().findIndex((p) => p.kind === d.item.kind && p.key === d.item.key);
-        pinAt(d.item, cur >= 0 && cur < at ? at - 1 : at);
-      } else if (d.kind === 'notes') {
-        d.paths.forEach((p, k) => pinAt({ kind: 'note', key: p }, at + k));
-      } else {
-        pinAt({ kind: 'folder', key: d.path }, at);
-      }
+      this.dropOnPins(d, at);
     };
     return sec;
   }
 
   private pinRow(it: PinItem, i: number): HTMLElement {
     const isNote = it.kind === 'note';
-    // The server says when a pinned path is gone (renamed or deleted outside
-    // Memora): the pin stays, dimmed, until it is removed.
+    // A pin whose path is gone stays, dimmed, until it is removed.
     const missing = !!it.missing;
     const row = el('div', 'vx-pin' + (missing ? ' missing' : ''));
     row.setAttribute('role', 'listitem');
@@ -586,7 +538,7 @@ export class TreeView {
     const color = isNote ? folderColor(dirOf(it.key)) : folderColor(it.key);
     const active = isNote ? state.note === it.key : prefs.folder === it.key && state.page === 'vault' && !state.note;
     if (active) row.classList.add('active');
-    const label = isNote ? noteName(it.key) : baseName(it.key);
+    const label = isNote ? noteTitle(it.key) : baseName(it.key);
     const sub = missing
       ? `<span class="vx-pin-sub vx-pin-miss">Not found</span>`
       : isNote
@@ -623,7 +575,6 @@ export class TreeView {
       if (e.key === 'Enter') open();
       else if (e.key === 'Delete' || e.key === 'Backspace') ask();
       else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.altKey) {
-        // Alt+Up/Down reorders pins from the keyboard.
         e.preventDefault();
         e.stopPropagation();
         this.focusKey = row.dataset.key || null;
@@ -639,14 +590,12 @@ export class TreeView {
     return row;
   }
 
-  // ------------------------------------------------------------- folders
-
   private folderSection(): HTMLElement {
     const sec = el('section', 'vx-sec vx-folders');
     sec.classList.toggle('folded', !secOpen.folders);
     sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.folder}<span>Folders</span></span>
       <span class="vx-sec-acts">
-        <button class="vx-icon-btn" data-act="note" title="New node" aria-label="New node">${I.newNote}</button>
+        <button class="vx-icon-btn" data-act="note" title="New note" aria-label="New note">${I.newNote}</button>
         <button class="vx-icon-btn" data-act="folder" title="New folder" aria-label="New folder">${I.newFolder}</button>
         <button class="vx-icon-btn" data-act="collapse" title="Close all subfolders" aria-label="Close all subfolders">${FOLD_ALL}</button>
       </span><span class="vx-fold-caret">${I.caret}</span></header>`;
@@ -677,14 +626,11 @@ export class TreeView {
     const wrap = el('div', 'vx-branch');
     wrap.appendChild(this.folderRow(f));
     const open = openFolders.has(f.path);
-    const hasKids = f.children.length > 0 || (this.opts.showNotes && f.notes.length > 0);
-    if (hasKids) {
-      const kids = el('div', 'vx-kids' + (open ? ' open' : ''));
-      kids.setAttribute('role', 'group');
-      // Children are built lazily on first open: large vaults stay fast.
-      if (open) this.fillKids(kids, f);
-      wrap.appendChild(kids);
-    }
+    const kids = el('div', 'vx-kids' + (open ? ' open' : ''));
+    kids.setAttribute('role', 'group');
+    // Children are built lazily on first open: large vaults stay fast.
+    if (open) this.fillKids(kids, f);
+    wrap.appendChild(kids);
     return wrap;
   }
 
@@ -692,6 +638,13 @@ export class TreeView {
     const inner = branchGroup(f.depth + 1);
     for (const c of f.children) inner.appendChild(this.folderBranch(c));
     if (this.opts.showNotes) for (const n of f.notes) inner.appendChild(this.noteRow(n, f.depth + 1));
+    if (!inner.childElementCount) {
+      // An empty folder still opens, and says so (trees that hide notes say there are no subfolders).
+      const what = f.notes.length ? 'No subfolders' : 'Empty folder';
+      const empty = el('div', 'vx-row vx-tempty', `<span class="vx-twist none"></span>${depthBadge(f.depth + 1)}<span class="vx-fname">${what}</span>`);
+      empty.style.setProperty('--depth', String(indentLevel(f.depth + 1)));
+      inner.appendChild(empty);
+    }
     kids.innerHTML = '';
     kids.appendChild(inner);
   }
@@ -703,7 +656,7 @@ export class TreeView {
     const row = el('div', 'vx-row vx-frow' + (isRoot ? ' root' : ''));
     row.setAttribute('role', 'treeitem');
     row.setAttribute('aria-level', String(f.depth + 1));
-    if (hasKids && !isRoot) row.setAttribute('aria-expanded', String(open));
+    if (!isRoot) row.setAttribute('aria-expanded', String(open));
     row.tabIndex = -1;
     row.dataset.key = 'f:' + f.path;
     row.dataset.folder = f.path;
@@ -716,11 +669,11 @@ export class TreeView {
     row.classList.toggle('sel', selected);
     row.setAttribute('aria-selected', String(selected));
     const here = f.total ? agentsAt(f.path, true) : [];
-    row.innerHTML = `<span class="vx-twist${hasKids && !isRoot ? '' : ' none'}" aria-hidden="true">${I.caret}</span>
-      ${depthBadge(f.depth)}<span class="vx-fico">${isRoot ? I.vault : folderGlyph(folderIcon(f.path), open && hasKids)}</span>
-      <span class="vx-fname"${isRoot ? '' : ` title="${attr(f.path)}"`}>${esc(isRoot ? 'All nodes' : f.name)}</span>${isRoot ? '' : lockMark('folder', f.path)}
+    row.innerHTML = `<span class="vx-twist${isRoot ? ' none' : ''}" aria-hidden="true">${I.caret}</span>
+      ${depthBadge(f.depth)}<span class="vx-fico">${isRoot ? I.vault : folderGlyph(folderIcon(f.path), open)}</span>
+      <span class="vx-fname"${isRoot ? '' : ` title="${attr(f.path)}"`}>${esc(isRoot ? ROOT_LABEL : f.name)}</span>${isRoot ? '' : lockMark('folder', f.path)}
       ${coinsHTML(here)}
-      <span class="vx-end"><span class="vx-count">${f.total}</span>${moreBtn(isRoot ? 'All nodes' : f.name)}</span>`;
+      <span class="vx-end"><span class="vx-count">${f.total}</span>${moreBtn(isRoot ? ROOT_LABEL : f.name)}</span>`;
 
     row.onclick = (e) => {
       const t = e.target as HTMLElement;
@@ -733,8 +686,7 @@ export class TreeView {
         this.toggle(f.path);
         return;
       }
-      // Anywhere on a folder row opens or closes it (animated), and selects it.
-      if (!isRoot && hasKids) this.toggle(f.path);
+      if (!isRoot) this.toggle(f.path);
       nav.selectFolder(f.path);
     };
     row.ondblclick = (e) => {
@@ -776,7 +728,6 @@ export class TreeView {
         this.host.querySelectorAll('.vx-drop-into').forEach((n) => n.classList.remove('vx-drop-into'));
         row.classList.add('vx-drop-into');
       }
-      // Hover a closed folder for a moment to open it.
       if (canExpand && !openFolders.has(path) && this.hoverPath !== path) {
         this.hoverPath = path;
         clearTimeout(this.hoverTimer);
@@ -822,7 +773,7 @@ export class TreeView {
     row.setAttribute('aria-selected', String(isActive || selection.has(n.path)));
     row.innerHTML = `<span class="vx-twist none"></span>${depthBadge(depth)}<span class="vx-nico">${I.note}</span><span class="vx-fname" title="${attr(
       n.path,
-    )}">${esc(n.name)}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(n.name)}</span>`;
+    )}">${esc(noteTitle(n.path))}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(noteTitle(n.path))}</span>`;
     row.onclick = (e) => {
       const more = (e.target as HTMLElement).closest<HTMLElement>('.vx-row-more');
       if (more) {
@@ -852,8 +803,6 @@ export class TreeView {
     };
     return row;
   }
-
-  // ---------------------------------------------------- pointer drag
 
   /** A press on a row may become a drag (drag.ts runs the gesture). */
   private onPress(e: PointerEvent): void {
@@ -933,7 +882,7 @@ export class TreeView {
       const path = tile.dataset.dropFolder || '';
       return { target: path ? { kind: 'folder', path } : { kind: 'root' }, el: tile };
     }
-    // The empty part of the folder tree: the top level (the "All nodes" row lights up).
+    // The empty part of the folder tree: the top level (the "All notes" row lights up).
     const sec = hit.closest<HTMLElement>('.vx-treehost .vx-folders');
     if (sec) return { target: { kind: 'root' }, el: sec.querySelector<HTMLElement>('.vx-frow.root') };
     return null;
@@ -1001,8 +950,6 @@ export class TreeView {
     }, 380);
   }
 
-  // ----------------------------------------------------------- behavior
-
   /** Fold every open folder one after another, bottom-up, each with a little bounce. */
   collapseAll(): void {
     const rows = Array.from(this.host.querySelectorAll<HTMLElement>('.vx-frow[aria-expanded=true][data-folder]'))
@@ -1045,6 +992,10 @@ export class TreeView {
     row.setAttribute('aria-expanded', String(open));
     const ico = row.querySelector('.vx-fico');
     if (ico && f) ico.innerHTML = folderGlyph(folderIcon(path), open);
+    const done = (): void => {
+      kids.style.height = '';
+      kids.removeEventListener('transitionend', done);
+    };
     if (open) {
       if (!kids.firstElementChild && f) this.fillKids(kids, f);
       kids.style.height = '0px';
@@ -1053,13 +1004,9 @@ export class TreeView {
       requestAnimationFrame(() => {
         kids.style.height = h + 'px';
       });
-      const done = (): void => {
-        kids.style.height = '';
-        kids.removeEventListener('transitionend', done);
-      };
       kids.addEventListener('transitionend', done);
       setTimeout(done, 320);
-      // The children slide and fade in, one after another (the first dozen).
+      // The first dozen children slide and fade in, one after another.
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         const items = Array.from(kids.firstElementChild?.children || []).slice(0, 12) as HTMLElement[];
         items.forEach((c, k) =>
@@ -1078,10 +1025,6 @@ export class TreeView {
         kids.style.height = '0px';
         kids.classList.remove('open');
       });
-      const done = (): void => {
-        kids.style.height = '';
-        kids.removeEventListener('transitionend', done);
-      };
       kids.addEventListener('transitionend', done);
       setTimeout(done, 320);
     }
@@ -1098,7 +1041,7 @@ export class TreeView {
   private async renameNoteInline(row: HTMLElement, path: string): Promise<void> {
     const name = row.querySelector<HTMLElement>('.vx-fname');
     if (!name) return;
-    const v = await inlineEdit(name, noteName(path));
+    const v = await inlineEdit(name, stemTitle(baseName(path).replace(/\.md$/i, '')));
     if (v) await renameNote(path, v);
   }
 
@@ -1184,7 +1127,7 @@ export class TreeView {
       case 'Delete':
         e.preventDefault();
         if (folder) confirmDeleteFolder(folder);
-        else if (path) confirmDeleteNotes(selection.size > 1 && selection.has(path) ? Array.from(selection) : [path]);
+        else if (path) void deleteNotesToTrash(selection.size > 1 && selection.has(path) ? Array.from(selection) : [path]);
         return;
       case 'p':
       case 'P':

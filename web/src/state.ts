@@ -1,6 +1,4 @@
-// Application state. One mutable object, read by every view module.
-
-import { hashColor } from './format';
+import { hashColor, stemTitle } from './format';
 import { loadOpenFolders } from './storage';
 import type { Config, FolderMetaMap, GraphLink, GraphNode, Health, NoteRef, Stats, Tree } from './types';
 
@@ -16,7 +14,8 @@ export type Page =
   | 'tools'
   | 'access'
   | 'settings'
-  | 'docs';
+  | 'docs'
+  | 'trash';
 
 interface GraphState {
   nodes: GraphNode[];
@@ -88,6 +87,20 @@ export function allNotes(): NoteRef[] {
   return out;
 }
 
+let titleTree: unknown = null;
+const titles = new Map<string, string>();
+
+/** The title a note shows: the server's display title, else its file name with `_` as spaces. */
+export function noteTitle(path?: string | null): string {
+  const p = String(path || '');
+  if (titleTree !== state.tree) {
+    titleTree = state.tree;
+    titles.clear();
+    for (const f of Object.keys(state.tree)) for (const n of state.tree[f] || []) if (n.title) titles.set(n.path, n.title);
+  }
+  return titles.get(p) || stemTitle((p.split('/').pop() || p).replace(/\.md$/i, ''));
+}
+
 /** Folder names, Root first, then alphabetical. */
 export function folderNames(): string[] {
   return Object.keys(state.tree).sort((a, b) =>
@@ -100,8 +113,7 @@ export function colorOfFolder(folder: string): string {
   return (meta && meta.color) || hashColor(folder);
 }
 
-// `state.note` is observed: the router keeps the URL (/node/<path>) in step
-// with whichever node is open, however it was opened.
+// `state.note` is observed so the router keeps the URL in step with the open node.
 const noteListeners: ((path: string | null) => void)[] = [];
 let noteValue: string | null = state.note;
 Object.defineProperty(state, 'note', {
@@ -121,7 +133,6 @@ Object.defineProperty(state, 'note', {
   },
 });
 
-/** Called whenever the open node changes. */
 export function onNoteChange(fn: (path: string | null) => void): void {
   noteListeners.push(fn);
 }

@@ -1,19 +1,9 @@
-// Pointer drag and drop for the vault tree: press and hold an item, carry it,
-// release it on a place. Works the same with a mouse, a pen and a finger
-// (a finger holds still for a moment first, so a swipe still scrolls).
-//
-// The pure helpers at the top (drop verdicts, auto-scroll speed, indent cap)
-// hold the rules; `pressDrag` runs one gesture: the ghost that follows the
-// pointer, the hover hint, opening a folder held over, scrolling near the
-// edges, Escape to cancel. What a place means is up to the caller (tree.ts).
+// Pointer drag and drop for the vault tree (mouse, pen and touch). Pure drop
+// rules first; `pressDrag` runs one gesture. What a place means is up to tree.ts.
 
 import { esc } from '../dom';
 import { baseName, dirOf, isInside } from './store';
 import type { DragPayload } from './nav';
-
-// ---------------------------------------------------------------------------
-// Rules (pure, no DOM)
-// ---------------------------------------------------------------------------
 
 /** Where a drag is over. */
 export type DropTarget =
@@ -22,7 +12,7 @@ export type DropTarget =
   | { kind: 'root' }
   | { kind: 'pins'; index: number };
 
-export interface DropVerdict {
+interface DropVerdict {
   ok: boolean;
   /** Destination folder of a move ('' = top level); unused for pins. */
   dest: string;
@@ -31,7 +21,7 @@ export interface DropVerdict {
 }
 
 /** True when `path` is `folder` itself or lies anywhere below it. */
-export function isSelfOrBelow(path: string, folder: string): boolean {
+function isSelfOrBelow(path: string, folder: string): boolean {
   return folder !== '' && isInside(path, folder);
 }
 
@@ -41,7 +31,7 @@ export function placeName(folder: string): string {
 }
 
 /** The move destination of a target ('' = top level), or null for pins. */
-export function destOf(t: DropTarget): string | null {
+function destOf(t: DropTarget): string | null {
   if (t.kind === 'folder') return t.path;
   if (t.kind === 'note') return dirOf(t.path);
   if (t.kind === 'root') return '';
@@ -92,17 +82,12 @@ export function confirmTitle(d: DragPayload, dest: string): string {
 }
 
 /** Auto-scroll zone height at the top and bottom of the scroll box (px). */
-export const EDGE = 48;
+const EDGE = 48;
 /** Fastest auto-scroll (px per frame), right at the edge. */
-export const MAX_SPEED = 18;
+const MAX_SPEED = 18;
 
-/**
- * Auto-scroll speed for a pointer at `y` over a box from `top` to `bottom`:
- * 0 outside the edge zones, growing (quadratically) to `max` at the edge or
- * beyond it; negative scrolls up. Small boxes shrink the zones so they never
- * overlap.
- */
-export function autoScrollSpeed(y: number, top: number, bottom: number, edge = EDGE, max = MAX_SPEED): number {
+/** Auto-scroll speed at `y` (negative = up): 0 outside the edge zones, growing quadratically to `max` at the edge. */
+function autoScrollSpeed(y: number, top: number, bottom: number, edge = EDGE, max = MAX_SPEED): number {
   const zone = Math.max(8, Math.min(edge, (bottom - top) / 3));
   const ramp = (d: number): number => {
     const t = Math.min(1, Math.max(0, 1 - d / zone));
@@ -126,18 +111,14 @@ export function showsDepthBadge(depth: number, cap = INDENT_CAP): boolean {
   return depth > cap;
 }
 
-// ---------------------------------------------------------------------------
-// One gesture
-// ---------------------------------------------------------------------------
-
 /** Mouse and pen: the drag starts after the pointer moves this far (px). */
 const MOVE_SLOP = 5;
 /** Touch: hold this long without moving to pick the item up (ms). */
-export const HOLD_MS = 380;
+const HOLD_MS = 380;
 /** Touch: moving farther than this before the hold ends means a scroll (px). */
 const TOUCH_SLOP = 8;
 /** Hold a dragged item over a closed folder this long to open it (ms). */
-export const OPEN_MS = 600;
+const OPEN_MS = 600;
 
 export interface DragSpec {
   payload: DragPayload;
@@ -164,7 +145,7 @@ const I_STACK =
   '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2h-2"/><path d="M5 7h7l4 4v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>';
 
 /** The gesture in progress, if any (only one at a time). */
-let live: { cancel: () => void; dragging: boolean } | null = null;
+let live: { dragging: boolean } | null = null;
 
 /** Whether a drag is being carried right now. */
 export function dragging(): boolean {
@@ -195,7 +176,7 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
   const begin = (): void => {
     s = spec();
     if (!s) {
-      finish(true);
+      finish();
       return;
     }
     started = true;
@@ -236,7 +217,6 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     document.querySelectorAll('.vx-pins.vx-drop-zone').forEach((n) => n.classList.remove('vx-drop-zone'));
   };
 
-  /** Work out the place under the pointer and show it. */
   const track = (): void => {
     if (!s || !ghost) return;
     cur = s.targetAt(x, y);
@@ -260,7 +240,6 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     const hint = ghost.querySelector<HTMLElement>('.vx-pghost-hint')!;
     const text = verdict ? verdict.hint : 'Drop on a folder';
     if (hint.textContent !== text) hint.textContent = text;
-    // Held over a closed folder: it opens after a moment.
     const want = cur ? s.canOpen(cur.target) : null;
     if (want !== openPath) {
       clearTimeout(openTimer);
@@ -307,7 +286,7 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     if (!started) {
       if (touch) {
         // Moving before the hold ends: the finger is scrolling, not dragging.
-        if (far > TOUCH_SLOP) finish(true);
+        if (far > TOUCH_SLOP) finish();
       } else if (far > MOVE_SLOP) begin();
       return;
     }
@@ -322,13 +301,13 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     x = ev.clientX;
     y = ev.clientY;
     if (!started) {
-      finish(true);
+      finish();
       return;
     }
     if (touch && !moved && s?.held) {
       // Held and let go in place: the long-press menu, not a drop.
       const sx = s;
-      finish(true);
+      finish();
       swallowClick();
       sx.held!(x, y);
       return;
@@ -337,20 +316,20 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     const t = cur;
     const v = verdict;
     const sx = s;
-    finish(true);
+    finish();
     swallowClick();
     if (sx && t && v?.ok) sx.drop(t.target, v);
   };
 
   const onCancel = (ev: PointerEvent): void => {
-    if (ev.pointerId === e.pointerId) finish(true);
+    if (ev.pointerId === e.pointerId) finish();
   };
 
   const onKey = (ev: KeyboardEvent): void => {
     if (ev.key !== 'Escape') return;
     ev.preventDefault();
     ev.stopPropagation();
-    finish(true);
+    finish();
   };
 
   // While held or dragging, the page must not scroll under the finger, and
@@ -365,9 +344,9 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     }
   };
 
-  const state = { dragging: false, cancel: () => finish(true) };
+  const state = { dragging: false };
 
-  const finish = (_cancel: boolean): void => {
+  const finish = (): void => {
     clearTimeout(holdTimer);
     holdTimer = 0;
     clearTimeout(openTimer);
@@ -422,11 +401,7 @@ function swallowClick(): void {
   setTimeout(() => window.removeEventListener('click', stop, true), 60);
 }
 
-/**
- * The box that scrolls `node` vertically: the nearest ancestor (or `node`
- * itself) with overflow auto/scroll whose content overflows, else the nearest
- * one that could scroll.
- */
+/** The nearest scroll box of `node` (or `node` itself) that overflows, else the nearest that could scroll. */
 export function scrollParent(node: HTMLElement | null, self = false): HTMLElement | null {
   let first: HTMLElement | null = null;
   for (let n = self ? node : node?.parentElement || null; n; n = n.parentElement) {

@@ -1,6 +1,4 @@
-// Value formatting helpers. All user facing output is English (en-US).
-
-import { SWATCH_COLORS as FOLDER_FALLBACK } from './icons';
+import { SWATCH_COLORS as FOLDER_FALLBACK } from './icons.ts';
 
 export function fmtTs(ts?: number | null): string {
   if (!ts) return '-';
@@ -16,11 +14,12 @@ export function fmtTs(ts?: number | null): string {
 export function relTs(ts?: number | null): string {
   if (!ts) return '-';
   const s = Date.now() / 1000 - Number(ts);
+  const n = (v: number, unit: string): string => `${v} ${unit}${v === 1 ? '' : 's'} ago`;
   if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + ' min ago';
-  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
-  if (s < 2592000) return Math.floor(s / 86400) + ' d ago';
-  return fmtTs(ts);
+  if (s < 3600) return n(Math.floor(s / 60), 'minute');
+  if (s < 86400) return n(Math.floor(s / 3600), 'hour');
+  if (s < 2592000) return n(Math.floor(s / 86400), 'day');
+  return new Date(Number(ts) * 1000).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function dayLabel(ts?: number | null): string {
@@ -37,7 +36,6 @@ export function trunc(value: unknown, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '...' : s;
 }
 
-/** Top level folder of a note path, or Root for an unfiled note. */
 export function folderOf(p?: string | null): string {
   const parts = String(p || '').split('/');
   return parts.length > 1 ? parts[0] : 'Root';
@@ -48,6 +46,10 @@ export function noteName(p?: string | null): string {
     .split('/')
     .pop()!
     .replace(/\.md$/, '');
+}
+
+export function stemTitle(stem: string): string {
+  return stem.replace(/_/g, ' ').trim() || stem;
 }
 
 export function hashColor(s?: string | null): string {

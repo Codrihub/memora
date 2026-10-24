@@ -1,19 +1,11 @@
-// Login page theme: the pre-paint theme script and the page stylesheet.
-//
-// The theme is a per-device preference chosen in the app (Settings) and kept
-// in localStorage under `memora.theme`: "dark" | "light" | "system".
-// Missing or invalid means "dark". The login page only applies it; it has no
-// switch of its own. `?theme=light|dark` overrides it for one load (testing).
+// Login page theme: applies the app's stored theme (`?theme=` overrides it for one load) and the page stylesheet.
 
 import { PRIMARY_DARK, PRIMARY_LIGHT } from './ui/primary.ts';
 
 const THEME_KEY = 'memora.theme';
 
-/**
- * Inline script for the top of <head>: sets <html data-theme> before the first
- * paint so the page never flashes the wrong palette. Kept tiny and ES5-safe.
- */
-export const THEME_BOOT = `(function(){var d=document.documentElement,p='dark',q=null;
+/** ES5 inline script for the top of <head>: sets data-theme before first paint to avoid a flash. */
+export const THEME_BOOT = `(function(){var d=document.documentElement,p='system',q=null;
 try{q=new URLSearchParams(location.search).get('theme')}catch(e){}
 try{var v=localStorage.getItem('${THEME_KEY}');if(v==='dark'||v==='light'||v==='system')p=v}catch(e){}
 if(q==='dark'||q==='light'||q==='system')p=q;
@@ -62,7 +54,7 @@ export const LOGIN_CSS = `
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{min-height:100%}
 body{
-  font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-family:'Geist',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   background-color:var(--bg); color:var(--fg);
   background-image:
     radial-gradient(circle at 12% 14%, var(--bg-glow) 0%, transparent 42%),
@@ -77,11 +69,10 @@ a:hover{text-decoration:underline}
 code{font-family:${MONO}}
 [hidden]{display:none!important}
 
-/* ---------- card ---------- */
 .card{
   width:100%; max-width:408px; position:relative; overflow:hidden;
-  background:var(--panel); border:1px solid var(--line); border-radius:16px;
-  box-shadow:var(--shadow); padding:30px 30px 22px;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px;
+  box-shadow:none; padding:30px 30px 22px;
 }
 .card::before,.card::after{content:'';position:absolute;top:0;height:2px;pointer-events:none}
 .card::before{left:0;right:0;background:linear-gradient(90deg,transparent,var(--track) 20%,var(--track) 80%,transparent)}
@@ -93,7 +84,6 @@ code{font-family:${MONO}}
 }
 @keyframes sweep{0%{transform:translateX(-110%)}62%{transform:translateX(245%)}100%{transform:translateX(245%)}}
 
-/* ---------- brand ---------- */
 .brand{display:flex;align-items:center;gap:11px;margin-bottom:22px;animation:vin .22s ease-out both}
 .card.splashing .brand{display:none}
 .brand-mark{width:32px;height:32px;flex:none}
@@ -101,7 +91,6 @@ code{font-family:${MONO}}
 .brand-txt b{font-size:16.5px;font-weight:800;letter-spacing:-.2px}
 .brand-txt small{font-size:9.5px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);margin-top:3px}
 
-/* ---------- views ---------- */
 .view{animation:vin .22s ease-out both}
 .view.leaving{animation:vout .15s ease-in both}
 @keyframes vin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -117,7 +106,6 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .links a{color:var(--muted)}
 .links a:hover{color:var(--fg)}
 
-/* ---------- splash ---------- */
 .splash{display:flex;flex-direction:column;align-items:center;text-align:center;padding:6px 0 4px}
 .splash .brand-mark{width:52px;height:52px;margin-bottom:14px;animation:breathe 2.4s ease-in-out infinite}
 @keyframes breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.04);opacity:.86}}
@@ -136,14 +124,13 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .checks .cv{margin-left:auto;font-size:11.5px;color:var(--muted)}
 .splash .btn{max-width:260px;margin-top:18px}
 
-/* ---------- fields ---------- */
 .field{margin-bottom:16px}
-.field label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px}
 .inp{position:relative;display:flex;align-items:center}
 .inp>svg{position:absolute;left:13px;width:15px;height:15px;color:var(--muted);pointer-events:none}
 .inp input{
   width:100%; height:46px; padding:0 44px 0 39px;
-  background:var(--input-bg); border:1px solid var(--line); border-radius:10px;
+  background:var(--input-bg); border:1px solid var(--line); border-radius:8px;
   color:var(--fg); font-size:14px; font-family:inherit; outline:none;
   transition:border-color .15s, background-color .15s, box-shadow .15s;
 }
@@ -163,9 +150,8 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .shake{animation:shake .32s ease}
 @keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
 
-/* ---------- button ---------- */
 .btn{
-  width:100%; height:44px; margin-top:6px; border:none; border-radius:10px;
+  width:100%; height:44px; margin-top:6px; border:none; border-radius:8px;
   background:var(--primary); color:var(--on-primary); font-size:14px; font-weight:700; font-family:inherit;
   display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
   transition:background-color .15s, transform .06s, opacity .15s;
@@ -182,18 +168,22 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .loading .spinner{display:block}
 .loading .btn-ico{display:none}
 
-/* ---------- alert ---------- */
 .alert{
   display:none; align-items:flex-start; gap:9px; margin-bottom:16px;
-  padding:10px 12px; border-radius:9px; font-size:12.5px; line-height:1.5;
+  padding:10px 12px; border-radius:8px; font-size:12.5px; line-height:1.5;
   background:var(--danger-soft); border:1px solid var(--danger-line); color:var(--danger-fg);
 }
 .alert.show{display:flex;animation:vin .18s ease-out both}
 .alert.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok-fg)}
 .alert.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn-fg)}
 .alert svg{width:15px;height:15px;flex:none;margin-top:1px}
+.alert>span{flex:1;min-width:0}
+.alert-x{flex:none;display:grid;place-items:center;width:22px;height:22px;margin:-2px -4px -2px 0;border:none;border-radius:6px;background:none;color:inherit;opacity:.75;cursor:pointer}
+.alert-x:hover{opacity:1;background:var(--chip-hover)}
+.alert-x:focus-visible{outline:2px solid currentColor;outline-offset:1px}
+.alert-x svg{width:13px;height:13px;margin:0}
+h1:focus{outline:none}
 
-/* ---------- strength + rules ---------- */
 .strength{height:3px;border-radius:3px;background:var(--line);margin-top:8px;overflow:hidden;display:none}
 .strength.show{display:block}
 .strength i{display:block;height:100%;width:0;background:var(--danger);transition:width .2s,background-color .2s}
@@ -201,11 +191,12 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .rules:empty{display:none}
 .rules.ok{color:var(--ok)}
 .rules.bad{color:var(--danger)}
+.caps{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--warn-fg);margin-top:7px;line-height:1.4}
+.caps svg{width:13px;height:13px;flex:none}
 
-/* ---------- window countdown banner ---------- */
 .win{
   display:flex; align-items:center; gap:10px; margin-bottom:18px; padding:10px 12px;
-  border-radius:10px; background:var(--ok-soft); border:1px solid var(--ok-line);
+  border-radius:8px; background:var(--ok-soft); border:1px solid var(--ok-line);
   font-size:12px; color:var(--ok-fg); position:relative; overflow:hidden;
 }
 .win svg{width:15px;height:15px;flex:none}
@@ -215,15 +206,15 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .win.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn-fg)}
 .win.expired{background:var(--panel-2);border-color:var(--line);color:var(--muted)}
 
-/* ---------- CLI command block ---------- */
-.clicmd{margin:2px 0 4px;padding:12px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}
-.clilabel{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.clicmd{margin:2px 0 4px;padding:12px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line)}
+.clilabel{font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:8px}
 .clirow{display:flex;align-items:stretch;gap:8px;min-width:0}
 .clirow code{
   flex:1; min-width:0; display:block; font-size:13px; color:var(--code-fg); background:var(--code-bg);
   border:1px solid var(--line); border-radius:8px; padding:9px 11px; line-height:1.4;
-  overflow-x:auto; white-space:nowrap; user-select:all; scrollbar-width:thin;
+  white-space:normal; overflow-x:auto; user-select:all; scrollbar-width:thin; text-align:left;
 }
+.clirow code .w{white-space:nowrap}
 .clirow code::before{content:'$ ';color:var(--faint);user-select:none}
 .clibtn{
   flex:none; font-size:12px; font-weight:600; padding:0 12px; font-family:inherit; border-radius:8px;
@@ -234,16 +225,15 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .clibtn:hover{background:var(--chip-hover)}
 .clibtn.done{color:var(--ok)}
 
-/* ---------- status icon panels ---------- */
 .ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px;
   background:var(--danger-soft);border:1px solid var(--danger-line);color:var(--danger-fg)}
 .ico svg{width:22px;height:22px}
 .ico.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn-fg)}
 .ico.calm{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
-.waiting{display:flex;align-items:center;gap:9px;margin-top:14px;padding:10px 12px;border-radius:10px;
+.waiting{display:flex;align-items:center;gap:8px;margin-top:16px;padding:10px 12px;border-radius:8px;
   background:var(--panel-2);border:1px solid var(--line);font-size:12px;color:var(--muted);line-height:1.45}
 .waiting .spin{width:13px;height:13px;border:2px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;flex:none}
-.checklist{list-style:none;margin:0 0 16px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.checklist{list-style:none;margin:0 0 16px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .checklist li{display:flex;align-items:center;gap:10px;padding:10px 12px;font-size:12.5px;background:var(--panel-2)}
 .checklist li+li{border-top:1px solid var(--line)}
 .checklist li svg{width:15px;height:15px;flex:none;color:var(--muted)}
@@ -255,9 +245,7 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .checklist.about li svg{margin-top:2px;color:var(--accent)}
 .checklist.about li b{display:block;color:var(--fg);font-weight:650}
 .steps-h{font-size:12px;font-weight:650;color:var(--fg);margin:0 0 8px}
-.about-name{font-size:11.5px;color:var(--muted);line-height:1.5;margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line);font-style:italic}
 
-/* ---------- welcome (no owner yet): two columns on wide screens ---------- */
 .su-list{list-style:none;display:flex;flex-direction:column;gap:14px;margin:0}
 .su-list>li{display:flex;gap:11px;align-items:flex-start;min-width:0}
 .su-n{flex:none;display:grid;place-items:center;width:22px;height:22px;margin-top:1px;border-radius:50%;font-size:11.5px;font-weight:700;
@@ -269,7 +257,6 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
 .su-steps .steps-h{margin-bottom:12px}
 .su-intro .checklist{margin-bottom:0}
 .su-steps{margin-top:18px}
-.su-b .clirow code{white-space:normal;overflow-wrap:anywhere;overflow-x:visible}
 @media (min-width:640px) and (max-width:879px){.card.wide{max-width:600px}}
 @media (min-width:880px){
   .card.wide{max-width:880px;padding:34px 36px 24px}
@@ -278,19 +265,58 @@ h1{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px;line-he
   .card.wide .su-intro .sub{margin-bottom:16px}
 }
 
-/* ---------- cooldown ---------- */
 .timer{font-family:${MONO};font-size:34px;font-weight:700;letter-spacing:.04em;font-variant-numeric:tabular-nums;margin:2px 0 12px;color:var(--fg)}
 .tbar{height:4px;border-radius:4px;background:var(--line);overflow:hidden;margin-bottom:14px}
 .tbar i{display:block;height:100%;width:100%;background:var(--accent);transition:width 1s linear}
 
-/* ---------- footer ---------- */
 .foot{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--muted)}
 .foot span{display:flex;align-items:center;gap:6px;min-width:0}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none;transition:background-color .2s,box-shadow .2s}
-.dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}
-.dot.off{background:var(--danger);box-shadow:0 0 6px var(--danger)}
+.dot.on{background:var(--ok);box-shadow:none}
+.dot.off{background:var(--danger);box-shadow:none}
 .foot .tag{letter-spacing:.02em;opacity:.85;white-space:nowrap}
 
+body{display:block;padding:0;background-image:none}
+.lx-side{order:2}
+.lx{width:100%;min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.lx-side{position:relative;overflow:hidden;margin:12px;border-radius:22px;padding:36px 40px;display:flex;flex-direction:column;justify-content:space-between;
+  background:linear-gradient(165deg,#17202e 0%,#0b0f17 62%);color:#e6e9ef;isolation:isolate}
+.lx-side::before{content:"";position:absolute;inset:-20%;z-index:-1;background:radial-gradient(closest-side at 70% 38%,rgba(94,234,212,.16),transparent 70%),
+  radial-gradient(closest-side at 22% 82%,rgba(34,211,238,.10),transparent 70%)}
+.lx-net{position:absolute;inset:0;width:100%;height:100%;z-index:-1}
+.lx-net .l line{stroke:rgba(94,234,212,.16);stroke-width:1}
+.lx-net .d circle{fill:#5eead4;stroke:none;opacity:.55}
+.lx-net .d circle:nth-child(5n+1){fill:#22d3ee;opacity:.9}
+.lx-top{display:flex;align-items:center;gap:14px}
+.lx-top .brand-mark{width:44px;height:44px}
+.lx-copy h2{font-size:clamp(28px,3.2vw,40px);font-weight:600;letter-spacing:-.025em;line-height:1.12;max-width:440px}
+.lx-copy p{margin-top:14px;max-width:400px;font-size:15px;line-height:1.6;color:#a3afc2}
+.lx-foot{font-size:12px;color:#6b7a91}
+.lx-main{display:grid;place-items:center;padding:40px 32px}
+.card{max-width:400px;background:transparent;border:0;border-radius:0;padding:0}
+.card::before,.card::after{display:none}
+.card .brand{display:none}
+h1{font-size:26px;font-weight:650;letter-spacing:-.02em;margin-bottom:8px}
+.eyebrow{color:var(--muted);font-weight:500}
+.sub{font-size:14px;margin-bottom:24px}
+.field label{font-size:13px;font-weight:500;color:var(--fg)}
+.inp input{height:46px;border-radius:10px;font-size:14.5px}
+.btn{height:46px;border-radius:10px;font-weight:600;margin-top:10px}
+.btn.ghost{border-radius:10px}
+.foot{margin-top:28px;border-top:1px solid var(--line);font-size:11.5px}
+.lx:has(.card.wide){grid-template-columns:minmax(0,1fr)}
+.lx:has(.card.wide) .lx-side{display:none}
+.card.wide .brand{display:flex}
+@media (max-width:900px){
+  .lx{grid-template-columns:minmax(0,1fr)}
+  .lx-side{display:none}
+  .lx-main{place-items:start center;padding:12vh 16px 24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 24px 20px}
+  .card .brand{display:flex}
+  .card.splashing .brand{display:none}
+  h1{font-size:22px}
+}
+@media (max-width:420px){.lx-main{padding:16px 12px}}
 @media (max-width:420px){
   body{padding:14px 12px;place-items:start center}
   .card{padding:24px 20px 18px;border-radius:14px;margin-top:max(0px,calc(50vh - 330px))}

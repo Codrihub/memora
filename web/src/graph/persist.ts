@@ -1,6 +1,4 @@
-// Pinned positions through the layout API (`/api/ui/layout/graph`), with a
-// localStorage fallback (`memora.layout.graph`) while the endpoint is missing
-// or unreachable. View preferences stay per browser.
+// Pins go to the layout API with a localStorage fallback; view prefs stay per browser.
 
 import { api } from '../api';
 import type { LayoutMode } from './model';
@@ -10,13 +8,12 @@ export interface GraphLayout {
   pins: Record<string, [number, number]>;
 }
 
-export interface GraphPrefs {
+interface GraphPrefs {
   mode: LayoutMode;
-  /** Label density (how small a node may be and still get a name). */
+  /** Label density: how small a node may be and still get a name. */
   labels: number;
   /** Spacing of the force layout (kept for older prefs). */
   spacing: number;
-  /** Spacing per layout: each has its own feel. */
   spacingBy: Record<LayoutMode, number>;
   noteLabels: boolean;
   folderLabels: boolean;
@@ -83,7 +80,7 @@ export function loadPrefs(): GraphPrefs {
   return parsePrefs(lsGet<Partial<GraphPrefs>>(LS_PREFS) || {});
 }
 
-/** The defaults, without touching storage (to compare against). */
+/** The defaults, without touching storage. */
 export function factoryPrefs(): GraphPrefs {
   return parsePrefs({});
 }
@@ -111,7 +108,6 @@ function num(v: unknown, dflt: number): number {
   return typeof v === 'number' && isFinite(v) ? v : dflt;
 }
 
-/** Fresh defaults (the Filter panel's reset). */
 export function defaultPrefs(): GraphPrefs {
   try {
     localStorage.removeItem(LS_PREFS);

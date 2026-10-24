@@ -1,8 +1,4 @@
-// Memora web UI entry point. Wires the shell, registers the view renderers and
-// boots the app. The bundle is loaded as a plain script from index.html.
-
-// Must stay the first import: snapshots the hooks.ts defaults before any other
-// package can install its own (see ui/hook-snapshot.ts).
+// Must stay the first import: snapshots the hooks.ts defaults before any package installs its own.
 import { DEFAULT_REFRESH_TREE, DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import './global.css';
 import { updateInfo, type UpdateInfo } from './version';
@@ -18,11 +14,13 @@ import {
 import { closeProfileMenu, openAccount, openGuide, openProfileMenu, paintAccountChip, signOut } from './account';
 import { $, useStyles } from './dom';
 import { BRAND_FONT, BRAND_FONT_CSS } from './brand-font';
+import { UI_FONT_CSS, UI_MONO_CSS } from './ui-font';
 import { loadCore } from './core-data';
 import { hooks } from './hooks';
 import { PWA } from './pwa';
 import { RT, onAgents } from './realtime';
 import {
+  PAGE_META,
   PAGES,
   findNode,
   go,
@@ -41,14 +39,14 @@ import { closePalette, openPalette, registerCommands, wireSearch } from './searc
 import { state } from './state';
 import { clearPeek, openPeek } from './peek';
 import { initLightbox } from './ui/lightbox';
-import { initVault, mountTree, openNote, renderVault } from './vault/index';
+import { initVault, mountTree, openNote, renderTrash, renderVault } from './vault/index';
 import { renderHome } from './views/home';
 import { renderGraph } from './views/graph';
 import { renderTags } from './views/tags';
 import { renderLogs } from './views/logs';
 import { connectOnLoad, renderKeys } from './views/keys';
 import { renderTools } from './views/tools';
-import { brainView, renderBrain } from './views/brain';
+import { renderBrain } from './views/brain';
 import { renderCanvas } from './views/canvas';
 import { renderAccess } from './views/access';
 import { renderSettings } from './views/settings';
@@ -57,13 +55,15 @@ import { applyTheme, cycleTheme, setThemePref } from './theme';
 import { fetchSettings, reloadVaultData, vaultSwitch } from './vault';
 import { showVaultOnboarding } from './views/onboarding';
 import { maybeWelcome, openWelcome } from './views/welcome';
+import { maybeWhatsNew } from './ui/whats-new';
 import { initPullRefresh } from './ui/pull-refresh';
 import { initToTop } from './ui/totop';
+import { initMapEnter } from './ui/map-enter';
 import { closeNotFound, isNotFoundOpen, showNotFound } from './ui/notfound';
 import { initToasts, notify, toast } from './toast';
 import { markUpdateNoticeSeen, updateNoticeSeen } from './storage';
 import { installStyles } from './ui';
-import { greetSplash, playSplash } from './brain/splash';
+import type { BootSplash } from './boot-splash';
 import type { Page } from './state';
 import type { SettingsInfo } from './types';
 
@@ -101,15 +101,12 @@ function wireShell(): void {
   initSidebar({ openSearch: () => openPalette(), openProfile: (a) => openProfileMenu(a) });
   wireSearch();
 
-  // Touch screens: pull down to reload the data of the page in view.
   initPullRefresh(reloadAll);
-  // One floating "back to top" button for every page.
   initToTop();
   $('#pwaBtn').onclick = () => void PWA.install();
   $('#pmScrim').onclick = () => closeProfileMenu(false);
   window.matchMedia('(max-width: 760px)').addEventListener('change', () => closeProfileMenu(false));
 
-  // Note preview panel.
   $('#peekClose').onclick = () => clearPeek();
   $('#peekOpen').onclick = () => {
     const p = state.peekPath;
@@ -120,20 +117,19 @@ function wireShell(): void {
     if (state.peekPath) void openPeek(state.peekPath);
   };
 
-  // Live agent count on the nav and the tab bar.
   onAgents((n) => setLiveAgents(n));
 
   registerCommands([
-    { id: 'new-note', title: 'New node', hint: 'Write a new node', icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
+    { id: 'new-note', title: 'New note', hint: 'Write a new note', icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
     { id: 'open-brain', title: 'Open brain', hint: 'Your memory as a living brain', icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
     { id: 'new-folder', title: 'New folder', hint: 'Create a folder', icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
     { id: 'activity', title: 'Show live activity', hint: 'What agents are doing now', icon: 'activity', keywords: 'logs agents feed', run: () => go('logs') },
-    { id: 'new-key', title: 'Connect an agent', hint: 'Create an API key on Agents & API keys', icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
+    { id: 'new-key', title: 'Connect an agent', hint: 'Set up an AI app so it can use your notes', icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
     { id: 'theme', title: 'Switch theme', hint: 'Dark, light or system', icon: 'sun', keywords: 'dark light mode appearance', run: () => cycleTheme() },
     { id: 'theme-dark', title: 'Use dark theme', icon: 'moon', keywords: 'appearance mode', run: () => setThemePref('dark') },
     { id: 'theme-light', title: 'Use light theme', icon: 'sun', keywords: 'appearance mode', run: () => setThemePref('light') },
     { id: 'sidebar', title: 'Toggle sidebar', hint: 'Slim icon rail or full sidebar', icon: 'sidebar', kbd: '[', keywords: 'collapse expand minimize', run: () => (isMobile() ? undefined : toggleCollapsed()) },
-    { id: 'reload', title: 'Reload data', hint: 'Re-read the vault from the server', icon: 'refresh', keywords: 'refresh sync', run: () => void reloadAll() },
+    { id: 'reload', title: 'Reload data', hint: 'Load your notes again', icon: 'refresh', keywords: 'refresh sync', run: () => void reloadAll() },
     { id: 'install', title: 'Install app', hint: 'Add Memora to your device', icon: 'download', keywords: 'pwa home screen', run: () => void PWA.install() },
     { id: 'guide', title: 'Keyboard shortcuts and guide', icon: 'help', keywords: 'help keys', run: () => openGuide() },
     { id: 'docs', title: 'Open documentation', hint: 'Guides, agent instructions and reference', icon: 'book', keywords: 'docs help manual guide reference api mcp install', run: () => openDocs() },
@@ -141,11 +137,11 @@ function wireShell(): void {
     { id: 'docs-tools', title: 'MCP tool reference', hint: 'Every tool agents can call', icon: 'book', keywords: 'docs tools catalog mcp reference', run: () => openDocs('tool-reference') },
     { id: 'welcome', title: 'Welcome to Memora', icon: 'sparkle', keywords: 'about intro tour what is memora', run: () => openWelcome() },
     { id: 'account', title: 'Account', hint: 'Session and appearance', icon: 'user', keywords: 'profile session', run: () => void openAccount() },
-    { id: 'open-nodes', title: 'Open nodes', hint: 'Browse every node', icon: 'note', keywords: 'notes vault list', run: () => { state.note = null; go('vault'); } },
+    { id: 'open-nodes', title: 'Open notes', hint: 'Browse every note', icon: 'note', keywords: 'notes vault list', run: () => { state.note = null; go('vault'); } },
+    { id: 'open-trash', title: 'Open Trash', hint: 'Deleted notes, ready to restore', icon: 'trash', keywords: 'trash deleted restore bin recycle undo', run: () => hooks.openTrash() },
     { id: 'signout', title: 'Sign out', icon: 'logout', keywords: 'logout exit', run: () => void signOut() },
   ]);
 
-  // Keyboard shortcuts: Alt+1..9 pages, "[" sidebar rail.
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || isTyping(e.target)) return;
     if (!$('#modalHost').classList.contains('hidden')) return;
@@ -168,27 +164,20 @@ function wireShell(): void {
     }
   });
 
-  // Back / forward.
   window.addEventListener('popstate', () => {
-    // Before boot finishes, boot itself applies the current URL.
     if (!booted) return;
-    // The Vault package's mobile node sheet pushes its own entries.
-    if ((history.state as { vxSheet?: unknown } | null)?.vxSheet) return;
     closeProfileMenu(false);
     closePalette(false);
     applyRoute(parseLocation());
   });
-  // Any navigation (palette, shortcuts) leaves the not-found page.
   onNavigate(() => closeNotFound());
+  initMapEnter();
 }
 
-/** Show what a URL names. Node paths only select nodes in the loaded tree. */
 function applyRoute(r: Route): void {
   closeNotFound();
   const to = resolveRoute(r, location.pathname, findNode);
   if (to.kind === 'missing') {
-    // An address or node that leads nowhere: say so and stay (the URL keeps
-    // what was asked for) until the user goes back or to Overview.
     if (r.page === 'vault') state.note = null;
     // Back only when there is an earlier page of this app to return to.
     const canBack = booted || (!!document.referrer && document.referrer.startsWith(location.origin + '/'));
@@ -213,7 +202,6 @@ function applyRoute(r: Route): void {
   go(to.page);
 }
 
-/** Open the note behind any [data-path] row in `scope` on click, Enter or Space. */
 function wireNoteRows(scope: ParentNode): void {
   const rows = Array.from(scope.querySelectorAll<HTMLElement>('[data-path]'));
   for (const row of rows) {
@@ -233,50 +221,27 @@ function wireNoteRows(scope: ParentNode): void {
   }
 }
 
-/**
- * The one loading animation: the M mark morphs into the brain, which keeps
- * turning until `ready` resolves, then fades into the app. Capped so a stuck
- * request can never hold the screen forever.
- */
-async function runSplash(splash: HTMLElement | null, ready: Promise<unknown>, maxMs = 20000): Promise<void> {
-  if (!splash) return;
-  // The animation draws its own background. The static mark sits where the
-  // grains form, so it fades out while they fade in, then the static backdrop
-  // goes transparent so the final fade reveals the app, never the static mark.
-  document.getElementById('splashBar')?.classList.add('done');
-  const statics = Array.from(splash.children) as HTMLElement[];
-  for (const c of statics) c.style.transition = 'opacity .45s ease';
-  requestAnimationFrame(() => statics.forEach((c) => (c.style.opacity = '0')));
-  window.setTimeout(() => {
-    statics.forEach((c) => (c.style.visibility = 'hidden'));
-    splash.style.background = 'transparent';
-  }, 500);
-  // The live brain stays hidden while the splash grains fly onto it, and
-  // appears the moment they land, so the two read as one brain.
-  useStyles(
-    'brain-intro-css',
-    '#view-brain .brain-stage,#view-brain .brain-labels{transition:opacity .45s ease}' +
-      // Not 0: a fully transparent canvas is never composited, so its first real
-      // frame (a long stall on some GPUs) would land in the middle of the hand-off.
-      'html.brain-intro #view-brain .brain-stage,html.brain-intro #view-brain .brain-labels{opacity:.004}',
-  );
-  // Only a boot onto the 3D brain grows the M into a brain; any other page
-  // (Graph, Canvas, Nodes, Overview...) gets the M bursting apart instead.
-  const toBrain = parseLocation().page === 'brain';
-  const root = document.documentElement;
-  if (toBrain) root.classList.add('brain-intro');
-  const reveal = (): void => root.classList.remove('brain-intro');
-  const cap = new Promise<void>((r) => window.setTimeout(r, maxMs));
-  await Promise.race([
-    playSplash(splash, Promise.race([ready, cap]), toBrain ? brainView : undefined, reveal, toBrain).catch(() => undefined),
-    cap,
-  ]);
-  reveal();
+// A shell without the splash controller (an old cached page) just gets the splash removed.
+const splash: BootSplash = window.memoraBoot ?? {
+  step: () => undefined,
+  fail: () => undefined,
+  done: () => document.getElementById('splash')?.remove(),
+};
+
+function painted(): Promise<void> {
+  return new Promise((r) => {
+    // A hidden tab runs no frames; the timer keeps boot going there.
+    const t = window.setTimeout(r, 50);
+    requestAnimationFrame(() => {
+      window.clearTimeout(t);
+      window.setTimeout(r, 0);
+    });
+  });
 }
 
 async function boot(): Promise<void> {
   applyTheme();
-  // The wordmark font (sidebar, splash) before anything paints it.
+  useStyles('ui-font', UI_FONT_CSS + UI_MONO_CSS);
   useStyles(
     'brand-font',
     BRAND_FONT_CSS +
@@ -284,19 +249,10 @@ async function boot(): Promise<void> {
       '.brand-text{font-size:23px;line-height:1}',
   );
 
-  const splash = document.getElementById('splash');
   const shell = document.getElementById('appShell');
-  // Keep the shell hidden until the session is known, so an expired cookie can
-  // never render the dashboard and then bounce to sign-in.
+  // Hidden until the session is known, so an expired cookie never flashes the dashboard.
   if (shell) shell.classList.add('hidden');
 
-  const dropSplash = (): void => {
-    if (!splash || !splash.isConnected) return;
-    splash.classList.add('gone');
-    window.setTimeout(() => splash.remove(), 420);
-  };
-
-  // Register the view renderers. The router never imports a view module.
   registerView('brain', renderBrain);
   registerView('home', renderHome);
   registerView('vault', renderVault);
@@ -309,9 +265,9 @@ async function boot(): Promise<void> {
   registerView('access', renderAccess);
   registerView('settings', renderSettings);
   registerView('docs', renderDocs);
+  registerView('trash', renderTrash);
 
-  // Cross-module wiring through hooks keeps the import graph acyclic. The tree
-  // hooks are only filled when the Vault package has not installed its own.
+  // The tree hooks are only filled when the Vault package has not installed its own.
   hooks.openNote = (p: string) => void openNote(p);
   hooks.go = (page: Page) => go(page);
   hooks.loadCore = loadCore;
@@ -326,10 +282,7 @@ async function boot(): Promise<void> {
   hooks.openFolderColor = openFolderColor;
   hooks.confirmDeleteFolder = confirmDeleteFolder;
   hooks.refreshVault = () => wireNoteRows($('#view-vault'));
-  hooks.refreshHome = () => void renderHome();
-  hooks.refreshGraph = () => void renderGraph();
   hooks.vaultChanged = (vault: string) => {
-    // Another tab or browser switched the vault: drop everything from the old one.
     if (vaultSwitch.pending || (vault && vault === state.health.vault)) return;
     void reloadVaultData().then(() => {
       if (state.page !== 'settings') go('brain');
@@ -337,8 +290,6 @@ async function boot(): Promise<void> {
     });
   };
 
-  // The Vault package takes over the tree, note reader and write dialogs,
-  // and draws its tree (pins + folders) in the sidebar.
   initVault();
   mountSidebarTree((host) => mountTree(host, { showNotes: true, showPins: true }));
   for (const k of ['openNewNote', 'openNewFolder'] as const) {
@@ -352,46 +303,32 @@ async function boot(): Promise<void> {
 
   wireShell();
 
-  // Start the animation right away; everything below loads behind it.
-  let markReady: () => void = () => {};
-  const ready = new Promise<void>((r) => (markReady = r));
-  const anim = runSplash(splash, ready);
-
-  // The session check and the first page's data go out together; the data is
-  // simply dropped when the session turns out to be gone.
+  // The session check and the first page's data go out together.
   const quiet = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
   const pMe = quiet(apiGet<{ user?: string; username?: string }>('/api/auth/me'));
   const pSettings = quiet(fetchSettings());
   const pGraph = quiet(apiGet<{ nodes?: unknown[]; links?: unknown[] }>('/api/graph'));
   const pCore = quiet(loadCore());
+  splash.step('Signing in…', 0.3);
 
   state.me = await pMe;
-  if (state.me) {
-    const name = state.me.user || state.me.username || '';
-    greetSplash(name ? `Welcome, ${name}` : 'Welcome back');
-  }
 
   if (!state.me) {
-    // No valid session. Hand off to sign-in rather than rendering a shell whose
-    // every request would fail with 401.
-    markReady();
+    splash.step('Opening sign-in…', 1);
     window.location.replace('/login?r=' + encodeURIComponent(location.pathname + location.search));
     return;
   }
 
-  // No vault folder yet: the vault chooser is the only thing on screen until
-  // one is picked; the app below then loads with it.
+  splash.step('Loading your notes…', 0.55);
   const info: SettingsInfo | null = await pSettings;
   if (info && info.vault_configured === false) {
-    markReady();
-    await anim;
-    dropSplash();
+    splash.done();
     await showVaultOnboarding(info, state.me.user || state.me.username || '');
   }
 
   paintAccountChip(state.me);
   const onboarded = !!info && info.vault_configured === false;
-  // A vault picked during onboarding: the early load saw no vault.
+  // The early load saw no vault when one was picked during onboarding.
   const g = onboarded ? await quiet(apiGet<{ nodes?: unknown[]; links?: unknown[] }>('/api/graph')) : await pGraph;
   if (g) {
     state.graph.nodes = (g.nodes || []) as typeof state.graph.nodes;
@@ -399,7 +336,6 @@ async function boot(): Promise<void> {
   }
   await pCore;
   if (onboarded) await loadCore();
-  // Under the name, next to the collapse button: the running version.
   const brandSub = $('#brandVault');
   const pUpdate = state.health.version ? updateInfo(state.health.version) : null;
   if (state.health.version) brandSub.textContent = 'v' + state.health.version;
@@ -410,24 +346,30 @@ async function boot(): Promise<void> {
     badge.title = 'v' + u.latest + ' is available';
   });
 
-  // Render the first page behind the animation, then let it fade into it.
+  const first = parseLocation();
+  splash.step(first.page === 'brain' ? 'Starting the brain…' : `Opening ${PAGE_META[first.page].label}…`, 0.85);
+  await painted();
   if (shell) shell.classList.remove('hidden');
-  applyRoute(parseLocation());
+  applyRoute(first);
   booted = true;
   if (!isNotFoundOpen()) paintTitle();
-  markReady();
-  await anim;
-  dropSplash();
-  void maybeWelcome();
+  splash.done();
+  void maybeWelcome().then(() => maybeWhatsNew());
   void pUpdate?.then(announceUpdate);
 
-  // Non blocking: realtime and PWA both degrade gracefully when absent.
   RT.start();
   PWA.init();
 }
 
+function start(): void {
+  boot().catch((e: unknown) => {
+    console.error('Memora could not start', e);
+    splash.fail('Memora could not start.', 'Reload to try again.');
+  });
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => void boot());
+  document.addEventListener('DOMContentLoaded', start);
 } else {
-  void boot();
+  start();
 }

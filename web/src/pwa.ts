@@ -1,5 +1,4 @@
-// Progressive web app bits: service worker registration and install prompt.
-
+import { buildOf, isNewBuild } from './build-version';
 import { $ } from './dom';
 import { Modal } from './modal';
 import { toast } from './toast';
@@ -14,7 +13,6 @@ export const PWA = {
           /* registration is best effort */
         });
       };
-      // init runs after boot, usually well after the load event has fired.
       if (document.readyState === 'complete') register();
       else window.addEventListener('load', register, { once: true });
     }
@@ -22,26 +20,20 @@ export const PWA = {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       this.prompt = e as Event & { prompt: () => void; userChoice: Promise<unknown> };
-      const b = $('#pwaBtn');
-      if (b.classList) b.classList.remove('hidden');
+      $('#pwaBtn').classList.remove('hidden');
     });
     window.addEventListener('appinstalled', () => {
       this.prompt = null;
-      const b = $('#pwaBtn');
-      if (b.classList) b.classList.add('hidden');
+      $('#pwaBtn').classList.add('hidden');
       toast('App installed', 'ok', 2600);
     });
     // iOS Safari has no beforeinstallprompt event, so show the manual button.
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = (window.navigator as Navigator & { standalone?: boolean }).standalone;
-    if (ios && !standalone) {
-      const b = $('#pwaBtn');
-      if (b.classList) b.classList.remove('hidden');
-    }
+    if (ios && !standalone) $('#pwaBtn').classList.remove('hidden');
   },
 
   async install(): Promise<void> {
-    const b = $('#pwaBtn');
     if (this.prompt) {
       this.prompt.prompt();
       try {
@@ -50,7 +42,7 @@ export const PWA = {
         /* the user dismissed the sheet */
       }
       this.prompt = null;
-      if (b.classList) b.classList.add('hidden');
+      $('#pwaBtn').classList.add('hidden');
       return;
     }
     Modal.open({
@@ -65,11 +57,14 @@ export const PWA = {
   },
 };
 
-/** The running app.js, by its ETag (the server's content hash). */
-async function appTag(): Promise<string> {
+function runningBuild(): string {
+  return document.querySelector<HTMLMetaElement>('meta[name="memora-build"]')?.content ?? '';
+}
+
+async function serverBuild(): Promise<string> {
   try {
-    const r = await fetch('/app.js', { method: 'HEAD', cache: 'no-store' });
-    return r.ok ? r.headers.get('etag') || '' : '';
+    const r = await fetch('/sw.js', { cache: 'no-store' });
+    return r.ok ? buildOf(await r.text()) : '';
   } catch {
     return '';
   }
@@ -77,7 +72,6 @@ async function appTag(): Promise<string> {
 
 let told = false;
 
-/** Load the new version now, unless a node is open in the editor. */
 function reloadWhenSafe(): void {
   if (document.querySelector('.note-editor')) {
     if (!told) toast('A new version of Memora is ready. Reload when you are done editing.', 'info', 8000);
@@ -87,36 +81,24 @@ function reloadWhenSafe(): void {
   location.reload();
 }
 
-/**
- * An installed app can stay open for days. When it comes back to the
- * foreground (and every 15 minutes while in view), check whether a new
- * version was deployed and load it when safe.
- */
+/** An installed app can stay open for days: on return to the foreground and every 15 minutes, load a new build when safe. */
 function watchForUpdates(): void {
-  let boot = '';
-  // The service worker announces a new version as soon as it takes over.
+  const running = runningBuild();
   navigator.serviceWorker?.addEventListener('message', (e) => {
-    const d = e.data as { type?: string } | null;
+    const d = e.data as { type?: string; version?: string } | null;
     if (d?.type !== 'NEW_VERSION') return;
     e.ports[0]?.postMessage('ok');
-    reloadWhenSafe();
+    // A shell from before build hashes has no meta: any announced build is newer.
+    if (running ? isNewBuild(running, d.version ?? '') : true) reloadWhenSafe();
   });
-  void appTag().then((t) => (boot = t));
   const check = async (): Promise<void> => {
-    if (document.hidden) return;
-    const now = await appTag();
-    // The first successful read is the running version (boot may have been offline).
-    if (!boot) {
-      boot = now;
-      return;
-    }
-    if (!now || now === boot) return;
+    if (document.hidden || !running) return;
+    if (!isNewBuild(running, await serverBuild())) return;
     void navigator.serviceWorker?.getRegistration().then((r) => r?.update());
     reloadWhenSafe();
   };
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    void navigator.serviceWorker?.getRegistration().then((r) => r?.update());
     void check();
   });
   window.setInterval(() => void check(), 15 * 60 * 1000);

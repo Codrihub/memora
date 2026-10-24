@@ -2,19 +2,22 @@
 
 import { esc, useStyles } from '../dom';
 import { copyText } from '../control/ui';
-import { noteName } from '../format';
+import { noteName, stemTitle } from '../format';
+import { noteTitle } from '../state';
 import { Modal } from '../modal';
 import { I } from './icons';
 import { nav } from './nav';
 import {
   deleteFolder,
-  deleteNotes,
   moveNotes,
   moveFolderContents,
   relocateFolder,
   renameFolder,
+  reload,
   renameNote,
+  restoreTrashed,
   setFolderMeta,
+  trashNotes,
 } from './ops';
 import { createFolderPicker, pickFolderDialog } from './folder-picker';
 import {
@@ -26,21 +29,21 @@ import {
   isPinned,
   notesUnder,
   pickerFolders,
+  ROOT_LABEL,
   togglePin,
   unpin,
 } from './store';
-import { folderLookDialog, openMenu, promptName, undoToast } from './ui';
+import { folderLookDialog, openMenu, promptName, undoToast, type MenuItem } from './ui';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
 
 type Anchor = { x: number; y: number } | HTMLElement;
 
-
-/** Ask before taking something off Pinned (the node or folder itself stays). */
+/** Ask before taking something off Pinned (the note or folder itself stays). */
 export function confirmUnpin(item: { kind: 'note' | 'folder'; key: string }, done: () => void): void {
-  const name = item.kind === 'note' ? noteName(item.key) : baseName(item.key) || 'Vault';
+  const name = item.kind === 'note' ? noteTitle(item.key) : baseName(item.key) || ROOT_LABEL;
   Modal.confirm(
     'Unpin "' + name + '"?',
-    `It leaves the Pinned list only; the ${item.kind === 'note' ? 'node' : 'folder'} itself stays in the vault.`,
+    `It leaves the Pinned list only; the ${item.kind === 'note' ? 'note' : 'folder'} itself stays where it is.`,
     'Unpin',
     () => {
       Modal.close();
@@ -58,7 +61,7 @@ export function pinToggle(kind: 'note' | 'folder', key: string): void {
     return;
   }
   const now = togglePin({ kind, key });
-  undoToast(now ? `Pinned "${kind === 'note' ? noteName(key) : baseName(key)}"` : 'Unpinned', () => void togglePin({ kind, key }), 'info', 4000);
+  undoToast(now ? `Pinned "${kind === 'note' ? noteTitle(key) : baseName(key)}"` : 'Unpinned', () => void togglePin({ kind, key }), 'info', 4000);
 }
 
 /** Ask, then move a folder into another folder. */
@@ -68,11 +71,11 @@ export function confirmFolderMove(src: string, destParent: string): void {
   const n = notesUnder(src).length;
   Modal.open({
     title: 'Move folder',
-    body: `<p style="margin:0 0 6px">Move <b>${esc(src)}</b> with its ${n} node${n === 1 ? '' : 's'} into <b>${esc(
-      destParent || 'the vault root',
+    body: `<p style="margin:0 0 6px">Move <b>${esc(src)}</b> with its ${n} note${n === 1 ? '' : 's'} into <b>${esc(
+      destParent || ROOT_LABEL,
     )}</b>?</p><p class="panel-sub" style="margin:0">It becomes <span class="mono">${esc(
       dest,
-    )}</span>. Wikilinks keep working: they resolve by node name.</p>`,
+    )}</span>. Links to its notes keep working.</p>`,
     actions: [
       { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
       {
@@ -88,14 +91,14 @@ export function confirmFolderMove(src: string, destParent: string): void {
 }
 
 export function askMoveNotes(paths: string[]): void {
-  // "current" only when every node lives in the same folder.
+  // "current" only when every note lives in the same folder.
   const dirs = new Set(paths.map(dirOf));
   const cur = dirs.size === 1 ? [...dirs][0] : null;
   pickFolderDialog({
-    title: paths.length === 1 ? `Move "${noteName(paths[0])}" to` : `Move ${paths.length} nodes to`,
+    title: paths.length === 1 ? `Move "${noteTitle(paths[0])}" to` : `Move ${paths.length} notes to`,
     folders: pickerFolders(),
     current: cur,
-    disabled: (f) => (f === cur ? (paths.length === 1 ? 'The node is already here' : 'The nodes are already here') : false),
+    disabled: (f) => (f === cur ? (paths.length === 1 ? 'The note is already here' : 'The notes are already here') : false),
     run: (f) => void moveNotes(paths, f),
   });
 }
@@ -114,33 +117,23 @@ export function askMoveFolder(path: string): void {
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-/**
- * Delete nodes. The web app's delete (POST /api/delete) removes the file: there
- * is no trash behind it, only the vault's git history when that is turned on.
- */
-export function confirmDeleteNotes(paths: string[], after?: () => void): void {
-  const one = paths.length === 1;
-  const what = one ? `"${noteName(paths[0])}"` : plural(paths.length, 'node');
-  Modal.open({
-    title: one ? `Delete node ${what}?` : `Delete ${what}?`,
-    body: `<p style="margin:0 0 8px">${esc(one ? what : `These ${what}`)} ${
-      one ? 'is' : 'are'
-    } deleted from the vault for good. Single nodes do not go to a trash, so this cannot be undone here.</p><p class="panel-sub" style="margin:0">If version history (git) is on for this vault, an agent can still bring ${
-      one ? 'it' : 'them'
-    } back with the <span class="mono">restore_memory</span> tool. Links to ${one ? 'it' : 'them'} stay in other nodes and show as missing.</p>`,
-    actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      {
-        label: one ? 'Delete node' : `Delete ${what}`,
-        cls: 'danger',
-        run: async () => {
-          Modal.close();
-          const ok = await deleteNotes(paths);
-          undoToast(`Deleted ${plural(ok, 'node')}`, null, 'info');
-          after?.();
-        },
-      },
-    ],
+/** Move notes to the Trash with Undo in the toast; `after` runs once they are gone, `reopen` reopens a single note on Undo. */
+export async function deleteNotesToTrash(paths: string[], after?: () => void, reopen = false): Promise<void> {
+  const done = await trashNotes(paths);
+  if (!done.length) return;
+  after?.();
+  const what = done.length === 1 ? `"${noteTitle(done[0].path)}"` : plural(done.length, 'note');
+  undoToast(`Moved ${what} to the Trash`, async () => {
+    const back: string[] = [];
+    for (const t of done.slice().reverse()) {
+      try {
+        back.push(await restoreTrashed(t.name));
+      } catch (e) {
+        undoToast(`Could not restore "${noteTitle(t.path)}": ${(e as Error).message}`, null, 'err');
+      }
+    }
+    await reload();
+    if (reopen && back.length === 1 && back[0]) nav.openNote(back[0]);
   });
 }
 
@@ -166,10 +159,7 @@ const FD_CSS = `
 @media (max-width:640px){.fd-dest{margin-left:0}}
 `;
 
-/**
- * Delete a folder in up to two steps: confirm, then (when nodes are inside)
- * choose to move them elsewhere or send them to the trash.
- */
+/** Delete a folder: confirm, then (when notes are inside) move them elsewhere or to the Trash. */
 export function confirmDeleteFolder(path: string): void {
   useStyles('fd-css', FD_CSS);
   const n = notesUnder(path).length;
@@ -180,11 +170,11 @@ export function confirmDeleteFolder(path: string): void {
     body: n
       ? `<p class="fd-p">The folder <b>${esc(path)}</b>${
           subs ? ` and its ${plural(subs, 'subfolder')}` : ''
-        } will be removed from the vault.</p><p class="fd-p">It holds ${plural(
+        } will be removed.</p><p class="fd-p">It holds ${plural(
           n,
-          'node',
-        )}. Next you choose what happens to them: move them to another folder, or delete them. Nothing is changed yet.</p>`
-      : `<p class="fd-p">The folder <b>${esc(path)}</b> has no nodes. It is removed from the vault${
+          'note',
+        )}. Next you choose what happens to them: move them to another folder, or move them to the Trash. Nothing is changed yet.</p>`
+      : `<p class="fd-p">The folder <b>${esc(path)}</b> has no notes. It is removed${
           subs ? `, with its ${plural(subs, 'empty subfolder')}` : ''
         }.</p><p class="panel-sub fd-p">Other files in it (such as images) are deleted too. This cannot be undone.</p>`,
     actions: [
@@ -207,7 +197,7 @@ export function confirmDeleteFolder(path: string): void {
 
 function folderDeleteStep2(path: string, n: number, subs: number): void {
   const name = baseName(path);
-  const nodes = plural(n, 'node');
+  const nodes = plural(n, 'note');
   const direct = notesUnder(path).filter((x) => dirOf(x.path) === path).length;
   const holds = !subs
     ? `This folder has ${nodes}.`
@@ -221,23 +211,23 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
     folders: pickerFolders(),
     value: dirOf(path),
     exclude: [path],
-    label: 'Move the nodes to',
+    label: 'Move the notes to',
     onChange: () => {
       if (go && mode === 'move') go.disabled = sel.value == null;
     },
   });
   const moveLabel = `Move ${nodes} and delete folder`;
-  const trashLabel = `Delete folder and ${nodes}`;
+  const trashLabel = `Delete folder, ${nodes} to Trash`;
   // Step 2 replaces step 1; closing first hands focus back to whatever opened step 1.
   Modal.close();
   Modal.open({
     title: `Delete folder "${name}"?`,
     body: `<p class="fd-p">${esc(holds)}</p>
-<div class="fd-opt" data-fd-move><label class="fd-opt-l"><input type="radio" name="fdMode" value="move" checked><span class="fd-opt-b"><span class="fd-opt-t">Move the nodes, then delete the folder</span>
-<span class="fd-opt-d">Subfolders are kept inside the destination and links to the moved nodes are updated. A clashing name gets a -N suffix.</span></span></label>
-<div class="fd-dest" data-fd-dest><span class="fd-dest-l">Move the nodes to</span></div></div>
-<label class="fd-opt fd-opt-l danger"><input type="radio" name="fdMode" value="trash"><span class="fd-opt-b"><span class="fd-opt-t">Delete everything in this folder</span>
-<span class="fd-opt-d">All ${esc(nodes)} go to the vault's trash (the <span class="mono">.Trash</span> folder). The web app cannot restore them yet; an agent can, with the <span class="mono">restore_trash</span> tool, back to their old paths. Other files in the folder (such as images) are deleted for good.</span></span></label>`,
+<div class="fd-opt" data-fd-move><label class="fd-opt-l"><input type="radio" name="fdMode" value="move" checked><span class="fd-opt-b"><span class="fd-opt-t">Move the notes, then delete the folder</span>
+<span class="fd-opt-d">Subfolders are kept inside the destination and links to the moved notes are updated. If a name is already taken there, a number is added to it.</span></span></label>
+<div class="fd-dest" data-fd-dest><span class="fd-dest-l">Move the notes to</span></div></div>
+<label class="fd-opt fd-opt-l danger"><input type="radio" name="fdMode" value="trash"><span class="fd-opt-b"><span class="fd-opt-t">Move everything in this folder to the Trash</span>
+<span class="fd-opt-d">All ${esc(nodes)} go to the Trash, where you can restore them to their old places. Other files in the folder (such as images) are deleted for good.</span></span></label>`,
     actions: [
       {
         label: 'Back',
@@ -259,8 +249,8 @@ function folderDeleteStep2(path: string, n: number, subs: number): void {
           if (done == null) return;
           undoToast(
             mode === 'trash'
-              ? `Folder "${name}" deleted, ${plural(done, 'node')} moved to the trash`
-              : `Folder "${name}" deleted, ${plural(done, 'node')} moved to ${into || 'Root'}`,
+              ? `Folder "${name}" deleted, ${plural(done, 'note')} moved to the Trash`
+              : `Folder "${name}" deleted, ${plural(done, 'note')} moved to ${into || ROOT_LABEL}`,
             null,
             'info',
           );
@@ -310,15 +300,12 @@ export function folderLook(path: string): void {
   folderLookDialog(path, folderColor(path), folderIcon(path), (patch) => void setFolderMeta(path, patch));
 }
 
-/**
- * Folder menu. `rename` starts the inline editor of the row that opened it
- * (or a dialog when there is no row).
- */
-export function folderMenu(path: string, at: Anchor, rename?: () => void): void {
+/** Folder menu; `rename` starts the inline editor of the row that opened it (else a dialog). */
+export function folderMenu(path: string, at: Anchor, rename?: () => void, extra: MenuItem[] = []): void {
   const root = path === '';
   openMenu(
     [
-      { label: 'New node here', icon: I.newNote, hint: 'N', run: () => nav.newNote(path) },
+      { label: 'New note here', icon: I.newNote, hint: 'N', run: () => nav.newNote(path) },
       { label: 'New folder here', icon: I.newFolder, run: () => nav.newFolder(path) },
       { sep: true, label: '' },
       {
@@ -349,7 +336,7 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void): void 
             run: (f) =>
               Modal.confirm(
                 'Move contents',
-                `Every node and sub folder in "${path}" moves into ${f || 'the top level'}; "${baseName(path)}" is then removed. Clashing names get a -N suffix.`,
+                `Every note and subfolder in "${path}" moves into ${f || ROOT_LABEL}; "${baseName(path)}" is then removed. If a name is already taken there, a number is added to it.`,
                 'Move contents',
                 async () => {
                   Modal.close();
@@ -370,6 +357,7 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void): void 
       },
       { sep: true, label: '' },
       { label: 'Delete folder…', icon: I.trash, danger: true, disabled: root, hint: 'Del', run: () => confirmDeleteFolder(path) },
+      ...extra,
     ],
     at,
   );
@@ -389,9 +377,9 @@ export function noteMenu(paths: string[], at: Anchor, rename?: () => void): void
           one &&
           (rename
             ? rename()
-            : promptName('Rename node', 'Node name', noteName(one), (v) => void renameNote(one, v))),
+            : promptName('Rename note', 'Note name', stemTitle(noteName(one)), (v) => void renameNote(one, v))),
       },
-      { label: paths.length > 1 ? `Move ${paths.length} nodes to…` : 'Move to…', icon: I.move, run: () => askMoveNotes(paths) },
+      { label: paths.length > 1 ? `Move ${paths.length} notes to…` : 'Move to…', icon: I.move, run: () => askMoveNotes(paths) },
       ...(one
         ? [
             {
@@ -404,14 +392,14 @@ export function noteMenu(paths: string[], at: Anchor, rename?: () => void): void
             { label: 'Copy wikilink', icon: I.link, run: () => copyWikilink(one) },
           ]
         : []),
-      { label: 'New node in this folder', icon: I.newNote, run: () => nav.newNote(dirOf(paths[0])) },
+      { label: 'New note in this folder', icon: I.newNote, run: () => nav.newNote(dirOf(paths[0])) },
       { sep: true, label: '' },
       {
-        label: paths.length > 1 ? `Delete ${paths.length} nodes…` : 'Delete…',
+        label: paths.length > 1 ? `Move ${paths.length} notes to Trash` : 'Move to Trash',
         icon: I.trash,
         hint: 'Del',
         danger: true,
-        run: () => confirmDeleteNotes(paths),
+        run: () => void deleteNotesToTrash(paths),
       },
     ],
     at,

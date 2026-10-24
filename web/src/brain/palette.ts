@@ -1,6 +1,4 @@
-// Colors for brain regions (folders), tuned for both themes.
-
-/** Region hues: luminous on dark, still readable on light. */
+/** Region (folder) hues: luminous on dark, still readable on light. */
 const REGION = [
   '#5eead4', // teal
   '#7dd3fc', // sky
@@ -18,7 +16,6 @@ const REGION = [
   '#bef264', // lime
 ];
 
-/** An explicit folder color wins; otherwise a hue from the palette by index. */
 export function regionColor(index: number, explicit?: string): string {
   if (explicit && /^#[0-9a-f]{6}$/i.test(explicit)) return explicit;
   return REGION[index % REGION.length];

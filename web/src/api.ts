@@ -1,5 +1,3 @@
-// JSON client for /api/*. Every call is same-origin so the session cookie is
-// sent, and nothing is cached.
 
 import type { KeyPermissionsUpdate, KeyRow, ToolInfo, ToolSwitchResult, ToolsResult } from './types';
 
@@ -22,11 +20,7 @@ function fail(message: string, status: number, data: unknown): ApiFailure {
 
 let leaving = false;
 
-/**
- * A 401 inside the app means this browser's session is gone (signed out on
- * another device, password changed, expired): go to sign-in, which tells why,
- * and come back here afterwards.
- */
+/** A 401 means the session is gone: go to sign-in and come back here afterwards. */
 function sessionEnded(): void {
   if (leaving || typeof location === 'undefined' || location.pathname === '/login') return;
   leaving = true;
@@ -85,20 +79,15 @@ export function apiPost<T = unknown>(path: string, body: unknown = {}): Promise<
   return api<T>(path, { method: 'POST', body });
 }
 
-// Tool switches and per key permissions (docs/contracts/tools-permissions.md).
-
-/** Every MCP tool with its category, description and server wide switch. */
 export async function fetchTools(): Promise<ToolInfo[]> {
   const d = await apiGet<ToolsResult>('/api/tools');
   return (d && d.tools) || [];
 }
 
-/** Turn one tool on or off for every agent. */
 export function setToolEnabled(name: string, enabled: boolean): Promise<ToolSwitchResult> {
   return apiPost<ToolSwitchResult>('/api/tools', { name, enabled });
 }
 
-/** Save what a key may do and which tools it may call. */
 export function updateKeyPermissions(body: KeyPermissionsUpdate): Promise<KeyRow> {
   return apiPost<KeyRow>('/api/keys/update', body);
 }

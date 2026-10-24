@@ -1,16 +1,5 @@
-// Sign-in page controller. Compiled into login.html by scripts/build-pages.mjs
-// (esbuild transform, no bundling: this file must stay self-contained).
-//
-// Flow: a splash checks the instance (/api/auth/me + /api/auth/state), then
-// exactly one view is shown:
-//   signin   owner exists, nothing pending          (help is its sub-view)
-//   setup    no owner yet, no window open            -> waits for a window
-//   code     a setup/reset window is open            -> one-time code step
-//   form     code accepted                           -> username + password
-//   notready vault/state folder not writable
-//   locked   a window expired unused                 -> waits for a new one
-//   cooldown too many failed attempts               -> returns afterwards
-// No view renders before routing completes.
+// Sign-in page controller, compiled unbundled into login.html: it must stay self-contained.
+// A splash checks /api/auth/me and /api/auth/state, then exactly one view is shown.
 
 type View = 'splash' | 'signin' | 'help' | 'setup' | 'code' | 'form' | 'notready' | 'locked' | 'cooldown' | 'oauth';
 
@@ -65,20 +54,107 @@ function family(v: View): string {
   return v;
 }
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
+const DUR = 200;
+const EASE = 'cubic-bezier(.2,.8,.2,1)';
+const canAnimate = (el: HTMLElement): boolean =>
+  typeof el.animate === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const SHUT: Keyframe = {
+  height: '0px',
+  paddingTop: '0px',
+  paddingBottom: '0px',
+  marginTop: '0px',
+  marginBottom: '0px',
+  borderTopWidth: '0px',
+  borderBottomWidth: '0px',
+  opacity: 0,
+};
+
+function boxOf(el: HTMLElement): Keyframe {
+  const cs = getComputedStyle(el);
+  return {
+    height: el.offsetHeight + 'px',
+    paddingTop: cs.paddingTop,
+    paddingBottom: cs.paddingBottom,
+    marginTop: cs.marginTop,
+    marginBottom: cs.marginBottom,
+    borderTopWidth: cs.borderTopWidth,
+    borderBottomWidth: cs.borderBottomWidth,
+    opacity: Number(cs.opacity),
+  };
+}
+
+const SLIDING = new WeakMap<HTMLElement, { anim: Animation; end: () => void }>();
+
+/** Jumps a running slide on `el` to its end state. */
+function settle(el: HTMLElement): void {
+  const s = SLIDING.get(el);
+  if (!s) return;
+  SLIDING.delete(el);
+  s.anim.cancel();
+  el.style.overflow = '';
+  s.end();
+}
+
+/** Opens or closes `el` with a height + fade; on close `apply` runs once the box has folded away. */
+function slide(el: HTMLElement, open: boolean, apply: () => void): void {
+  const prev = SLIDING.get(el);
+  const visible = el.getClientRects().length > 0;
+  const here = visible ? boxOf(el) : SHUT;
+  if (prev) {
+    SLIDING.delete(el);
+    prev.anim.cancel();
+  }
+  if (!canAnimate(el) || (!open && !visible)) return apply();
+  if (open) {
+    apply();
+    if ((visible && !prev) || !el.getClientRects().length) return;
+    play(el, [here, { ...boxOf(el), opacity: 1 }], () => {});
+  } else {
+    play(el, [here, SHUT], apply);
+  }
+}
+
+function play(el: HTMLElement, frames: Keyframe[], end: () => void): void {
+  el.style.overflow = 'hidden';
+  const anim = el.animate(frames, { duration: DUR, easing: EASE, fill: 'forwards' });
+  SLIDING.set(el, { anim, end });
+  anim.onfinish = () => {
+    if (SLIDING.get(el)?.anim === anim) settle(el);
+  };
+}
 
 const alertBox = $('#alert');
 const alertMsg = $('#alertMsg');
+let alertOpen = false;
 
 function showAlert(msg: string, kind: '' | 'ok' | 'warn' = ''): void {
   alertMsg.textContent = msg;
-  alertBox.className = 'alert show' + (kind ? ' ' + kind : '');
+  const cls = 'alert show' + (kind ? ' ' + kind : '');
+  if (alertOpen) {
+    alertBox.className = cls;
+    return;
+  }
+  alertOpen = true;
+  slide(alertBox, true, () => (alertBox.className = cls));
 }
 
 function hideAlert(): void {
-  alertBox.className = 'alert';
+  if (!alertOpen) return;
+  alertOpen = false;
+  slide(alertBox, false, () => (alertBox.className = 'alert'));
+}
+
+/** Focus without scrolling the page (older browsers ignore the option). */
+function focusEl(el: HTMLElement | null, select = false): void {
+  if (!el) return;
+  if (el.tagName === 'H1') el.tabIndex = -1;
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
+  if (select && el instanceof HTMLInputElement) el.select();
 }
 
 function errText(d: unknown, fallback: string): string {
@@ -108,12 +184,7 @@ function jsonPost(path: string, body: unknown): Promise<Response> {
 const RETURN_TO =
   /^\/(?:$|node\/|(?:brain|nodes|graph|canvas|tags|activity|agents|tools|access|settings|overview|welcome|home|vault|logs|keys|docs)(?:\/|$))/;
 
-/**
- * A same-origin path for `n`, or null (no open redirect). The result must start
- * with exactly one `/`: a path such as `//evil.example` (from
- * `?next=https://this-host//evil.example`) would be read by `location` as a
- * protocol-relative URL to another host.
- */
+/** A same-origin app path for `n`, or null; a `//host` path would be read by `location` as another host. */
 function samePath(n: string | null | undefined): string | null {
   if (!n || typeof n !== 'string' || n.length > 2048) return null;
   // Control characters (raw or encoded) never belong in a page address.
@@ -137,10 +208,7 @@ function safeNext(): string | null {
   return samePath(q.get('r') ?? q.get('next'));
 }
 
-/**
- * The OAuth authorize request this page was opened for (`/oauth/authorize`
- * sends the browser here with `?oauth=1&...`), without the marker; null otherwise.
- */
+/** The OAuth authorize query this page was opened with (`?oauth=1&...`) minus the marker, or null. */
 const OAUTH_Q: string | null = (() => {
   const p = new URLSearchParams(location.search);
   if (!p.has('oauth')) return null;
@@ -235,26 +303,43 @@ function limitedOf(status: number, d: unknown, retryHeader: string | null): Limi
 }
 
 let HINT = 'memora-cli setup';
-/**
- * How this install runs the console, from the server's hint: everything up to
- * and including `memora-cli` (e.g. `docker exec -it memora memora-cli`).
- */
+/** How this install runs the console, e.g. `docker exec -it memora memora-cli`. */
 const cliName = (): string => {
   const m = /^(.*?\bmemora-cli(?:\.exe)?)(?=\s|$)/.exec(HINT.trim());
   return m ? m[1]! : HINT.trim().split(/\s+/)[0] || 'memora-cli';
 };
 /** The one command that opens the setup window and prints the code. */
-const SETUP_ARGS = 'setup --minutes 15';
+const SETUP_ARGS = 'setup';
 
-/* ------------------------------------------------------------------ */
-/* View switching                                                      */
-/* ------------------------------------------------------------------ */
+/** Shows a command that wraps only between words, never inside `reset-password`. */
+function setCmd(sel: string, cmd: string): void {
+  const el = $(sel);
+  el.textContent = '';
+  cmd.split(' ').forEach((w, i) => {
+    if (i) el.append(' ');
+    const s = document.createElement('span');
+    s.className = 'w';
+    s.textContent = w;
+    el.append(s);
+  });
+}
 
 let current: View = 'splash';
 let switching = 0;
 const card = $('#card');
 
-/** Crossfade to `v`: fade the current view out, then the next one in. */
+let cardAnim: Animation | null = null;
+
+/** Where focus goes on a view: its first empty or wrong field, its first field, else its heading. */
+function focusView(v: View): void {
+  if (v === 'splash') return;
+  const fields: Partial<Record<View, string[]>> = { signin: ['#u', '#p'], code: ['#code'], form: ['#su', '#sp'] };
+  const open = (fields[v] || []).map(input).filter((el) => !el.disabled);
+  const pick = open.find((el) => !el.value || el.getAttribute('aria-invalid') === 'true') || open[0];
+  focusEl(pick || $(VIEWS[v]).querySelector<HTMLElement>('h1'));
+}
+
+/** Crossfade to `v`, easing the card from the old height to the new one. */
 async function show(v: View): Promise<void> {
   // Already showing (or switching to) it: a second call must not cancel the first.
   if (v === current) return;
@@ -262,13 +347,15 @@ async function show(v: View): Promise<void> {
   const from = current;
   current = v;
   const out = $(VIEWS[from]);
-  if (out && !out.hidden) {
+  if (out && !out.hidden && canAnimate(out)) {
     out.classList.add('leaving');
-    await sleep(150);
+    await sleep(120);
     if (token !== switching) return;
-    out.classList.remove('leaving');
-    out.hidden = true;
   }
+  cardAnim?.cancel();
+  const h0 = card.offsetHeight;
+  const w0 = card.offsetWidth;
+  settle(alertBox);
   Object.entries(VIEWS).forEach(([k, sel]) => {
     const el = $(sel);
     el.classList.remove('leaving');
@@ -278,41 +365,17 @@ async function show(v: View): Promise<void> {
   // Only the welcome view uses the wide two-column card.
   card.classList.toggle('wide', v === 'setup');
   $(VIEWS[v]).hidden = false;
-  const focus: Partial<Record<View, string>> = { signin: '#u', code: '#code', form: '#su' };
-  const f = focus[v];
-  if (f) {
-    const el = input(f);
-    try {
-      el.focus({ preventScroll: true });
-    } catch {
-      el.focus();
-    }
+  const h1 = card.offsetHeight;
+  // A width change (the wide welcome card) reflows everything: no height ease then.
+  if (canAnimate(card) && card.offsetWidth === w0 && Math.abs(h1 - h0) > 2) {
+    cardAnim = card.animate([{ height: h0 + 'px' }, { height: h1 + 'px' }], { duration: DUR, easing: EASE });
+    cardAnim.onfinish = () => (cardAnim = null);
   }
+  focusView(v);
   syncPolling();
 }
 
-/* ------------------------------------------------------------------ */
-/* Server state                                                        */
-/* ------------------------------------------------------------------ */
-
 let LAST: AuthState = {};
-
-/** Plain words for the reasons a session is ended on purpose. */
-const SIGNED_OUT_TEXT: Record<string, string> = {
-  password_changed: 'You were signed out because the password was changed on another device. Sign in with the new password.',
-  signed_out_remotely: 'You were signed out from another device. Sign in again to continue.',
-  expired: 'Your session expired. Sign in again to continue.',
-};
-
-/** The reason from the server (dead cookie) or `?reason=` (set by the app on a 401). */
-let SIGNED_OUT: string | null = new URLSearchParams(location.search).get('reason');
-
-function signedOutText(): string {
-  // Own keys only: `?reason=constructor` must not reach Object.prototype.
-  return SIGNED_OUT && Object.prototype.hasOwnProperty.call(SIGNED_OUT_TEXT, SIGNED_OUT)
-    ? SIGNED_OUT_TEXT[SIGNED_OUT]
-    : '';
-}
 
 async function fetchState(): Promise<StateResult> {
   try {
@@ -323,7 +386,6 @@ async function fetchState(): Promise<StateResult> {
     if (!r.ok || !d || typeof d !== 'object') return { ok: false };
     const s = d as AuthState;
     if (s.setup_hint) HINT = s.setup_hint;
-    if (s.signed_out) SIGNED_OUT = s.signed_out;
     LAST = s;
     return { ok: true, s };
   } catch {
@@ -333,7 +395,7 @@ async function fetchState(): Promise<StateResult> {
 
 function setOnline(on: boolean): void {
   $('#dot').className = 'dot ' + (on ? 'on' : 'off');
-  $('#footState').textContent = on ? 'gateway online' : 'gateway unreachable';
+  $('#footState').textContent = on ? 'Connected' : 'Cannot reach the server';
 }
 
 /** The single view the server state calls for. */
@@ -355,19 +417,17 @@ function enter(v: View, s: AuthState): void {
     case 'signin':
       if (s.ready === false) {
         showAlert('The server cannot write to its vault or state folder. Run ' + cli + ' on the server to check it.', 'warn');
-      } else if (signedOutText()) {
-        showAlert(signedOutText(), 'warn');
       }
       break;
     case 'help':
-      $('#resetCmd').textContent = cli;
+      setCmd('#resetCmd', cli + ' reset-password');
       break;
     case 'setup':
-      $('#setupCmd').textContent = cli + ' ' + SETUP_ARGS;
+      setCmd('#setupCmd', cli + ' ' + SETUP_ARGS);
       break;
     case 'code':
       prepareCode(s);
-      $('#codeAgain').textContent = cli + (s.mode === 'reset' || s.mode === 'reset-password' ? ' reset-password' : ' setup');
+      $('#codeAgain').textContent = cli + (isResetMode(s) ? ' reset-password' : ' setup');
       break;
     case 'notready': {
       const row = (id: string, ok: boolean | undefined): void => {
@@ -377,14 +437,12 @@ function enter(v: View, s: AuthState): void {
       };
       row('#nrVault', s.checks?.vault);
       row('#nrState', s.checks?.state);
-      $('#nrCmd').textContent = cli;
+      setCmd('#nrCmd', cli);
       break;
     }
     case 'locked':
-      $('#lockCmd').textContent = cli;
-      $('#lockWhy').textContent = s.bootstrap
-        ? 'The setup window expired before the owner account was created. Access stays on hold until setup finishes.'
-        : 'The reset window expired before the new password was saved. Access stays on hold until the reset finishes.';
+      setCmd('#lockCmd', cli);
+      $('#lockWhy').textContent = 'Sign-in was paused on the server. Your notes are safe.';
       break;
     case 'cooldown':
       startCooldown(s.cooldown ?? 60);
@@ -394,10 +452,6 @@ function enter(v: View, s: AuthState): void {
   }
   void show(v);
 }
-
-/* ------------------------------------------------------------------ */
-/* Polling while waiting on the server terminal                        */
-/* ------------------------------------------------------------------ */
 
 let POLL: number | null = null;
 const POLLED: View[] = ['setup', 'code', 'form', 'notready', 'locked', 'help'];
@@ -446,10 +500,6 @@ async function refresh(): Promise<void> {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Cooldown                                                            */
-/* ------------------------------------------------------------------ */
-
 let CD: number | null = null;
 let BEFORE_CD: View | null = null;
 
@@ -462,6 +512,7 @@ function enterCooldown(secs: number): void {
 function startCooldown(secs: number): void {
   if (current !== 'cooldown' && current !== 'splash') BEFORE_CD = current;
   if (CD !== null) clearInterval(CD);
+  setCmd('#cdCmd', cliName() + ' clear-cooldowns');
   const total = Math.max(1, secs);
   const end = Date.now() + secs * 1000;
   const time = $('#cdTime');
@@ -506,10 +557,6 @@ function handleLimited(lim: Limited): void {
   else showAlert('Too many requests. Wait a few seconds and try again.', 'warn');
 }
 
-/* ------------------------------------------------------------------ */
-/* Password visibility                                                 */
-/* ------------------------------------------------------------------ */
-
 const EYE_ON = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_OFF =
   '<path d="M9.9 5.2A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a18 18 0 0 1-3.2 4.1"/><path d="M6.1 6.4A18 18 0 0 0 2 12s3.6 7 10 7a10.5 10.5 0 0 0 4.3-.9"/><path d="M3 3l18 18"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
@@ -545,9 +592,34 @@ wireEye('#eye', '#p');
 const hideSp = wireEye('#eye2', '#sp');
 const hideSp2 = wireEye('#eye3', '#sp2');
 
-/* ------------------------------------------------------------------ */
-/* Sign in                                                             */
-/* ------------------------------------------------------------------ */
+/** The Caps Lock hint under a password field, shown only while it is on. */
+function wireCaps(inpSel: string, hintSel: string): void {
+  const i = input(inpSel);
+  const hint = $(hintSel);
+  let on = false;
+  const set = (v: boolean): void => {
+    if (v === on) return;
+    on = v;
+    slide(hint, v, () => (hint.hidden = !v));
+  };
+  const read = (e: KeyboardEvent | MouseEvent): void => {
+    if (typeof e.getModifierState === 'function') set(e.getModifierState('CapsLock'));
+  };
+  i.addEventListener('keydown', read);
+  i.addEventListener('keyup', read);
+  i.addEventListener('mousedown', read);
+  i.addEventListener('blur', () => set(false));
+}
+
+wireCaps('#p', '#pCaps');
+wireCaps('#sp', '#spCaps');
+wireCaps('#sp2', '#sp2Caps');
+
+/** Marks a field wrong for screen readers until it is edited. */
+function markBad(el: HTMLInputElement): void {
+  el.setAttribute('aria-invalid', 'true');
+  el.addEventListener('input', () => el.removeAttribute('aria-invalid'), { once: true });
+}
 
 $('#loginForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -574,7 +646,8 @@ $('#loginForm').addEventListener('submit', (e) => {
               : errText(d, 'Sign-in failed (' + r.status + ').');
         showAlert(msg);
         busy(btn, false, 'Sign in', txt);
-        input('#p').select();
+        if (r.status === 401) markBad(input('#p'));
+        focusEl(input('#p'), true);
         return;
       }
       showAlert('Signed in. Opening your vault...', 'ok');
@@ -582,11 +655,11 @@ $('#loginForm').addEventListener('submit', (e) => {
     } catch (err) {
       showAlert('Could not reach the server: ' + (err as Error).message);
       busy(btn, false, 'Sign in', txt);
+      focusEl(btn);
     }
   })();
 });
 
-/* Help (#help) is a sub-view of sign in. */
 window.addEventListener('hashchange', () => {
   if (family(current) !== 'signin') return;
   enter(location.hash === '#help' ? 'help' : 'signin', LAST);
@@ -597,19 +670,12 @@ $('#backLink').addEventListener('click', (e) => {
   enter('signin', LAST);
 });
 
-/* ------------------------------------------------------------------ */
-/* Setup / reset window: countdown                                     */
-/* ------------------------------------------------------------------ */
-
 let WIN: number | null = null;
 let WIN_END = 0;
 let WIN_TOTAL = 300;
 let WIN_DONE = false;
 
-/**
- * Start or resync the window countdown shown on the code and form steps.
- * Both numbers come from the server, so a reload shows the same time left.
- */
+/** Start or resync the window countdown; the numbers come from the server so a reload agrees. */
 function setWindow(secs: number, total?: number): void {
   WIN_TOTAL = typeof total === 'number' && total > 0 ? total : Math.max(WIN_TOTAL, secs, 1);
   WIN_END = Date.now() + secs * 1000;
@@ -647,10 +713,7 @@ function tickWindow(): void {
   }
 }
 
-/**
- * A wrong code voids the window on the server. Leave the code and form steps
- * for whatever the instance shows now, and say why.
- */
+/** A wrong code voids the window on the server: move to whatever the instance shows now. */
 async function afterBurn(msg: string): Promise<void> {
   stopWindow();
   input('#code').value = '';
@@ -660,10 +723,6 @@ async function afterBurn(msg: string): Promise<void> {
   showAlert(msg, 'warn');
 }
 
-/* ------------------------------------------------------------------ */
-/* Code step                                                           */
-/* ------------------------------------------------------------------ */
-
 interface Arm {
   mode: string;
   min: number;
@@ -672,15 +731,15 @@ interface Arm {
 }
 let ARM: Arm = { mode: 'bootstrap', min: 10, user: null, code: '' };
 
-const isReset = (): boolean => ARM.mode === 'reset' || ARM.mode === 'reset-password';
+const isResetMode = (s: { mode?: string }): boolean => s.mode === 'reset' || s.mode === 'reset-password';
+const isReset = (): boolean => isResetMode(ARM);
 const rawCode = (v: string): string => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 
 function prepareCode(s: AuthState): void {
   ARM = { mode: s.mode || (s.bootstrap ? 'bootstrap' : 'reset'), min: s.min_password_len || 10, user: null, code: '' };
   const reset = isReset();
   $('#codeTitle').textContent = reset ? 'Enter the reset code' : 'Enter the setup code';
-  $('#codeSub').textContent =
-    'Enter the ' + (reset ? 'reset' : 'setup') + ' code shown in the server terminal. A few wrong tries from one device pause it for a while.';
+  $('#codeSub').textContent = 'Type the code printed on the server.';
   $('#codeLabel').textContent = reset ? 'Reset code' : 'Setup code';
   const c = input('#code');
   c.value = '';
@@ -734,8 +793,17 @@ $('#codeForm').addEventListener('submit', (e) => {
         if (d.burned) {
           await afterBurn(msg);
         } else {
-          showAlert(msg);
-          window.setTimeout(() => void refresh(), 1500);
+          showAlert(
+            r.status === 403
+              ? 'That ' + (isReset() ? 'reset' : 'setup') + ' code is not right. Check the code shown on the server and type it again.'
+              : msg,
+          );
+          shake($('#codeInp'));
+          $('#codeInp').classList.add('bad');
+          markBad(input('#code'));
+          focusEl(input('#code'), true);
+          // Re-check quietly: the view (and this message) only change if the window did.
+          window.setTimeout(() => void poll(), 1500);
         }
         return;
       }
@@ -748,20 +816,17 @@ $('#codeForm').addEventListener('submit', (e) => {
     } catch (err) {
       busy(btn, false, 'Continue', txt);
       showAlert('Could not reach the server: ' + (err as Error).message);
+      focusEl(btn);
     }
   })();
 });
-
-/* ------------------------------------------------------------------ */
-/* Account form (setup or reset)                                       */
-/* ------------------------------------------------------------------ */
 
 function prepareForm(): void {
   const reset = isReset();
   $('#formTitle').textContent = reset ? 'Reset password' : 'Create the owner account';
   $('#formSub').textContent = reset
-    ? 'Set a new password for the owner. Change the username to rename the account.'
-    : 'Choose a username and password for this vault.';
+    ? 'Choose a new password. You can also change the username here.'
+    : 'You will use these to sign in.';
   $('#setBtnTxt').textContent = reset ? 'Save new password' : 'Create account';
   input('#su').value = reset && ARM.user ? ARM.user : '';
   input('#sp').value = '';
@@ -774,38 +839,33 @@ function prepareForm(): void {
   checkForm();
 }
 
-function strength(pw: string): number {
-  let s = 0;
-  if (pw.length >= 10) s++;
-  if (pw.length >= 14) s++;
-  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) s++;
-  if (/\d/.test(pw)) s++;
-  if (/[^A-Za-z0-9]/.test(pw)) s++;
-  return Math.min(s, 4);
-}
+/** Characters as the server counts them (code points, not UTF-16 units). */
+const chars = (s: string): number => [...s].length;
 
 function checkForm(): void {
   const min = ARM.min;
   const pw = input('#sp').value;
   const pw2 = input('#sp2').value;
-  const bar = $('#strength');
-  const fill = bar.querySelector('i') as HTMLElement;
+  const n = chars(pw);
+  // Length is what makes a password hard to guess; the meter only counts it.
+  const strong = Math.max(min + 6, 16);
+  const fill = $('#strength').querySelector('i') as HTMLElement;
   const rules = $('#rules');
   const inp3 = $('#inp3');
   if (!pw) {
-    bar.classList.remove('show');
-    rules.textContent = '';
+    fill.style.width = '0';
+    rules.textContent = 'At least ' + min + ' characters. A short phrase works well.';
     rules.className = 'rules';
     inp3.classList.remove('ok', 'bad');
   } else {
-    bar.classList.add('show');
-    const s = strength(pw);
-    fill.style.width = [15, 35, 60, 82, 100][s] + '%';
-    fill.style.background = ['var(--danger)', 'var(--danger)', 'var(--warn)', 'var(--ok)', 'var(--ok)'][s];
-    const okLen = pw.length >= min;
-    rules.textContent = okLen
-      ? 'Length OK (' + pw.length + ' characters)'
-      : 'At least ' + min + ' characters (' + pw.length + ' so far)';
+    const okLen = n >= min;
+    fill.style.width = (okLen ? 55 + 45 * Math.min(1, (n - min) / (strong - min)) : 8 + 40 * (n / min)) + '%';
+    fill.style.background = okLen ? 'var(--ok)' : 'var(--danger)';
+    rules.textContent = !okLen
+      ? 'At least ' + min + ' characters (' + n + ' so far)'
+      : n >= strong
+        ? 'Strong: ' + n + ' characters'
+        : 'Long enough. A few more characters make it stronger.';
     rules.className = 'rules ' + (okLen ? 'ok' : 'bad');
     inp3.classList.toggle('ok', okLen);
     inp3.classList.toggle('bad', !okLen);
@@ -813,17 +873,21 @@ function checkForm(): void {
   const m = $('#match');
   const inp2 = $('#inp2');
   if (!pw2) {
-    m.textContent = '';
-    m.className = 'rules';
+    if (m.textContent) slide(m, false, () => (m.textContent = ''));
     inp2.classList.remove('ok', 'bad');
   } else {
     const same = pw2 === pw;
-    m.textContent = same ? 'Passwords match' : 'Passwords do not match';
-    m.className = 'rules ' + (same ? 'ok' : 'bad');
+    const txt = same ? 'Passwords match' : 'Passwords do not match';
+    const paint = (): void => {
+      m.textContent = txt;
+      m.className = 'rules ' + (same ? 'ok' : 'bad');
+    };
+    if (m.textContent && !SLIDING.has(m)) paint();
+    else slide(m, true, paint);
     inp2.classList.toggle('ok', same);
     inp2.classList.toggle('bad', !same);
   }
-  const ready = pw.length >= min && pw2 === pw && input('#su').value.trim().length > 0;
+  const ready = n >= min && pw2 === pw && input('#su').value.trim().length > 0;
   $<HTMLButtonElement>('#setBtn').disabled = !ready || WIN_DONE;
 }
 
@@ -846,9 +910,14 @@ $('#setForm').addEventListener('submit', (e) => {
     const label = isReset() ? 'Save new password' : 'Create account';
     const username = input('#su').value.trim();
     const password = input('#sp').value;
-    if (!username) return showAlert('Username required.');
-    if (password.length < ARM.min) return showAlert('Password must be at least ' + ARM.min + ' characters.');
-    if (password !== input('#sp2').value) return showAlert('Passwords do not match.');
+    const fail = (msg: string, sel: string): void => {
+      showAlert(msg);
+      markBad(input(sel));
+      focusEl(input(sel), true);
+    };
+    if (!username) return fail('Username required.', '#su');
+    if (chars(password) < ARM.min) return fail('Password must be at least ' + ARM.min + ' characters.', '#sp');
+    if (password !== input('#sp2').value) return fail('Passwords do not match.', '#sp2');
     busy(btn, true, 'Saving...', txt);
     try {
       const r = await jsonPost(isReset() ? '/api/auth/reset' : '/api/auth/bootstrap', {
@@ -870,7 +939,7 @@ $('#setForm').addEventListener('submit', (e) => {
         if ((d as { burned?: boolean }).burned) {
           await afterBurn(msg);
         } else {
-          showAlert(msg);
+          fail(msg, /user/i.test(msg) ? '#su' : '#sp');
         }
         return;
       }
@@ -882,7 +951,7 @@ $('#setForm').addEventListener('submit', (e) => {
         input('#u').value = username;
         input('#p').value = '';
         showAlert('Password saved. Sign in with the new password.', 'ok');
-        window.setTimeout(() => input('#p').focus(), 260);
+        window.setTimeout(() => focusEl(input('#p')), 260);
         return;
       }
       showAlert(isReset() ? 'Password saved. Opening your vault...' : 'Account created. Opening your vault...', 'ok');
@@ -890,13 +959,15 @@ $('#setForm').addEventListener('submit', (e) => {
     } catch (err) {
       busy(btn, false, label, txt);
       showAlert('Could not reach the server: ' + (err as Error).message);
+      focusEl(btn);
     }
   })();
 });
 
-/* ------------------------------------------------------------------ */
-/* Copy buttons                                                        */
-/* ------------------------------------------------------------------ */
+$('#alertX').addEventListener('click', () => {
+  hideAlert();
+  focusView(current);
+});
 
 document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
   const label = btn.querySelector('span') as HTMLElement;
@@ -933,10 +1004,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
   });
 });
 
-/* ------------------------------------------------------------------ */
-/* Boot: splash, checks, then exactly one view                         */
-/* ------------------------------------------------------------------ */
-
 const MIN_SPLASH = 500;
 
 function check(id: string, st: '' | 'run' | 'ok' | 'bad', value = ''): void {
@@ -971,7 +1038,6 @@ function accountLabel(s: AuthState): string {
   if (s.bootstrap) return 'not set up';
   return 'ready';
 }
-const isResetMode = (s: AuthState): boolean => s.mode === 'reset' || s.mode === 'reset-password';
 
 async function boot(): Promise<void> {
   const t0 = now();

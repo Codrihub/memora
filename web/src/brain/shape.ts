@@ -1,11 +1,6 @@
-// Brain geometry: an implicit, anatomically suggestive brain volume (two
-// cerebral hemispheres with temporal lobes, a cerebellum and a brainstem),
-// plus deterministic samplers for the cortex shell, folder regions and notes.
-// Pure math, no three.js, so the splash can reuse it on a 2D canvas.
-//
-// Axes: x = left/right, y = up, z = front (frontal lobe at +z).
+// Implicit brain volume and deterministic samplers. Axes: x = left/right, y = up, z = front.
 
-export type Rng = () => number;
+type Rng = () => number;
 export type Vec3 = [number, number, number];
 
 /** FNV-1a 32-bit string hash. */
@@ -18,7 +13,7 @@ export function hashStr(s: string): number {
   return h >>> 0;
 }
 
-/** Small fast seeded PRNG. */
+/** Seeded PRNG. */
 export function rng(seed: number): Rng {
   let a = seed >>> 0 || 0x9e3779b9;
   return () => {
@@ -33,8 +28,6 @@ function gauss(r: Rng): number {
   const u = Math.max(1e-9, r());
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r());
 }
-
-// ---- value noise (for gyri / sulci) ----
 
 function h3(x: number, y: number, z: number): number {
   let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(z, 1274126177);
@@ -64,7 +57,7 @@ function vnoise(x: number, y: number, z: number): number {
   );
 }
 
-/** Sulcus strength 0..1: thin meandering creases (ridged noise peaks). */
+/** Sulcus strength 0..1 from ridged noise. */
 function sulcus(x: number, y: number, z: number): number {
   const f = 5.2;
   const n1 = 1 - Math.abs(2 * vnoise(x * f + 11.3, y * f * 1.15, z * f) - 1);
@@ -72,8 +65,6 @@ function sulcus(x: number, y: number, z: number): number {
   const r = Math.max(Math.pow(n1, 5), Math.pow(n2, 7) * 0.6);
   return Math.min(1, r * 1.25);
 }
-
-// ---- implicit volume ----
 
 interface Ellipsoid {
   c: Vec3;
@@ -84,7 +75,7 @@ const CEREBRUM: Ellipsoid = { c: [0.4, 0.06, 0], a: [0.52, 0.62, 1.0] };
 const TEMPORAL: Ellipsoid = { c: [0.52, -0.27, 0.14], a: [0.3, 0.25, 0.56] };
 const CEREBELLUM: Ellipsoid = { c: [0.25, -0.44, -0.66], a: [0.3, 0.2, 0.3] };
 
-/** Normalized ellipsoid radius of a point (1 = on the surface). */
+/** 1 = on the surface. */
 function q(e: Ellipsoid, x: number, y: number, z: number): number {
   // Frontal taper and a flatter base give the cerebrum its outline.
   const taper = 1 - 0.1 * Math.max(0, z);
@@ -95,7 +86,7 @@ function q(e: Ellipsoid, x: number, y: number, z: number): number {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-/** Cerebral field (min over cerebrum and temporal lobe), mirrored in x. */
+/** Mirrored in x. */
 function cerebralQ(x: number, y: number, z: number): number {
   const ax = Math.abs(x);
   if (ax < 0.035) return 9; // longitudinal fissure
@@ -108,24 +99,19 @@ function cerebellumQ(x: number, y: number, z: number): number {
   return q(CEREBELLUM, ax, y, z);
 }
 
-/** True when a point is deep enough inside the brain to hold a note. */
 function inside(x: number, y: number, z: number, depth = 0.9): boolean {
   return cerebralQ(x, y, z) < depth || cerebellumQ(x, y, z) < depth * 0.9;
 }
 
-// ---- samplers ----
-
-export interface ShellSample {
-  /** xyz triples. */
+interface ShellSample {
   pos: Float32Array;
-  /** Outward normal triples (approximate). */
+  /** Approximate outward normals. */
   nrm: Float32Array;
-  /** Brightness 0..1 (dark in sulci). */
+  /** 0..1, dark in sulci. */
   shade: Float32Array;
   count: number;
 }
 
-/** Points on the cortex surface, with sulci carved in. */
 export function sampleShell(n: number, seed = 7): ShellSample {
   const r = rng(seed);
   const pos = new Float32Array(n * 3);
@@ -152,7 +138,7 @@ export function sampleShell(n: number, seed = 7): ShellSample {
     let ny: number;
     let nz: number;
     if (kind === 2) {
-      // Brainstem: a short tilted cylinder under the cerebrum.
+      // Brainstem: a short tilted cylinder.
       const t = r();
       const a = r() * Math.PI * 2;
       const rad = 0.1 - t * 0.025;
@@ -169,7 +155,6 @@ export function sampleShell(n: number, seed = 7): ShellSample {
       k++;
       continue;
     }
-    // Uniform direction, then scale onto the ellipsoid surface.
     const u = r() * 2 - 1;
     const th = r() * Math.PI * 2;
     const s = Math.sqrt(1 - u * u);
@@ -185,7 +170,6 @@ export function sampleShell(n: number, seed = 7): ShellSample {
     y = e.c[1] + (y - e.c[1]) / qq;
     z = e.c[2] + (z - e.c[2]) / qq;
     if (x < 0.035) continue;
-    // Drop points buried inside another part.
     if (kind === 0) {
       const other = e === CEREBRUM ? q(TEMPORAL, x, y, z) : q(CEREBRUM, x, y, z);
       if (other < 0.985) continue;
@@ -200,7 +184,6 @@ export function sampleShell(n: number, seed = 7): ShellSample {
     let sh: number;
     let depth: number;
     if (kind === 1) {
-      // Cerebellar folia: fine horizontal ridges.
       const f = Math.abs(Math.sin(y * 70 + z * 12));
       sh = 0.35 + 0.65 * f;
       depth = (1 - f) * 0.018;
@@ -222,7 +205,7 @@ export function sampleShell(n: number, seed = 7): ShellSample {
   return { pos, nrm, shade, count: k };
 }
 
-/** Candidate region anchors spread over both hemispheres (farthest-point). */
+/** Farthest-point region anchors over both hemispheres. */
 export function regionAnchors(count: number, seed = 3): Vec3[] {
   const r = rng(seed);
   const cand: Vec3[] = [];
@@ -273,7 +256,6 @@ function d2(a: Vec3, b: Vec3): number {
   return x * x + y * y + z * z;
 }
 
-/** A stable point for a note inside its folder region. */
 export function notePoint(path: string, anchor: Vec3, spread: number): Vec3 {
   const r = rng(hashStr(path));
   for (let tries = 0; tries < 40; tries++) {
@@ -288,7 +270,6 @@ export function notePoint(path: string, anchor: Vec3, spread: number): Vec3 {
   return [anchor[0], anchor[1], anchor[2]];
 }
 
-/** Region radius for a folder holding `n` notes. */
 export function regionSpread(n: number, regions: number): number {
   const base = 0.62 / Math.cbrt(Math.max(1, regions));
   return Math.min(0.3, Math.max(0.045, base * (0.22 + 0.12 * Math.cbrt(n))));

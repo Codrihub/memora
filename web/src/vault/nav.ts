@@ -1,15 +1,18 @@
-// Navigation callbacks shared by the tree, list and note panes. view.ts
-// fills them in, so the components never import the view (no cycles).
+// Navigation callbacks filled in by view.ts, so the panes never import the view (no cycles).
 
 export const nav = {
   /** Show a folder's notes in the list pane ('' = whole vault). */
   selectFolder: (_path: string): void => {},
+  /** "Notes" in the menu: All notes, nothing left selected or filtered. */
+  allNotes: (): void => {},
   /** Open a note in the reader. */
   openNote: (_path: string): void => {},
   /** Start a new note in a folder (inline title prompt). */
   newNote: (_folder: string): void => {},
   /** Start a new sub folder (inline name prompt). */
   newFolder: (_parent: string): void => {},
+  /** Open the Trash page. */
+  openTrash: (): void => {},
 };
 
 /** Drag payload of the drag in progress (dataTransfer is unreadable during dragover). */
@@ -32,7 +35,6 @@ export function startDrag(e: DragEvent, payload: DragPayload, label: string): vo
   } catch {
     /* some browsers refuse custom types */
   }
-  // A compact ghost: "3 notes" or the item name.
   const ghost = document.createElement('div');
   ghost.className = 'vx-ghost';
   ghost.textContent = label;

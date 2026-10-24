@@ -1,13 +1,5 @@
-// Realtime channel over /ws: reconnect with backoff, refresh on mutations,
-// and fan server events out on the bus:
-//
-//   ai_activity           -> bus `activity`   (AgentActivity)
-//   node_* mutations      -> bus `mutation`   (raw event)
-//   socket state          -> bus `connection` ('on' | 'connecting' | 'off')
-//   hello / presence      -> bus `presence`   (connected browsers)
-//
-// It also tracks which agents are active right now and paints the top bar
-// indicator and its popover.
+// Realtime channel over /ws: reconnects with backoff, fans server events out on the bus,
+// tracks active agents and paints the top bar indicator and its popover.
 
 import { $ } from './dom';
 import { emit, type AgentActivity } from './bus';
@@ -15,7 +7,9 @@ import { loadCore } from './core-data';
 import { hooks } from './hooks';
 import { state } from './state';
 import { trunc } from './format';
-import { toast } from './toast';
+import { groupAlive, notify, toast } from './toast';
+import { agentNotice, type ActCall } from './ui/notice-text';
+import { avatarHTML } from './control/agents';
 import { activityToastAllowed } from './storage';
 import { renderRtPop, resetRtPop, type PopAgent } from './ui/rt-pop';
 import { flyHome, flyIn } from './ui/agent-flight';
@@ -29,10 +23,9 @@ const MUTATIONS = new Set(['node_created', 'node_updated', 'node_deleted', 'node
 const PIN_TOOLS = new Set(['pin', 'unpin']);
 /** An agent counts as active while a call is open or for this long after one. */
 const ACTIVE_MS = 5_000;
-/** Agents seen within this window are listed in the popover. */
 const RECENT_MS = 30 * 60_000;
 
-export type ConnState = 'on' | 'connecting' | 'off';
+type ConnState = 'on' | 'connecting' | 'off';
 
 export interface AgentInfo {
   actor: string;
@@ -44,15 +37,16 @@ export interface AgentInfo {
   lastAction: string;
   /** Calls started and not yet ended. */
   open: number;
-  /** Notes the latest call touched (where it flies to on the open view). */
   lastPaths?: string[];
+  lastOk?: boolean;
+  lastError?: string;
+  lastRefused?: boolean;
   calls: number;
 }
 
 const agents = new Map<string, AgentInfo>();
 const agentListeners: ((active: number, list: AgentInfo[]) => void)[] = [];
 
-/** Subscribe to the active-agent count (fires on every change). */
 export function onAgents(fn: (active: number, list: AgentInfo[]) => void): () => void {
   agentListeners.push(fn);
   fn(activeAgents().length, agentList());
@@ -67,13 +61,11 @@ function isActive(a: AgentInfo, now = Date.now()): boolean {
   return (a.open > 0 && now - a.lastAt < 2 * 60_000) || now - a.lastAt < ACTIVE_MS;
 }
 
-/** Agents (not browser users) active right now. */
 export function activeAgents(): AgentInfo[] {
   const now = Date.now();
   return agentList().filter((a) => a.kind === 'agent' && isActive(a, now));
 }
 
-/** Every actor seen recently, newest first. */
 export function agentList(): AgentInfo[] {
   const now = Date.now();
   return Array.from(agents.values())
@@ -89,10 +81,8 @@ function myName(): string {
   return ((state.me && (state.me.user || state.me.username)) || '').trim();
 }
 
-/** Agents active at the last repaint, by key id (or name). */
 let wasActive = new Map<string, AgentInfo>();
 
-/** Enabled API keys: every agent that could be working. */
 let keyList: { id: string; name: string; lastUsed: number }[] | null = null;
 let keysAt = 0;
 
@@ -111,20 +101,17 @@ export async function loadKeys(): Promise<void> {
   }
 }
 
-/** The API key id behind an event: its own id, or the key with that name. */
 function keyOf(aid: string, actor: string): string {
   if (aid) return aid;
   return keyList?.find((k) => k.name === actor)?.id || '';
 }
 
-/** Agents with nothing running right now. */
 function idleCount(active: AgentInfo[]): number {
   const busy = new Set(active.map((a) => a.id || a.actor));
   if (keyList) return keyList.filter((k) => !busy.has(k.id) && !busy.has(k.name)).length;
   return agentList().filter((a) => a.kind === 'agent' && !busy.has(a.id || a.actor)).length;
 }
 
-/** Restart a one-shot CSS animation class. */
 function replay(el: Element, cls: string): void {
   el.classList.remove(cls);
   void (el as HTMLElement).offsetWidth;
@@ -133,6 +120,9 @@ function replay(el: Element, cls: string): void {
 
 const STATE_LABEL: Record<ConnState, string> = { on: 'Live', connecting: 'Connecting', off: 'Offline' };
 
+/** Calls behind each agent's live notice, so it can say "edited 3 notes". */
+const bursts = new Map<string, ActCall[]>();
+
 export const RT = {
   ws: null as WebSocket | null,
   tries: 0,
@@ -140,7 +130,6 @@ export const RT = {
   state: 'connecting' as ConnState,
   clients: 0,
   lastActive: -1,
-  /** Set once the server was shut down on purpose: never reconnect. */
   stopped: false,
 
   setState(kind: ConnState): void {
@@ -150,12 +139,10 @@ export const RT = {
     if (changed) emit('connection', kind);
   },
 
-  /** Repaint the indicator (state, label, active agents). */
   paint(): void {
     const pill = $('#rtPill');
     const act = activeAgents();
     const n = act.length;
-    // Each agent that woke up flies into the open view; each that went idle flies home.
     const now = new Map(act.map((a) => [a.id || a.actor, a]));
     for (const [k, a] of now) if (!wasActive.has(k)) flyIn({ actor: a.actor, id: a.id, paths: a.lastPaths || [] });
     for (const [k, a] of wasActive) if (!now.has(k)) flyHome({ actor: a.actor, id: a.id, paths: a.lastPaths || [] });
@@ -167,13 +154,10 @@ export const RT = {
     const count = $('#rtAgentN');
     const box = $('#rtAgents');
     const idleBox = $('#rtIdle');
-    // An agent waking up: the moon blinks awake and the active count jumps.
-    // One going to sleep: a "z" drifts up from the moon.
     if (this.lastActive >= 0 && n > this.lastActive) {
       box.classList.remove('drop');
       idleBox.classList.remove('sleep');
       replay(idleBox, 'wake');
-      // The robot powers up as the spark from the moon arrives.
       window.setTimeout(() => replay(box, 'bump'), 260);
     } else if (this.lastActive >= 0 && n < this.lastActive) {
       box.classList.remove('bump');
@@ -210,7 +194,6 @@ export const RT = {
 
   start(): void {
     this.wirePop();
-    // Every second, so an agent goes idle (and flies home) right on time.
     window.setInterval(() => this.paint(), 1000);
     if (!('WebSocket' in window)) {
       this.setState('off');
@@ -231,7 +214,6 @@ export const RT = {
     this.kick();
   },
 
-  /** Stop for good (the server was shut down): close the socket, no retries. */
   stop(): void {
     this.stopped = true;
     clearTimeout(this.timer);
@@ -311,7 +293,6 @@ export const RT = {
       return;
     }
     if (d.replay) return;
-    // A vault mutation from another writer: refresh the view, never the editor.
     if (MUTATIONS.has(t)) {
       emit('mutation', d);
       if (!state.editing) {
@@ -398,11 +379,18 @@ export const RT = {
       a.calls++;
       a.lastLabel = ev.label;
       a.lastAction = ev.action;
-      if (ev.paths.length) a.lastPaths = ev.paths;
+      a.lastPaths = ev.paths;
+      a.lastOk = ev.ok;
+      a.lastRefused = d.refused === true;
+      a.lastError = typeof d.error === 'string' ? d.error : '';
     } else {
       a.open = Math.max(0, a.open - 1);
-      // Remember the end: a page that reloads the log afterwards (where only the
-      // start is stored) still shows the call as finished.
+      if (ev.action === a.lastAction) {
+        a.lastOk = ev.ok;
+        a.lastRefused = d.refused === true;
+        a.lastError = typeof d.error === 'string' ? d.error : '';
+      }
+      // A log reloaded later stores only the start; this marks the call finished.
       if (ev.callId) noteCallEnd(ev.callId, ev.ok, ev.ms);
     }
     agents.set(slot, a);
@@ -411,10 +399,8 @@ export const RT = {
     this.paint();
 
     if (phase === 'start') {
-      // The activity page refreshes; other pages toast, except the brain,
-      // which shows activity itself.
       if (state.page === 'logs') hooks.refreshLogs?.();
-      // Pin changes toast once the list reloads ("agent1 pinned Plan", see vault/store).
+      // Pin changes toast once the list reloads (vault/store).
       else if (
         state.page !== 'brain' &&
         !state.editing &&
@@ -422,7 +408,11 @@ export const RT = {
         !PIN_TOOLS.has(ev.action) &&
         activityToastAllowed(keyOf(aid, actor))
       ) {
-        toast(actor + ' · ' + trunc(ev.label, 70), 'ok', 2600);
+        const group = 'agent:' + slot;
+        const calls = (groupAlive(group) && bursts.get(group)) || [];
+        calls.push({ action: ev.action, label: ev.label });
+        bursts.set(group, calls);
+        notify(agentNotice(actor, calls), 'info', 3600, undefined, { group, iconHtml: avatarHTML(actor, 22, '', aid || undefined) });
       }
     } else if (
       ev.ok === false &&
@@ -435,10 +425,7 @@ export const RT = {
     }
   },
 
-  /* ── popover ─────────────────────────────────────────────────────── */
-
   wirePop(): void {
-    // A key got a new color: repaint what shows agents.
     window.addEventListener(AGENT_COLORS_EVENT, () => {
       this.paint();
       if (state.page === 'logs' || state.page === 'home' || state.page === 'keys') hooks.refreshPage();
@@ -464,7 +451,6 @@ export const RT = {
   },
 
   openPop(): void {
-    // Hang the panel right under the pill, flush with its right edge.
     const r = $('#rtPill').getBoundingClientRect();
     const pop = $('#rtPop');
     pop.style.top = Math.round(r.bottom + 8) + 'px';
@@ -485,7 +471,6 @@ export const RT = {
     const now = Date.now();
     const seen = agentList().filter((a) => a.kind === 'agent');
     const bySlot = new Map(seen.map((a) => [a.id || a.actor, a]));
-    // Every enabled key, plus agents seen recently whose key is gone.
     const known = new Set((keyList || []).flatMap((k) => [k.id, k.name]));
     const rows = [
       ...(keyList || []).map((k) => ({ id: k.id, name: k.name, keyed: true, lastUsed: k.lastUsed })),
@@ -494,7 +479,6 @@ export const RT = {
         .map((a) => ({ id: a.id || '', name: a.actor, keyed: !keyList, lastUsed: 0 })),
     ];
     const agents: PopAgent[] = rows.map((r) => {
-      // Older events carry no key id: fall back to the name.
       const a = bySlot.get(r.id) || bySlot.get(r.name);
       return {
         name: r.name,
@@ -505,9 +489,12 @@ export const RT = {
         lastUsed: r.lastUsed,
         lastAction: a?.lastAction || '',
         lastLabel: a?.lastLabel || '',
+        lastPaths: a?.lastPaths || [],
+        lastOk: a?.lastOk,
+        lastRefused: a?.lastRefused,
+        lastError: a?.lastError || '',
       };
     });
-    // Working agents first, then the most recently seen.
     agents.sort(
       (x, y) =>
         Number(y.active) - Number(x.active) ||

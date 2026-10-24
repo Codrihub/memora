@@ -1,16 +1,12 @@
-// Tiny in-page event bus. realtime.ts emits server events here so any view
-// (brain, graph, canvas, activity) can react without importing each other.
+// In-page event bus: realtime.ts emits server events here.
 
 import type { WsEvent } from './types';
 
 export interface AgentActivity {
   /** Who acted: the API key name for agents, the username for the browser. */
   actor: string;
-  /** Tool or action name, e.g. `search_memory`. */
   action: string;
-  /** Human-readable summary. */
   label: string;
-  /** `start` or `end`. */
   phase: string;
   /** Notes the action touched (vault-relative paths), when known. */
   paths: string[];
@@ -18,11 +14,9 @@ export interface AgentActivity {
   ok?: boolean;
   /** Milliseconds the call took (only on `end`). */
   ms?: number;
-  /** Client timestamp when the event arrived. */
   at: number;
   /** API key id of an agent (tells same-named agents apart). */
   actorId?: string;
-  /** Pairs a call's `start` and `end` events. */
   callId?: string;
   /** `agent` (API key) or `user` (browser). */
   kind?: string;
@@ -38,24 +32,20 @@ export interface PinsChange {
   kind: 'agent' | 'user';
 }
 
-export interface BusEvents {
-  /** An agent or user action (from `ai_activity`). */
+interface BusEvents {
   activity: AgentActivity;
-  /** A vault mutation (node_created / node_updated / node_deleted / node_renamed). */
   mutation: WsEvent;
-  /** Realtime connection state. */
   connection: 'on' | 'connecting' | 'off';
   /** Number of browsers connected to the server. */
   presence: number;
-  /** The owner's pins changed on the server (`pins_changed`); reload them. Names
-   * the actor when the change came over MCP. */
+  /** Names the actor when the change came over MCP. */
   pins: PinsChange | null;
 }
 
 type Handler<K extends keyof BusEvents> = (payload: BusEvents[K]) => void;
 const handlers = new Map<keyof BusEvents, Set<(payload: never) => void>>();
 
-/** Subscribe; returns an unsubscribe function. */
+/** Returns an unsubscribe function. */
 export function on<K extends keyof BusEvents>(type: K, fn: Handler<K>): () => void {
   let set = handlers.get(type);
   if (!set) handlers.set(type, (set = new Set()));

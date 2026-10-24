@@ -1,5 +1,3 @@
-// Node preview panel, used by the graph and the tag index.
-
 import { apiGet } from './api';
 import { $, esc } from './dom';
 import { folderOf, noteName } from './format';
@@ -19,7 +17,6 @@ export async function openPeek(path: string): Promise<void> {
   $('#peekBody').innerHTML = '<div class="empty">Loading...</div>';
   try {
     const d = await apiGet<NoteDoc>('/api/note?path=' + encodeURIComponent(path));
-    // A slower answer for a node the panel no longer shows is dropped.
     if (state.peekPath !== path) return;
     // `html` is the server's sanitized render of the note.
     $('#peekBody').innerHTML = d.html || `<pre>${esc(d.content || '')}</pre>`;

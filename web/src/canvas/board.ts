@@ -1,6 +1,4 @@
-// The canvas board: camera, rendering, virtualization and every interaction.
-// Cards and frames are DOM (crisp text, CSS transforms on two world layers);
-// wikilink connectors are painted on a canvas sandwiched between them.
+// Cards and frames are DOM on two world layers; wikilink wires are painted on a canvas between them.
 
 import { apiGet } from '../api';
 import { on, type AgentActivity } from '../bus';
@@ -44,7 +42,7 @@ import { buildChrome, CURSOR_SVG, ICON, Toast, type Chrome } from './ui';
 import { NodeCard, type CardLink } from '../ui/node-card';
 import { toggleHTML, ViewChrome } from '../ui/view-chrome';
 
-/** Run a vault write with excerpt fetching paused, so the write is not queued behind reads. */
+/** Pause excerpt fetching so the write is not queued behind reads. */
 async function held<T>(p: () => Promise<T>): Promise<T> {
   holdExcerpts(true);
   try {
@@ -60,6 +58,9 @@ const setFolderColor = (folder: string, color: string): Promise<void> => held(()
 
 const MIN_Z = 0.04;
 const MAX_Z = 4;
+/** Smallest zoom a visit opens at, so cards can be read. */
+const READ_Z = 0.8;
+const READ_Z_PHONE = 0.7;
 const LOD1 = 0.45;
 const LOD2 = 0.2;
 const TOUCH_MS = 10 * 60 * 1000;
@@ -99,7 +100,6 @@ export class Board {
   private ctx!: CanvasRenderingContext2D;
   private ui!: Chrome;
   private marquee!: HTMLElement;
-  private empty!: HTMLElement;
   private toast!: Toast;
   private panel!: NodeCard;
 
@@ -122,7 +122,7 @@ export class Board {
   private space = false;
   private showLinks = true;
   private vc!: ViewChrome;
-  /** Folders switched off in Regions: their frames, cards and links are not drawn. */
+  /** Folders switched off in Regions. */
   private hiddenFrames = loadHiddenFrames();
   private labelPrefs = loadLabelPrefs();
 
@@ -155,15 +155,12 @@ export class Board {
 
   constructor(private host: HTMLElement) {}
 
-  // ───────────────────────────── setup ─────────────────────────────
-
   async init(): Promise<void> {
     this.build();
     this.layout = await loadLayout();
     this.showLinks = this.layout.links !== false;
     this.syncButtons();
     this.sync();
-    // Every visit opens on the whole board, centred (see activate()).
     if (this.layout.view && isFinite(this.layout.view.z)) this.cam = { ...this.layout.view };
     this.needFit = true;
     this.ready = true;
@@ -174,7 +171,6 @@ export class Board {
     observeVisibility(this.host, (vis) => (vis ? this.activate() : this.deactivate()));
   }
 
-  /** Called by renderCanvas on every visit and by refreshPage after mutations. */
   refresh(): void {
     if (!this.ready) return;
     this.activate();
@@ -196,10 +192,7 @@ export class Board {
     this.fg.className = 'cv-layer cv-fg';
     this.marquee = document.createElement('div');
     this.marquee.className = 'cv-marquee hidden';
-    this.empty = document.createElement('div');
-    this.empty.className = 'cv-empty hidden';
-    this.empty.textContent = 'No nodes in this vault yet.';
-    root.append(this.bg, this.linkCv, this.fg, this.marquee, this.empty);
+    root.append(this.bg, this.linkCv, this.fg, this.marquee);
     this.host.appendChild(root);
     this.ctx = this.linkCv.getContext('2d')!;
     this.ui = buildChrome(root);
@@ -283,8 +276,7 @@ export class Board {
     clearInterval(this.decayTimer);
     cancelAnimationFrame(this.raf);
     this.raf = 0;
-    // A gesture cut short by the view hiding: put dragged items back and
-    // forget pointers whose pointerup will never arrive.
+    // Pointers whose pointerup will never arrive.
     this.cancelGesture();
     this.pointers.clear();
     this.edge = null;
@@ -304,11 +296,9 @@ export class Board {
     this.kick(true);
   }
 
-  // ───────────────────────────── data ─────────────────────────────
-
   private frameOf = (c: Card): Frame | undefined => this.frames.get(c.folder);
 
-  /** Reconcile the board with state.tree: add, move and drop cards and frames. */
+  /** Reconcile the board with state.tree. */
   private sync(): void {
     const seen = new Set<string>();
     const fresh: Frame[] = [];
@@ -416,24 +406,42 @@ export class Board {
       const c = this.cards.get(p);
       if (c && c.el) this.flash(c);
     }
-    this.empty.classList.toggle('hidden', this.cards.size > 0);
+    this.vc.setEmpty(this.cards.size === 0);
     this.fitIfNeeded();
-    this.paintInfo();
+    this.vc?.refreshRegions();
     this.geomDirty = true;
     this.persist();
     this.kick(true);
   }
 
-  /** Keep frames from overlapping after `f` grew or moved. */
   private separate(f: Frame | undefined): void {
     if (f && this.frames.has(f.name)) separateFrames(Array.from(this.frames.values()), f);
   }
 
-  /** First visit without a saved view: fit once there is a size and content. */
+  /** Fit once there is a size and content. */
   private fitIfNeeded(): void {
     if (!this.needFit || !this.ready || this.W < 50 || !this.frames.size) return;
     this.needFit = false;
-    this.fitTo(this.allBounds(), false);
+    this.openView();
+  }
+
+  /** The whole board when it fits at a readable zoom, else its top left at a readable zoom. */
+  private openView(): void {
+    const b = this.allBounds();
+    if (!b) return;
+    const phone = this.W <= 760;
+    const pad = phone ? 28 : 80;
+    const fitZ = Math.min((this.W - pad * 2) / b.w, (this.H - pad * 2 - 40) / (b.h + 40));
+    if (fitZ >= READ_Z) {
+      this.fitTo(b, false);
+      return;
+    }
+    const z = phone ? READ_Z_PHONE : READ_Z;
+    // Clear of the overlaid controls and the frame labels above each frame.
+    const left = phone ? 60 : 84;
+    const top = phone ? 76 : 96;
+    this.cam = { z, x: left - b.x * z, y: top - b.y * z };
+    this.kick(true);
   }
 
   private scheduleLinks(): void {
@@ -467,11 +475,10 @@ export class Board {
     this.links = pairs;
     this.linkCount = count;
     for (const c of this.cards.values()) if (c.el) this.fillCard(c);
-    this.paintInfo();
+    this.vc?.refreshRegions();
     this.kick();
   }
 
-  /** Mark cards agents touched in the last hour, from the activity log. */
   private async seedTouches(): Promise<void> {
     try {
       const r = await apiGet<{ events?: LogEvent[] }>('/api/logs?range=1h&limit=300');
@@ -511,8 +518,6 @@ export class Board {
     clearTimeout(this.camSaveTimer);
     this.camSaveTimer = window.setTimeout(() => this.persist(), 900);
   }
-
-  // ───────────────────────────── rendering ─────────────────────────────
 
   private kick(geom = false): void {
     if (geom) this.geomDirty = true;
@@ -605,7 +610,7 @@ export class Board {
     this.drawLinks();
     if (this.vc.prefs.minimap && (now - this.miniAt > 60 || !more)) {
       this.miniAt = now;
-      this.drawMini();
+      this.vc.redrawMini();
     }
     if (more) this.kick();
   }
@@ -630,7 +635,6 @@ export class Board {
     if (lod !== this.lod) {
       this.lod = lod;
       this.root.classList.toggle('lod1', lod >= 1);
-      this.root.classList.toggle('lod2', lod === 2);
       this.geomDirty = true;
     }
     this.ui.zoom.textContent = Math.round(z * 100) + '%';
@@ -646,7 +650,7 @@ export class Board {
     };
   }
 
-  /** Mount the cards in view, unmount the rest (except ones being dragged or edited). */
+  /** Mount the cards in view, unmount the rest except ones being dragged or edited. */
   private virtualize(): void {
     const vb = this.viewBox(240);
     const visible = new Set<string>();
@@ -693,7 +697,7 @@ export class Board {
     if (!f.el) return;
     f.el.style.setProperty('--fc', colorOfFolder(f.name));
     const t = f.el.querySelector<HTMLElement>('.cv-ftitle')!;
-    if (!t.querySelector('input')) t.textContent = f.name;
+    if (!t.querySelector('input')) t.textContent = /^root$/i.test(f.name) ? 'Top level' : f.name;
     f.el.querySelector<HTMLElement>('.cv-fcount')!.textContent = String(f.cards.length);
     f.el.classList.toggle('sel', this.selFrames.has(f.name));
   }
@@ -738,7 +742,7 @@ export class Board {
       <div class="cv-cex${ex ? '' : ' loading'}">${ex ? esc(ex.text) : ''}</div>
       <div class="cv-ctags">${tags}</div>
       <div class="cv-cfoot"><span title="Last edited">${esc(relTs(c.mtime))}</span>${
-        n ? `<span title="${n} wikilinks">↔ ${n}</span>` : ''
+        n ? `<span title="${n} ${n === 1 ? 'link' : 'links'} to other notes">↔ ${n}</span>` : ''
       }<span class="grow"></span>${
         t
           ? `<span class="cv-agent${t.live ? ' live' : ''}" title="${esc(t.actor)}: ${esc(t.label)} (${esc(
@@ -780,12 +784,8 @@ export class Board {
       selected: this.sel,
       light: document.documentElement.dataset.theme === 'light',
     });
-    // Wires are routed a batch per frame; keep drawing until all are in.
+    // Wires are routed a batch per frame.
     if (pending) this.kick();
-  }
-
-  private drawMini(): void {
-    this.vc.redrawMini();
   }
 
   private paintMini(cv: HTMLCanvasElement, w: number, h: number, dpr: number): void {
@@ -802,19 +802,11 @@ export class Board {
     });
   }
 
-  /** Regions follow the board as frames come and go. */
-  private paintInfo(): void {
-    this.vc?.refreshRegions();
-  }
-
-  // ───────────────────────────── shared chrome ─────────────────────────────
-
   private applyLabelPrefs(): void {
     this.root.classList.toggle('no-node-text', !this.labelPrefs.nodes);
     this.root.classList.toggle('no-folder-titles', !this.labelPrefs.folders);
   }
 
-  /** Fly to a folder's frame and flash it. */
   private focusFolder(name: string): void {
     const f = this.frames.get(name);
     if (!f) return;
@@ -828,7 +820,6 @@ export class Board {
     this.flashFrame(f);
   }
 
-  /** A short glow round a frame, so it is clear which folder the view went to. */
   private flashFrame(f: Frame): void {
     window.setTimeout(() => {
       const el = f.el;
@@ -855,7 +846,6 @@ export class Board {
     requestAnimationFrame(() => this.vc.redrawMini());
   }
 
-  /** The chrome shared with Brain and Graph. */
   private buildViewChrome(root: HTMLElement): ViewChrome {
     const panTo = (dx: number, dy: number): void => {
       const z = this.cam.z;
@@ -870,10 +860,9 @@ export class Board {
       page: 'canvas',
       root,
       search: {
-        placeholder: 'Find a node, #tag or in:folder',
+        placeholder: 'Find a note, #tag or in:folder',
         find: {
           items: () => {
-            // Tags and links come with the graph data.
             const meta = new Map(state.graph.nodes.map((n) => [n.path || n.id, n as { tags?: unknown; degree?: number }]));
             return Array.from(this.cards.values()).map((c) => {
               const m = meta.get(c.path);
@@ -934,9 +923,7 @@ export class Board {
         this.vc.finder?.clear();
         this.closePanel();
         this.setHiddenFrames([]);
-        // The board itself back to its default layout: every frame tidied
-        // into a grid and the frames packed from the origin, so aligning or
-        // distributing never survives a reset. Then the whole board, centred.
+        // Back to the default layout so aligning or distributing never survives a reset.
         this.select([]);
         this.selFrames.clear();
         this.paintSelection();
@@ -989,10 +976,9 @@ export class Board {
     });
   }
 
-  /** Cards matching the search (null: no search). Highlighted, not selected. */
+  /** Search matches: highlighted, not selected. */
   private hits: Set<string> | null = null;
 
-  /** Light the cards the finder matched; null clears. */
   private lightCards(ids: Set<string> | null): void {
     this.hits = ids;
     this.root.classList.toggle('searching', !!this.hits);
@@ -1004,11 +990,10 @@ export class Board {
     c.el?.classList.toggle('hit', on);
   }
 
-  /** The canvas's own section of the Filter panel. */
   private renderFilter(host: HTMLElement): void {
     host.innerHTML =
       '<h4>Canvas</h4>' +
-      toggleHTML('links', 'Wikilink wires', this.showLinks, 'Lines between cards for every [[wikilink]], routed around cards and frames.') +
+      toggleHTML('links', 'Link lines', this.showLinks, 'Lines between cards for every link from one note to another, routed around cards and frames.') +
       '<button type="button" class="vc-act" data-tidy title="Lay every folder frame out in a neat grid">Tidy the whole board</button>' +
       '<div class="vc-hint">V select · H or Space pan · T tidy · L wires · M minimap · ? all shortcuts</div>';
     host.querySelector<HTMLElement>('[data-t=links]')!.onclick = () => {
@@ -1017,8 +1002,6 @@ export class Board {
     };
     host.querySelector<HTMLElement>('[data-tidy]')!.onclick = () => this.tidy(null, true);
   }
-
-  // ───────────────────────────── camera ─────────────────────────────
 
   private stopAnims(): void {
     this.fly = null;
@@ -1079,7 +1062,6 @@ export class Board {
     this.kick();
   }
 
-  /** Bring a card into view (and zoom in if it is too small to read). */
   private reveal(c: Card, zoom: boolean): void {
     const f = this.frameOf(c);
     if (!f) return;
@@ -1088,8 +1070,6 @@ export class Board {
     if (!zoom && contains(vb, b.x, b.y) && contains(vb, b.x + b.w, b.y + b.h) && this.cam.z >= LOD1) return;
     this.fitTo({ x: b.x - 160, y: b.y - 120, w: b.w + 320, h: b.h + 240 }, true, Math.max(this.cam.z, 1));
   }
-
-  // ───────────────────────────── selection ─────────────────────────────
 
   private select(paths: string[], add = false): void {
     if (!add) {
@@ -1109,15 +1089,13 @@ export class Board {
     this.root.classList.toggle('has-sel', show);
     const cnt = this.ui.selbar.querySelector<HTMLElement>('.cnt')!;
     cnt.textContent = n
-      ? `${n} node${n === 1 ? '' : 's'}`
-      : `${this.selFrames.size} frame${this.selFrames.size === 1 ? '' : 's'}`;
+      ? `${n} note${n === 1 ? '' : 's'}`
+      : `${this.selFrames.size} folder${this.selFrames.size === 1 ? '' : 's'}`;
     this.ui.selbar.querySelectorAll<HTMLElement>('[data-act^=al-],[data-act^=dis-]').forEach((b) => {
       b.classList.toggle('hidden', b.dataset.act!.startsWith('dis-') ? n < 3 : n < 2);
     });
-    // Separators before the align and distribute groups only when those show.
     this.ui.selbar.querySelectorAll<HTMLElement>('.cv-sep').forEach((s, i) => s.classList.toggle('hidden', i < 2 && n < 2));
     this.ui.selbar.querySelector('[data-act=sel-open]')?.classList.toggle('hidden', n !== 1);
-    // The folders the selection lives in: one chip each, tap to fly there.
     const folders = new Map<string, number>();
     for (const p of this.sel) {
       const c = this.cards.get(p);
@@ -1148,8 +1126,6 @@ export class Board {
       .map((p) => this.cards.get(p))
       .filter((c): c is Card => !!c);
   }
-
-  // ───────────────────────────── pointer input ─────────────────────────────
 
   private pt(e: { clientX: number; clientY: number }): { x: number; y: number } {
     const r = this.root.getBoundingClientRect();
@@ -1198,8 +1174,7 @@ export class Board {
     }
     const p = this.pt(e);
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, type: e.pointerType });
-    // Touch pointers are captured at once (the browser would otherwise steal them);
-    // mouse pointers only once a drag starts, so click and dblclick keep their targets.
+    // Touch is captured at once (the browser would steal it); mouse only on drag, so click and dblclick keep their targets.
     if (e.pointerType !== 'mouse') this.capture(e.pointerId);
     this.lastPointer = e.pointerId;
     this.inertia = null;
@@ -1382,7 +1357,6 @@ export class Board {
             .map((f) => ({ f, x: f.x, y: f.y }));
           this.g = { kind: 'frame-drag', frames, sx: g.sx, sy: g.sy, px: p.x, py: p.y, drop: null };
           for (const o of frames) {
-            o.f.el?.classList.add('lift');
             if (o.f.el) this.bg.appendChild(o.f.el);
           }
           this.dragMove(p.x, p.y);
@@ -1465,7 +1439,6 @@ export class Board {
         this.dropFrames(g);
         return;
       case 'frame-pending':
-        // A click on a frame's title (no drag): its folder card, as in Brain and Graph.
         this.openFolderCard(g.frame.name);
         return;
       case 'marquee':
@@ -1531,7 +1504,6 @@ export class Board {
   }
 
   private onDbl(e: MouseEvent): void {
-    // With pointer capture the event can target the board root; fall back to hit testing.
     let t = e.target as HTMLElement;
     if (t === this.root) t = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null) || t;
     if (t.closest('.cv-ui') || t.closest('input')) return;
@@ -1581,8 +1553,6 @@ export class Board {
     for (const c of this.cards.values()) if (c.el) c.el.classList.toggle('sel', this.sel.has(c.path));
     this.kick();
   }
-
-  // ───────────────────────────── dragging ─────────────────────────────
 
   private beginCardDrag(g: Extract<Gesture, { kind: 'card-pending' }>, px: number, py: number): void {
     const lead = g.card;
@@ -1693,7 +1663,7 @@ export class Board {
       this.persist();
       return;
     }
-    // Optimistic: move the cards into the target frame now, then ask the server.
+    // Optimistic: move the cards now, then ask the server.
     const plan = moving.map((o) => {
       const from = this.frameOf(o.c)!;
       const wx = from.x + o.c.x;
@@ -1712,7 +1682,7 @@ export class Board {
     normalizeFrame(target);
     this.separate(target);
     this.kick(true);
-    const label = plan.length === 1 ? `"${plan[0].o.c.name}"` : `${plan.length} nodes`;
+    const label = plan.length === 1 ? `"${plan[0].o.c.name}"` : `${plan.length} notes`;
     this.toast.show(`Moving ${label} to ${target.name}...`, { ms: 20000 });
     const done: { c: Card; from: string; oldPath: string; fx: number; fy: number; frame: Frame }[] = [];
     let failed = 0;
@@ -1725,7 +1695,6 @@ export class Board {
       } catch (err) {
         failed++;
         lastErr = (err as Error).message;
-        // Put the card back where it came from.
         target.cards = target.cards.filter((c) => c !== it.o.c);
         it.o.c.folder = it.o.from;
         it.o.c.x = it.o.fx;
@@ -1765,7 +1734,7 @@ export class Board {
       };
       this.pushUndo(`Move ${label}`, undo);
       this.toast.show(
-        `Moved ${done.length === 1 ? `"${done[0].c.name}"` : done.length + ' nodes'} to ${target.name}${
+        `Moved ${done.length === 1 ? `"${done[0].c.name}"` : done.length + ' notes'} to ${target.name}${
           failed ? ` · ${failed} failed: ${lastErr}` : ''
         }`,
         { undo: () => void this.runUndo(), err: failed > 0 },
@@ -1781,7 +1750,6 @@ export class Board {
     const target = g.drop;
     if (target && g.frames.length === 1) {
       const src = g.frames[0].f;
-      // Snap back first; the folder move happens only after confirmation.
       src.x = g.frames[0].x;
       src.y = g.frames[0].y;
       this.kick(true);
@@ -1797,7 +1765,7 @@ export class Board {
     const n = src.cards.length;
     Modal.confirm(
       'Move folder',
-      `Move the folder "${src.name}" with its ${n} node${n === 1 ? '' : 's'} into "${target.name}"? The nodes move on disk to ${target.name}/${src.name}/.`,
+      `Move the folder "${src.name}" with its ${n} note${n === 1 ? '' : 's'} into "${target.name}"? The notes move on disk to ${target.name}/${src.name}/.`,
       'Move folder',
       async () => {
         Modal.close();
@@ -1812,11 +1780,10 @@ export class Board {
     const paths = src.cards.map((c) => c.path);
     const before = new Map(src.cards.map((c) => [c.path, { x: c.x, y: c.y }]));
     const srcBox = { x: src.x, y: src.y, w: src.w, h: src.h };
-    this.toast.show(`Moving ${paths.length} nodes into ${target.name}...`, { ms: 30000 });
+    this.toast.show(`Moving ${paths.length} notes into ${target.name}...`, { ms: 30000 });
     this.busy = true;
     const r = await moveMany(paths, dest);
     this.busy = false;
-    // Cards that made it join the target frame in free slots.
     for (const m of r.moved) {
       const c = this.cards.get(m.from);
       if (!c) continue;
@@ -1837,7 +1804,6 @@ export class Board {
         r.moved.map((m) => this.cards.get(m.to)?.path || m.to),
         src.name,
       );
-      // Restore the old frame geometry and card spots before the board syncs.
       this.layout.frames[src.name] = srcBox;
       for (const m of back.moved) {
         const orig = r.moved.find((x) => x.to === m.from);
@@ -1855,13 +1821,12 @@ export class Board {
     };
     this.pushUndo(`Move folder ${src.name}`, undo);
     this.toast.show(
-      `Moved ${r.moved.length} nodes into ${target.name}/${src.name}${r.failed.length ? ` · ${r.failed.length} failed` : ''}`,
+      `Moved ${r.moved.length} notes into ${target.name}/${src.name}${r.failed.length ? ` · ${r.failed.length} failed` : ''}`,
       { undo: () => void this.runUndo(), err: r.failed.length > 0 },
     );
     await this.afterWrite();
   }
 
-  /** Change a card's path everywhere it is keyed. */
   private rekey(c: Card, path: string): void {
     if (c.path === path) return;
     const old = c.path;
@@ -1875,7 +1840,6 @@ export class Board {
     if (this.panel.path === old) this.panel.path = path;
   }
 
-  /** Refresh shared data after a write, then reconcile. */
   private async afterWrite(): Promise<void> {
     try {
       await hooks.loadCore();
@@ -1905,8 +1869,6 @@ export class Board {
       this.toast.show('Undo failed: ' + (e as Error).message, { err: true });
     }
   }
-
-  // ───────────────────────────── rename ─────────────────────────────
 
   private inlineEdit(host: HTMLElement, value: string, commit: (v: string) => void): void {
     const input = document.createElement('input');
@@ -2006,7 +1968,6 @@ export class Board {
       return;
     }
     const color = state.folderMeta[old]?.color;
-    // Optimistic: rename the frame and rekey its cards.
     this.frames.delete(old);
     f.name = name;
     this.frames.set(name, f);
@@ -2019,7 +1980,7 @@ export class Board {
     }
     this.fillFrame(f);
     this.kick(true);
-    this.toast.show(`Renaming folder to ${name} (${paths.length} nodes)...`, { ms: 30000 });
+    this.toast.show(`Renaming folder to ${name} (${paths.length} notes)...`, { ms: 30000 });
     this.busy = true;
     const r = await moveMany(paths, name);
     this.busy = false;
@@ -2059,7 +2020,6 @@ export class Board {
     window.setTimeout(() => mo.disconnect(), 120000);
   }
 
-  /** Repaint folder colors on frames and cards. */
   private recolor(): void {
     for (const f of this.frames.values()) {
       this.fillFrame(f);
@@ -2068,9 +2028,7 @@ export class Board {
     this.kick();
   }
 
-  // ───────────────────────────── layout commands ─────────────────────────────
-
-  /** Animate model positions from their current values to what `mutate` sets. */
+  /** Animate model positions to what `mutate` sets. */
   private animate(mutate: () => void): void {
     const objs: { x: number; y: number }[] = [];
     for (const f of this.frames.values()) {
@@ -2088,10 +2046,23 @@ export class Board {
       it.o.x = it.fx;
       it.o.y = it.fy;
     }
-    // Sizes jump; positions glide.
     this.tween = { t0: performance.now(), ms: 380, items };
     this.kick(true);
     window.setTimeout(() => this.persist(), 420);
+  }
+
+  /** Tidy the whole board quietly, then fit all of it on screen. */
+  async enter(): Promise<void> {
+    for (let i = 0; i < 40 && (!this.ready || !this.frames.size || this.W < 50); i++) await new Promise((r) => setTimeout(r, 75));
+    if (!this.ready || !this.frames.size) return;
+    this.needFit = false;
+    this.animate(() => {
+      for (const f of this.frames.values()) tidyFrame(f);
+      const b = this.allBounds();
+      packFrames(Array.from(this.frames.values()), b ? b.x : 0, b ? b.y : 0);
+    });
+    await new Promise((r) => setTimeout(r, 420));
+    this.fitTo(this.allBounds());
   }
 
   private tidy(frames: Frame[] | null, packAll: boolean): void {
@@ -2249,8 +2220,6 @@ export class Board {
     this.ui.scrim.classList.toggle('hidden', !show);
   }
 
-  // ───────────────────────────── panel ─────────────────────────────
-
   private async openPanel(c: Card): Promise<void> {
     this.vc.close();
     this.root.classList.add('panel-open');
@@ -2258,7 +2227,6 @@ export class Board {
     this.panel.showNote(c.path, c.name, c.folder, colorOfFolder(c.folder), Array.isArray(tags?.tags) ? tags.tags.map(String) : []);
   }
 
-  /** A frame's folder card (frame title click, Regions, the finder). */
   private openFolderCard(name: string): void {
     this.vc.close();
     this.root.classList.add('panel-open');
@@ -2270,7 +2238,6 @@ export class Board {
     this.root.classList.remove('panel-open');
   }
 
-  /** The shared node and folder card (ui/node-card.ts). */
   private buildCard(root: HTMLElement): NodeCard {
     const link = (c: Card): CardLink => ({ path: c.path, name: c.name, color: colorOfFolder(c.folder), degree: this.linkCount.get(c.path) || 0 });
     return new NodeCard({
@@ -2303,8 +2270,6 @@ export class Board {
       closed: () => this.root.classList.remove('panel-open'),
     });
   }
-
-  // ───────────────────────────── keyboard ─────────────────────────────
 
   private onKey(e: KeyboardEvent): void {
     if (state.page !== 'canvas') return;
@@ -2430,8 +2395,6 @@ export class Board {
     }
   }
 
-  // ───────────────────────────── live ─────────────────────────────
-
   private findCard(path: string): Card | undefined {
     if (!path) return undefined;
     const p = path.replace(/^\/+/, '');
@@ -2517,7 +2480,7 @@ export class Board {
         if (c.el) this.fillCard(c);
       }
     }
-    // realtime.ts reloads the tree and calls refreshPage; this is the fallback.
+    // Fallback: realtime.ts normally reloads the tree and calls refreshPage.
     if (this.busy) return;
     const tree = state.tree;
     clearTimeout(this.syncTimer);
@@ -2531,7 +2494,6 @@ export class Board {
   }
 }
 
-/** Call `fn` when the view section is shown or hidden by the router. */
 function observeVisibility(node: HTMLElement, fn: (visible: boolean) => void): void {
   let vis = !node.classList.contains('hidden');
   new MutationObserver(() => {

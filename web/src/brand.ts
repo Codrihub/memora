@@ -1,37 +1,23 @@
-// Memora brand: the logo mark and the icon artwork.
-//
-// The mark is a vault (a slate tile) holding a small note graph whose edges
-// trace an "M": four notes on the outside, one glowing note at the core.
-// Drawn on a 24 x 24 grid. Used by the login and offline pages (inline, styled
-// through CSS classes) and by scripts/icons.ts, which renders the favicon and
-// the PWA icons from the standalone variants below.
+// Brand copy, the logo mark (24 x 24 grid) and the icon artwork rendered by scripts/icons.ts.
 
 export const BRAND_TAG = 'Memora by Codrihub Tech';
-/** The motto: the one line under the name. */
 export const BRAND_MOTTO = 'Second brain for your AI';
-/** What Memora is, in one breath. */
 export const BRAND_DESC =
   'A self-hosted memory vault: your notes as plain Markdown, wired into a living brain that your AI agents read and write over MCP. What they learn stays.';
-/** Set up once, use everywhere: why one shared memory beats one per agent. */
 export const BRAND_ONCE =
   'Set up once, use everywhere: connect each agent once and they all share the same memory, on your local network or over the internet.';
-/** Where the name comes from. */
 export const BRAND_NAME =
   'Memora is memory, advanced: built to remember what you and your AI learn, and to remember more the more you use it.';
 
 const BRAND_COLORS = {
-  /** The tile: a dark slate, a touch lighter at the top. */
   bg: '#0b0f17',
   bgTop: '#17202e',
-  /** The mark: teal into cyan; the core glows white at its heart. */
   accent: '#5eead4',
   cyan: '#22d3ee',
   coreLight: '#a5f3fc',
 } as const;
 
-/** The graph edges that draw the "M". */
 const EDGES = 'M7.2 16.8V7.4l4.8 5.1 4.8-5.1v9.4';
-/** Outer notes: [cx, cy] (left pair teal, right pair cyan). */
 const NODES: ReadonlyArray<readonly [number, number]> = [
   [7.2, 16.8],
   [7.2, 7.4],
@@ -40,19 +26,11 @@ const NODES: ReadonlyArray<readonly [number, number]> = [
 ];
 const CORE: readonly [number, number] = [12, 12.5];
 
-/**
- * Every inline mark gets its own gradient ids (several can share a page). The
- * prefix differs per load: marks rendered into the static pages at build time
- * and marks drawn by the app at runtime count from 1 independently.
- */
+// Unique, deterministic gradient ids per mark; the prefix separates build-time ("s") and runtime ("r") marks.
 let uid = 0;
-const SEED = Math.random().toString(36).slice(2, 7);
+const SEED = typeof document === 'undefined' ? 's' : 'r';
 
-/**
- * The mark's parts on the 24 x 24 grid: a solid
- * slate tile with a thin gradient rim, a bold gradient "M", four notes and a
- * glowing core. `tile: false` leaves the tile out (full-bleed app icons).
- */
+/** `tile: false` leaves the tile out (full-bleed app icons). */
 function markParts(tile: boolean): string {
   const { bg, bgTop, accent, cyan, coreLight } = BRAND_COLORS;
   const n = ++uid;
@@ -80,19 +58,12 @@ function markParts(tile: boolean): string {
   );
 }
 
-/** Inline mark for a page (self-coloured; size it with CSS through `cls`). */
 export function markSvg(cls = 'brand-mark'): string {
   return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${markParts(true)}</svg>`;
 }
 
 export type IconKind = 'any' | 'maskable' | 'apple';
 
-/**
- * Standalone app icon at `size` px.
- * - any: the tile on a transparent canvas, filling most of it.
- * - maskable: full-bleed slate, the mark kept inside the 80% safe circle.
- * - apple: full-bleed slate (iOS rounds the corners itself).
- */
 export function iconSvg(size: number, kind: IconKind): string {
   const { bg, bgTop } = BRAND_COLORS;
   const s = size;
@@ -109,10 +80,7 @@ export function iconSvg(size: number, kind: IconKind): string {
   );
 }
 
-/**
- * App shortcut icon (long press on the installed app): the slate tile, full
- * bleed for the launcher's mask, with one line glyph in the brand teal.
- */
+/** App shortcut icon: full-bleed slate with one line glyph. */
 export function shortcutSvg(size: number, glyph: string): string {
   const { bg, accent } = BRAND_COLORS;
   return (
@@ -123,12 +91,10 @@ export function shortcutSvg(size: number, glyph: string): string {
   );
 }
 
-/** favicon.svg: the tiled mark, readable at 16 px. */
 export function faviconSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="1 1 22 22">${markParts(true)}</svg>`;
 }
 
-/** URL-encoded favicon for an inline `<link rel="icon">`. */
 export function faviconDataUri(): string {
   return 'data:image/svg+xml,' + encodeURIComponent(faviconSvg());
 }

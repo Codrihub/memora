@@ -2,7 +2,7 @@
 // Runs after the vite step; output lands in crates/http/assets.
 
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform } from 'esbuild';
@@ -42,13 +42,15 @@ async function compileScript(relPath, minify = true) {
   return code.trim();
 }
 
-/** Insert the generated banner after the doctype. */
 function stamp(html) {
   return html.replace(/(<!DOCTYPE html>\n)/i, `$1${GENERATED}\n`);
 }
 
+/** Write through a temporary file and a rename, so a half-written file is never served. */
 function write(name, contents) {
-  writeFileSync(join(assets, name), contents);
+  const tmp = join(assets, `.${name}.tmp`);
+  writeFileSync(tmp, contents);
+  renameSync(tmp, join(assets, name));
   console.log(`  ${name} (${contents.length} bytes)`);
 }
 
@@ -56,17 +58,22 @@ const appCss = await minifyCss('src/app.css');
 const loginCss = await minifyCss('src/login.css');
 const loginJs = await compileScript('src/login.ts');
 const swJs = await compileScript('src/sw.ts', false);
+const splashJs = await compileScript('src/boot-splash.ts');
 
 const { indexPage } = await loadModule('src/pages/index.page.ts');
 const { loginPage } = await loadModule('src/pages/login.page.ts');
 const { offlinePage } = await loadModule('src/pages/offline.page.ts');
 const { robotsTxt } = await loadModule('src/robots.ts');
 
-// Version the script URL by its content, so a deploy is picked up even when a
-// proxy or CDN caches /app.js for hours.
-const appHash = createHash('sha256').update(readFileSync(join(assets, 'app.js'))).digest('hex').slice(0, 12);
-const indexHtml = indexPage(appCss).replace('<script src="/app.js">', `<script src="/app.js?v=${appHash}">`);
+const sha = (b) => createHash('sha256').update(b).digest('hex').slice(0, 12);
+
+// Version the script URL by its content, so a deploy is picked up even behind a caching proxy.
+const appJs = readFileSync(join(assets, 'app.js'));
+const appUrl = `/app.js?v=${sha(appJs)}`;
+let indexHtml = indexPage(appCss, splashJs).replace('<script src="/app.js">', `<script src="${appUrl}">`);
 const loginHtml = loginPage(loginCss, loginJs);
+const offlineHtml = offlinePage();
+let sw = swJs.replace('__MEMORA_APP_JS__', appUrl);
 
 // A leftover placeholder would ship a broken tag; fail instead.
 for (const html of [indexHtml, loginHtml]) {
@@ -75,9 +82,30 @@ for (const html of [indexHtml, loginHtml]) {
   }
 }
 
+// The build version hashes only content, so the same source always gets the same version.
+const STATIC = ['manifest.webmanifest', 'favicon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'];
+const repoAssets = join(web, '..', 'crates', 'http', 'assets');
+const version = createHash('sha256');
+for (const [name, body] of [
+  ['app.js', appJs],
+  ['index.html', indexHtml],
+  ['login.html', loginHtml],
+  ['offline.html', offlineHtml],
+  ['sw.js', sw],
+  ...STATIC.map((n) => [n, readFileSync(existsSync(join(assets, n)) ? join(assets, n) : join(repoAssets, n))]),
+]) {
+  version.update(`${name}\0`).update(body).update('\0');
+}
+const build = version.digest('hex').slice(0, 12);
+indexHtml = indexHtml.replace('__MEMORA_BUILD__', build);
+sw = sw.replace('__MEMORA_BUILD__', build);
+if (indexHtml.includes('__MEMORA_') || sw.includes('__MEMORA_')) throw new Error('unresolved build placeholder');
+
 console.log('pages built:');
 write('index.html', stamp(indexHtml));
 write('login.html', stamp(loginHtml));
-write('offline.html', stamp(offlinePage()));
-write('sw.js', swJs);
+write('offline.html', stamp(offlineHtml));
 write('robots.txt', robotsTxt());
+// Last: a running app learns of a new build from sw.js.
+write('sw.js', sw);
+console.log(`build ${build}`);

@@ -1,7 +1,5 @@
-// Canvas chrome: editing toolbar, selection bar, undo toast and the
-// shortcut help overlay.
-
 import { el, esc } from '../dom';
+import { dismissGroup, notify } from '../toast';
 
 const P = (d: string): string =>
   `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -42,26 +40,25 @@ function btn(act: string, icon: string, title: string, extra = ''): string {
 }
 
 export function buildChrome(root: HTMLElement): Chrome {
-  // Editing tools only: view switching, search, zoom, minimap and regions
-  // come from the chrome shared with Brain and Graph (ui/view-chrome.ts).
+  // Editing tools only; the rest comes from the shared view chrome.
   const tools = el(
     'div',
     'cv-ui cv-tools',
     btn('tool-select', ICON.pointer, 'Select (V)', 'on') +
-      btn('tool-hand', ICON.hand, 'Hand (H, or hold Space)') +
+      btn('tool-hand', ICON.hand, 'Hand (H, or hold Space)', 'wide') +
       '<span class="cv-sep"></span>' +
-      `<button class="cv-btn cv-zoom" data-act="zoom-100" title="Reset to 100% (Shift+0)">100%</button>` +
+      '<span class="cv-zoom wide" title="Zoom level">100%</span>' +
+      `<button class="cv-btn wide" data-act="fit" title="Fit the whole board on screen (Shift+1)" aria-label="Fit the whole board on screen">${ICON.fit}Fit</button>` +
+      `<button class="cv-btn" data-act="zoom-100" title="Actual size, 100% (Shift+0)" aria-label="Actual size, 100%">100%</button>` +
       '<span class="cv-sep"></span>' +
       btn('tidy', ICON.tidy, 'Tidy up (T: selection, Shift+T: whole board)') +
-      btn('links', ICON.link, 'Show wikilinks (L)', 'on') +
+      btn('links', ICON.link, 'Show links between notes (L)', 'on') +
       btn('help', ICON.help, 'Keyboard shortcuts (?)'),
   );
   const zoom = tools.querySelector<HTMLElement>('.cv-zoom')!;
   const selbar = el(
     'div',
     'cv-ui cv-selbar hidden',
-    // What is selected: the count, the folder(s) it lives in (tap one to fly
-    // there) and, for a single node, preview and focus. Then the arrange tools.
     '<span class="cnt"></span><span class="cv-fchips"></span>' +
       btn('sel-open', ICON.open, 'Preview and open (Enter)') +
       btn('fit-sel', ICON.fit, 'Focus the selection (Shift+2)') +
@@ -106,8 +103,8 @@ function helpHtml(): string {
     ['Select / Hand tool', 'V H'],
     ['Add to selection', 'Shift+click'],
     ['Select all', 'Ctrl+A'],
-    ['Preview node', 'Enter'],
-    ['Open node', 'O'],
+    ['Preview note', 'Enter'],
+    ['Open note', 'O'],
     ['Rename', 'F2'],
     ['Nudge', 'Arrows'],
     ['Align left / right', 'Alt+A Alt+D'],
@@ -122,34 +119,27 @@ function helpHtml(): string {
     ['Clear / close', 'Esc'],
   ];
   return `<h3>Canvas shortcuts</h3>
-  <p>Drag a card into another folder frame to move the node on disk. Drag a frame by its name to rearrange the board; drop it onto another frame to move the whole folder there. Double-click a title to rename. On touch: drag to pan, pinch to zoom, long-press a card to move it, tap to preview.</p>
+  <p>Drag a card into another folder frame to move the note on disk. Drag a frame by its name to rearrange the board; drop it onto another frame to move the whole folder there. Double-click a title to rename. On touch: drag to pan, pinch to zoom, long-press a card to move it, tap to preview.</p>
   <div class="cols">${rows.map(([a, b]) => `<div class="row"><span>${esc(a)}</span><span>${k(b)}</span></div>`).join('')}</div>`;
 }
 
-/** Undo-able notification. */
+/** Undo-able notification in the app's notification stack, one at a time for the board. */
 export class Toast {
-  private timer = 0;
   constructor(private node: HTMLElement) {}
 
   show(msg: string, opts: { undo?: () => void; err?: boolean; ms?: number } = {}): void {
-    clearTimeout(this.timer);
-    this.node.classList.toggle('err', !!opts.err);
-    this.node.innerHTML = `<span class="msg">${esc(msg)}</span>${
-      opts.undo ? `<button class="cv-btn" data-undo>${ICON.undo}Undo</button>` : ''
-    }`;
-    const b = this.node.querySelector<HTMLButtonElement>('[data-undo]');
-    if (b && opts.undo) {
-      const run = opts.undo;
-      b.onclick = () => {
-        this.hide();
-        run();
-      };
-    }
-    this.node.classList.add('show');
-    this.timer = window.setTimeout(() => this.hide(), opts.ms ?? (opts.undo ? 7000 : 3600));
+    this.node.classList.remove('show');
+    const undo = opts.undo;
+    notify(
+      msg,
+      opts.err ? 'err' : 'info',
+      opts.ms ?? (undo ? 7000 : 3600),
+      undo ? { label: 'Undo', icon: ICON.undo, run: () => undo() } : undefined,
+      { group: 'canvas' },
+    );
   }
 
   hide(): void {
-    this.node.classList.remove('show');
+    dismissGroup('canvas');
   }
 }

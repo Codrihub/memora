@@ -1,16 +1,13 @@
-// Vault UI state: the folder hierarchy built from the flat /api/tree payload,
-// the selection, list preferences, pin order and the agent activity map.
-//
-// /api/tree groups notes by their TOP level folder only; the real hierarchy
-// is rebuilt here from each note's path, so `Projects/Web/x.md` shows up under
-// Projects > Web.
+// Vault UI state: folder hierarchy, selection, list preferences, pins and agent activity.
+// /api/tree groups notes by top level folder only, so the hierarchy is rebuilt from note paths.
 
 import { on, type PinsChange } from '../bus';
-import { hashColor, noteName } from '../format';
+import { hashColor } from '../format';
 import { api, apiGet, apiPost } from '../api';
 import { activityToastAllowed, clearLegacyPins, legacyPins } from '../storage';
 import { toast } from '../toast';
-import { allNotes, state } from '../state';
+import { allNotes, noteTitle, state } from '../state';
+import { activeAgents } from '../realtime';
 import type { NoteRef, WsEvent } from '../types';
 
 export interface FolderNode {
@@ -35,6 +32,7 @@ interface Prefs {
   filter: ListFilter;
   treeW: number;
   showNotesInTree: boolean;
+  view: 'list' | 'cards';
 }
 
 const LS_PREFS = 'memora.vault.v1';
@@ -63,14 +61,15 @@ export const prefs: Prefs = readLS<Prefs>(LS_PREFS, {
   filter: 'all',
   treeW: 264,
   showNotesInTree: false,
+  view: 'list',
 });
+// A saved 'agents' filter falls back to All.
+if (prefs.filter === 'agents') prefs.filter = 'all';
 export function savePrefs(): void {
   writeLS(LS_PREFS, prefs);
 }
 
-/** Expanded folder paths (full paths, not just top level names). Every load
- * starts with all folders closed; the sidebar closes them again each time it
- * opens (see "memora:collapse-folders"). */
+/** Expanded folder paths (full paths); every load starts with all folders closed. */
 export const openFolders = new Set<string>();
 export function saveOpen(): void {
   writeLS(LS_OPEN, Array.from(openFolders));
@@ -78,10 +77,6 @@ export function saveOpen(): void {
 
 /** Selected note paths in the list (multi-select). */
 export const selection = new Set<string>();
-
-// ---------------------------------------------------------------------------
-// Folder model
-// ---------------------------------------------------------------------------
 
 export function dirOf(path: string): string {
   const i = path.lastIndexOf('/');
@@ -91,6 +86,9 @@ export function baseName(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? path : path.slice(i + 1);
 }
+/** What the vault root is called on screen (breadcrumbs, trees, pickers). */
+export const ROOT_LABEL = 'All notes';
+
 /** The API names the vault root "Root". */
 export function apiFolder(path: string): string {
   return path === '' ? 'Root' : path;
@@ -107,11 +105,10 @@ const byPath = new Map<string, FolderNode>();
 export function folderTree(): FolderNode {
   const notes = allNotes();
   const sig = Object.keys(state.tree).join('|') + '#' + state.folders.join('|') + '#' + notes.map((n) => n.path).join('|');
-  // The payload is replaced on every reload, so identity catches mtime changes
-  // that leave the paths alone; the signature catches in-place edits.
+  // Identity catches a reloaded payload with the same paths; the signature catches in-place edits.
   if (cachedRoot && cachedTree === state.tree && sig === cachedSig) return cachedRoot;
   byPath.clear();
-  const root: FolderNode = { path: '', name: 'Vault', depth: 0, children: [], notes: [], total: 0 };
+  const root: FolderNode = { path: '', name: ROOT_LABEL, depth: 0, children: [], notes: [], total: 0 };
   byPath.set('', root);
   const ensure = (path: string): FolderNode => {
     const hit = byPath.get(path);
@@ -129,9 +126,8 @@ export function folderTree(): FolderNode {
     byPath.set(path, node);
     return node;
   };
-  // Top level folders from the payload even when the walk saw no note in them.
   for (const f of Object.keys(state.tree)) if (f !== 'Root') ensure(f);
-  // Every folder the server knows, empty and nested ones too (a new folder shows at once).
+  // Empty and nested folders the server knows, so a new folder shows at once.
   for (const f of state.folders) ensure(f);
   for (const n of notes) ensure(dirOf(n.path)).notes.push(n);
   const count = (f: FolderNode): number => {
@@ -151,15 +147,12 @@ export function folderAt(path: string): FolderNode | null {
   return byPath.get(path) || null;
 }
 
-export function allFolderPaths(): string[] {
+function allFolderPaths(): string[] {
   folderTree();
   return Array.from(byPath.keys()).sort((a, b) => a.localeCompare(b));
 }
 
-/**
- * Every folder to offer in a folder picker: the ones holding notes plus every
- * folder the server lists (empty and nested ones too), sorted, without ''.
- */
+/** Every folder to offer in a folder picker, sorted, without ''. */
 export function pickerFolders(): string[] {
   const out = new Set(allFolderPaths());
   for (const f of state.folders) out.add(f);
@@ -191,13 +184,9 @@ export function folderIcon(path: string): string {
   return (meta && meta.icon) || '';
 }
 
-// ---------------------------------------------------------------------------
-// Pins: saved on the server (/api/pins) and shared by every browser and device.
-// Renames, moves and deletes done by Memora (here, in another browser or by an
-// agent) rewrite them there, and the server says `pins_changed` so this list
-// reloads. Changes made here show at once and are sent in order; the server's
-// answer replaces the list once nothing else is in flight.
-// ---------------------------------------------------------------------------
+// Pins live on the server (/api/pins), which rewrites them on renames and moves and says
+// `pins_changed`. Local changes show at once, are sent in order, and the server's answer
+// replaces the list once nothing else is in flight.
 
 export interface PinItem {
   kind: 'note' | 'folder';
@@ -234,7 +223,7 @@ function pinsSynced(): void {
 const samePin = (a: PinItem, b: PinItem): boolean => a.kind === b.kind && a.key === b.key;
 
 /** A pin's id, as the tree keys its row (`pin:<id>`). */
-export const pinId = (p: { kind: string; key: string }): string => p.kind + ':' + p.key;
+const pinId = (p: { kind: string; key: string }): string => p.kind + ':' + p.key;
 
 /** How long a new pin row shows its arrival (slide in, accent highlight). */
 export const PIN_FX_MS = 1400;
@@ -260,7 +249,7 @@ let pinsBy: (PinsChange & { at: number }) | null = null;
 /** The first server list fills the sidebar without any arrival effect. */
 let pinsLoaded = false;
 
-const pinLabel = (p: PinItem): string => (p.kind === 'note' ? noteName(p.key) : baseName(p.key));
+const pinLabel = (p: PinItem): string => (p.kind === 'note' ? noteTitle(p.key) : baseName(p.key));
 
 /** "agent1 pinned Plan" / "agent1 unpinned Plan", under the activity toast settings. */
 function toastAgentPins(by: PinsChange, added: PinItem[], removed: PinItem[]): void {
@@ -282,8 +271,7 @@ function applyPins(r: PinsReply | null): void {
   const by = pinsBy && performance.now() - pinsBy.at < 10_000 ? pinsBy : null;
   pinsBy = null;
   if (pinsLoaded) {
-    // What arrived from elsewhere (an agent, another browser) shows its arrival;
-    // a bulk change (vault switch, Settings) just appears.
+    // Pins from elsewhere show their arrival; a bulk change (vault switch, Settings) just appears.
     const added = pinList.filter((p) => !before.some((b) => samePin(b, p)));
     const removed = before.filter((b) => !pinList.some((p) => samePin(b, p)));
     if (added.length <= 6) added.forEach(markFresh);
@@ -327,11 +315,7 @@ function legacyUpload(): { kind: 'note' | 'folder'; path: string }[] {
   return legacyPins().filter(ok).slice(0, 200);
 }
 
-/**
- * First load: the server's list, after a one-time upload of this browser's old
- * pins when the server has none yet. The local copy goes once the server has
- * answered, so it can never come back over a list emptied later.
- */
+/** First load: the server's list, after a one-time upload of this browser's old pins when it has none. */
 function firstPinLoad(): void {
   void pinRequest(async () => {
     const r = await apiGet<PinsReply>('/api/pins');
@@ -361,7 +345,6 @@ export function pinAt(item: PinItem, index?: number): void {
   const at = index == null ? order.length : Math.max(0, Math.min(order.length, index));
   order.splice(at, 0, { kind: item.kind, key: item.key, missing: had ? had.missing : false });
   pinList = order;
-  // Pinned here: it shows at once, with the same arrival as a pin from elsewhere.
   if (!had) markFresh(item);
   pinsSynced();
   if (had) {
@@ -397,10 +380,7 @@ export function clearPins(): Promise<void> {
   return pinRequest(() => api<PinsReply>('/api/pins', { method: 'PUT', body: { pins: [] } }));
 }
 
-/**
- * Rewrite expansion and selection after a note moved or was renamed. Pins are
- * rewritten by the server, which then says `pins_changed`.
- */
+/** Rewrite selection and activity after a note moved or was renamed (the server rewrites pins). */
 export function notePathChanged(from: string, to: string | null): void {
   if (selection.delete(from) && to) selection.add(to);
   if (state.note === from) state.note = to;
@@ -411,10 +391,7 @@ export function notePathChanged(from: string, to: string | null): void {
   }
 }
 
-/**
- * Rewrite expansion and preferences after a folder moved. Pins (the folder's
- * and those of everything inside it) are rewritten by the server.
- */
+/** Rewrite expansion and preferences after a folder moved (the server rewrites pins). */
 export function folderPathChanged(from: string, to: string | null): void {
   const remap = (p: string): string | null =>
     p === from || p.startsWith(from + '/') ? (to == null ? null : to + p.slice(from.length)) : p;
@@ -431,10 +408,7 @@ export function folderPathChanged(from: string, to: string | null): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Agent activity: which notes agents touched recently (bus `activity` and
-// `mutation`). Kept for the session.
-// ---------------------------------------------------------------------------
+// Agent activity: which notes agents touched recently this session.
 
 export interface Touch {
   actor: string;
@@ -492,17 +466,34 @@ function present(path: string, actor: string, id?: string): void {
   presence.set(p, m);
 }
 
-/**
- * Agents active on a note, or (`folder`) anywhere inside a folder and its sub
- * folders: one entry per agent, most recent first.
- */
+/** An agent is wherever its latest call was: clear it from every other note first. */
+function moveAgent(key: string, keep: Set<string>): void {
+  for (const [p, m] of presence) {
+    if (keep.has(p)) continue;
+    if (m.delete(key) && !m.size) presence.delete(p);
+  }
+}
+
+/** Agents working right now, by key id or name (the same "active" as the header's Live pill). */
+function activeKeys(): Set<string> {
+  const out = new Set<string>();
+  for (const a of activeAgents()) {
+    if (a.id) out.add(a.id);
+    out.add(a.actor);
+  }
+  return out;
+}
+
+/** Agents active on a note, or (`folder`) anywhere below a folder: one per agent, most recent first. */
 export function agentsAt(path: string, folder = false): Presence[] {
   const now = Date.now();
+  const busy = activeKeys();
   const out = new Map<string, Presence>();
   for (const [p, m] of presence) {
     if (folder ? !isInside(dirOf(p), path) : p !== path) continue;
     for (const [k, v] of m) {
-      if (now - v.at > PRESENCE_MS) continue;
+      // Only agents working right now carry a coin.
+      if (now - v.at > PRESENCE_MS || !busy.has(k)) continue;
       const cur = out.get(k);
       if (!cur || cur.at < v.at) out.set(k, v);
     }
@@ -510,7 +501,8 @@ export function agentsAt(path: string, folder = false): Presence[] {
   return [...out.values()].sort((a, b) => b.at - a.at);
 }
 
-// Drop stale presence and repaint so coins leave on their own.
+// Drop stale presence, and repaint when an agent starts or stops working, so coins come and go live.
+let lastBusy = '';
 setInterval(() => {
   const now = Date.now();
   let gone = false;
@@ -518,8 +510,10 @@ setInterval(() => {
     for (const [k, v] of m) if (now - v.at > PRESENCE_MS) (m.delete(k), (gone = true));
     if (!m.size) presence.delete(p);
   }
+  const busy = [...activeKeys()].sort().join('|');
+  if (busy !== lastBusy) (lastBusy = busy), (gone = true);
   if (gone) notify();
-}, 10_000);
+}, 1_000);
 
 function touch(path: string, actor: string, action: string): void {
   if (!path || !actor || actor === me()) return;
@@ -527,7 +521,7 @@ function touch(path: string, actor: string, action: string): void {
   touched.set(p, { actor, action, at: Date.now() });
 }
 
-export interface MutationInfo {
+interface MutationInfo {
   type: string;
   actor: string;
   path: string;
@@ -560,8 +554,7 @@ export function wireBus(): void {
     if (by) pinsBy = { ...by, at: performance.now() };
     void loadPins();
   });
-  // Back online: events may have been missed. A returning tab catches paths
-  // changed outside Memora (shown as missing).
+  // Back online or a returning tab: events may have been missed.
   on('connection', (c) => {
     if (c === 'on') void loadPins();
   });
@@ -570,6 +563,7 @@ export function wireBus(): void {
   });
   on('activity', (a) => {
     if (!a || !a.paths || !a.paths.length) return;
+    if (a.kind !== 'user') moveAgent(a.actorId || a.actor, new Set(a.paths.map((p) => (p.endsWith('.md') ? p : p + '.md'))));
     for (const p of a.paths) {
       touch(p, a.actor, a.action);
       if (a.kind !== 'user') present(p, a.actor, a.actorId);

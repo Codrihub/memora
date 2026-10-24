@@ -1,7 +1,5 @@
-// MCP tools: the server wide switch per tool (docs/contracts/tools-permissions.md).
-// A disabled tool is hidden from tools/list and refused by tools/call for every
-// API key. Switches are optimistic: the UI flips at once and rolls back with a
-// toast when the server refuses.
+// Tools: the server-wide switch per MCP tool (docs/contracts/tools-permissions.md). Switches are optimistic and
+// roll back with a toast when the server refuses.
 
 import { fetchTools, setToolEnabled } from '../api';
 import { $, $$, attr, esc, useStyles } from '../dom';
@@ -9,14 +7,13 @@ import { toast } from '../toast';
 import { Modal } from '../modal';
 import { ICO, openMenu, systemHeader, useControlStyles } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
+import { icon } from '../ui/icons';
 import type { ToolInfo } from '../types';
-
-// ── catalogue knowledge shared with the permissions editor ─────────────
 
 /** Category names and one plain line each, in the order people think of them. */
 const CATEGORIES: Record<string, { label: string; desc: string }> = {
   note: { label: 'Notes', desc: 'Read, create, edit, move and delete single notes.' },
-  search: { label: 'Search', desc: 'Find notes by words and get counts for the vault.' },
+  search: { label: 'Search', desc: 'Find notes by words and count what is in your notes.' },
   tag: { label: 'Tags', desc: 'See every tag and add or remove tags on a note.' },
   folder: { label: 'Folders', desc: 'List folders and create new ones.' },
   graph: { label: 'Links and graph', desc: 'Follow links between notes: neighbours, paths, hubs and loose ends.' },
@@ -26,46 +23,37 @@ const CATEGORIES: Record<string, { label: string; desc: string }> = {
   collab: { label: 'Working together', desc: 'Locks, mentions and assignments so agents do not overwrite each other.' },
   ops: { label: 'Activity and upkeep', desc: 'Activity logs, health checks, stale notes, folder settings and folder moves.' },
   identity: { label: 'Identity', desc: 'How the agent itself shows up: its display name and colour.' },
-  interop: { label: 'Import and export', desc: 'Bring notes in or take them out as a zip of markdown.' },
+  interop: { label: 'Import and export', desc: 'Bring notes in or take them out as a zip of text files.' },
   ux: { label: 'Tasks, checks and pins', desc: 'To-dos, follow-ups, checks that a note is well formed, and the pinned notes and folders.' },
 };
 const CAT_ORDER = Object.keys(CATEGORIES);
 
-export type ToolRisk = 'read' | 'write' | 'admin';
+type ToolRisk = 'read' | 'write' | 'admin';
 
-export const RISKS: Record<ToolRisk, { label: string; desc: string }> = {
-  read: { label: 'Read only', desc: 'Only looks; changes nothing.' },
-  write: { label: 'Can write', desc: 'Creates or edits notes, tags or folders.' },
-  admin: { label: 'High impact', desc: 'Deletes, or changes many notes at once.' },
+const RISKS: Record<ToolRisk, { label: string; desc: string }> = {
+  read: { label: 'Reads', desc: 'Only looks at notes; changes nothing.' },
+  write: { label: 'Changes', desc: 'Creates, edits, moves or renames notes, tags or folders.' },
+  admin: { label: 'Can delete', desc: 'Can remove notes or folders, or overwrite text in many notes at once.' },
 };
 
-const HIGH = new Set([
-  'delete_memory',
-  'soft_delete',
-  'bulk_delete',
-  'bulk_replace',
-  'merge_memory',
-  'rename_tag',
-  'merge_tag',
-  'import_memory',
-  'delete_folder',
-  'rename_folder',
-  'move_folder',
-  'move_folder_contents',
-]);
+/** The "Can delete" tier: tools that remove notes or folders, or can overwrite text in many notes. */
+const HIGH = new Set(['delete_memory', 'soft_delete', 'bulk_delete', 'bulk_replace', 'import_memory', 'delete_folder', 'move_folder_contents']);
 const READ_RE =
   /^(get|list|read|search|find|query|export)_|^(link_stats|broken_links|diff|presence|healthcheck|folder_stats|stale_detection|validate_memory|follow_ups|suggest_links|digest)$/;
 
 /** What a tool can do to the vault, from its name. */
 export function toolRisk(t: { name: string }): ToolRisk {
-  if (HIGH.has(t.name) || /(^|_)(delete|purge|drop|wipe)(_|$)|^bulk_|^merge_|^import_/.test(t.name)) return 'admin';
+  if (HIGH.has(t.name) || /(^|_)(delete|purge|drop|wipe)(_|$)|^bulk_/.test(t.name)) return 'admin';
   if (READ_RE.test(t.name)) return 'read';
   return 'write';
 }
 
-/** "read_memory" -> "Read memory". */
+/** "read_memory" -> "Read note": a memory is a note everywhere people read it. */
 export function toolTitle(name: string): string {
-  const s = name.replace(/[_-]+/g, ' ').trim();
+  const s = name
+    .replace(/[_-]+/g, ' ')
+    .replace(/\bmemory\b/g, 'note')
+    .trim();
   return s ? s[0].toUpperCase() + s.slice(1) : name;
 }
 
@@ -109,18 +97,15 @@ export function riskChip(r: ToolRisk): string {
   return `<span class="tl-risk ${r}" title="${attr(RISKS[r].desc)}">${esc(RISKS[r].label)}</span>`;
 }
 
-/** Shared by the Tools page and the permissions editor. */
+/** Shared by the Tools page and the permissions editor: risk as a small dot and a word. */
 export const TOOL_ROW_CSS = `
-.tl-risk{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:650;
-  white-space:nowrap;border:1px solid var(--line);color:var(--muted);background:var(--panel-2)}
-.tl-risk::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
-.tl-risk.read{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 30%,transparent);background:var(--ok-soft)}
-.tl-risk.write{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
-.tl-risk.admin{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-soft)}
+.tl-risk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:550;white-space:nowrap;color:var(--text-2)}
+.tl-risk::before{content:"";width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-3)}
+.tl-risk.read::before{background:var(--ok)}
+.tl-risk.write::before{background:var(--accent)}
+.tl-risk.admin::before{background:var(--warn)}
 .tl-code{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 `;
-
-// ── page ────────────────────────────────────────────────────────────────
 
 let tools: ToolInfo[] = [];
 let query = '';
@@ -130,103 +115,231 @@ const pending = new Set<string>();
 /** Bumped per renderTools(); a slower, older tool list is dropped. */
 let loadSeq = 0;
 
-const TL_CSS = `
-.tl2-explain{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 18px}
-.tl2-pt{display:flex;gap:12px;align-items:flex-start;padding:14px 15px;border-radius:var(--r-lg);border:1px solid var(--line);background:var(--panel)}
-.tl2-pt .ic{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;flex:none;background:var(--accent-soft);color:var(--accent)}
-.tl2-pt .tx{flex:1;min-width:0}
-.tl2-pt b{display:block;font-size:13.5px;font-weight:650;margin-bottom:3px}
-.tl2-pt p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.5}
-.tl2-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.tl2-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;position:sticky;top:0;z-index:2;padding:8px 0;
-  background:var(--bg)}
-.tl2-bar .cc-search{max-width:420px;height:40px}
-.tl2-bar .cc-seg button{min-height:32px;padding:5px 14px}
-.tl2-count{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-left:auto}
-.tl2-count b{color:var(--fg);font-weight:650}
-.tl2-cat{margin-bottom:12px;overflow:hidden}
-.tl2-cat-h{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:64px}
-.tl2-tg{display:flex;align-items:center;gap:12px;flex:1;min-width:0;text-align:left;padding:4px 0;border-radius:8px}
-.tl2-tg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.tl2-tg .chev{transition:transform .2s;color:var(--muted)}
-.tl2-tg[aria-expanded=true] .chev{transform:rotate(90deg)}
-.tl2-tg .t{min-width:0;flex:1}
-.tl2-tg b{display:block;font-size:14.5px;font-weight:680}
-.tl2-tg small{display:block;font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:1px}
-.tl2-n{font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
-.tl2-n.all{color:var(--ok)}
-.tl2-n.none{color:var(--danger)}
-.tl2-body{border-top:1px solid var(--line)}
-.tl2-row{display:flex;align-items:center;gap:16px;padding:12px 16px;border-top:1px solid var(--line)}
-.tl2-row:first-child{border-top:0}
-.tl2-row .tx{flex:1;min-width:0}
-.tl2-row .nm{font-size:13.5px;font-weight:620}
-.tl2-row .ds{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:2px}
-.tl2-row .nm{display:flex;align-items:baseline;gap:10px;min-width:0}
-.tl2-row .nm .tl-code{font-weight:400}
-.tl2-row .mt{display:none;align-items:center;gap:8px;margin-top:6px;min-width:0}
-.tl2-row .rk{flex:none;width:110px;display:flex;justify-content:flex-start}
-.tl2-row.off .nm{color:var(--muted)}
-.tl2-row.off .tl-risk{opacity:.7}
-.tl2-row .cc-sw,.tl2-cat-h .cc-sw{margin:0 2px}
-.tl2-sk{padding:16px;display:flex;flex-direction:column;gap:14px}
-@media (max-width:1000px){.tl2-explain{grid-template-columns:1fr;gap:8px}.tl2-pt{padding:12px 14px}}
+/** A quiet outline icon per category, for the leading tile of each row. */
+const CAT_ICON: Record<string, string> = {
+  note: 'note',
+  search: 'search',
+  tag: 'tags',
+  folder: 'folder',
+  graph: 'graph',
+  query: 'command',
+  version: 'refresh',
+  write: 'canvas',
+  collab: 'agents',
+  ops: 'activity',
+  identity: 'user',
+  interop: 'download',
+  ux: 'check',
+};
+const catIcon = (c: string): string => icon(CAT_ICON[c] || 'tools');
+
+/** Segments in the "switched on" meter. */
+const TICKS = 28;
+
+/** Shared look of the system pages (Tools, Access rules, Settings): roomy frame, calm header. */
+export const SYS_PAGE_CSS = `
+:is(#view-tools,#view-access,#view-settings){padding:32px 32px 72px}
+:is(#view-tools,#view-access,#view-settings) .sys-head{margin:0 0 24px;align-items:flex-end}
+:is(#view-tools,#view-access,#view-settings) .sys-head h1{font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.2}
+:is(#view-tools,#view-access,#view-settings) .sys-head p{margin-top:6px;font-size:14px;color:var(--muted)}
+:is(#view-tools,#view-access,#view-settings) .sys-acts .btn{height:38px;border-radius:10px;padding:0 16px}
+:is(#view-tools,#view-access,#view-settings) .sys-acts .cc-ibtn{width:38px;height:38px;border-radius:10px;border:1px solid var(--line-strong);color:var(--text-2)}
+:is(#view-tools,#view-access,#view-settings) .sys-acts .cc-ibtn:hover{background:var(--hover);color:var(--fg)}
+@media (max-width:1100px){:is(#view-tools,#view-access,#view-settings){padding:24px 24px 64px}}
 @media (max-width:760px){
-  .tl2-bar{gap:8px;top:0}
-  .tl2-bar .cc-search{max-width:none;flex-basis:100%;height:44px}
-  .tl2-bar .cc-seg{flex:1}
-  .tl2-bar .cc-seg button{flex:1;min-height:38px}
-  .tl2-count{margin-left:0}
-  .tl2-cat-h{padding:10px 12px 10px 14px}
-  .tl2-tg small{display:none}
-  .tl2-row{padding:12px 12px 12px 14px;gap:12px}
-  .tl2-row .nm .tl-code,.tl2-row .rk{display:none}
-  .tl2-row .mt{display:flex}
-  .tl2-explain{gap:0;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--panel)}
-  .tl2-pt{border:0;border-radius:0;border-top:1px solid var(--line);padding:12px 14px}
-  .tl2-pt:first-child{border-top:0}
-  .tl2-pt .ic{width:28px;height:28px}
+  :is(#view-tools,#view-access,#view-settings){padding:16px 16px 32px}
+  :is(#view-tools,#view-access,#view-settings) .sys-head{margin-bottom:18px;align-items:start}
+  :is(#view-tools,#view-access,#view-settings) .sys-head h1{font-size:22px}
+  :is(#view-tools,#view-access,#view-settings) .sys-head p{font-size:13.5px}
+  :is(#view-tools,#view-access,#view-settings) .sys-acts .btn{height:44px}
+  :is(#view-tools,#view-access,#view-settings) .sys-acts .cc-ibtn{width:44px;height:44px}
 }
+:is(#view-tools,#view-access,#view-settings) .cc-sw{background:color-mix(in srgb,var(--fg) 10%,transparent);border-color:transparent}
+:is(#view-tools,#view-access,#view-settings) .cc-sw i{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+:is(#view-tools,#view-access,#view-settings) .cc-sw[aria-checked=true]{background:var(--brand-mark,var(--accent));border-color:transparent}
+:is(#view-tools,#view-access,#view-settings) .cc-sw[aria-checked=true] i{background:#fff}
+:is(#view-tools,#view-access,#view-settings) .cc-sw[aria-checked=mixed]{background:color-mix(in srgb,var(--accent) 45%,color-mix(in srgb,var(--fg) 10%,transparent));border-color:transparent}
+:is(#view-tools,#view-access,#view-settings) .cc-sw[aria-checked=mixed] i{background:#fff}
 `;
+
+const TL_CSS = `
+.tl3{max-width:1240px;container:tl/inline-size}
+.tl3-sum{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;margin:0 0 24px;border:1px solid var(--line);border-radius:14px;background:var(--surface-1)}
+.tl3-k{padding:20px 24px 18px;min-width:0}
+.tl3-k+.tl3-k{border-left:1px solid var(--line)}
+.tl3-k .lb{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.tl3-k .lb.tl-risk{font-weight:400;color:var(--muted)}
+.tl3-k .v{margin-top:6px;font-size:30px;font-weight:450;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--fg)}
+.tl3-k .v small{font-size:15px;font-weight:450;color:var(--muted);letter-spacing:0;margin-left:3px}
+.tl3-k .h{margin-top:4px;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl3-meter{display:flex;gap:3px;margin-top:14px;height:12px}
+.tl3-meter i{flex:1;border-radius:3px;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.tl3-meter i.on{background:var(--brand-mark,var(--accent))}
+.tl3-why{grid-column:1/-1;display:flex;gap:12px 32px;flex-wrap:wrap;padding:14px 24px;border-top:1px solid var(--line);
+  background:color-mix(in srgb,var(--fg) 2%,transparent);border-radius:0 0 14px 14px}
+.tl3-why>span{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);min-width:0}
+.tl3-why>span>span{min-width:0}
+.tl3-why b{font-weight:550;color:var(--fg)}
+.tl3-why .cc-i{width:16px;height:16px;color:var(--text-3)}
+
+.tl3-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;position:sticky;top:-32px;z-index:3;padding:12px 0;background:var(--surface-0)}
+.tl3-q{display:flex;align-items:center;gap:9px;flex:1 1 260px;max-width:400px;height:40px;padding:0 12px;border-radius:10px;
+  background:color-mix(in srgb,var(--fg) 5%,transparent);border:1px solid transparent;transition:border-color .16s,background .16s}
+.tl3-q:hover{border-color:var(--line)}
+.tl3-q:focus-within{border-color:var(--line-strong);background:var(--surface-1)}
+.tl3-q .cc-i{width:16px;height:16px;color:var(--muted)}
+.tl3-q input{flex:1;min-width:0;height:100%;border:0;outline:none;background:none;font-size:14px;color:var(--fg)}
+.tl3-q input::placeholder{color:var(--text-3)}
+.tl3-pills{display:flex;gap:8px;flex:none}
+.tl3-pill{height:32px;padding:0 14px;border-radius:99px;border:1px solid var(--line-strong);font-size:13px;font-weight:500;color:var(--text-2);
+  white-space:nowrap;transition:background .16s,color .16s,border-color .16s}
+.tl3-pill:hover{background:var(--hover);color:var(--fg)}
+.tl3-pill[aria-pressed=true]{background:var(--fg);border-color:var(--fg);color:var(--surface-0)}
+.tl3-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tl3-count{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tl3-count b{color:var(--fg);font-weight:600}
+
+.tl3-cols,.tl3-row{display:grid;grid-template-columns:36px minmax(170px,250px) minmax(0,1fr) 118px 48px;gap:0 16px;align-items:center}
+.tl3-cols{padding:0 20px 8px;font-size:12px;font-weight:500;color:var(--muted)}
+.tl3-cols span:first-child{grid-column:1/3}
+.tl3-cols span:last-child{text-align:right}
+.tl3-grp{margin:0 0 20px}
+.tl3-gh{display:flex;align-items:center;gap:12px;min-height:40px;padding:0 20px 0 6px;margin-bottom:6px}
+.tl3-tg{display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-align:left;padding:4px 6px;border-radius:8px}
+.tl3-tg:hover{background:var(--hover)}
+.tl3-tg:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.tl3-tg .chev{width:16px;height:16px;color:var(--text-3);transition:transform .2s var(--ease)}
+.tl3-tg[aria-expanded=true] .chev{transform:rotate(90deg)}
+.tl3-tg b{font-size:13.5px;font-weight:600;color:var(--fg);white-space:nowrap}
+.tl3-tg .n{font-size:12.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tl3-tg .n.none{color:var(--warn)}
+.tl3-tg small{flex:1;min-width:0;font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl3-tg small::before{content:"·";margin-right:10px;color:var(--text-3)}
+.tl3-card{border:1px solid var(--line);border-radius:14px;background:var(--surface-1);overflow:hidden}
+.tl3-card[hidden]{display:none}
+.tl3-row{padding:12px 20px;min-height:60px;border-top:1px solid var(--line);transition:background .15s}
+.tl3-row:first-child{border-top:0}
+.tl3-row:hover{background:color-mix(in srgb,var(--fg) 2%,transparent)}
+.tl3-ic{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:color-mix(in srgb,var(--fg) 5%,transparent);color:var(--muted)}
+.tl3-ic .i{width:17px;height:17px;stroke-width:1.7}
+.tl3-nm{min-width:0}
+.tl3-nm b{display:block;font-size:14px;font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl3-nm .tl-code{display:block;margin-top:2px}
+.tl3-ds{min-width:0}
+.tl3-ds .ds{font-size:13px;color:var(--muted);line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.tl3-ds .ds.open{display:block}
+.tl3-more{margin-top:2px;padding:1px 0;font-size:12.5px;font-weight:550;color:var(--fg);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px;border-radius:4px}
+.tl3-more:hover{text-decoration-color:currentColor}
+.tl3-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tl3-rk{display:flex}
+.tl3-row .cc-sw{justify-self:end}
+.tl3-row.off .tl3-nm b{color:var(--muted)}
+.tl3-row.off .tl3-ic{opacity:.6}
+.tl3-mt{display:none}
+.tl3-sk{padding:4px 20px}
+.tl3-sk .r{display:flex;align-items:center;gap:16px;height:60px;border-top:1px solid var(--line)}
+.tl3-sk .r:first-child{border-top:0}
+.tl3-empty{padding:40px 20px;text-align:center}
+.tl3-empty .ic{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:12px;margin-bottom:14px;
+  background:linear-gradient(180deg,#17202e,#0b0f17);color:#5eead4}
+.tl3-empty .ic .cc-i,.tl3-empty .ic .i{width:20px;height:20px}
+.tl3-empty b{display:block;font-size:15px;font-weight:600;color:var(--fg)}
+.tl3-empty p{margin:4px auto 16px;max-width:42ch;font-size:13.5px;color:var(--muted);line-height:1.55}
+
+@container tl (max-width:1000px){
+  .tl3-cols,.tl3-row{grid-template-columns:36px minmax(0,1fr) 48px}
+  .tl3-row{grid-template-areas:"ic nm sw" "ic ds sw";gap:4px 16px;padding:14px 20px}
+  .tl3-ic{grid-area:ic;align-self:start}
+  .tl3-nm{grid-area:nm}
+  .tl3-ds{grid-area:ds}
+  .tl3-row .cc-sw{grid-area:sw}
+  .tl3-cols span:nth-child(2),.tl3-cols span:nth-child(3),.tl3-rk{display:none}
+  .tl3-nm .tl-code{display:none}
+  .tl3-mt{display:flex;align-items:center;gap:10px;margin-top:6px;min-width:0}
+  .tl3-tg small{display:none}
+}
+@container tl (max-width:720px){
+  .tl3-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tl3-k:nth-child(3){border-left:0}
+  .tl3-k:nth-child(n+3){border-top:1px solid var(--line)}
+  .tl3-why{flex-direction:column;gap:8px}
+  .tl3-why>span{align-items:flex-start}
+  .tl3-why .cc-i{margin-top:2px}
+}
+@container tl (max-width:600px){
+  .tl3-sum{margin-bottom:16px}
+  .tl3-k{padding:14px 16px}
+  .tl3-k .v{font-size:24px}
+  .tl3-meter{height:10px;gap:2px}
+  .tl3-why{padding:12px 16px}
+  .tl3-bar{gap:8px;padding:8px 0}
+  .tl3-q{max-width:none;flex-basis:100%}
+  .tl3-pills{flex:1;min-width:0}
+  .tl3-cols{display:none}
+  .tl3-gh{padding:0 8px 0 0}
+  .tl3-row{grid-template-columns:34px minmax(0,1fr) 48px;grid-template-areas:"ic nm sw" "ds ds ds";gap:8px 12px;padding:14px 14px 14px 16px}
+  .tl3-ic{grid-area:ic}
+  .tl3-nm{grid-area:nm}
+  .tl3-row .cc-sw{grid-area:sw}
+  .tl3-ds{grid-area:ds}
+}
+@media (max-width:1100px){.tl3-bar{top:-24px}}
+@media (max-width:760px){
+  .tl3-bar{top:-16px}
+  .tl3-q{height:44px}
+  .tl3-pill{height:36px}
+}
+@media (pointer:coarse){.tl3-pill{height:40px}}
+@media (prefers-reduced-motion:reduce){.tl3-tg .chev{transition:none}}
+`;
+
+function summaryHTML(): string {
+  const on = tools.filter((t) => t.enabled).length;
+  const total = tools.length;
+  const lit = total ? Math.round((on / total) * TICKS) : 0;
+  const tier = (r: ToolRisk): string => {
+    const all = tools.filter((t) => toolRisk(t) === r);
+    const n = all.filter((t) => t.enabled).length;
+    return `<div class="tl3-k"><div class="lb tl-risk ${r}" title="${attr(RISKS[r].desc)}">${esc(RISKS[r].label)}</div>
+      <div class="v">${all.length}</div><div class="h">${n === all.length ? 'All on' : `${n} on`}</div></div>`;
+  };
+  return `<div class="tl3-k"><div class="lb">Switched on</div><div class="v">${on}<small>/ ${total}</small></div>
+      <div class="tl3-meter" aria-hidden="true">${Array.from({ length: TICKS }, (_, i) => `<i${i < lit ? ' class="on"' : ''}></i>`).join('')}</div></div>
+    ${(Object.keys(RISKS) as ToolRisk[]).map(tier).join('')}
+    <div class="tl3-why"><span>${ICO.x}<span><b>Off for every AI.</b> A switched off tool is hidden from all of them.</span></span>
+      <span>${ICO.shield}<span><b>Less for one AI.</b> An agent's own page can allow it fewer tools.</span></span></div>`;
+}
 
 export async function renderTools(): Promise<void> {
   useControlStyles();
-  useStyles('tools-css-3', TL_CSS + TOOL_ROW_CSS);
+  useStyles('tools-css-4', SYS_PAGE_CSS + TL_CSS + TOOL_ROW_CSS);
   const host = $('#view-tools');
-  host.innerHTML = `<div class="cc">${systemHeader(
+  host.innerHTML = `<div class="cc tl3">${systemHeader(
     'tools',
     'Tools',
-    'Choose which MCP tools exist on this server. A tool switched off here is gone for every agent.',
-    `<button type="button" class="cc-ibtn" id="tlMore" aria-haspopup="menu" aria-label="More actions" title="More">${ICO.more}</button>
-     <button type="button" class="cc-ibtn" id="tlReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>`,
+    'What connected AIs can do in Memora. A tool switched off here is off for every AI.',
+    `<button type="button" class="cc-ibtn" id="tlMore" aria-haspopup="menu" aria-label="More actions" title="More">${ICO.more}</button>`,
   )}
-    <div class="tl2-explain">
-      <div class="tl2-pt"><span class="ic">${ICO.x}</span><div class="tx"><b>Off means off for everyone</b>
-        <p>The tool disappears from every agent's tool list and any call to it is refused.</p></div></div>
-      <div class="tl2-pt"><span class="ic">${ICO.shield}</span><div class="tx"><b>Agents can be narrower</b>
-        <p>Each agent's own permissions can limit it to fewer tools, never to more than are on here.</p></div></div>
-      <div class="tl2-pt"><span class="ic">${ICO.note}</span><div class="tx"><b>Know what a tool does</b>
-        <p>Every tool is marked by what it can do.</p>
-        <div class="tl2-legend">${(Object.keys(RISKS) as ToolRisk[]).map((r) => riskChip(r)).join('')}</div></div></div>
-    </div>
-    <div class="tl2-bar">
-      <label class="cc-search">${ICO.search}<span class="sr-only">Search tools</span>
+    <section class="tl3-sum" id="tlSum" aria-label="Summary"><div class="tl3-k">${skBlock('40%', 12)}<div style="height:12px"></div>${skBlock('55%', 28)}</div>${[0, 1, 2]
+      .map(() => `<div class="tl3-k">${skBlock('50%', 12)}<div style="height:12px"></div>${skBlock('30%', 28)}</div>`)
+      .join('')}</section>
+    <div class="tl3-bar">
+      <label class="tl3-q">${ICO.search}<span class="sr-only">Search tools</span>
         <input type="search" id="tlQ" placeholder="Search by name or what it does" autocomplete="off" value="${attr(query)}"></label>
-      <div class="cc-seg" role="group" aria-label="Show" id="tlShow">${(['all', 'on', 'off'] as const)
-        .map((v) => `<button type="button" data-v="${v}" aria-pressed="${show === v}">${v === 'all' ? 'All' : v === 'on' ? 'On' : 'Off'}</button>`)
+      <div class="tl3-pills" role="group" aria-label="Show" id="tlShow">${(['all', 'on', 'off'] as const)
+        .map((v) => `<button type="button" class="tl3-pill" data-v="${v}" aria-pressed="${show === v}">${v === 'all' ? 'All' : v === 'on' ? 'On' : 'Off'}</button>`)
         .join('')}</div>
-      <span class="tl2-count" id="tlCount" aria-live="polite"></span>
+      <span class="tl3-count" id="tlCount" aria-live="polite"></span>
     </div>
-    <div id="tlList">${[0, 1, 2]
+    <div class="tl3-cols" aria-hidden="true"><span>Tool</span><span>What it does</span><span>Access</span><span>On</span></div>
+    <div id="tlList">${[0, 1]
       .map(
         () =>
-          `<div class="cc-card tl2-cat" aria-hidden="true"><div class="tl2-sk">${skBlock('30%', 14)}${skBlock('60%', 10)}${skBlock('100%', 1)}${skBlock(
-            '45%',
-            12,
-          )}${skBlock('70%', 10)}${skBlock('38%', 12)}</div></div>`,
+          `<div class="tl3-grp" aria-hidden="true"><div class="tl3-gh">${skBlock('160px', 12)}</div><div class="tl3-card tl3-sk">${[0, 1, 2]
+            .map(() => `<div class="r">${skBlock('34px', 34)}${skBlock('22%', 12)}${skBlock('40%', 10)}</div>`)
+            .join('')}</div></div>`,
       )
       .join('')}</div></div>`;
-  $('#tlReload').onclick = () => void renderTools();
   $('#tlMore').onclick = (e) => {
     const shown = visible();
     const offN = shown.filter((t) => !t.enabled).length;
@@ -237,19 +350,21 @@ export async function renderTools(): Promise<void> {
       [
         {
           label: filtered ? 'Turn on the tools shown' : 'Turn every tool on',
-          desc: offN ? `Switches ${offN} tool${offN === 1 ? '' : 's'} back on for every agent.` : 'Everything shown is already on.',
+          desc: offN ? `Switches ${offN} tool${offN === 1 ? '' : 's'} back on for every AI.` : 'Everything shown is already on.',
           icon: ICO.check,
           disabled: !offN,
           run: () => void flip(shown.filter((t) => !t.enabled).map((t) => t.name), true),
         },
         {
           label: filtered ? 'Turn off the tools shown' : 'Turn every tool off',
-          desc: onN ? `Agents lose ${onN} tool${onN === 1 ? '' : 's'} at once. Asks first.` : 'Everything shown is already off.',
+          desc: onN ? `Every AI loses ${onN} tool${onN === 1 ? '' : 's'} at once. Asks first.` : 'Everything shown is already off.',
           icon: ICO.pause,
           danger: true,
           disabled: !onN,
-          run: () => confirmOff(shown.filter((t) => t.enabled).map((t) => t.name)),
+          run: () => confirmOff(shown.filter((t) => t.enabled).map((t) => t.name), !filtered),
         },
+        { sep: true, label: '' },
+        { label: 'Reload the list', icon: ICO.refresh, run: () => void renderTools() },
       ],
       { title: 'Tools' },
     );
@@ -274,8 +389,10 @@ export async function renderTools(): Promise<void> {
   } catch (e) {
     if (seq !== loadSeq) return;
     $('#tlCount').textContent = '';
-    $('#tlList').innerHTML = `<div class="cc-card cc-empty"><b>Could not load the tool list</b>${esc((e as Error).message)}
-      <div style="margin-top:12px"><button type="button" class="btn" id="tlRetry">${ICO.refresh}Try again</button></div></div>`;
+    $('#tlSum').hidden = true;
+    $('#tlList').innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.refresh}</span><b>Could not load the tool list</b><p>${esc(
+      (e as Error).message,
+    )}</p><button type="button" class="btn" id="tlRetry">${ICO.refresh}Try again</button></div>`;
     $('#tlRetry').onclick = () => void renderTools();
     return;
   }
@@ -284,14 +401,16 @@ export async function renderTools(): Promise<void> {
   paint();
 }
 
-function confirmOff(names: string[]): void {
+/** Ask before switching tools off; `every` = the whole list, which leaves AIs unable to do anything. */
+function confirmOff(names: string[], every = false): void {
   if (!names.length) return;
+  const n = names.length;
   Modal.confirm(
-    'Turn tools off',
-    `Turn off ${names.length} tool${names.length === 1 ? '' : 's'} for every agent? Agents lose ${names.length === 1 ? 'it' : 'them'} at once; you can turn ${
-      names.length === 1 ? 'it' : 'them'
-    } back on any time.`,
-    'Turn off',
+    every ? 'Turn every tool off?' : n === 1 ? 'Turn this tool off?' : `Turn ${n} tools off?`,
+    every
+      ? `Every connected AI loses all ${n} tools at once and can no longer read or change your notes until you turn tools back on here.`
+      : `Every connected AI loses ${n === 1 ? 'it' : 'them'} at once. You can turn ${n === 1 ? 'it' : 'them'} back on any time.`,
+    every ? 'Turn every tool off' : 'Turn off',
     () => {
       Modal.close();
       void flip(names, false);
@@ -312,13 +431,16 @@ function paint(): void {
   const shown = visible();
   $('#tlCount').innerHTML =
     `<b>${on}</b> of ${tools.length} on` + (query || show !== 'all' ? ` &middot; ${shown.length} shown` : '');
+  const sum = $('#tlSum');
+  sum.hidden = !tools.length;
+  if (tools.length) sum.innerHTML = summaryHTML();
 
   if (!tools.length) {
-    list.innerHTML = '<div class="cc-card cc-empty"><b>No tools</b>The server reports no MCP tools.</div>';
+    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${icon('tools')}</span><b>No tools</b><p>The server lists no tools. Try reloading the page.</p></div>`;
     return;
   }
   if (!shown.length) {
-    list.innerHTML = `<div class="cc-card cc-empty"><b>Nothing matches</b>Try another word, or show all tools.</div>`;
+    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.search}</span><b>Nothing matches</b><p>Try another word, or show all tools.</p></div>`;
     return;
   }
 
@@ -330,19 +452,29 @@ function paint(): void {
       const open = !collapsed.has(cat) || !!query;
       const state = n === all.length ? 'true' : n ? 'mixed' : 'false';
       const busy = all.some((t) => pending.has(t.name));
-      return `<section class="cc-card tl2-cat" aria-labelledby="${attr(hid)}">
-        <div class="tl2-cat-h"><button type="button" class="tl2-tg" id="${attr(hid)}" data-tg="${attr(cat)}" aria-expanded="${open}" aria-controls="${attr(hid)}-b">
+      return `<section class="tl3-grp" aria-labelledby="${attr(hid)}">
+        <div class="tl3-gh"><button type="button" class="tl3-tg" id="${attr(hid)}" data-tg="${attr(cat)}" aria-expanded="${open}" aria-controls="${attr(hid)}-b">
           <svg class="cc-i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-          <span class="t"><b>${esc(categoryLabel(cat))}</b>${categoryDesc(cat) ? `<small>${esc(categoryDesc(cat))}</small>` : ''}</span>
-          <span class="tl2-n ${n === all.length ? 'all' : n ? '' : 'none'}">${n} of ${all.length} on</span></button>
+          <b>${esc(categoryLabel(cat))}</b><span class="n${n ? '' : ' none'}">${n} of ${all.length} on</span>${
+            categoryDesc(cat) ? `<small>${esc(categoryDesc(cat))}</small>` : ''
+          }</button>
           <button type="button" class="cc-sw" role="switch" id="${attr(hid)}-sw" data-cat="${attr(cat)}" aria-checked="${state}"${busy ? ' disabled' : ''}
             aria-label="All ${attr(categoryLabel(cat))} tools" title="${n === all.length ? 'Turn all off' : 'Turn all on'}"><i></i></button></div>
-        <div class="tl2-body" id="${attr(hid)}-b"${open ? '' : ' hidden'}>${items.map(row).join('')}</div></section>`;
+        <div class="tl3-card" id="${attr(hid)}-b"${open ? '' : ' hidden'}>${items.map(row).join('')}</div></section>`;
     })
     .join('');
 
-  $$<HTMLButtonElement>('.tl2-row .cc-sw', list).forEach(
+  $$<HTMLButtonElement>('.tl3-row .cc-sw', list).forEach(
     (b) => (b.onclick = () => void flip([b.dataset.name!], b.getAttribute('aria-checked') !== 'true')),
+  );
+  $$<HTMLButtonElement>('[data-more]', list).forEach(
+    (b) =>
+      (b.onclick = () => {
+        const open = b.getAttribute('aria-expanded') !== 'true';
+        b.setAttribute('aria-expanded', String(open));
+        b.textContent = open ? 'Less' : 'More';
+        b.previousElementSibling?.classList.toggle('open', open);
+      }),
   );
   $$<HTMLButtonElement>('[data-tg]', list).forEach(
     (b) =>
@@ -354,7 +486,7 @@ function paint(): void {
         document.getElementById(b.id)?.focus();
       }),
   );
-  $$<HTMLButtonElement>('.tl2-cat-h .cc-sw', list).forEach(
+  $$<HTMLButtonElement>('.tl3-gh .cc-sw', list).forEach(
     (b) =>
       (b.onclick = () => {
         const cat = b.dataset.cat!;
@@ -366,13 +498,21 @@ function paint(): void {
   if (refocus) document.getElementById(refocus)?.focus();
 }
 
+/** Descriptions longer than this are clamped to two lines with a "More" toggle. */
+const LONG_DESC = 150;
+
 function row(t: ToolInfo): string {
   const id = 'tls-' + t.name.replace(/[^a-z0-9_-]+/gi, '-');
-  return `<div class="tl2-row${t.enabled ? '' : ' off'}">
-    <div class="tx"><div class="nm"><span id="${attr(id)}-l">${esc(toolTitle(t.name))}</span><code class="tl-code" title="The name agents call it by">${esc(t.name)}</code></div>
-      ${t.description ? `<div class="ds" id="${attr(id)}-d">${esc(t.description)}</div>` : ''}
-      <div class="mt">${riskChip(toolRisk(t))}<code class="tl-code" title="The name agents call it by">${esc(t.name)}</code></div></div>
-    <span class="rk">${riskChip(toolRisk(t))}</span>
+  const code = `<code class="tl-code" title="The technical name an AI uses for it">${esc(t.name)}</code>`;
+  return `<div class="tl3-row${t.enabled ? '' : ' off'}">
+    <span class="tl3-ic" aria-hidden="true">${catIcon(t.category || 'other')}</span>
+    <div class="tl3-nm"><b id="${attr(id)}-l">${esc(toolTitle(t.name))}</b>${code}</div>
+    <div class="tl3-ds">${t.description ? `<div class="ds" id="${attr(id)}-d">${esc(t.description)}</div>` : ''}${
+      t.description.length > LONG_DESC
+        ? `<button type="button" class="tl3-more" data-more aria-expanded="false" aria-controls="${attr(id)}-d">More</button>`
+        : ''
+    }<div class="tl3-mt">${riskChip(toolRisk(t))}${code}</div></div>
+    <span class="tl3-rk">${riskChip(toolRisk(t))}</span>
     <button type="button" class="cc-sw" role="switch" id="${attr(id)}" data-name="${attr(t.name)}" aria-checked="${t.enabled}"
       aria-labelledby="${attr(id)}-l"${t.description ? ` aria-describedby="${attr(id)}-d"` : ''}${pending.has(t.name) ? ' disabled' : ''}><i></i></button></div>`;
 }
@@ -394,7 +534,7 @@ async function flip(names: string[], enabled: boolean): Promise<void> {
     const t = targets[i];
     pending.delete(t.name);
     if (r.status === 'rejected') {
-      t.enabled = !enabled; // roll back
+      t.enabled = !enabled;
       failed.push(t.name);
       lastErr = (r.reason as Error)?.message || 'error';
     } else if (r.value && typeof r.value.enabled === 'boolean') {

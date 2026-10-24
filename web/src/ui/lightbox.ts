@@ -1,23 +1,15 @@
-// Full-screen image viewer for rendered notes.
-//
-// One delegated click listener on document (capture phase, so cards and
-// readers that handle clicks themselves do not swallow it) opens any
-// `.note-body img` that is not inside a link. Esc, a click on the scrim or
-// the close button closes it. Clicking an image larger than the screen
-// toggles between "fit" and actual size; in actual size the viewer scrolls,
-// and phones keep native pinch-zoom.
-
 import { useStyles } from '../dom';
 
 const CSS = `
-.lbx{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:rgba(3,6,12,.9);
-  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#e8ecf3;opacity:0;transition:opacity .18s ease;
+.lbx{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:rgba(3,6,12,.88);
+  -webkit-backdrop-filter:var(--scrim-filter);backdrop-filter:var(--scrim-filter);
+  color:#e8ecf3;opacity:0;transition:opacity .18s ease;
   touch-action:pinch-zoom pan-x pan-y}
 .lbx.on{opacity:1}
 .lbx-stage{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;padding:56px 16px calc(16px + env(safe-area-inset-bottom,0px));
   overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .lbx-stage img{display:block;max-width:100%;max-height:calc(100vh - 120px);max-height:calc(100dvh - 120px);width:auto;height:auto;
-  object-fit:contain;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8);background:rgba(255,255,255,.04);
+  object-fit:contain;border-radius:var(--r-sm);box-shadow:none;background:rgba(255,255,255,.04);
   transform:scale(.97);transition:transform .2s cubic-bezier(.16,1,.3,1);cursor:zoom-out;user-select:none}
 .lbx.on .lbx-stage img{transform:none}
 .lbx.can-zoom .lbx-stage img{cursor:zoom-in}
@@ -27,7 +19,7 @@ const CSS = `
   background:rgba(3,6,12,.72);pointer-events:none}
 .lbx-cap{flex:1;min-width:0;font-size:13px;line-height:1.4;color:#c6cfdb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbx-bar a,.lbx-bar button{all:unset;box-sizing:border-box;cursor:pointer;height:36px;min-width:36px;padding:0 12px;
-  display:inline-grid;place-items:center;border-radius:10px;font-size:12.5px;font-weight:600;color:#e8ecf3;
+  display:inline-grid;place-items:center;border-radius:var(--r-sm);font-size:12.5px;font-weight:600;color:#e8ecf3;
   background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)}
 .lbx-bar a{pointer-events:auto}
 .lbx-bar button{pointer-events:auto;font-size:20px;line-height:1;padding:0}
@@ -60,10 +52,9 @@ function close(): void {
   if (lastFocus instanceof HTMLElement) lastFocus.focus({ preventScroll: true });
 }
 
-/** Step through the note's images (set while a gallery is open). */
 let step: ((d: number) => void) | null = null;
 
-/** Only real image URLs get an "Open original" link (never javascript: and the like). */
+/** Never javascript: and the like. */
 function safeHref(src: string): string | null {
   try {
     const u = new URL(src, location.href);
@@ -82,7 +73,6 @@ function setOriginal(a: HTMLAnchorElement, src: string): void {
 
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Tab' && open) {
-    // Keep focus inside the dialog.
     const items = Array.from(open.querySelectorAll<HTMLElement>('a[href],button')).filter((n) => n.getClientRects().length > 0);
     if (!items.length) return;
     const first = items[0];
@@ -106,15 +96,11 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
-export interface LightboxImage {
+interface LightboxImage {
   src: string;
   caption: string;
 }
 
-/**
- * Show `src` full screen with `caption` (the image's alt text). With `set`,
- * the arrows, arrow keys and a sideways swipe move through the note's images.
- */
 function openLightbox(src: string, caption: string, set: LightboxImage[] = [], at = 0): void {
   close();
   useStyles('lightbox-css', CSS);
@@ -193,7 +179,6 @@ function openLightbox(src: string, caption: string, set: LightboxImage[] = [], a
       e.stopPropagation();
       show(idx + 1);
     };
-    // A sideways swipe moves too (not while zoomed in, where it pans).
     let sx = 0;
     let sy = 0;
     stage.addEventListener('touchstart', (e) => {
@@ -208,7 +193,6 @@ function openLightbox(src: string, caption: string, set: LightboxImage[] = [], a
     }, { passive: true });
   }
 
-  // Zoom only helps when the image is larger than the space it is fit into.
   const measure = (): void => {
     const big = img.naturalWidth > img.clientWidth + 2 || img.naturalHeight > img.clientHeight + 2;
     root.classList.toggle('can-zoom', big && !root.classList.contains('zoomed'));
@@ -221,7 +205,6 @@ function openLightbox(src: string, caption: string, set: LightboxImage[] = [], a
       const zoomed = root.classList.toggle('zoomed');
       root.classList.toggle('can-zoom', !zoomed);
       if (zoomed) {
-        // Keep the clicked spot under the pointer, roughly.
         const r = img.getBoundingClientRect();
         const fx = (e.clientX - r.left) / r.width;
         const fy = (e.clientY - r.top) / r.height;
@@ -248,7 +231,6 @@ function openLightbox(src: string, caption: string, set: LightboxImage[] = [], a
 
 let wired = false;
 
-/** Open images in rendered notes (`.note-body img`) in the lightbox. */
 export function initLightbox(): void {
   if (wired) return;
   wired = true;
@@ -258,14 +240,12 @@ export function initLightbox(): void {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const t = e.target;
       if (!(t instanceof HTMLImageElement) || !t.closest('.note-body')) return;
-      // An image inside a link follows the link; editors keep their own clicks.
       if (t.closest('a[href],[contenteditable="true"]')) return;
       const src = t.currentSrc || t.src;
       if (!src) return;
       e.preventDefault();
       e.stopPropagation();
       const capOf = (im: HTMLImageElement): string => im.alt || im.closest('figure')?.querySelector('figcaption')?.textContent || '';
-      // Every image of the same note, in order, so the arrows walk through them.
       const all = Array.from(t.closest('.note-body')!.querySelectorAll<HTMLImageElement>('img')).filter(
         (im) => !im.closest('a[href]') && (im.currentSrc || im.src),
       );

@@ -1,40 +1,28 @@
-// Custom select: a button (role=combobox) that opens a listbox popover, or a
-// bottom sheet list on phones. Keyboard: arrows, Home/End, PageUp/PageDown,
-// type-ahead, Enter/Space to choose, Esc to close, Tab to leave. Focus stays on
-// the button (or on the filter box when the list is searchable) and the active
-// option is announced through aria-activedescendant.
-
 import { attr, esc, useStyles } from '../dom';
+import { fadeScroll } from './scroll-fade';
 
 export interface SelectOption {
   value: string;
   label: string;
-  /** A second, quieter line under the label. */
   hint?: string;
-  /** Leading trusted HTML: an icon, an avatar, a monogram. */
+  /** Trusted HTML. */
   lead?: string;
-  /** Options with the same group are listed under one heading. */
   group?: string;
   disabled?: boolean;
 }
 
-export interface SelectConfig {
+interface SelectConfig {
   options: SelectOption[];
   value?: string;
-  /** Accessible name; also the heading of the bottom sheet on phones. */
+  /** Accessible name; also the phone sheet heading. */
   label: string;
-  /** Id of a visible label element; used instead of `label` as the name. */
   labelledBy?: string;
   placeholder?: string;
-  /** Adds a filter box above the options. */
   searchable?: boolean;
-  /** Extra classes on the button. */
   className?: string;
-  /** Trusted HTML for the button's content; the default is lead, label and a chevron. */
+  /** Trusted HTML for the button content. */
   render?: (o: SelectOption | undefined) => string;
-  /** Which edge of the button the popover lines up with. */
   align?: 'start' | 'end';
-  /** Minimum popover width in px (default: the button's width). */
   minWidth?: number;
   id?: string;
   disabled?: boolean;
@@ -55,13 +43,12 @@ const CHECK = '<svg class="ui-sel-ck" viewBox="0 0 24 24" aria-hidden="true"><pa
 const SEARCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>';
 
 const CSS = `
-.ui-sel{display:inline-flex;align-items:center;gap:9px;height:42px;min-width:0;max-width:100%;padding:0 10px 0 12px;border-radius:10px;
+.ui-sel{display:inline-flex;align-items:center;gap:8px;height:40px;min-width:0;max-width:100%;padding:0 10px 0 12px;border-radius:var(--r-sm);
   border:1px solid var(--line-strong);background:var(--field-bg,var(--surface-0));color:var(--fg);font-size:14px;text-align:left;cursor:pointer;
   transition:border-color .15s,box-shadow .15s,background .15s}
 .ui-sel:hover:not(:disabled){border-color:color-mix(in srgb,var(--fg) 26%,transparent)}
 .ui-sel:focus-visible,.ui-sel[aria-expanded=true]{outline:none;border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft)}
 .ui-sel:disabled{opacity:.5;cursor:not-allowed}
-.ui-sel.block{display:flex;width:100%}
 .ui-sel-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ui-sel-v.ph{color:var(--muted)}
 .ui-sel-chev{width:16px;height:16px;flex:none;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
@@ -70,24 +57,25 @@ const CSS = `
 .ui-sel .ui-sel-ld{display:grid;place-items:center;flex:none}
 
 .ui-sel-scrim{position:fixed;inset:0;z-index:86}
-.ui-sel-scrim.dim{background:rgba(3,6,12,.5);opacity:0;transition:opacity .2s var(--ease)}
-:root[data-theme=light] .ui-sel-scrim.dim{background:rgba(15,23,42,.3)}
+.ui-sel-scrim.dim{background:var(--scrim);-webkit-backdrop-filter:var(--scrim-filter);backdrop-filter:var(--scrim-filter);opacity:0;transition:opacity .2s var(--ease)}
 .ui-sel-scrim.dim.in{opacity:1}
 .ui-sel-pop{position:fixed;z-index:87;display:flex;flex-direction:column;min-width:180px;max-width:min(420px,calc(100vw - 16px));
-  background:var(--surface-1);border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;
+  background:var(--ovl-bg);-webkit-backdrop-filter:var(--ovl-filter);backdrop-filter:var(--ovl-filter);
+  border:1px solid var(--line-strong);border-top-color:var(--ovl-edge);border-radius:var(--r);box-shadow:none;overflow:hidden;
   animation:uiSelIn .14s var(--ease)}
 @keyframes uiSelIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .ui-sel-pop.up{animation-name:uiSelUp}
 @keyframes uiSelUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-.ui-sel-q{display:flex;align-items:center;gap:8px;margin:6px 6px 2px;padding:0 10px;height:38px;border-radius:9px;flex:none;
-  background:var(--surface-2);border:1px solid var(--line)}
+.ui-sel-q{display:flex;align-items:center;gap:8px;margin:4px 4px 2px;padding:0 10px;height:36px;border-radius:var(--r-sm);flex:none;
+  background:color-mix(in srgb,var(--fg) 4%,transparent);border:1px solid var(--line)}
 .ui-sel-q:focus-within{border-color:var(--accent-line)}
 .ui-sel-q svg{width:15px;height:15px;flex:none;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round}
 .ui-sel-q input{flex:1;min-width:0;height:100%;border:0;outline:none;background:none;padding:0;font-size:13.5px;color:var(--fg);box-shadow:none}
-.ui-sel-lb{list-style:none;margin:0;padding:5px;overflow-y:auto;overscroll-behavior:contain;flex:1;min-height:0}
-.ui-sel-g{padding:8px 10px 4px;font-size:11.5px;font-weight:650;color:var(--muted);letter-spacing:.02em}
+.ui-sel-lb{list-style:none;margin:0;padding:4px;overflow-y:auto;overscroll-behavior:contain;flex:1;min-height:0}
+.ui-sel-g{padding:8px 10px 4px;font-size:12px;font-weight:550;color:var(--muted)}
 .ui-sel-g:first-child{padding-top:4px}
-.ui-sel-o{display:flex;align-items:center;gap:10px;min-height:38px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;
+.ui-sel-g:not(:first-child){margin-top:4px;border-top:1px solid var(--line);padding-top:10px}
+.ui-sel-o{display:flex;align-items:center;gap:10px;min-height:34px;padding:6px 10px;border-radius:var(--r-xs);cursor:pointer;font-size:13.5px;
   color:var(--fg);user-select:none}
 .ui-sel-o.on{background:var(--hover)}
 .ui-sel-o[aria-disabled=true]{opacity:.45;cursor:not-allowed}
@@ -100,15 +88,18 @@ const CSS = `
 .ui-sel-o[aria-selected=true] .tx b{font-weight:650}
 .ui-sel-empty{margin:0;padding:14px 12px 16px;text-align:center;font-size:12.5px;color:var(--muted)}
 .ui-sel-h{display:none}
-.ui-sel-pop.sheet{left:0;right:0;bottom:0;top:auto;max-width:none;width:auto;max-height:min(80vh,560px);border-radius:20px 20px 0 0;border-bottom:0;
+.ui-sel-pop.sheet{left:0;right:0;bottom:0;top:auto;max-width:none;width:auto;max-height:88dvh;border-radius:var(--r) var(--r) 0 0;border-bottom:0;
   padding-bottom:env(safe-area-inset-bottom);animation:none;transform:translateY(100%);transition:transform .22s var(--ease)}
 .ui-sel-pop.sheet.in{transform:none}
-.ui-sel-pop.sheet .ui-sel-h{display:flex;flex-direction:column;align-items:stretch;flex:none;padding:0 18px 8px}
-.ui-sel-pop.sheet .ui-sel-h i{display:block;width:38px;height:4px;border-radius:99px;background:var(--line-strong);margin:8px auto 12px}
-.ui-sel-pop.sheet .ui-sel-h b{font-size:15px;font-weight:680}
-.ui-sel-pop.sheet .ui-sel-q{margin:2px 12px 6px;height:44px}
+.ui-sel-pop.sheet .ui-sel-h{display:grid;grid-template-columns:1fr auto;align-items:center;flex:none;padding:0 8px 8px 16px;border-bottom:1px solid var(--line)}
+.ui-sel-pop.sheet .ui-sel-h i{grid-column:1/-1;display:block;width:36px;height:4px;border-radius:99px;background:var(--line-strong);margin:8px auto 4px}
+.ui-sel-pop.sheet .ui-sel-h b{font-size:16px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ui-sel-x{all:unset;cursor:pointer;display:grid;place-items:center;width:44px;height:44px;border-radius:var(--r-sm);color:var(--muted)}
+.ui-sel-x:hover{background:var(--hover);color:var(--fg)}
+.ui-sel-x svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.ui-sel-pop.sheet .ui-sel-q{margin:8px 12px 4px;height:44px}
 .ui-sel-pop.sheet .ui-sel-lb{padding:4px 8px 10px}
-.ui-sel-pop.sheet .ui-sel-o{min-height:52px;padding:10px 12px;border-radius:12px;font-size:15px}
+.ui-sel-pop.sheet .ui-sel-o{min-height:48px;padding:10px 12px;border-radius:var(--r-sm);font-size:15px}
 .ui-sel-pop.sheet .ui-sel-o.on{background:transparent}
 .ui-sel-pop.sheet .ui-sel-o:active{background:var(--hover)}
 .ui-sel-pop.sheet .ui-sel-o[aria-selected=true]{background:var(--accent-soft)}
@@ -120,11 +111,6 @@ const CSS = `
 const MOBILE = '(max-width: 760px)';
 let seq = 0;
 let current: { close: (focus: boolean) => void } | null = null;
-
-/** Close whichever select popover is open. */
-export function closeSelects(): void {
-  current?.close(false);
-}
 
 export function createSelect(cfg: SelectConfig): Select {
   useStyles('ui-select-css', CSS);
@@ -154,7 +140,6 @@ export function createSelect(cfg: SelectConfig): Select {
   };
   paintButton();
 
-  // ── popover state
   let pop: HTMLElement | null = null;
   let scrim: HTMLElement | null = null;
   let list: HTMLElement | null = null;
@@ -251,7 +236,7 @@ export function createSelect(cfg: SelectConfig): Select {
     bufAt = now;
     const pool = pick ? options.map((_, i) => i) : shown;
     const from = pick ? options.findIndex((o) => o.value === value) : active;
-    // Repeating one letter cycles through its matches; a longer word refines the current one.
+    // Repeating one letter cycles its matches; a longer word refines.
     const same = buf.split('').every((c) => c === buf[0]);
     const needle = same ? buf[0] : buf;
     const start = same ? from + 1 : Math.max(from, 0);
@@ -318,7 +303,7 @@ export function createSelect(cfg: SelectConfig): Select {
     scrim.className = 'ui-sel-scrim' + (sheet ? ' dim' : '');
     pop = document.createElement('div');
     pop.className = 'ui-sel-pop' + (sheet ? ' sheet' : '');
-    pop.innerHTML = `<div class="ui-sel-h" aria-hidden="true"><i></i><b>${esc(cfg.label)}</b></div>${
+    pop.innerHTML = `<div class="ui-sel-h"><i aria-hidden="true"></i><b aria-hidden="true">${esc(cfg.label)}</b><button type="button" class="ui-sel-x" aria-label="Close" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>${
       cfg.searchable
         ? `<label class="ui-sel-q">${SEARCH}<span class="sr-only">Filter</span><input type="text" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="${attr(
             uid,
@@ -327,6 +312,8 @@ export function createSelect(cfg: SelectConfig): Select {
     }<ul class="ui-sel-lb" role="listbox" id="${attr(uid)}-lb" aria-label="${attr(cfg.label)}" tabindex="-1"></ul><p class="ui-sel-empty" hidden>Nothing matches</p>`;
     list = pop.querySelector('.ui-sel-lb');
     input = pop.querySelector('input');
+    fadeScroll(list);
+    pop.querySelector<HTMLElement>('.ui-sel-x')!.onclick = () => close(true);
     document.body.append(scrim, pop);
     btn.setAttribute('aria-expanded', 'true');
     paintList();
@@ -423,7 +410,6 @@ export function createSelect(cfg: SelectConfig): Select {
   };
 }
 
-/** Put a select where `slot` is (a placeholder element in rendered markup). */
 export function mountSelect(slot: Element | null, cfg: SelectConfig): Select {
   const s = createSelect(cfg);
   slot?.replaceWith(s.el);

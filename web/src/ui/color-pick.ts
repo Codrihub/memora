@@ -1,7 +1,3 @@
-// A color field: preset swatches, a free color box (native picker) and a hex
-// input. Used for API key colors and folder colors. The value is a lowercase
-// "#rrggbb", or "" for "automatic" (when `auto` is offered).
-
 import { attr, esc, useStyles } from '../dom';
 import { AGENT_PALETTE } from '../control/agents';
 
@@ -31,7 +27,6 @@ function normHex(v: string): string | null {
   return null;
 }
 
-/** Markup of a color field with the given id; `auto` adds an "automatic" swatch. */
 export function colorPickHTML(id: string, value: string, opts: { auto?: boolean; presets?: readonly string[] } = {}): string {
   useStyles('cpk-css', CSS);
   const presets = opts.presets || AGENT_PALETTE;
@@ -50,7 +45,7 @@ export function colorPickHTML(id: string, value: string, opts: { auto?: boolean;
   </div>`;
 }
 
-/** Wire a field made by `colorPickHTML`; `onChange` gets "#rrggbb" or "". */
+/** `onChange` gets a lowercase "#rrggbb", or "" for automatic. */
 export function wireColorPick(root: ParentNode, id: string, onChange?: (v: string) => void): () => string {
   const box = root.querySelector<HTMLElement>('#' + id)!;
   const hex = box.querySelector<HTMLInputElement>('.cpk-hex')!;

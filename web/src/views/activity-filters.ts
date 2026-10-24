@@ -1,11 +1,9 @@
-// The Activity filter sheet: Time, Status, Action type, Source and Agents in
-// one panel. A side sheet on desktop and tablet, a bottom sheet on phones
-// (openDrawer). Every change applies at once; counts are facet counts (each
-// group counts as if its own selection were empty).
+// The Activity filter sheet. Changes apply at once; each group's counts ignore its own selection.
 
 import { attr, esc } from '../dom';
 import { agentColor, avatarHTML } from '../control/agents';
-import { verb, type ActivityItem, type Source } from '../control/feed';
+import type { ActivityItem, Source } from '../control/feed';
+import { actionLabel, isSystem } from '../control/sentence';
 import { ago, ICO, openDrawer, plural } from '../control/ui';
 import {
   CATS,
@@ -26,7 +24,7 @@ import {
 } from './activity-model';
 import { CAT_COLOR } from './activity-views';
 
-export interface SheetCtx {
+interface SheetCtx {
   /** Events of the selected time range (before the other filters). */
   scoped(): ActivityItem[];
   agents(): AgentInfo[];
@@ -68,6 +66,7 @@ function bodyHTML(ctx: SheetCtx): string {
     scoped.filter((x) => matches(x, 'agents')),
     (x) => x.actor,
   );
+  const sysN = scoped.filter((x) => isSystem(x)).length;
   const today = isoDay(Date.now() / 1000);
   const actList = [...acts.entries()].sort((a, b) => b[1] - a[1]);
   F.actions.forEach((a) => acts.has(a) || actList.push([a, 0]));
@@ -85,7 +84,7 @@ function bodyHTML(ctx: SheetCtx): string {
         )}" aria-pressed="${on}" style="--ag:${agentColor(a.name, a.id)}">${avatarHTML(a.name, 30, a.cls === 'active' ? 'live' : '', a.id)}
           <span class="t"><b>${esc(a.name)}</b><small>${
             a.lastTs ? `Last seen ${esc(ago(a.lastTs))}` : 'No activity yet'
-          }${a.disabled ? ' · disabled' : ''}</small></span><span class="n">${n}</span><span class="ax-box">${CSS_CHECK}</span></button>`;
+          }${a.disabled ? ' · turned off' : ''}</small></span><span class="n">${n}</span><span class="ax-box">${CSS_CHECK}</span></button>`;
       })
       .join('')}`;
   }
@@ -97,12 +96,12 @@ function bodyHTML(ctx: SheetCtx): string {
         <label><span>To</span><input type="date" data-date="to" value="${attr(F.to)}" max="${today}"></label>
       </div>
     </section>
-    <section class="ax-fg"><h3>Status</h3>
+    <section class="ax-fg"><h3>Result</h3>
       <div class="ax-opts">${STATUSES.map((s) =>
         opt('status', s.id, s.label, F.status.has(s.id), st.get(s.id) || 0, `<span class="cc-dot ${s.id === 'fail' ? 'err' : s.id === 'running' ? 'run' : 'ok'}"></span>`),
       ).join('')}</div>
     </section>
-    <section class="ax-fg"><h3>Action type</h3>
+    <section class="ax-fg"><h3>What</h3>
       <div class="ax-opts">${CATS.filter((c) => c.id !== 'other' || cats.get(c.id) || F.cats.has(c.id)).map((c) =>
         opt('cats', c.id, c.label, F.cats.has(c.id), cats.get(c.id) || 0, `<i class="sw" style="--c:${CAT_COLOR[c.id]}"></i>`, c.hint),
       ).join('')}</div>
@@ -110,21 +109,30 @@ function bodyHTML(ctx: SheetCtx): string {
         actList.length
           ? `<details class="ax-acts"${actionsOpen || F.actions.size ? ' open' : ''}><summary>Specific actions<span class="n">${actList.length}</span></summary>
         <div class="ax-opts">${actList
-          .map(([a, n]) => opt('actions', a, verb(a), F.actions.has(a), n))
+          .map(([a, n]) => opt('actions', a, actionLabel(a, catRows.find((x) => x.action === a)?.source), F.actions.has(a), n, '', a))
           .join('')}</div></details>`
           : ''
       }
     </section>
-    <section class="ax-fg"><h3>Source</h3>
+    <section class="ax-fg"><h3>Where it came from</h3>
       <div class="ax-opts">${SRCS.map((s) => opt('srcs', s.id, s.label, F.srcs.has(s.id), srcs.get(s.id) || 0, '', s.hint)).join('')}</div>
+      <div class="ax-opts ax-sysopt">${opt(
+        'system',
+        '1',
+        'Include system lines',
+        F.system,
+        sysN,
+        '',
+        'Server and sign-in events, the console, and note saves that repeat an AI’s own action',
+      )}</div>
     </section>
-    <section class="ax-fg"><h3>Agents${F.agents.size ? `<button type="button" class="ax-lnk" data-k="agents-clear">All agents</button>` : ''}</h3>
+    <section class="ax-fg"><h3>AIs and people${F.agents.size ? `<button type="button" class="ax-lnk" data-k="agents-clear">Everyone</button>` : ''}</h3>
       ${
         agents.length > 6
-          ? `<label class="ax-agq">${ICO.search}<span class="sr-only">Find an agent</span><input type="search" placeholder="Find an agent" autocomplete="off"></label>`
+          ? `<label class="ax-agq">${ICO.search}<span class="sr-only">Find an AI</span><input type="search" placeholder="Find an AI" autocomplete="off"></label>`
           : ''
       }
-      <div class="ax-aglist">${agHTML || '<div class="cc-muted" style="font-size:13px">No agents yet</div>'}</div>
+      <div class="ax-aglist">${agHTML || '<div class="cc-muted" style="font-size:13px">No AIs yet</div>'}</div>
     </section>
   </div>`;
 }
@@ -157,9 +165,9 @@ function paint(): void {
   });
   const n = ctx.scoped().filter((x) => matches(x)).length;
   const done = d.querySelector<HTMLElement>('[data-done]');
-  if (done) done.textContent = `Show ${plural(n, 'event')}`;
+  if (done) done.textContent = `Show ${plural(n, 'action')}`;
   const sub = d.querySelector<HTMLElement>('.cc-drawer-h .s');
-  if (sub) sub.textContent = `${n} of ${ctx.scoped().length} events match`;
+  if (sub) sub.textContent = `${n} of ${plural(ctx.scoped().length, 'action')} match`;
 }
 
 function filterAgents(d: HTMLElement, q: string): void {
@@ -183,7 +191,7 @@ export function openFilters(ctx: SheetCtx): void {
     title: 'Filters',
     sub: ' ',
     body: '',
-    foot: `<button type="button" class="btn ghost" data-reset>Reset</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>Show events</button>`,
+    foot: `<button type="button" class="btn ghost" data-reset>Reset</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>Show actions</button>`,
   });
   d.classList.add('ax-sheet');
   sheet = { d, ctx };
@@ -215,6 +223,7 @@ export function openFilters(ctx: SheetCtx): void {
       else if (k === 'srcs') toggle(F.srcs, v as Source);
       else if (k === 'agents') toggle(F.agents, v);
       else if (k === 'agents-clear') F.agents.clear();
+      else if (k === 'system') F.system = !F.system;
       ctx.changed('local');
     }
     paint();

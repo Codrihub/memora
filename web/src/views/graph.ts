@@ -1,11 +1,15 @@
-// Graph view: a live, physics-driven 2D knowledge graph. The implementation
-// lives in ../graph/*; this module only mounts it and wires the router's stop.
+// Graph view: mounts ../graph/* and wires the router's stop.
 
 import { GraphApp } from '../graph/app';
 import { state } from '../state';
 import { setFlightTarget } from '../ui/agent-flight';
 
 let app: GraphApp | null = null;
+
+/** Entering Graph (ui/map-enter.ts): zoom to fit the whole graph. */
+export function enterGraph(): void {
+  app?.fitAll(500);
+}
 
 export async function renderGraph(): Promise<void> {
   const host = document.getElementById('view-graph');

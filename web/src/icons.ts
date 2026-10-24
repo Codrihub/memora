@@ -1,5 +1,3 @@
-// Inline SVG icons used when rows and buttons are built at runtime.
-
 export const CARET =
   '<svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>';
 

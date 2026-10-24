@@ -1,12 +1,12 @@
-// Response shapes of the /api endpoints the UI reads. Only the fields the
-// browser actually consumes are typed, so an extra server field never breaks
-// the build. Optional fields are marked optional on purpose.
+// Response shapes of the /api endpoints; only the fields the browser reads are typed.
 
 export interface NoteRef {
   path: string;
   name: string;
   folder: string;
   mtime: number;
+  /** What the note is called on screen (front matter title, first heading or the file name). */
+  title?: string;
 }
 
 /** Folder name to note list. */
@@ -51,7 +51,6 @@ export interface GraphLink {
   target: string;
 }
 
-/** The /api/graph payload. */
 export interface GraphData {
   nodes?: GraphNode[];
   links?: GraphLink[];
@@ -147,24 +146,6 @@ export interface LogsResult {
   events?: LogEvent[];
 }
 
-export interface ActorRow {
-  actor?: string;
-  alias?: string;
-  events?: number;
-  tools?: string[];
-  last_ip?: string;
-  last_ts?: number;
-  seen_minutes_ago?: number;
-}
-
-export interface ActorsResult {
-  actors?: ActorRow[];
-}
-
-export interface AliasesResult {
-  aliases?: Record<string, string>;
-}
-
 export interface KeyRow {
   id: string;
   name?: string;
@@ -194,7 +175,6 @@ export interface KeyCreated {
   secret?: string;
 }
 
-/** What an API key may do. */
 export type KeyScope = 'mcp' | 'read' | 'write' | 'admin';
 
 /** Per key MCP tool access: every tool, or only the listed names. */
@@ -248,19 +228,12 @@ export interface AccessTestResult {
   would_lock_out_caller?: boolean;
 }
 
-export interface DeleteFolderResult {
-  ok?: boolean;
-  deleted_folder?: string;
-  moved_to_root?: string[];
-}
-
 export interface OkResult {
   ok?: boolean;
   path?: string;
   [key: string]: unknown;
 }
 
-/** Frames pushed over /ws. */
 export interface WsEvent {
   type?: string;
   clients?: number;

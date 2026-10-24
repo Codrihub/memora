@@ -1,41 +1,49 @@
-// Notifications: one stack at the top right, just under the header. The newest
-// sits on top and pushes the others down. At most five stay; the bottom one
-// leaves faster the fuller the stack gets, so the newest is always readable.
-// Hover pauses them; swipe right or press × to dismiss one.
+// App-wide notification stack. Errors stay until dismissed; a toast with a `group` is updated in place.
 
 import { $, el, esc } from './dom';
 import { icon } from './ui/icons';
 
-export type ToastKind = 'ok' | 'warn' | 'err' | 'info';
+type ToastKind = 'ok' | 'warn' | 'err' | 'info';
 
-export interface ToastAction {
+interface ToastAction {
   label: string;
   icon?: string;
   run: () => void | Promise<void>;
 }
 
+interface ToastOptions {
+  group?: string;
+  /** Markup for the icon slot (an agent avatar), instead of the kind's icon. */
+  iconHtml?: string;
+}
+
 const ICON: Record<ToastKind, string> = { ok: 'check', warn: 'alert', err: 'alert', info: 'info' };
-const MAX = 5;
-/** Bottom toast's remaining time once the stack holds 4 / 5 toasts (ms). */
-const RUSH = [Infinity, Infinity, Infinity, Infinity, 2200, 900];
+const VISIBLE = 3;
+const KEEP = 12;
 
 interface Live {
   node: HTMLElement;
   until: number;
-  total: number;
   timer: number;
   left: number;
+  sticky: boolean;
+  group?: string;
 }
 
+/** Newest first. */
 const live: Live[] = [];
 let paused = false;
+let expanded = false;
+
+const reduced = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 function host(): HTMLElement {
   return $('#toasts');
 }
 
-/** Slide every toast from where it was to where it is now (FLIP). */
+/** FLIP animation from the previous positions. */
 function flip(before: Map<HTMLElement, number>): void {
+  if (reduced()) return;
   for (const t of live) {
     const prev = before.get(t.node);
     if (prev == null) continue;
@@ -56,30 +64,46 @@ function positions(): Map<HTMLElement, number> {
 
 function arm(t: Live, ms: number): void {
   window.clearTimeout(t.timer);
+  if (t.sticky) return;
   t.left = ms;
   t.until = Date.now() + ms;
-  const bar = t.node.querySelector<HTMLElement>('.t-bar');
-  if (bar) {
-    bar.style.transition = 'none';
-    bar.style.transform = `scaleX(${Math.max(0, Math.min(1, ms / t.total))})`;
-    requestAnimationFrame(() => {
-      bar.style.transition = `transform ${ms}ms linear`;
-      bar.style.transform = 'scaleX(0)';
-    });
-  }
   if (!paused) t.timer = window.setTimeout(() => dismiss(t.node), ms);
 }
 
-/** Shorten the bottom toast's time as the stack fills up. */
-function rush(): void {
-  const bottom = live[live.length - 1];
-  if (!bottom) return;
-  const cap = RUSH[Math.min(live.length, RUSH.length - 1)];
-  const left = bottom.until - Date.now();
-  if (cap < left) arm(bottom, cap);
+/** `--toasts-h` lets the scroll-to-top button rise above the stack. */
+function layout(): void {
+  const box = host();
+  if (!box.classList) return;
+  const extra = Math.max(0, live.length - VISIBLE);
+  if (!extra) expanded = false;
+  live.forEach((t, i) => t.node.classList.toggle('stowed', !expanded && i >= VISIBLE));
+  let more = box.querySelector<HTMLButtonElement>('.t-more');
+  if (extra && !more) {
+    more = el('button', 't-more') as HTMLButtonElement;
+    more.type = 'button';
+    more.onclick = () => {
+      const before = positions();
+      expanded = !expanded;
+      layout();
+      flip(before);
+    };
+    box.prepend(more);
+  }
+  if (more) {
+    if (!extra) more.remove();
+    else {
+      more.textContent = expanded ? 'Show fewer' : `+${extra} more`;
+      more.setAttribute('aria-expanded', String(expanded));
+      more.setAttribute('aria-label', expanded ? 'Show only the latest notifications' : `Show ${extra} more notification${extra === 1 ? '' : 's'}`);
+    }
+  }
+  box.classList.toggle('expanded', expanded);
+  // Measured after the stowed ones are gone from the flow.
+  const h = live.length ? Math.ceil(box.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty('--toasts-h', h ? h + 12 + 'px' : '0px');
 }
 
-export function dismiss(node: HTMLElement, fast = false): void {
+function dismiss(node: HTMLElement, fast = false): void {
   const i = live.findIndex((t) => t.node === node);
   if (i < 0) return;
   const [t] = live.splice(i, 1);
@@ -90,11 +114,20 @@ export function dismiss(node: HTMLElement, fast = false): void {
   window.setTimeout(
     () => {
       node.remove();
+      layout();
       flip(before);
-      rush();
     },
-    fast ? 160 : 260,
+    reduced() ? 0 : fast ? 160 : 260,
   );
+}
+
+export function dismissGroup(group: string): void {
+  const t = live.find((x) => x.group === group);
+  if (t) dismiss(t.node, true);
+}
+
+export function groupAlive(group: string): boolean {
+  return live.some((x) => x.group === group);
 }
 
 function swipe(node: HTMLElement): void {
@@ -132,24 +165,14 @@ function swipe(node: HTMLElement): void {
   node.addEventListener('pointercancel', end);
 }
 
-/** Show a notification. */
-export function notify(msg: string, kind: ToastKind = 'ok', ms = 4200, action?: ToastAction): void {
-  const box = host();
-  if (!box.classList) return;
-  const node = el(
-    'div',
-    'toast ' + kind,
-    `<span class="t-ico">${icon(ICON[kind] || 'info')}</span><span class="t-msg">${esc(msg)}</span>${
-      action ? `<button type="button" class="t-act">${action.icon || ''}${esc(action.label)}</button>` : ''
-    }<button type="button" class="t-x" aria-label="Dismiss">${icon('close')}</button><span class="t-bar" aria-hidden="true"></span>`,
-  );
-  node.setAttribute('role', kind === 'err' ? 'alert' : 'status');
-  const before = positions();
-  box.prepend(node);
-  const t: Live = { node, until: 0, total: ms, timer: 0, left: ms };
-  live.unshift(t);
-  flip(before);
-  arm(t, ms);
+function fill(node: HTMLElement, msg: string, kind: ToastKind, action?: ToastAction, opts?: ToastOptions): void {
+  node.className = 'toast ' + kind + (opts?.iconHtml ? ' has-av' : '');
+  node.innerHTML = `<span class="t-ico">${opts?.iconHtml || icon(ICON[kind] || 'info')}</span><span class="t-msg">${esc(msg)}</span>${
+    action ? `<button type="button" class="t-act">${action.icon || ''}${esc(action.label)}</button>` : ''
+  }<button type="button" class="t-x" aria-label="Dismiss" title="Dismiss">${icon('close')}</button>`;
+  // Errors interrupt; the rest is read out politely by the stack's live region.
+  if (kind === 'err') node.setAttribute('role', 'alert');
+  else node.removeAttribute('role');
   node.querySelector<HTMLButtonElement>('.t-x')!.onclick = () => dismiss(node, true);
   const act = node.querySelector<HTMLButtonElement>('.t-act');
   if (act && action) {
@@ -159,10 +182,45 @@ export function notify(msg: string, kind: ToastKind = 'ok', ms = 4200, action?: 
       await action.run();
     };
   }
+}
+
+export function notify(msg: string, kind: ToastKind = 'ok', ms = 4200, action?: ToastAction, opts?: ToastOptions): void {
+  const box = host();
+  if (!box.classList) return;
+  const sticky = kind === 'err';
+  const before = positions();
+  const same = opts?.group ? live.find((x) => x.group === opts.group) : undefined;
+  if (same) {
+    live.splice(live.indexOf(same), 1);
+    live.unshift(same);
+    same.sticky = sticky;
+    fill(same.node, msg, kind, action, opts);
+    box.appendChild(same.node);
+    if (!reduced()) {
+      same.node.classList.remove('bump');
+      void same.node.offsetWidth;
+      same.node.classList.add('bump');
+    }
+    layout();
+    flip(before);
+    arm(same, ms);
+    return;
+  }
+  const node = el('div', 'toast');
+  fill(node, msg, kind, action, opts);
+  box.appendChild(node);
+  const t: Live = { node, until: 0, timer: 0, left: ms, sticky, group: opts?.group };
+  live.unshift(t);
   swipe(node);
-  // Over the limit: the oldest leaves at once.
-  while (live.length > MAX) dismiss(live[live.length - 1].node, true);
-  rush();
+  while (live.length > KEEP) {
+    const old = [...live].reverse().find((x) => !x.sticky) || live[live.length - 1];
+    live.splice(live.indexOf(old), 1);
+    window.clearTimeout(old.timer);
+    old.node.remove();
+  }
+  layout();
+  flip(before);
+  arm(t, ms);
 }
 
 export function toast(msg: string, kind: ToastKind = 'ok', ms = 4200): void {
@@ -180,18 +238,19 @@ export function initToasts(): void {
     paused = true;
     for (const t of live) {
       window.clearTimeout(t.timer);
+      if (t.sticky) continue;
       t.left = Math.max(600, t.until - Date.now());
-      const bar = t.node.querySelector<HTMLElement>('.t-bar');
-      if (bar) {
-        const now = getComputedStyle(bar).transform;
-        bar.style.transition = 'none';
-        bar.style.transform = now === 'none' ? '' : now;
-      }
     }
   });
   box.addEventListener('pointerleave', () => {
     paused = false;
+    if (expanded) {
+      const before = positions();
+      expanded = false;
+      layout();
+      flip(before);
+    }
     for (const t of live) arm(t, Math.max(1200, t.left));
-    rush();
   });
+  window.addEventListener('resize', () => layout(), { passive: true });
 }

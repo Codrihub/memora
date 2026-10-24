@@ -1,8 +1,19 @@
 (() => {
-  const VERSION = "memora-v1.3.8";
-  const SHELL = "shell-" + VERSION;
+  const BUILD = "memora-build:9f9e01fca37b".slice("memora-build:".length);
+  const APP_JS = "/app.js?v=1e891249ade2";
+  const VERSION = BUILD;
+  const SHELL = "memora-" + BUILD;
   const sw = self;
-  const OFFLINE_FILES = ["/offline.html", "/icon-192.png", "/icon-512.png"];
+  const BUILD_FILES = [
+    APP_JS,
+    "/offline.html",
+    "/manifest.webmanifest",
+    "/favicon.svg",
+    "/apple-touch-icon.png",
+    "/icon-192.png",
+    "/icon-512.png"
+  ];
+  const CACHED = new Set(BUILD_FILES);
   const NEVER_CACHE = [
     "/api/",
     "/mcp",
@@ -19,7 +30,7 @@
       (async () => {
         const cache = await caches.open(SHELL);
         await Promise.all(
-          OFFLINE_FILES.map((u) => cache.add(new Request(u, { cache: "reload" })).catch(() => null))
+          BUILD_FILES.map((u) => cache.add(new Request(u, { cache: "reload" })).catch(() => null))
         );
         await sw.skipWaiting();
       })()
@@ -29,7 +40,7 @@
     event.waitUntil(
       (async () => {
         const names = await caches.keys();
-        const older = names.filter((n) => n !== SHELL);
+        const older = names.filter((n) => n !== SHELL && (n.startsWith("memora-") || n.startsWith("shell-")));
         await Promise.all(older.map((n) => caches.delete(n)));
         if (sw.registration.navigationPreload) {
           await sw.registration.navigationPreload.disable().catch(() => null);
@@ -68,11 +79,23 @@
     return NEVER_CACHE.some((p) => pathname === p || pathname.startsWith(p));
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function fromBuild(req) {
+    const cache = await caches.open(SHELL);
+    const hit = await cache.match(req, { ignoreVary: true });
+    if (hit) return hit;
+    const res = await fetch(req);
+    if (res.ok) await cache.put(req, res.clone()).catch(() => null);
+    return res;
+  }
   sw.addEventListener("fetch", ((event) => {
     const req = event.request;
-    if (req.method !== "GET" || req.mode !== "navigate") return;
+    if (req.method !== "GET") return;
     const url = new URL(req.url);
     if (url.origin !== sw.location.origin) return;
+    if (req.mode !== "navigate") {
+      if (CACHED.has(url.pathname + url.search)) event.respondWith(fromBuild(req));
+      return;
+    }
     if (isNever(url.pathname)) return;
     event.respondWith(
       (async () => {

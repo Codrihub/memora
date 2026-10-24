@@ -1,10 +1,7 @@
-// localStorage and sessionStorage access. The `memora.` key names are part of
-// the stored format: renaming one would drop users' preferences or folder
-// expansion state.
+// The `memora.` key names are part of the stored format: never rename them.
 
-/** Pins as kept by releases before 1.2.2 (now on the server; read once to upload). */
+/** Legacy local pins, read once to upload to the server. */
 const LS_PINS = 'memora.pins.v3';
-/** Display order of those pins (`n:<path>` / `f:<path>`). */
 const LS_PIN_ORDER = 'memora.pinorder.v1';
 const LS_UI = 'memora.ui.v3';
 const LS_OPEN = 'memora.openfolders.v3';
@@ -12,7 +9,7 @@ const LS_UPDATE = 'memora.updateNotice';
 const LS_TOASTS = 'memora.toasts.v1';
 const SS_TAGIDX = 'memora.tagidx';
 
-export interface LegacyPin {
+interface LegacyPin {
   kind: 'note' | 'folder';
   path: string;
 }
@@ -57,7 +54,7 @@ function field(v: unknown, k: string): unknown {
 export const ui: UiPrefs = { collapsed: field(read('local', LS_UI), 'collapsed') === true };
 
 /** Activity toasts: `off` silences every one; `muted` lists API key ids. */
-export interface ToastPrefs {
+interface ToastPrefs {
   off: boolean;
   muted: string[];
 }
@@ -72,16 +69,21 @@ export function saveToastPrefs(): void {
   write('local', LS_TOASTS, toastPrefs);
 }
 
-/**
- * Whether an agent's activity may toast. The global switch wins: when it is
- * off nothing toasts, whatever a key says. Otherwise a muted key stays quiet.
- */
 export function activityToastAllowed(keyId: string): boolean {
   if (toastPrefs.off) return false;
-  return !keyId || !toastPrefs.muted.includes(keyId);
+  return !keyId || (!toastPrefs.muted.includes(keyId) && !quiet.has(keyId));
 }
 
-/** This browser's pre-1.2.2 pins in their display order (empty when there are none). */
+/** Keys whose activity a screen already shows live (not saved). */
+const quiet = new Set<string>();
+
+/** Returns the undo. */
+export function quietToasts(keyId: string): () => void {
+  quiet.add(keyId);
+  return () => quiet.delete(keyId);
+}
+
+/** This browser's legacy pins in their display order. */
 export function legacyPins(): LegacyPin[] {
   const stored = read('local', LS_PINS);
   const rank = new Map(strings(read('local', LS_PIN_ORDER)).map((id, i) => [id, i]));
@@ -92,7 +94,6 @@ export function legacyPins(): LegacyPin[] {
   ].sort((a, b) => (rank.get(id(a)) ?? 1e9) - (rank.get(id(b)) ?? 1e9));
 }
 
-/** Forget the pre-1.2.2 pins once the server holds the list. */
 export function clearLegacyPins(): void {
   try {
     localStorage.removeItem(LS_PINS);

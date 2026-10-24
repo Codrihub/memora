@@ -1,12 +1,11 @@
-// Folder picker: a branch-style tree like the sidebar (Root at the top,
-// chevrons, folder icons, indent guides) with a search box that finds folders
-// at any depth by name or full path. Used by the New node dialog, every
-// "Move to" dialog and the destination step of the folder delete.
+// Folder picker: a sidebar-style folder tree with a search box that finds folders at any depth.
 
 import { attr, el, esc, useStyles } from '../dom';
 import { Modal } from '../modal';
+import { INDENT_CAP } from './drag';
 import { I, folderGlyph } from './icons';
-import { folderColor, folderIcon, folderTree, type FolderNode } from './store';
+import { folderColor, folderIcon, folderTree, ROOT_LABEL, type FolderNode } from './store';
+import { fadeScroll } from '../ui/scroll-fade';
 import {
   ancestorsOf,
   breadcrumbPieces,
@@ -19,10 +18,7 @@ import {
   type Piece,
 } from './folder-tree';
 
-/** Indent stops growing past this level; deeper rows show their level instead. */
-const INDENT_CAP = 6;
-
-export interface FolderPickerOptions {
+interface FolderPickerOptions {
   /** Every folder path to offer (ancestors are filled in; '' is the root and always shown). */
   folders: string[];
   /** Selected at start ('' = root). Its ancestors are expanded. */
@@ -58,7 +54,7 @@ function crumbHTML(segs: Piece[][]): string {
 }
 
 /** A breadcrumb; with `keep`, only the last `keep` levels after "…". */
-export function breadcrumb(path: string, rootLabel = 'Root', keep = 0): string {
+export function breadcrumb(path: string, rootLabel = ROOT_LABEL, keep = 0): string {
   if (!path) return esc(rootLabel);
   const segs = breadcrumbPieces(path, []);
   if (!keep || segs.length <= keep) return crumbHTML(segs);
@@ -68,7 +64,7 @@ export function breadcrumb(path: string, rootLabel = 'Root', keep = 0): string {
 export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   useStyles('fp-css', FP_CSS);
   const id = 'fp' + ++seq;
-  const rootLabel = opts.rootLabel || 'Root';
+  const rootLabel = opts.rootLabel || ROOT_LABEL;
   const tree = buildPickTree(opts.folders, opts.exclude || []);
   const total = tree.byPath.size - 1;
   const offReason = (p: string): string | false => (opts.disabled ? opts.disabled(p) : false);
@@ -100,6 +96,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
 <div class="fp-foot"><span class="fp-status" aria-live="polite"></span><span class="fp-chosen"></span></div>`;
   const q = box.querySelector<HTMLInputElement>('.fp-q')!;
   const list = box.querySelector<HTMLElement>('.fp-tree')!;
+  fadeScroll(list);
   const status = box.querySelector<HTMLElement>('.fp-status')!;
   const chosen = box.querySelector<HTMLElement>('.fp-chosen')!;
 
@@ -128,7 +125,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
       opts.current != null && n.path === opts.current ? '<em class="fp-tag">current</em>' : '',
       root ? '<em class="fp-tag soft">top level</em>' : '',
     ].join('');
-    const tip = (root ? rootLabel + ' (top level of the vault)' : n.path) + (off ? ' · ' + off : '');
+    const tip = (root ? rootLabel + ' (the top level)' : n.path) + (off ? ' · ' + off : '');
     return `<div class="fp-row${root ? ' root' : ''}${sel ? ' sel' : ''}${i === active ? ' kb' : ''}${off ? ' off' : ''}${
       matches && !r.match && !root ? ' anc' : ''
     }${sub ? ' two' : ''}" role="treeitem" id="${id}-r${i}" data-i="${i}" aria-level="${n.depth + 1}"${
@@ -241,8 +238,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
       if (rows[active]) pick(rows[active].node.path);
     }
   });
-  // Esc in a filled search box clears it instead of closing the dialog. The
-  // dialog listens on document (capture), so this listens on window, earlier.
+  // Esc in a filled search box clears it instead of closing the dialog (window capture runs before the dialog's).
   const onEsc = (e: KeyboardEvent): void => {
     if (!box.isConnected) {
       window.removeEventListener('keydown', onEsc, true);
@@ -344,7 +340,6 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   rows = visibleRows(tree, expanded);
   active = Math.max(0, rows.findIndex((r) => r.node.path === value));
   draw(false);
-  // Once in the page: bring the selection into view.
   requestAnimationFrame(() => scrollToActive());
 
   return {
@@ -356,7 +351,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   };
 }
 
-export interface PickFolderDialog {
+interface PickFolderDialog {
   title: string;
   folders: string[];
   current?: string | null;
@@ -364,7 +359,7 @@ export interface PickFolderDialog {
   value?: string;
   exclude?: string[];
   disabled?: (path: string) => string | false;
-  /** Primary button text; gets the folder name appended. */
+  /** Primary button text. */
   verb?: string;
   run: (folder: string) => void;
 }
@@ -419,12 +414,13 @@ const FP_CSS = `
 .fp{display:flex;flex-direction:column;gap:8px;min-width:0;contain:inline-size}
 .fp-search{position:relative;display:flex;align-items:center}
 .fp-search > svg{position:absolute;left:11px;width:15px;height:15px;color:var(--muted);pointer-events:none}
-.fp .fp-search input.fp-q{width:100%;box-sizing:border-box;height:38px;padding:0 12px 0 34px;border-radius:10px;
+.fp .fp-search input.fp-q{width:100%;box-sizing:border-box;height:38px;padding:0 12px 0 34px;border-radius:8px;
   border:1px solid var(--line-strong,var(--line));background:var(--surface-0,var(--bg));color:var(--fg);font:inherit;font-size:13.5px;outline:none}
 .fp .fp-search input.fp-q:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 .fp-tree{--step:14px;--pad:6px;max-height:min(46vh,340px);min-height:120px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
-  scrollbar-width:thin;border:1px solid var(--line);border-radius:12px;padding:4px;outline:none;font-size:13px;
+  scrollbar-width:none;border:1px solid var(--line);border-radius:8px;padding:4px;outline:none;font-size:13px;
   background:var(--surface-1,var(--panel))}
+.fp-tree::-webkit-scrollbar{display:none}
 .fp-tree:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 .fp-row{position:relative;display:flex;align-items:center;gap:6px;min-height:32px;box-sizing:border-box;
   padding:0 8px 0 calc(var(--pad) + var(--lv,0) * var(--step));border-radius:8px;cursor:pointer;color:var(--fg);user-select:none}

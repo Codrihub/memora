@@ -1,10 +1,8 @@
-// One floating panel at a time for the reader: a popover under its button on
-// wider screens, a bottom sheet (backdrop, handle, swipe down) on phones.
-// Closes on Esc, a click outside, the backdrop, the X or a swipe; focus goes
-// back to the button that opened it.
+// One floating panel at a time: a popover under its button, or a bottom sheet on phones.
 
 import { el, esc } from '../dom';
 import { I } from './icons';
+import { fadeScroll } from '../ui/scroll-fade';
 
 const PHONE = '(max-width: 760px)';
 
@@ -30,21 +28,18 @@ export function closePanel(): void {
   if (c.anchor.isConnected) c.anchor.focus({ preventScroll: true });
 }
 
-export function panelOpenFor(anchor: HTMLElement): boolean {
+function panelOpenFor(anchor: HTMLElement): boolean {
   return !!cur && cur.anchor === anchor;
 }
 
-/**
- * Show `body` in a panel for `anchor`. Pressing the same button again closes
- * it. `cls` sizes the popover (e.g. 'vx-pop-aa').
- */
-export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement, cls = ''): HTMLElement {
+/** Show `body` in a panel for `anchor` (toggles); `sheet` forces the bottom sheet on any screen. */
+export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement, cls = '', sheet = false): HTMLElement {
   if (panelOpenFor(anchor)) {
     closePanel();
     return body;
   }
   closePanel();
-  const phone = window.matchMedia(PHONE).matches;
+  const phone = sheet || window.matchMedia(PHONE).matches;
   const root = el('div', (phone ? 'vx-sheet' : 'vx-pop') + (cls ? ' ' + cls : ''));
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', title);
@@ -54,6 +49,7 @@ export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement,
   )}</b><button class="vx-icon-btn" data-close aria-label="Close">${I.close}</button></header>`;
   body.classList.add('vx-pop-body');
   card.appendChild(body);
+  fadeScroll(body);
   if (phone) root.innerHTML = '<div class="vx-sheet-back"></div>';
   root.appendChild(card);
   document.body.appendChild(root);

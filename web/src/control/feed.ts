@@ -1,17 +1,14 @@
-// Activity feed shared by Overview and Activity: one normalized item shape for
-// the vault log (/api/logs), the gateway audit trail (/api/auth/events) and
-// live bus `activity` events. `start` and `end` phases of the same call are
-// merged into one item that carries `ok` and `ms`.
+// Activity feed: one item shape for the vault log, the auth audit trail and live bus events.
 
 import { apiGet } from '../api';
 import { on, type AgentActivity } from '../bus';
 import type { LogEvent, LogsResult } from '../types';
+import { reconcile } from './sentence';
 
 export type Source = 'agent' | 'vault' | 'auth';
 
 export interface ActivityItem {
   id: string;
-  /** Unix seconds. */
   ts: number;
   actor: string;
   action: string;
@@ -25,6 +22,8 @@ export interface ActivityItem {
   running?: boolean;
   ip?: string;
   live?: boolean;
+  /** A note event that only repeats an agent's own call (see `reconcile`). */
+  echo?: boolean;
   raw: Record<string, unknown>;
 }
 
@@ -87,7 +86,7 @@ export function fromAuth(e: LogEvent): ActivityItem {
 }
 
 /** A live bus event. */
-export function fromBus(a: AgentActivity): ActivityItem {
+function fromBus(a: AgentActivity): ActivityItem {
   return {
     id: nextId(),
     ts: (a.at || Date.now()) / 1000,
@@ -100,8 +99,7 @@ export function fromBus(a: AgentActivity): ActivityItem {
     ms: a.ms,
     running: a.phase === 'start' ? true : undefined,
     live: true,
-    // Stored log rows carry the key id as `actor_id`; give live rows the same
-    // field so every reader can tell same-named keys apart.
+    // Same field names as stored rows, so readers can tell same-named keys apart.
     raw: {
       ...a,
       ...(a.actorId ? { actor_id: a.actorId } : {}),
@@ -122,7 +120,7 @@ export function noteCallEnd(callId: string, ok?: boolean, ms?: number): void {
 }
 
 /** Close a running item whose end was seen live. Returns whether it did. */
-export function closeEnded(it: ActivityItem): boolean {
+function closeEnded(it: ActivityItem): boolean {
   if (!it.running) return false;
   const e = ended.get(str((it.raw as { call_id?: unknown }).call_id));
   if (!e) return false;
@@ -132,12 +130,7 @@ export function closeEnded(it: ActivityItem): boolean {
   return true;
 }
 
-/**
- * Whether an item still counts as running, settling it first: its end was seen
- * live, or it is too old to still be open (a start from the log for 30 s, since
- * ends are never stored; a live start for 2 min). Readers call this when they
- * paint, so a row and the Running filter count never disagree.
- */
+/** Whether an item still counts as running; ends are never stored, so old starts time out (30 s logged, 2 min live). */
 export function settleRunning(it: ActivityItem, now = Date.now() / 1000): boolean {
   if (!it.running) return false;
   if (closeEnded(it)) return false;
@@ -145,10 +138,7 @@ export function settleRunning(it: ActivityItem, now = Date.now() / 1000): boolea
   return !!it.running;
 }
 
-/**
- * Merge `end` phases into their `start`. Input oldest first; returns newest
- * first. An end with no start becomes its own item.
- */
+/** Merge `end` phases into their `start`. Input oldest first; returns newest first. */
 export function mergePhases(items: ActivityItem[]): ActivityItem[] {
   const out: ActivityItem[] = [];
   const open = new Map<string, ActivityItem[]>();
@@ -176,18 +166,15 @@ export function mergePhases(items: ActivityItem[]): ActivityItem[] {
     }
     out.push(it);
   }
-  // `end` phases are realtime only (never persisted), so a stored start is
-  // only "running" while it is fresh.
+  // `end` phases are never persisted, so a stored start is only "running" while fresh.
   const stale = Date.now() / 1000 - 30;
   for (const it of out) if (!closeEnded(it) && it.running && it.ts < stale) it.running = false;
+  reconcile(out);
   return out.reverse();
 }
 
 export interface FeedRange {
-  /**
-   * Rolling windows (`1h` is served from the 1d log), `today` (since local
-   * midnight), `all` (everything the log still keeps) or one local day `day:YYYY-MM-DD`.
-   */
+  /** `1h` is served from the 1d log; `day:YYYY-MM-DD` is one local day. */
   range: '1h' | '1d' | '7d' | '30d' | 'today' | 'all' | `day:${string}`;
 }
 
@@ -214,8 +201,41 @@ export function rangeWindow(r: FeedRange['range']): { since: number; until: numb
   return { since: Date.now() / 1000 - (RANGE_SECS[r] || 86400), until: Infinity };
 }
 
-/** Load both server feeds for a range, merged and newest first. */
-export async function loadFeed(range: FeedRange['range'], limit = 800): Promise<ActivityItem[]> {
+/** The server answers at most this many log events per request. */
+const LOG_PAGE = 2000;
+
+const evTs = (e: LogEvent): number => Number(e._ts || e.ts || (e as { at?: number }).at || 0);
+
+/** The vault log for a window, newest first; asks above LOG_PAGE walk back page by page. */
+async function loadLog(q: string, w: { since: number; until: number }, limit: number, onPage?: (sofar: LogEvent[]) => void): Promise<LogEvent[]> {
+  if (limit <= LOG_PAGE) return (await apiGet<LogsResult>(`/api/logs?${q}&limit=${limit}`)).events || [];
+  const out: LogEvent[] = [];
+  const seen = new Set<string>();
+  let until = w.until;
+  while (out.length < limit) {
+    const since = w.since > 0 ? `&since=${Math.floor(w.since)}` : '';
+    const upto = Number.isFinite(until) ? `&until=${until}` : '';
+    const page = (await apiGet<LogsResult>(`/api/logs?range=all${since}${upto}&limit=${LOG_PAGE}`)).events || [];
+    let added = 0;
+    let oldest = Infinity;
+    for (const e of page) {
+      oldest = Math.min(oldest, evTs(e));
+      // Pages overlap on the boundary second; keep each event once.
+      const k = JSON.stringify(e);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(e);
+      added++;
+    }
+    if (page.length < LOG_PAGE || !added || !Number.isFinite(oldest)) break;
+    onPage?.(out);
+    until = oldest + 0.001;
+  }
+  return out.slice(0, limit);
+}
+
+/** Both server feeds for a range, merged, newest first; `onPage` gets partial results of a paged ask. */
+export async function loadFeed(range: FeedRange['range'], limit = 800, onPage?: (sofar: ActivityItem[]) => void): Promise<ActivityItem[]> {
   const w = rangeWindow(range);
   const q =
     range === '1h'
@@ -223,22 +243,19 @@ export async function loadFeed(range: FeedRange['range'], limit = 800): Promise<
       : range === 'all' || /^\d+d$/.test(range)
         ? `range=${range}`
         : `range=1d&since=${Math.floor(w.since)}${Number.isFinite(w.until) ? `&until=${Math.ceil(w.until)}` : ''}`;
-  const [logs, auth] = await Promise.all([
-    apiGet<LogsResult>(`/api/logs?${q}&limit=${limit}`).catch(() => ({ events: [] }) as LogsResult),
-    apiGet<LogsResult>('/api/auth/events?limit=300').catch(() => ({ events: [] }) as LogsResult),
-  ]);
-  const items = [...(logs.events || []).map(fromLog), ...(auth.events || []).map(fromAuth)].filter(
-    (i) => i.ts >= w.since && i.ts < w.until,
-  );
-  return mergePhases(items);
+  const auth = await apiGet<LogsResult>('/api/auth/events?limit=300').catch(() => ({ events: [] }) as LogsResult);
+  const authItems = (auth.events || []).map(fromAuth);
+  const shape = (logs: LogEvent[]): ActivityItem[] =>
+    mergePhases([...logs.map(fromLog), ...authItems.map((x) => ({ ...x }))].filter((i) => i.ts >= w.since && i.ts < w.until));
+  const logs = await loadLog(q, w, limit, onPage && ((sofar) => onPage(shape(sofar)))).catch(() => [] as LogEvent[]);
+  return shape(logs);
 }
 
 /** Add one live item to a newest-first list (merging an `end` into its start). */
 export function pushLive(list: ActivityItem[], it: ActivityItem, max = 2000): ActivityItem[] {
   const phase = str((it.raw as { phase?: unknown }).phase);
   if (phase === 'end') {
-    // The call id pairs them exactly; parallel calls of one tool would
-    // otherwise close each other's rows.
+    // Pair by call id so parallel calls of one tool don't close each other's rows.
     const cid = str((it.raw as { call_id?: unknown }).call_id);
     const start =
       (cid && list.find((x) => x.running && str((x.raw as { call_id?: unknown }).call_id) === cid)) ||
@@ -257,11 +274,7 @@ export function pushLive(list: ActivityItem[], it: ActivityItem, max = 2000): Ac
   return list;
 }
 
-/**
- * Live items held while a stream is paused. Only the newest `max` are kept (a live
- * list never shows more, see `pushLive`), so a paused page left open under heavy agent
- * traffic does not grow without end; `length` still counts every item that arrived.
- */
+/** Live items held while paused: keeps the newest `max`, while `length` counts every arrival. */
 export class PausedQueue {
   private items: ActivityItem[] = [];
   private count = 0;

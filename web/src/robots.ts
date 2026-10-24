@@ -1,5 +1,3 @@
-// robots.txt for a private instance: no crawler, search engine or AI scraper
-// may index any page. Every response also carries X-Robots-Tag: noindex.
 // Rendered by scripts/build-pages.mjs into crates/http/assets/robots.txt.
 
 const AI_CRAWLERS = [

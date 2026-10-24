@@ -1,7 +1,4 @@
-// The brain renderer: notes as glowing particles, wikilinks as synapses, the
-// cortex as a translucent particle shell, and agents as moving "thoughts"
-// that fire sparks at the notes they touch. Owns every three.js object and
-// disposes all of them in `dispose()`.
+// Owns every three.js object and disposes all of them in `dispose()`.
 
 import {
   AdditiveBlending,
@@ -29,7 +26,7 @@ import { HOME_DIR, HOME_FOV_DEG, HOME_TARGET, homeDistance, type BrainView } fro
 export interface ParticleSpec {
   key: string;
   target: Vec3;
-  /** Where a new particle is born (its region anchor). */
+  /** Where a new particle is born. */
   origin: Vec3;
   color: string;
   size: number;
@@ -42,12 +39,11 @@ export interface RegionLabel {
   count: number;
 }
 
-export interface SceneCallbacks {
+interface SceneCallbacks {
   onHover: (index: number, x: number, y: number) => void;
   onPick: (index: number) => void;
-  /** Text for an on-canvas note label. */
   labelOf: (index: number) => string;
-  /** Controls laid over the canvas; labels keep clear of them. */
+  /** Controls laid over the canvas that labels keep clear of. */
   obstacles?: () => Iterable<Element>;
 }
 
@@ -55,12 +51,9 @@ const HIST = 110;
 const SPARK_CAP = 6000;
 const TRAIL_CAP = 12 * HIST * 2;
 const AGENT_TTL = 5 * 60_000;
-/** An agent with no call for this long heads back to the dock (the header pill). */
+/** An agent with no call for this long heads back to the dock. */
 const AGENT_IDLE_MS = 5_000;
-/** The brain starts turning again this long after the last pointer or key input. */
 const IDLE_SPIN_MS = 2_000;
-
-// ---------------------------------------------------------------- shaders
 
 const NOTE_VS = /* glsl */ `
 attribute vec3 aColor; attribute float aSize; attribute float aFlare; attribute float aDim; attribute float aPhase;
@@ -163,14 +156,12 @@ void main() {
   }
 }`;
 
-// ---------------------------------------------------------------- helpers
-
-/** Segments per link: fewer on huge graphs to keep the buffer small. */
+/** Fewer segments on huge graphs to keep the buffer small. */
 function nerveSegments(links: number): number {
   return Math.max(4, Math.min(12, Math.floor(80000 / Math.max(1, links))));
 }
 
-/** Stable pseudo-random value in [0, 1) for an unordered note pair. */
+/** Stable value in [0, 1) for an unordered note pair. */
 function pairRand(lo: number, hi: number, k: number): number {
   let h = (Math.imul(lo + 1, 0x9e3779b1) ^ Math.imul(hi + 7, 0x85ebca77) ^ Math.imul(k + 3, 0xc2b2ae3d)) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
@@ -178,11 +169,7 @@ function pairRand(lo: number, hi: number, k: number): number {
   return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
 }
 
-/**
- * A point on the nerve between notes `a` and `b` at `t`: an S-shaped cubic
- * that sags toward the brain core with a faint wobble, so links read as
- * fibres rather than straight rods. Symmetric: (b, a, 1 - t) is the same point.
- */
+/** S-shaped cubic sagging toward the core, so links read as fibres; (b, a, 1 - t) is the same point. */
 function nervePoint(pos: Float32Array, a: number, b: number, t: number, out: Float32Array, o: number): void {
   if (a > b) {
     [a, b] = [b, a];
@@ -191,7 +178,6 @@ function nervePoint(pos: Float32Array, a: number, b: number, t: number, out: Flo
   const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
   const dx = pos[b * 3] - ax, dy = pos[b * 3 + 1] - ay, dz = pos[b * 3 + 2] - az;
   const len = Math.hypot(dx, dy, dz) || 1e-6;
-  // Basis perpendicular to the link.
   let ux = -dz, uy = 0, uz = dx;
   if (Math.abs(dy) > 0.9 * len) {
     ux = 0;
@@ -214,7 +200,6 @@ function nervePoint(pos: Float32Array, a: number, b: number, t: number, out: Flo
   const c2x = (ax + (dx * 2) / 3) * sag + ex * bend * s2, c2y = (ay + (dy * 2) / 3) * sag + ey * bend * s2, c2z = (az + (dz * 2) / 3) * sag + ez * bend * s2;
   const u = 1 - t;
   const b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
-  // Wobble along the second perpendicular, zero at both ends.
   const wob = Math.sin(t * Math.PI * (3 + 2 * pairRand(a, b, 3)) + th) * Math.sin(Math.PI * t) * len * 0.035;
   wx *= wob;
   wy *= wob;
@@ -245,7 +230,7 @@ interface Spark {
   alpha: number;
   strength: number;
   echo: boolean;
-  /** Source note when the spark runs along a link's nerve. */
+  /** Source note when the spark runs along a nerve. */
   from?: number;
 }
 
@@ -265,8 +250,6 @@ interface Agent {
   el: HTMLElement;
 }
 
-// ---------------------------------------------------------------- scene
-
 export class BrainScene {
   readonly canvas: HTMLCanvasElement;
   private renderer: WebGLRenderer;
@@ -278,9 +261,11 @@ export class BrainScene {
   private cb: SceneCallbacks;
   private reduced: boolean;
   private light = false;
+  /** Cortex brightness, faint while there are no notes. */
+  private shellLevel = 1;
+  private shellTarget = 1;
   private readonly dprCap = 2;
 
-  // particles (struct of arrays)
   private n = 0;
   private keys: string[] = [];
   private pos = new Float32Array(0);
@@ -302,7 +287,6 @@ export class BrainScene {
   private noteMat: ShaderMaterial;
   private notePts: Points;
 
-  // links
   private linkPairs = new Int32Array(0);
   private linkSeg = 1;
   private tmp3 = new Float32Array(3);
@@ -317,11 +301,9 @@ export class BrainScene {
   private hiObj: LineSegments;
   private hiFor = -1;
 
-  // cortex
   private shellGeo = new BufferGeometry();
   private shellMat: ShaderMaterial;
 
-  // sparks, agents
   private sparks: Spark[] = [];
   private sparkGeo = new BufferGeometry();
   private sparkMat: ShaderMaterial;
@@ -335,24 +317,22 @@ export class BrainScene {
   private trailCol = new Float32Array(TRAIL_CAP * 3);
   private trailAlpha = new Float32Array(TRAIL_CAP);
   private agents = new Map<string, Agent>();
-  /** Client point agents come from and return to (the header pill); null = none. */
+  /** Client point agents come from and return to. */
   private dock: (() => { x: number; y: number } | null) | null = null;
   private ambientAcc = 0;
   private r = rng(1234);
 
-  // labels
   private regionLabels: { el: HTMLElement; anchor: Vec3; name: string }[] = [];
   private hiddenRegions = new Set<string>();
   private noteLabels: { el: HTMLElement; index: number }[] = [];
   private reticle: HTMLElement;
   private showLabels = true;
-  /** Control boxes (label-layer px) labels avoid, refreshed a few times a second. */
+  /** In label-layer px, refreshed a few times a second. */
   private blockers: Box[] = [];
   private blockersAt = -1e9;
-  /** Label sizes, measured once each (their text does not change). */
+  /** Measured once each; label text does not change. */
   private labelSize = new WeakMap<HTMLElement, [number, number]>();
 
-  // state
   private raf = 0;
   private running = false;
   private disposed = false;
@@ -369,9 +349,8 @@ export class BrainScene {
   private ro: ResizeObserver;
   private width = 1;
   private height = 1;
-  /** Whether the stage has been laid out once (no glide on the first size). */
   private sized = false;
-  /** The field of view eases to this after a layout change, so the size never jumps. */
+  /** The fov eases to this after a layout change, so the size never jumps. */
   private fovTarget = 42;
   private tmp = new Vector3();
   private vp = new Matrix4();
@@ -407,7 +386,6 @@ export class BrainScene {
       this.zoomTween = null;
     });
 
-    // Notes.
     this.noteMat = new ShaderMaterial({
       vertexShader: NOTE_VS,
       fragmentShader: NOTE_FS,
@@ -420,7 +398,6 @@ export class BrainScene {
     this.notePts.frustumCulled = false;
     this.notePts.renderOrder = 3;
 
-    // Links.
     this.linkMat = new ShaderMaterial({
       vertexShader: LINE_VS,
       fragmentShader: LINE_FS,
@@ -444,7 +421,6 @@ export class BrainScene {
     this.hiObj.frustumCulled = false;
     this.hiObj.renderOrder = 2;
 
-    // Cortex shell.
     const shell = sampleShell(window.innerWidth < 700 ? 14000 : 26000);
     this.shellGeo.setAttribute('position', attr(shell.pos.subarray(0, shell.count * 3), 3, false));
     this.shellGeo.setAttribute('normal', attr(shell.nrm.subarray(0, shell.count * 3), 3, false));
@@ -469,7 +445,6 @@ export class BrainScene {
     shellPts.frustumCulled = false;
     shellPts.renderOrder = 0;
 
-    // Sparks and agent heads.
     this.sparkGeo.setAttribute('position', attr(this.sparkPos, 3));
     this.sparkGeo.setAttribute('aColor', attr(this.sparkCol, 3));
     this.sparkGeo.setAttribute('aSize', attr(this.sparkSize, 1));
@@ -523,8 +498,6 @@ export class BrainScene {
     this.canvas.addEventListener('pointerleave', this.onLeave);
   }
 
-  // ------------------------------------------------------------ lifecycle
-
   private onWindowResize = (): void => {
     if (this.host.clientWidth !== this.width || this.host.clientHeight !== this.height) this.resize();
   };
@@ -539,20 +512,15 @@ export class BrainScene {
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    // Portrait screens: widen the vertical field so the brain still fits.
     this.fovTarget = w / h < 0.9 ? 58 : 42;
     if (!this.sized || this.reduced) this.camera.fov = this.fovTarget;
     this.sized = true;
     this.applyFraming();
-    // A resize clears the WebGL canvas: draw again right away so the brain
-    // never blinks or shows a stale frame while the layout moves.
+    // A resize clears the WebGL canvas: draw again right away so it never blinks.
     this.renderOnce();
   }
 
-  /**
-   * When the layout moves (sidebar, window), keep the canvas and its labels
-   * where they were on screen and let them glide together to the new spot.
-   */
+  /** When the layout moves, the canvas and labels glide together from their old screen spot. */
   private glide(): void {
     const parent = this.host.parentElement;
     if (!this.sized || this.reduced || !parent) return;
@@ -572,7 +540,6 @@ export class BrainScene {
     }
   }
 
-  /** Push the field of view into the camera and the point-size shaders. */
   private applyFraming(): void {
     this.camera.updateProjectionMatrix();
     const dpr = Math.min(window.devicePixelRatio || 1, this.dprCap);
@@ -582,7 +549,6 @@ export class BrainScene {
     this.sparkMat.uniforms.uScale.value = scale;
   }
 
-  /** Ease the field of view toward its target after a layout change. */
   private easeFraming(dt: number): void {
     if (this.camera.fov === this.fovTarget) return;
     const k = 1 - Math.exp(-dt * 9);
@@ -637,8 +603,6 @@ export class BrainScene {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // ------------------------------------------------------------ theme / options
-
   setTheme(light: boolean): void {
     this.light = light;
     const blend: Blending = light ? NormalBlending : AdditiveBlending;
@@ -660,6 +624,16 @@ export class BrainScene {
     this.renderOnce();
   }
 
+  /** No notes: the cortex fades so the brain does not look full. */
+  setEmpty(on: boolean): void {
+    this.shellTarget = on ? 0.14 : 1;
+    if (this.reduced || !this.running) {
+      this.shellLevel = this.shellTarget;
+      this.shellMat.uniforms.uFade.value = this.shellLevel;
+    }
+    this.renderOnce();
+  }
+
   setAutoRotate(on: boolean): void {
     this.autoRotate = on && !this.reduced;
     if (!this.autoRotate) this.controls.autoRotate = false;
@@ -673,9 +647,7 @@ export class BrainScene {
     this.labels.classList.toggle('no-regions', !regions);
   }
 
-  // ------------------------------------------------------------ data
-
-  /** Replace the particle set; existing keys glide to their new spot. */
+  /** Existing keys glide to their new spot. */
   setData(specs: ParticleSpec[], links: [number, number][], regions: RegionLabel[]): void {
     const old = new Map<string, number>();
     for (let i = 0; i < this.n; i++) if (this.growT[i] > 0) old.set(this.keys[i], i);
@@ -718,7 +690,6 @@ export class BrainScene {
         if (P[i * 3] !== T[i * 3] || P[i * 3 + 1] !== T[i * 3 + 1] || P[i * 3 + 2] !== T[i * 3 + 2]) active.add(i);
         if (G[i] < 1 || F[i] > 0.001 || D[i] !== DT[i]) active.add(i);
       } else if (firstLoad && !this.reduced) {
-        // First load: particles condense from the cortex toward their spot.
         const r = 1.25 + this.r() * 0.2;
         const len = Math.hypot(s.target[0], s.target[1], s.target[2]) || 1;
         P.set([(s.target[0] / len) * r, (s.target[1] / len) * r, (s.target[2] / len) * r], i * 3);
@@ -779,7 +750,6 @@ export class BrainScene {
     this.noteGeo.setAttribute('aPhase', attr(this.phase, 1, false));
     this.notePts.geometry = this.noteGeo;
 
-    // Links and adjacency.
     const L = links.length;
     this.linkPairs = new Int32Array(L * 2);
     const deg = new Int32Array(n + 1);
@@ -809,13 +779,12 @@ export class BrainScene {
     this.fillLinks(true);
     this.updateLinkOpacity();
 
-    // Region labels.
     for (const l of this.regionLabels) l.el.remove();
     this.regionLabels = regions.map((rg) => {
       const el = document.createElement('div');
       el.className = 'bl-region';
       el.style.setProperty('--c', rg.color);
-      el.textContent = rg.name;
+      el.textContent = /^root$/i.test(rg.name) ? 'Top level' : rg.name;
       this.labels.appendChild(el);
       return { el, anchor: rg.anchor, name: rg.name };
     });
@@ -823,7 +792,6 @@ export class BrainScene {
 
     clearTimeout(this.ghostTimer);
     if (ghosts.length) {
-      // Drop faded ghosts once their exit animation is over.
       this.ghostTimer = window.setTimeout(() => this.compact(), 1400);
     }
     if (!this.running) this.renderOnce();
@@ -881,7 +849,6 @@ export class BrainScene {
       for (let k = 0; k < S; k++) {
         const v = (i * S + k) * 2;
         pa.set(pt.subarray(k * 3, k * 3 + 6), v * 3);
-        // Fibres glow a little brighter mid-way and fade into their notes.
         aa[v] = g * (0.5 + 0.5 * Math.sin((Math.PI * k) / S));
         aa[v + 1] = g * (0.5 + 0.5 * Math.sin((Math.PI * (k + 1)) / S));
         if (ca) {
@@ -895,10 +862,8 @@ export class BrainScene {
     P.needsUpdate = true;
     A.needsUpdate = true;
     if (ca) (geo.getAttribute('aColor') as BufferAttribute).needsUpdate = true;
-    this.linksDirty = false;
   }
 
-  /** Highlighted synapses of one note. */
   private buildHighlight(i: number): void {
     if (this.hiFor === i) return;
     this.hiFor = i;
@@ -936,9 +901,7 @@ export class BrainScene {
     return Array.from(this.adj.subarray(this.adjOff[i], this.adjOff[i + 1]));
   }
 
-  // ------------------------------------------------------------ dimming / selection
-
-  /** Set every particle's dim target (0 = lit, 1 = faded). */
+  /** 0 = lit, 1 = faded. */
   setDim(fn: ((i: number) => number) | null): void {
     for (let i = 0; i < this.n - this.ghosts; i++) {
       const v = fn ? fn(i) : 0;
@@ -973,12 +936,11 @@ export class BrainScene {
     this.active.add(i);
   }
 
-  /** Agents enter the brain from this client point and fly back to it when idle. */
   setDock(fn: (() => { x: number; y: number } | null) | null): void {
     this.dock = fn;
   }
 
-  /** The dock as a point in brain space, between the camera and the brain. */
+  /** Between the camera and the brain. */
   private dockWorld(): Vec3 | null {
     const p = this.dock?.();
     const r = this.canvas.getBoundingClientRect();
@@ -991,7 +953,6 @@ export class BrainScene {
     return [cam.x + dir.x * d, cam.y + dir.y * d, cam.z + dir.z * d];
   }
 
-  /** Where an agent's head floats right now (brain space), when it is shown. */
   agentHead(actor: string): Vec3 | null {
     const a = this.agents.get(actor);
     return a && a.fade > 0.05 ? [a.head[0], a.head[1], a.head[2]] : null;
@@ -1001,11 +962,9 @@ export class BrainScene {
     return [this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]];
   }
 
-  /** Glide the camera to look at a point from `dist` away. */
   focus(p: Vec3, dist: number): void {
     const target = new Vector3(p[0], p[1], p[2]);
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
-    // Look from the outside of the brain toward the point when possible.
     const out = target.clone().setY(target.y * 0.5);
     if (out.length() > 0.15) dir.lerp(out.normalize(), 0.55).normalize();
     const pos = target.clone().add(dir.multiplyScalar(dist));
@@ -1021,7 +980,6 @@ export class BrainScene {
     this.tween = { p0: this.camera.position.clone(), p1: pos, t0: this.controls.target.clone(), t1: target, s: 0, dur: 1.1 };
   }
 
-  /** The live camera, for the boot splash to fly its grains in along. */
   cameraView(): BrainView | null {
     const r = this.canvas.getBoundingClientRect();
     if (!r.width || !r.height) return null;
@@ -1030,7 +988,7 @@ export class BrainScene {
     return { eye: [p.x, p.y, p.z], target: [t.x, t.y, t.z], fov: (this.camera.fov * Math.PI) / 180, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
   }
 
-  /** Where a point in brain space appears on the page right now (client px), plus its depth. */
+  /** Client px plus depth. */
   projectToClient(x: number, y: number, z: number): [number, number, number] | null {
     const r = this.canvas.getBoundingClientRect();
     if (!r.width || !r.height) return null;
@@ -1039,11 +997,7 @@ export class BrainScene {
     return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height, v.z];
   }
 
-  /**
-   * The camera is zoomed or moved off the home framing (after flying to a
-   * node or a region, or zooming). Orbiting, by hand or the idle spin, keeps
-   * the framing and does not count.
-   */
+  /** Zoomed or moved off the home framing; orbiting does not count. */
   awayFromHome(): boolean {
     if (this.tween || this.zoomTween) return true;
     const hd = homeDistance(this.camera.aspect);
@@ -1052,15 +1006,11 @@ export class BrainScene {
     return t.distanceTo(new Vector3(...HOME_TARGET)) > hd * 0.04 || Math.abs(d - hd) > hd * 0.06;
   }
 
-  /** Default camera: a lateral, slightly raised view (the classic profile). */
   private homePos(): Vector3 {
     return new Vector3(...HOME_DIR).normalize().multiplyScalar(homeDistance(this.camera.aspect));
   }
 
-  /**
-   * Back to the home zoom and centre, keeping the current viewing angle; any
-   * idle spin carries on.
-   */
+  /** Home zoom and centre, keeping the current angle. */
   resetView(): void {
     const target = new Vector3(...HOME_TARGET);
     const d1 = this.homePos().length();
@@ -1075,7 +1025,6 @@ export class BrainScene {
     this.zoomTween = { d0: this.camera.position.distanceTo(this.controls.target), d1, t0: this.controls.target.clone(), t1: target, s: 0, dur: 0.9 };
   }
 
-  /** Dolly toward (factor > 1) or away from the target, keeping the angle. */
   zoomBy(factor: number): void {
     const d0 = this.camera.position.distanceTo(this.controls.target);
     const d1 = Math.max(this.controls.minDistance, Math.min(this.controls.maxDistance, d0 / factor));
@@ -1089,7 +1038,7 @@ export class BrainScene {
     this.zoomTween = { d0, d1, t0: this.controls.target.clone(), t1: this.controls.target.clone(), s: 0, dur: 0.35 };
   }
 
-  /** Turn the camera around the target: `dAz` left/right, `dEl` up/down (radians). */
+  /** Radians: `dAz` left/right, `dEl` up/down. */
   orbitBy(dAz: number, dEl: number): void {
     const t = this.controls.target;
     const off = this.camera.position.clone().sub(t);
@@ -1099,7 +1048,7 @@ export class BrainScene {
     this.orbitTo(th, ph, 0.32);
   }
 
-  /** Look from azimuth `th` (and polar angle `ph`, default: keep) at the target. */
+  /** `ph` defaults to the current polar angle. */
   orbitTo(th: number, ph?: number, dur = 0.8): void {
     const t = this.controls.target;
     const off = this.camera.position.clone().sub(t);
@@ -1115,7 +1064,6 @@ export class BrainScene {
     this.tween = { p0: this.camera.position.clone(), p1: pos, t0: t.clone(), t1: t.clone(), s: 0, dur, arc: true };
   }
 
-  /** The default camera: home angle, zoom and centre. */
   goHome(): void {
     this.halt();
     const pos = this.homePos().add(new Vector3(...HOME_TARGET));
@@ -1129,14 +1077,12 @@ export class BrainScene {
     this.tween = { p0: this.camera.position.clone(), p1: pos, t0: this.controls.target.clone(), t1: target, s: 0, dur: 0.9, arc: true };
   }
 
-  /** Camera azimuth (around the vertical axis) and elevation, for the orbit globe. */
   orientation(): { yaw: number; pitch: number } {
     const off = this.camera.position.clone().sub(this.controls.target);
     const r = off.length() || 1;
     return { yaw: Math.atan2(off.x, off.z), pitch: Math.asin(Math.max(-1, Math.min(1, off.y / r))) };
   }
 
-  /** A user move from the controls: stop the idle spin and any glide. */
   private halt(): void {
     this.tween = null;
     this.zoomTween = null;
@@ -1144,9 +1090,6 @@ export class BrainScene {
     this.lastInteract = performance.now();
   }
 
-  // ------------------------------------------------------------ agents
-
-  /** An agent touched these notes: fly sparks there and flare them. */
   activity(actor: string, phase: string, ok: boolean | undefined, idx: number[]): void {
     const now = performance.now();
     let ag = this.agents.get(actor);
@@ -1162,7 +1105,6 @@ export class BrainScene {
       (el.firstChild as HTMLElement).textContent = agentInitials(actor);
       (el.lastChild as HTMLElement).textContent = actor;
       this.labels.appendChild(el);
-      // Agents arrive from the header pill (the dock) when it is on screen.
       const dock = this.dockWorld();
       ag = {
         rgb: hexToRgb(hex),
@@ -1187,7 +1129,6 @@ export class BrainScene {
     else ag.busy = Math.max(0, ag.busy - 1);
     const list = idx.filter((i) => i >= 0 && i < this.n).slice(0, 40);
     if (list.length) {
-      // The thought moves toward what it is working on.
       let cx = 0;
       let cy = 0;
       let cz = 0;
@@ -1234,8 +1175,6 @@ export class BrainScene {
     this.sparks.push({ a, b, c, target, t: 0, dur, delay, rgb, size, alpha, strength: echo ? 1 : 0.35, echo, from: fromNote });
   }
 
-  // ------------------------------------------------------------ input
-
   private onMove = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return; // touch drags orbit; taps pick on release
     const r = this.canvas.getBoundingClientRect();
@@ -1275,7 +1214,6 @@ export class BrainScene {
     this.cb.onHover(i, this.pointer.x, this.pointer.y);
   }
 
-  /** Nearest visible particle to a screen point, or -1. */
   private pick(px: number, py: number, radius: number): number {
     this.camera.updateMatrixWorld();
     this.vp.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
@@ -1305,16 +1243,12 @@ export class BrainScene {
     return best;
   }
 
-  /** Screen position of a world point (null when behind the camera). */
   private project(p: Vec3): { x: number; y: number; depth: number } | null {
     this.tmp.set(p[0], p[1], p[2]).project(this.camera);
     if (this.tmp.z > 1) return null;
     return { x: (this.tmp.x * 0.5 + 0.5) * this.width, y: (0.5 - this.tmp.y * 0.5) * this.height, depth: this.tmp.z };
   }
 
-  // ------------------------------------------------------------ labels
-
-  /** The most connected notes get on-canvas name labels. */
   private pickNoteLabels(): void {
     for (const l of this.noteLabels) l.el.remove();
     const live = this.n - this.ghosts;
@@ -1332,7 +1266,6 @@ export class BrainScene {
     });
   }
 
-  /** Regions the user turned off: their name labels stay hidden. */
   setHiddenRegions(names: Iterable<string>): void {
     this.hiddenRegions = new Set(names);
     this.renderOnce();
@@ -1342,7 +1275,7 @@ export class BrainScene {
     this.pickNoteLabels();
   }
 
-  /** Size of a label, measured on first sight; null while it is not laid out. */
+  /** null while not laid out. */
   private sizeOf(el: HTMLElement): [number, number] | null {
     let sz = this.labelSize.get(el);
     if (!sz) {
@@ -1355,7 +1288,6 @@ export class BrainScene {
     return sz;
   }
 
-  /** Re-read where the overlaid controls are (they move with panels and breakpoints). */
   private refreshBlockers(): void {
     const now = performance.now();
     if (!this.cb.obstacles || now - this.blockersAt < 250) return;
@@ -1364,21 +1296,23 @@ export class BrainScene {
   }
 
   private placeLabels(): void {
-    // Reads first (control boxes, label sizes), then the style writes below.
+    // Reads first, then the style writes below.
     this.refreshBlockers();
-    const sized = (el: HTMLElement): [number, number] | null => (this.blockers.length ? this.sizeOf(el) : null);
+    const sized = (el: HTMLElement): [number, number] | null => this.sizeOf(el);
     const camDist = this.camera.position.distanceTo(this.controls.target);
     const center = this.controls.target;
     const camPos = this.camera.position;
-    const boxes: number[] = [];
+    const taken: Box[] = [];
+    const LABEL_GAP = 4;
+    const hits = (k: Box): boolean => !clearOf({ l: k.l - LABEL_GAP, t: k.t - LABEL_GAP, r: k.r + LABEL_GAP, b: k.b + LABEL_GAP }, taken);
     const place = (el: HTMLElement, p: Vec3, extra = 1, avoid = false, kind?: LabelKind, size?: [number, number] | null): void => {
       const s = this.project(p);
       if (!s || s.x < -50 || s.y < -20 || s.x > this.width + 50 || s.y > this.height + 20) {
         el.style.opacity = '0';
         return;
       }
+      let dy = 0;
       if (kind && size) {
-        // Keep clear of the controls: agents swap sides first, other labels just hide.
         if (kind === 'agent') {
           const side = agentSide(s.x, s.y, size[0], size[1], this.blockers);
           el.classList.toggle('flip', side === 'left');
@@ -1386,27 +1320,30 @@ export class BrainScene {
             el.style.opacity = '0';
             return;
           }
-        } else if (!clearOf(labelBox(kind, s.x, s.y, size[0], size[1]), this.blockers)) {
-          el.style.opacity = '0';
-          return;
-        }
-      } else if (kind === 'agent') el.classList.remove('flip');
-      if (avoid) {
-        // Skip a label that would overlap one already placed.
-        for (let k = 0; k < boxes.length; k += 2) {
-          if (Math.abs(boxes[k] - s.x) < 110 && Math.abs(boxes[k + 1] - s.y) < 16) {
+        } else {
+          // A folder name may step a line up or down to avoid another label.
+          const steps = avoid && kind === 'region' ? [0, -(size[1] + 3), size[1] + 3] : [0];
+          let ok = false;
+          for (const d of steps) {
+            const box = labelBox(kind, s.x, s.y + d, size[0], size[1]);
+            if (!clearOf(box, this.blockers) || (avoid && hits(box))) continue;
+            if (avoid) taken.push(box);
+            dy = d;
+            ok = true;
+            break;
+          }
+          if (!ok) {
             el.style.opacity = '0';
             return;
           }
         }
-        boxes.push(s.x, s.y);
-      }
-      // Fade labels on the far side of the brain.
+      } else if (kind === 'agent') el.classList.remove('flip');
+      // Fade labels on the far side (less on light, where faint text is hard to read).
       const dp = Math.hypot(p[0] - camPos.x, p[1] - camPos.y, p[2] - camPos.z);
       const dc = Math.hypot(center.x - camPos.x, center.y - camPos.y, center.z - camPos.z);
       const back = Math.max(0, Math.min(1, (dp - dc + 0.4) / 0.8));
-      el.style.opacity = String((1 - back * 0.7) * extra);
-      el.style.transform = `translate3d(${s.x.toFixed(1)}px,${s.y.toFixed(1)}px,0)`;
+      el.style.opacity = String((1 - back * (this.light ? 0.45 : 0.7)) * extra);
+      el.style.transform = `translate3d(${s.x.toFixed(1)}px,${(s.y + dy).toFixed(1)}px,0)`;
     };
     const agents = Array.from(this.agents.values());
     const agentSizes = agents.map((a) => sized(a.el));
@@ -1426,17 +1363,13 @@ export class BrainScene {
     agents.forEach((a, k) => place(a.el, a.head, a.fade, false, 'agent', agentSizes[k]));
   }
 
-  // ------------------------------------------------------------ frame
-
   private frame(dt: number, now: number): void {
     if (!this.reduced) this.time += dt;
     this.noteMat.uniforms.uTime.value = this.time;
     this.shellMat.uniforms.uTime.value = this.time;
 
-    // Camera.
     if (this.zoomTween) {
-      // Move along the current view direction only: the angle is kept and
-      // auto-rotate keeps turning the camera meanwhile.
+      // Along the view direction only, so auto-rotate keeps turning meanwhile.
       const z = this.zoomTween;
       z.s = Math.min(1, z.s + dt / z.dur);
       const k = easeInOut(z.s);
@@ -1451,7 +1384,7 @@ export class BrainScene {
       const k = easeInOut(tw.s);
       this.controls.target.lerpVectors(tw.t0, tw.t1, k);
       if (tw.arc) {
-        // Around the target on a sphere, so a big turn never cuts through the brain.
+        // On a sphere around the target, so a big turn never cuts through the brain.
         const a = tw.p0.clone().sub(tw.t0);
         const b = tw.p1.clone().sub(tw.t1);
         const ra = a.length() || 1;
@@ -1473,9 +1406,12 @@ export class BrainScene {
     this.controls.update(dt);
     // Fade the cortex when diving inside it.
     const cd = this.camera.position.length();
-    this.shellMat.uniforms.uFade.value = Math.max(0.15, Math.min(1, (cd - 0.6) / 1.4));
+    if (this.shellLevel !== this.shellTarget) {
+      this.shellLevel += (this.shellTarget - this.shellLevel) * (1 - Math.exp(-dt * 4));
+      if (Math.abs(this.shellLevel - this.shellTarget) < 0.005) this.shellLevel = this.shellTarget;
+    }
+    this.shellMat.uniforms.uFade.value = this.shellLevel * Math.max(0.15, Math.min(1, (cd - 0.6) / 1.4));
 
-    // Particles.
     if (this.active.size) {
       const kp = 1 - Math.exp(-dt * 3.2);
       const kg = 1 - Math.exp(-dt * 3.5);
@@ -1532,7 +1468,6 @@ export class BrainScene {
     }
     if (this.linksDirty) this.fillLinks();
 
-    // Ambient neural firing along random synapses.
     const live = this.n - this.ghosts;
     if (!this.reduced && live > 1 && !document.hidden) {
       this.ambientAcc += dt;
@@ -1592,7 +1527,6 @@ export class BrainScene {
         if (s.target >= 0) {
           this.flareNote(s.target, s.strength);
           if (s.echo) {
-            // The touched note fires along a few of its synapses.
             const nb = this.neighbors(s.target);
             for (let k = 0; k < Math.min(4, nb.length); k++) {
               const j = nb[Math.floor(this.r() * nb.length)];
@@ -1623,13 +1557,11 @@ export class BrainScene {
     }
     this.sparks = keep;
 
-    // Agent heads: a bright core with a soft breathing aura.
     this.agents.forEach((a) => {
       if (a.fade <= 0.01) return;
       const pulse = 0.5 + 0.5 * Math.sin(this.time * 4 + a.seed);
       out(a.head[0], a.head[1], a.head[2], a.rgb, (0.32 + 0.12 * pulse + a.energy * 0.25) * (a.busy ? 1.15 : 0.85), 0.32 * a.fade);
       out(a.head[0], a.head[1], a.head[2], a.rgb, 0.1 + a.energy * 0.05, a.fade);
-      // Thick trail glow: every few history samples.
       for (let k = 2; k < a.histN; k += 3) {
         const idx = (a.histI - 1 - k + HIST * 2) % HIST;
         const f = 1 - k / a.histN;
@@ -1651,7 +1583,6 @@ export class BrainScene {
     let v = 0;
     this.agents.forEach((a, key) => {
       const idle = now - a.last;
-      // Idle agents fly home to the dock and fade once they reach it.
       const dock = idle > AGENT_IDLE_MS && a.busy === 0 ? this.dockWorld() : null;
       if (dock) a.target = dock;
       const docked = !!dock && Math.hypot(a.head[0] - dock[0], a.head[1] - dock[1], a.head[2] - dock[2]) < 0.35;
@@ -1664,7 +1595,6 @@ export class BrainScene {
         return;
       }
       if (!this.reduced) {
-        // A wandering spring toward the work target.
         const t = this.time;
         const wob = 0.09 + 0.06 * a.energy;
         const tx = a.target[0] + Math.sin(t * 1.3 + a.seed) * wob;
@@ -1683,7 +1613,6 @@ export class BrainScene {
       a.histI = (a.histI + 1) % HIST;
       a.histN = Math.min(HIST, a.histN + 1);
       a.el.classList.toggle('busy', a.busy > 0);
-      // Trail segments.
       for (let k = 0; k < a.histN - 1 && v + 2 <= TRAIL_CAP; k++) {
         const i0 = (a.histI - 1 - k + HIST * 2) % HIST;
         const i1 = (a.histI - 2 - k + HIST * 2) % HIST;

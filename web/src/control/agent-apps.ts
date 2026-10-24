@@ -1,7 +1,4 @@
-// Which app each agent (API key) is used with. The connect flow records the
-// choice in the UI layout store (`/api/ui/layout/agent-apps`, so it follows
-// the owner to every browser); agents set up elsewhere get a guess from their
-// name or from the OAuth client that signed in.
+// Which app each agent (API key) is used with; stored server-side so it follows the owner to every browser.
 
 import { api, apiGet } from '../api';
 
@@ -52,7 +49,7 @@ const RULES: [RegExp, string][] = [
 ];
 
 /** A best guess from a name ("cursor-laptop" -> cursor), or ''. */
-export function guessApp(...names: (string | null | undefined)[]): string {
+function guessApp(...names: (string | null | undefined)[]): string {
   for (const n of names) {
     const s = String(n || '').toLowerCase();
     if (!s) continue;

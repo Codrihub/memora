@@ -1,6 +1,4 @@
-// DOM helpers. Every lookup is defensive: a selector that matches nothing
-// returns a no-op stand-in instead of throwing, so a view still renders when
-// its node is missing from index.html.
+// A selector that matches nothing returns a no-op stand-in, so a view still renders when its node is missing.
 
 const noopClassList = {
   add(): void {},
@@ -26,12 +24,10 @@ const NOOP = new Proxy({} as HTMLElement, {
   set: () => true,
 });
 
-/** First match, or the no-op stand-in when the node is absent. */
 export function $(sel: string, root: ParentNode = document): HTMLElement {
   return (root.querySelector(sel) as HTMLElement | null) ?? NOOP;
 }
 
-/** Every match as an array, cast to a concrete element type. */
 export function $$<T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T[] {
   return Array.from(root.querySelectorAll(sel)) as unknown as T[];
 }
@@ -64,19 +60,13 @@ export function esc(value: unknown): string {
   });
 }
 
-/** Escape a value that lands in an HTML attribute position. */
 export function attr(value: unknown): string {
   return esc(value);
 }
 
-/** Entities the server uses when it escapes snippet text. */
 const SNIP_ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
 
-/**
- * A search snippet as safe HTML. The server sends escaped text whose only markup is
- * the <b>...</b> around the match: keep those marks, decode the text between them
- * and escape it again, so nothing is double-escaped and no other tag can render.
- */
+/** Keeps only the server's <b> match marks; the text between is decoded and escaped again. */
 export function safeSnip(value: unknown): string {
   return String(value == null ? '' : value)
     .split(/(<\/?b>)/)
@@ -88,7 +78,7 @@ export function safeSnip(value: unknown): string {
     .join('');
 }
 
-/** Add a stylesheet string to <head> once (module CSS kept in TypeScript). */
+/** Add a stylesheet string to <head> once. */
 export function useStyles(id: string, css: string): void {
   if (document.getElementById(id)) return;
   const node = document.createElement('style');

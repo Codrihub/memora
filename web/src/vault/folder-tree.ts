@@ -1,6 +1,4 @@
-// Pure helpers behind the folder picker: a tree built from folder paths,
-// subtree exclusion, search matching with highlight ranges, and the flat row
-// list the picker draws. No DOM here, so the logic can be checked on its own.
+// Pure helpers behind the folder picker (tree, search matching, visible rows). No DOM.
 
 export interface PickNode {
   /** Vault-relative folder path ('' = the vault root). */
@@ -12,7 +10,7 @@ export interface PickNode {
   children: PickNode[];
 }
 
-export interface PickTree {
+interface PickTree {
   root: PickNode;
   byPath: Map<string, PickNode>;
 }
@@ -25,16 +23,11 @@ function parentOf(path: string): string {
 }
 
 /** Whether `path` is `top` itself or anywhere below it ('' contains everything). */
-export function inSubtree(path: string, top: string): boolean {
+function inSubtree(path: string, top: string): boolean {
   return top === '' || path === top || path.startsWith(top + '/');
 }
 
-/**
- * Build the folder tree from paths in any order. Missing ancestors are added,
- * duplicates and '' are ignored, and paths inside an `exclude` subtree (with
- * the excluded folder itself) are left out. Children sort like the sidebar
- * (numeric, case-insensitive).
- */
+/** Folder tree from paths in any order; adds missing ancestors and leaves out `exclude` subtrees. */
 export function buildPickTree(paths: Iterable<string>, exclude: string[] = []): PickTree {
   const root: PickNode = { path: '', name: '', depth: 0, parent: null, children: [] };
   const byPath = new Map<string, PickNode>([['', root]]);
@@ -75,7 +68,7 @@ export function ancestorsOf(path: string): string[] {
 }
 
 /** [start, end) character ranges in a full path. */
-export type Range = [number, number];
+type Range = [number, number];
 
 export interface FolderMatch {
   path: string;
@@ -90,13 +83,8 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/\s*[›>\\]\s*/g, '/');
 }
 
-/**
- * Match one folder path against a query. Every whitespace-separated term must
- * appear in the full path (case-insensitive); a term with "/" (or "›") matches
- * across levels, e.g. "2027/q1". Matches in the folder's own name rank first,
- * then shallower folders. Returns null when a term is missing.
- */
-export function matchFolder(path: string, query: string): FolderMatch | null {
+/** Every query term must appear in the path; hits in the folder's own name rank first, then shallower folders. */
+function matchFolder(path: string, query: string): FolderMatch | null {
   const terms = norm(query.trim())
     .split(/\s+/)
     .map((t) => t.replace(/^\/+|\/+$/g, ''))
@@ -134,7 +122,7 @@ export function matchFolder(path: string, query: string): FolderMatch | null {
   return { path, score, ranges: mergeRanges(ranges) };
 }
 
-export function mergeRanges(ranges: Range[]): Range[] {
+function mergeRanges(ranges: Range[]): Range[] {
   const s = ranges.slice().sort((a, b) => a[0] - b[0]);
   const out: Range[] = [];
   for (const r of s) {
@@ -161,10 +149,7 @@ export interface Piece {
   hl: boolean;
 }
 
-/**
- * Split a path into its segments, each a list of pieces with the highlight
- * ranges applied, for a breadcrumb such as "Projects › 2027 › Q1".
- */
+/** Path segments, each split into highlighted / plain pieces, for a breadcrumb. */
 export function breadcrumbPieces(path: string, ranges: Range[]): Piece[][] {
   const segs: Piece[][] = [];
   let start = 0;
@@ -196,12 +181,7 @@ export interface PickRow {
   match?: FolderMatch;
 }
 
-/**
- * The rows to draw, top to bottom. Without a search: the root, then every
- * folder whose ancestors are all in `expanded`. With search `matches`: only
- * the matches and their ancestors, all expanded, unless the user collapsed
- * one in `collapsed`.
- */
+/** Rows to draw: folders under `expanded` ancestors, or with `matches` only the matches and their ancestors (minus `collapsed`). */
 export function visibleRows(
   tree: PickTree,
   expanded: Set<string>,

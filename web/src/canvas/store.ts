@@ -1,6 +1,4 @@
-// Board layout persistence: GET/PUT /api/ui/layout/canvas, with a
-// localStorage copy under `memora.layout.canvas` that is used whenever the
-// endpoint is missing or unreachable.
+// The localStorage copy is used whenever the layout endpoint is missing or unreachable.
 
 import { api, apiGet } from '../api';
 import { emptyLayout, type SavedLayout } from './model';
@@ -38,7 +36,7 @@ function valid(d: unknown): d is SavedLayout {
 
 const finite = (...n: unknown[]): boolean => n.every((v) => typeof v === 'number' && isFinite(v));
 
-/** Drop frame and card entries without finite numbers, so a damaged copy cannot put NaN on the board. */
+/** Drop non-finite entries so a damaged copy cannot put NaN on the board. */
 function clean(d: SavedLayout): SavedLayout {
   const frames: SavedLayout['frames'] = {};
   const cards: SavedLayout['cards'] = {};
@@ -48,7 +46,6 @@ function clean(d: SavedLayout): SavedLayout {
   return { ...d, view, frames, cards };
 }
 
-/** The saved layout: the server copy when it exists, otherwise the local one. */
 export async function loadLayout(): Promise<SavedLayout> {
   const local = readLocal();
   try {
@@ -77,7 +74,6 @@ async function flush(): Promise<void> {
   }
 }
 
-/** Debounced save; the latest layout wins. */
 export function saveLayout(d: SavedLayout, now = false): void {
   pending = d;
   clearTimeout(timer);
@@ -85,7 +81,6 @@ export function saveLayout(d: SavedLayout, now = false): void {
   else timer = window.setTimeout(() => void flush(), 700);
 }
 
-/** Write any pending save immediately (used when the view hides). */
 export function flushLayout(): void {
   clearTimeout(timer);
   void flush();

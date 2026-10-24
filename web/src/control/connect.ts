@@ -1,40 +1,67 @@
-// "Connect an app". Two ways in:
-// - a new agent (the /agents/new page): pick the app, name the agent and
-//   choose what it may do (its key is made then), set the app up with that
-//   key, give it its instructions;
-// - an existing agent (the Setup tab of its page): straight to the setup of
-//   the one app it belongs to, with its key filled in (unlocked with the
-//   owner's password when it is sealed). An agent never moves to another app.
-// Apps that sign in over OAuth skip the key entirely.
+// "Connect an app" wizard: for a new agent (/agents/new) or an existing agent's Setup tab.
+// On-screen setup text shows dots for the key; Copy puts the real key in.
 
 import { apiGet, apiPost } from '../api';
+import { on } from '../bus';
 import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyleId } from '../docs/agent-prompt';
 import { attr, esc, useStyles } from '../dom';
 import { Modal } from '../modal';
 import { onAgents } from '../realtime';
 import { state } from '../state';
+import { quietToasts } from '../storage';
 import { toast } from '../toast';
 import { agentKey, avatarHTML } from './agents';
 import { closeSheet, codeHTML, copyText, ICO, wireCopy } from './ui';
-import { cachedCatalog, permsHTML, presetPerms, summaryText, wirePerms, type PermEditor, type Permissions, type Preset } from './perms';
+import {
+  accessSentence,
+  cachedCatalog,
+  permsHTML,
+  presetPerms,
+  scopesOf,
+  summaryText,
+  toolsOf,
+  wirePerms,
+  type PermEditor,
+  type Permissions,
+  type Preset,
+} from './perms';
+import {
+  createdBy,
+  firstPrompts,
+  howLabel,
+  isLocalAddress,
+  KEY_DOTS,
+  maskKey,
+  oneClickLink,
+  setupText,
+  testCommand,
+  titleOfPath,
+  TROUBLE_AFTER,
+  type CreatedNote,
+  type Method,
+} from './connect-model';
 import { radioCardHTML, useFormStyles, wireRadios } from '../ui/forms';
-import type { KeyRow, KeysResult } from '../types';
+import type { KeyRow, KeysResult, LogsResult } from '../types';
 
-export const KEY_PLACEHOLDER = '<YOUR_MEMORA_KEY>';
+const KEY_PLACEHOLDER = '<YOUR_MEMORA_KEY>';
 
 export interface ClientSnippet {
   id: string;
   label: string;
-  /** What kind of app it is, one or two words. */
+  /** What kind of app it is, a few words. */
   kind: string;
-  /** How it connects, as a short badge: Sign in, Run a command, Edit file... */
+  /** The tile's plain label: "One click" or "Copy setup". */
   how: string;
-  /** Numbered steps; `{code}` marks where the snippet goes. */
+  method: Method;
+  /** Numbered steps (trusted HTML); `{action}` marks where the step's button goes. */
   steps: string[];
+  /** The setup text, with the key filled in when given. */
   code: string;
-  /** The file the snippet goes in, when there is one. */
+  /** The file the setup goes in, when there is one. */
   file?: string;
-  /** Where the agent instructions go for this app (trusted HTML). */
+  /** More for the technical details (trusted HTML). */
+  tech?: string;
+  /** Where the standing instructions go for this app (trusted HTML). */
   rules: string;
   /** The short instructions fit this app better than the full ones. */
   short?: boolean;
@@ -52,10 +79,12 @@ export interface ConnectKey {
   oauth?: boolean;
   /** Its permissions, when known (shown after it is made). */
   perms?: Permissions;
+  /** It made calls before, so the live check waits for the next one. */
+  used?: boolean;
 }
 
 /** The server's public origin: MEMORA_BASE_URL when set, else this page's origin. */
-export function publicOrigin(): string {
+function publicOrigin(): string {
   return (state.health.base_url || location.origin).replace(/\/$/, '');
 }
 
@@ -67,165 +96,140 @@ export function mcpUrl(): string {
 export function snippets(secret?: string | null): ClientSnippet[] {
   const url = mcpUrl();
   const key = secret || KEY_PLACEHOLDER;
-  const json = (v: unknown): string => JSON.stringify(v, null, 2);
   const claudeRules = 'The instructions of a Claude <b>project</b>, or your personal preferences in Claude <b>Settings</b>.';
+  const paste = 'Name it <b>Memora</b> and paste your Memora address as the server URL. {action}';
+  const app = (a: Omit<ClientSnippet, 'how' | 'code'>): ClientSnippet => ({ ...a, how: howLabel(a.method), code: setupText(a.id, url, key) });
   return [
-    {
+    app({
       id: 'claude-ai',
       label: 'Claude',
       kind: 'Web & desktop app',
-      how: 'Sign in',
+      method: 'signin',
       oauth: true,
       steps: [
-        'In Claude (web or desktop) open <b>Settings &gt; Connectors</b> and choose <b>Add custom connector</b>.',
-        'Fill in the name and URL below.',
-        "Authentication: <b>Sign in now</b>. OAuth client: <b>Use Claude's published identity</b> (or <b>Register automatically</b>).",
-        'Claude opens Memora: sign in and press <b>Allow</b>. The connection shows up on the Agents page as an agent marked Signed in.',
-        '{code}',
-        'No OAuth? Pick <b>No sign-in</b> and add the request header <code>Authorization: Bearer &lt;key&gt;</code> instead.',
+        'In Claude (web or desktop), open <b>Settings → Connectors</b> and choose <b>Add custom connector</b>.',
+        paste,
+        'Click <b>Add</b>, then <b>Connect</b>. A Memora page opens: sign in if asked and press <b>Allow</b>.',
       ],
-      code: `Name:            Memora\nMCP server URL:  ${url}`,
+      tech: 'Claude signs in over OAuth, so no key is pasted: it gets its own key when you press Allow. Without sign-in, connect it as <b>Other app</b> and send the header <code>Authorization: Bearer &lt;key&gt;</code>.',
       rules: claudeRules,
-    },
-    {
+    }),
+    app({
       id: 'chatgpt',
       label: 'ChatGPT',
       kind: 'Web app',
-      how: 'Sign in',
+      method: 'signin',
       oauth: true,
       short: true,
       steps: [
-        'In ChatGPT open <b>Settings &gt; Apps &amp; Connectors &gt; Advanced</b> and turn on <b>Developer mode</b>.',
-        'Choose <b>Create</b> and fill in the name and URL below. Authentication: <b>OAuth</b>, client ID and secret left empty.',
-        '{code}',
-        'ChatGPT opens Memora: sign in and press <b>Allow</b>. ChatGPT only signs in with OAuth; it cannot send a key header.',
+        'In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b>. Then choose <b>Create</b>.',
+        paste,
+        'For authentication choose <b>OAuth</b>, leave the client ID and secret empty, and click <b>Create</b>. A Memora page opens: press <b>Allow</b>.',
       ],
-      code: `Name:            Memora\nMCP server URL:  ${url}\nAuthentication:  OAuth`,
-      rules: 'Your <b>custom instructions</b> (Settings &gt; Personalization), or the instructions of a ChatGPT <b>project</b>.',
-    },
-    {
+      tech: 'ChatGPT only signs in over OAuth; it cannot send a key header.',
+      rules: 'Your <b>custom instructions</b> (Settings → Personalization), or the instructions of a ChatGPT <b>project</b>.',
+    }),
+    app({
       id: 'claude-code',
       label: 'Claude Code',
-      kind: 'Terminal',
-      how: 'Run a command',
+      kind: 'Runs in your terminal',
+      method: 'command',
       steps: [
-        'Run this in a terminal (add <code>--scope user</code> to use it in every project):',
-        '{code}',
-        'Check it with <code>claude mcp list</code>; Memora should show as connected.',
+        'Copy this command. {action}',
+        'Paste it in a terminal and press <kbd>Enter</kbd>. Then start Claude Code, or restart it: Memora loads by itself.',
       ],
-      code: `claude mcp add --transport http memora ${url} \\\n  --header "Authorization: Bearer ${key}"`,
+      tech: 'The command adds Memora for every project (<code>--scope user</code>); leave that out to add it to the current project only. Check it with <code>claude mcp list</code>.',
       rules: '<code>CLAUDE.md</code> in the project, or <code>~/.claude/CLAUDE.md</code> for every project.',
-    },
-    {
+    }),
+    app({
       id: 'cursor',
       label: 'Cursor',
-      kind: 'Editor',
-      how: 'Edit file',
+      kind: 'Code editor',
+      method: 'deeplink',
       file: '~/.cursor/mcp.json',
       steps: [
-        'Open <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project). Create it when missing.',
-        'Add the <code>memora</code> entry:',
-        '{code}',
-        'In <b>Cursor Settings &gt; MCP</b> Memora turns green with its tools listed.',
+        'Click the button to add Memora to Cursor. {action}',
+        'Cursor opens and asks to install Memora. Click <b>Install</b>; it then shows in <b>Cursor Settings → MCP</b>.',
       ],
-      code: json({ mcpServers: { memora: { url, headers: { Authorization: `Bearer ${key}` } } } }),
+      tech: 'Button does nothing? Choose <b>Copy setup instead</b> and paste it into <code>~/.cursor/mcp.json</code> (create the file when missing).',
       rules: 'A project rule in <code>.cursor/rules</code>.',
-    },
-    {
+    }),
+    app({
       id: 'vscode',
       label: 'VS Code / Copilot',
-      kind: 'Editor',
-      how: 'Paste config',
+      kind: 'Code editor',
+      method: 'deeplink',
       file: '.vscode/mcp.json',
       steps: [
-        'Run <b>MCP: Open User Configuration</b> from the Command Palette (or create <code>.vscode/mcp.json</code> in the workspace).',
-        'Add the <code>memora</code> server. VS Code uses <code>servers</code>, not <code>mcpServers</code>:',
-        '{code}',
-        'Press <b>Start</b> above the entry, then use Memora from Copilot Chat in agent mode.',
+        'Click the button to add Memora to VS Code. {action}',
+        'VS Code opens and asks to add Memora. Click <b>Install</b>, then use Copilot Chat in agent mode.',
       ],
-      code: json({ servers: { memora: { type: 'http', url, headers: { Authorization: `Bearer ${key}` } } } }),
+      tech: 'Button does nothing? Choose <b>Copy setup instead</b>, run <b>MCP: Open User Configuration</b> from the Command Palette and paste it there. VS Code uses <code>servers</code>, not <code>mcpServers</code>.',
       rules: '<code>.github/copilot-instructions.md</code> in the repository.',
-    },
-    {
+    }),
+    app({
       id: 'codex',
       label: 'Codex CLI',
-      kind: 'Terminal',
-      how: 'Edit file',
+      kind: 'Runs in your terminal',
+      method: 'command',
       file: '~/.codex/config.toml',
-      steps: [
-        'Add this to <code>~/.codex/config.toml</code>:',
-        '{code}',
-        'Export the key in the shell that starts Codex, then check with <code>codex mcp list</code>.',
-      ],
-      code: `[mcp_servers.memora]\nurl = "${url}"\nbearer_token_env_var = "MEMORA_KEY"\n\n# in your shell:\nexport MEMORA_KEY=${key}`,
+      steps: ['Copy this command. {action}', 'Paste it in a terminal and press <kbd>Enter</kbd>, then start Codex in that same terminal.'],
+      tech: 'Codex reads the key from <code>MEMORA_KEY</code>. Add the <code>export</code> line to your shell profile (like <code>~/.bashrc</code>) so new terminals have it too. Check it with <code>codex mcp list</code>.',
       rules: '<code>AGENTS.md</code> in the project, or <code>~/.codex/AGENTS.md</code> for every project.',
-    },
-    {
+    }),
+    app({
       id: 'gemini',
       label: 'Gemini CLI',
-      kind: 'Terminal',
-      how: 'Edit file',
-      file: '~/.gemini/settings.json',
+      kind: 'Runs in your terminal',
+      method: 'command',
       steps: [
-        'Open <code>~/.gemini/settings.json</code> (or <code>.gemini/settings.json</code> in a project).',
-        'Add the <code>memora</code> server (streamable HTTP uses <code>httpUrl</code>):',
-        '{code}',
-        'Restart Gemini CLI and run <code>/mcp</code> to see Memora and its tools.',
+        'Copy this command. {action}',
+        'Paste it in a terminal and press <kbd>Enter</kbd>. Then start Gemini CLI, or restart it, and type <code>/mcp</code> to see Memora.',
       ],
-      code: json({ mcpServers: { memora: { httpUrl: url, headers: { Authorization: `Bearer ${key}` } } } }),
+      tech: 'Older Gemini CLI without <code>gemini mcp add</code>: add the server to <code>~/.gemini/settings.json</code> under <code>mcpServers</code>, with <code>httpUrl</code> and the same header.',
       rules: '<code>GEMINI.md</code> in the project, or <code>~/.gemini/GEMINI.md</code> for every project.',
-    },
-    {
+    }),
+    app({
       id: 'windsurf',
       label: 'Windsurf',
-      kind: 'Editor',
-      how: 'Edit file',
+      kind: 'Code editor',
+      method: 'copy',
       file: '~/.codeium/windsurf/mcp_config.json',
       steps: [
-        'Open <b>Windsurf Settings &gt; Cascade &gt; MCP servers &gt; View raw config</b> (<code>~/.codeium/windsurf/mcp_config.json</code>).',
-        'Add the <code>memora</code> entry (Windsurf uses <code>serverUrl</code>):',
-        '{code}',
-        'Press <b>Refresh</b>; Memora appears in the MCP list.',
+        'In Windsurf, open <b>Settings → Cascade → MCP servers</b> and choose <b>View raw config</b>.',
+        'Copy the setup. {action}',
+        'Paste it into the file and save, then press <b>Refresh</b>. Memora shows up in the list.',
       ],
-      code: json({ mcpServers: { memora: { serverUrl: url, headers: { Authorization: `Bearer ${key}` } } } }),
+      tech: 'Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.',
       rules: "Windsurf's <b>rules</b>: a global rule, or a workspace rule for one project.",
-    },
-    {
+    }),
+    app({
       id: 'claude-desktop',
-      label: 'Claude Desktop (file)',
-      kind: 'Older desktop builds',
-      how: 'Edit file',
+      label: 'Claude Desktop (older)',
+      kind: 'Versions without Connectors',
+      method: 'copy',
       file: 'claude_desktop_config.json',
       steps: [
-        'Only for older Claude Desktop builds without connectors (else pick <b>Claude</b>).',
-        'Open <b>Settings &gt; Developer &gt; Edit Config</b> and add this (needs Node.js for mcp-remote):',
-        '{code}',
-        'Restart Claude Desktop.',
+        'In Claude Desktop, open <b>Settings → Developer → Edit Config</b>. On newer versions, pick <b>Claude</b> instead.',
+        'Copy the setup. {action}',
+        'Paste it into the file, save, and restart Claude Desktop. It needs Node.js on this computer.',
       ],
-      code: json({
-        mcpServers: {
-          memora: {
-            command: 'npx',
-            args: ['-y', 'mcp-remote', url, '--header', 'Authorization:${MEMORA_AUTH}'],
-            env: { MEMORA_AUTH: `Bearer ${key}` },
-          },
-        },
-      }),
+      tech: 'Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.',
       rules: claudeRules,
-    },
-    {
+    }),
+    app({
       id: 'http',
-      label: 'Any client',
-      kind: 'Any MCP client',
-      how: 'HTTP + key',
+      label: 'Other app',
+      kind: 'Any app that takes a server address',
+      method: 'copy',
       steps: [
-        'Streamable HTTP MCP endpoint with a bearer token. Test it with curl:',
-        '{code}',
-        'A JSON list of tools means the key works.',
+        'Copy your Memora address. {action}',
+        'Copy the key from the box below. The app takes it where it asks for a key, token or password.',
+        'Paste both into the app and save.',
       ],
-      code: `curl -s ${url} \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -H "Accept: application/json, text/event-stream" \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
-      rules: "The client's system prompt or project instructions.",
-    },
+      tech: 'Memora speaks MCP over streamable HTTP. Apps send the key in the header <code>Authorization: Bearer &lt;key&gt;</code>.',
+      rules: "The app's system prompt or project instructions.",
+    }),
   ];
 }
 
@@ -235,7 +239,7 @@ export function appById(id: string, secret?: string | null): ClientSnippet | und
 }
 
 /** A plain name for an agent made for this app: "VS Code / Copilot" -> "VS Code". */
-export function appAgentName(s: ClientSnippet): string {
+function appAgentName(s: ClientSnippet): string {
   if (s.id === 'http') return 'Agent';
   return s.label.replace(/\s*\(.*?\)\s*/g, ' ').split(' / ')[0].trim();
 }
@@ -266,7 +270,6 @@ export function appIconHTML(label: string | null | undefined, size = 32): string
 const CSS = `
 .cn-wz{min-width:0}
 
-/* progress */
 .cn-prog{margin:0 0 22px}
 .cn-prog ol{display:flex;align-items:center;gap:0;margin:0;padding:0;list-style:none;min-width:0}
 .cn-prog li{display:flex;align-items:center;flex:1 1 auto;min-width:0}
@@ -287,16 +290,14 @@ const CSS = `
 .cn-prog .done button{color:var(--text-2)}
 .cn-prog .done .n{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
 .cn-prog-m{display:none}
-.cn-same{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:12px;margin:0 0 16px;font-size:12.5px;line-height:1.5;
+.cn-same{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:var(--r-sm);margin:0 0 16px;font-size:12.5px;line-height:1.5;
   color:var(--text-2);border:1px solid var(--accent-line);background:color-mix(in srgb,var(--accent) 6%,var(--surface-1))}
 .cn-same .ic{display:grid;color:var(--accent);margin-top:1px}
 .cn-same b{color:var(--fg)}
-.cn-used{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:650;white-space:nowrap;
-  color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line)}
 
-.cn-h{margin:0;font-size:18px;font-weight:700;letter-spacing:-.015em;line-height:1.3;outline:none}
-.cn-sub{margin:5px 0 18px;font-size:13px;color:var(--muted);line-height:1.55}
-.cn-sub code,.cn-note code,.cn-where code,.cn-steps code,.cn-hint code{font:500 12px var(--mono);padding:1px 5px;border-radius:5px;
+.cn-h{margin:0;font-size:18px;font-weight:650;letter-spacing:-.015em;line-height:1.3;outline:none}
+.cn-sub{margin:6px 0 20px;font-size:13.5px;color:var(--muted);line-height:1.55}
+.cn-sub code,.cn-note code,.cn-where code,.cn-steps code{font:500 12px var(--mono);padding:1px 5px;border-radius:5px;
   background:var(--surface-2);border:1px solid var(--line);word-break:break-word}
 .cn-link{display:inline;padding:0;font:inherit;font-weight:620;color:var(--accent);background:none;border:0;cursor:pointer;
   text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent) 35%,transparent);text-underline-offset:3px}
@@ -305,67 +306,63 @@ const CSS = `
 .cn-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin:6px 0 18px;font-size:13px;color:var(--muted)}
 .cn-meta .sep{width:3px;height:3px;border-radius:50%;background:var(--text-3)}
 
-/* app picker */
 .cn-search{position:relative;display:block;margin:0 0 20px}
 .cn-search svg{position:absolute;left:13px;top:50%;width:16px;height:16px;margin-top:-8px;color:var(--muted);pointer-events:none}
-.cn-search .ui-input{padding-left:38px;height:44px;border-radius:12px}
+.cn-search .ui-input{padding-left:38px;height:42px;border-radius:var(--r-sm)}
 .cn-group{margin:0 0 18px}
 .cn-group[hidden]{display:none}
-.cn-group>h4{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;margin:0 0 9px;font-size:12.5px;font-weight:650;color:var(--text-2)}
+.cn-group>h4{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;margin:0 0 10px;font-size:14px;font-weight:650;color:var(--fg)}
 .cn-group>h4 span{font-weight:500;color:var(--muted)}
-.cn-tile .how-m{display:none}
-.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
-.cn-tile{display:flex;align-items:center;gap:11px;padding:10px 12px;min-height:60px;border-radius:12px;min-width:0;text-align:left;
-  border:1px solid var(--line);background:var(--surface-0);color:var(--fg);transition:border-color .15s,background .15s,transform .15s}
-.cn-tile:hover{border-color:var(--line-strong);background:var(--surface-2)}
-.cn-tile:active{transform:scale(.985)}
+.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.cn-tile{display:flex;align-items:center;gap:11px;padding:10px 12px;min-height:60px;border-radius:var(--r-sm);min-width:0;text-align:left;
+  border:1px solid var(--line);background:transparent;color:var(--fg);transition:background .15s}
+.cn-tile:hover{background:var(--hover)}
 .cn-tile:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft);border-color:var(--accent-line)}
 .cn-tile[aria-pressed=true]{border-color:var(--accent-line);background:var(--accent-soft)}
-.cn-tile .top{display:contents}
-.cn-tile .tx{flex:1;min-width:0;order:1}
-.cn-tile .cn-how,.cn-tile .cn-used{order:2;flex:none}
-.cn-tile b{display:block;font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cn-tile small{display:block;font-size:12px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cn-how{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:640;white-space:nowrap;
-  color:var(--muted);background:var(--surface-2);border:1px solid var(--line)}
+.cn-tile .tx{flex:1;min-width:0}
+.cn-tile b{display:block;font-size:14px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.cn-tile small{display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.35}
+.cn-how{display:inline-flex;align-items:center;gap:4px;margin-top:5px;height:20px;padding:0 7px;border-radius:99px;font-size:11px;font-weight:650;
+  white-space:nowrap;color:var(--text-2);background:var(--surface-2)}
+.cn-how .cc-i{width:12px;height:12px}
+.cn-how.one{color:var(--accent);background:var(--accent-soft)}
+.cn-tile .cn-in{display:inline-flex;align-items:center;gap:4px;color:var(--text-2);font-weight:600}
+.cn-tile .cn-in .cc-i{width:12px;height:12px;color:var(--ok)}
 .cn-tile .go{display:none}
 .cn-empty{padding:18px 4px;text-align:center;color:var(--muted);font-size:13px}
 
-/* name & access */
 .cn-acc{grid-template-columns:1fr}
 .cn-custom{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
-.cn-done{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--ok) 35%,var(--line));
+.cn-done{display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--r-sm);border:1px solid color-mix(in srgb,var(--ok) 35%,var(--line));
   background:var(--ok-soft)}
 .cn-done .tx{flex:1;min-width:0}
 .cn-done b{display:block;font-size:14px}
 .cn-done small{display:block;font-size:12.5px;color:var(--muted);margin-top:1px}
 
-/* set up */
-.cn-note{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-radius:12px;margin:0 0 18px;font-size:13px;line-height:1.55;
-  border:1px solid var(--line);background:var(--surface-2)}
+.cn-note{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-radius:var(--r-sm);margin:0 0 18px;font-size:13px;line-height:1.55;
+  border:1px solid transparent;background:var(--surface-2)}
 .cn-note .ic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;flex:none;background:var(--ok-soft);color:var(--ok)}
 .cn-note .tx{flex:1;min-width:0}
 .cn-note b{color:var(--fg)}
-.cn-away{font-size:12.5px;margin:-8px 0 16px;color:var(--muted);line-height:1.5}
-.cn-key{display:flex;align-items:center;gap:12px;padding:12px 12px 12px 14px;margin:0 0 18px;border-radius:12px;min-width:0;
-  border:1px solid var(--line);background:var(--surface-2)}
+.cn-key{display:flex;align-items:center;gap:12px;padding:12px 12px 12px 14px;margin:0 0 18px;border-radius:var(--r-sm);min-width:0;
+  border:1px solid transparent;background:var(--surface-2)}
 .cn-key .kt{flex:1;min-width:0}
 .cn-key .kt b{display:block;font-size:13px;font-weight:650}
 .cn-key code{display:block;font:500 12.5px/1.4 var(--mono);color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cn-key code.full{white-space:normal;word-break:break-all}
 .cn-key .acts{display:flex;gap:6px;flex:none}
 .cn-key .btn{height:32px}
-.cn-once{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:12px;margin:0 0 10px;font-size:12.5px;line-height:1.5;
+.cn-once{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:var(--r-sm);margin:0 0 10px;font-size:12.5px;line-height:1.5;
   border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
 .cn-once .cc-i{color:var(--warn);margin-top:1px}
-.cn-unlock{padding:14px;margin:0 0 18px;border-radius:12px;border:1px solid var(--accent-line);background:color-mix(in srgb,var(--accent) 5%,var(--surface-1))}
+.cn-unlock{padding:14px;margin:0 0 18px;border-radius:var(--r-sm);border:1px solid var(--accent-line);background:color-mix(in srgb,var(--accent) 5%,var(--surface-1))}
 .cn-unlock .hd{display:flex;gap:12px;align-items:flex-start;margin:0 0 12px}
 .cn-unlock .ic{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;flex:none;background:var(--accent-soft);color:var(--accent)}
 .cn-unlock .hd b{display:block;font-size:14px;font-weight:680}
 .cn-unlock .hd small{display:block;margin-top:2px;font-size:12.5px;color:var(--muted);line-height:1.5}
 .cn-unlock .row{display:flex;gap:8px}
 .cn-unlock .row .ui-input{flex:1}
-.cn-unlock .row .btn{height:42px;padding:0 16px;border-radius:10px}
+.cn-unlock .row .btn{height:42px;padding:0 16px;border-radius:var(--r-sm)}
 .cn-unlock .alt{margin:10px 0 0;font-size:12.5px;color:var(--muted)}
 .cn-steps{margin:0 0 18px;padding:0;list-style:none;counter-reset:step;font-size:13.5px;line-height:1.6;min-width:0}
 .cn-steps li{position:relative;margin:0 0 12px;padding-left:34px;min-width:0}
@@ -373,18 +370,15 @@ const CSS = `
   border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:720;color:var(--text-2);background:var(--surface-2);
   border:1px solid var(--line-strong)}
 .cn-steps li.code{padding-left:34px}
-.cn-file{display:flex;align-items:center;gap:7px;margin:0 0 7px;font-size:12px;color:var(--muted);min-width:0}
-.cn-file svg{width:14px;height:14px}
-.cn-file code{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .cn-wz .cc-code-wrap{min-width:0;max-width:100%}
-.cn-wz .cc-code{max-width:100%;border-radius:12px 12px 0 0;max-height:300px;padding-right:14px}
+.cn-wz .cc-code{max-width:100%;border-radius:8px 8px 0 0;max-height:300px;padding-right:14px}
 .cn-wz .cc-copy{display:none}
 .cn-copy{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-top:0;
-  border-radius:0 0 12px 12px;background:var(--surface-2);font-size:12px;color:var(--muted)}
-.cn-copy .btn{height:34px;border-radius:9px}
-.cn-test{padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--surface-0)}
+  border-radius:0 0 8px 8px;background:var(--surface-2);font-size:12px;color:var(--muted)}
+.cn-copy .btn{height:34px;border-radius:var(--r-sm)}
+.cn-test{padding:16px;border-radius:var(--r);border:1px solid var(--line);background:transparent}
 .cn-test p{margin:12px 0 8px;font-size:12.5px;color:var(--muted);line-height:1.5}
-.cn-ask{display:flex;align-items:center;gap:8px;padding:8px 6px 8px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);
+.cn-ask{display:flex;align-items:center;gap:8px;padding:8px 6px 8px 12px;border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--line);
   font-size:13px;min-width:0}
 .cn-ask span{flex:1;min-width:0}
 .cn-ask .cc-ibtn{width:34px;height:34px}
@@ -399,20 +393,120 @@ const CSS = `
 .cn-live.on b{color:var(--ok)}
 .cn-live code{font:500 12px var(--mono)}
 .cn-live .grow{flex:1;min-width:0}
-.cn-live .btn{flex:none;height:34px;border-radius:9px}
+.cn-live .btn{flex:none;height:34px;border-radius:var(--r-sm)}
 .cn-live .btn .cc-i{width:14px;height:14px;margin:0 0 0 2px}
 
-/* instructions */
-.cn-where{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);
+.cn-steps .cn-pre{margin:8px 0 0;border-radius:8px 8px 0 0;white-space:pre-wrap;word-break:break-all;max-height:220px}
+.cn-steps .cn-copy{margin:0}
+.cn-act{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-top:10px}
+.cn-act .btn.primary{height:40px;padding:0 18px;border-radius:var(--r-sm)}
+.cn-key.once{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:var(--warn-soft)}
+.cn-key .kt small{display:block;margin-top:3px;font-size:12px;line-height:1.45;color:var(--text-2)}
+.cn-wait-sub{margin:6px 0 0 20px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.cn-test .cn-ask{margin-top:12px}
+.cn-test.mini{padding:10px 14px;margin:0 0 16px}
+.cn-test:empty,.cn-test:has(>[data-live]:empty){display:none}
+.cn-ok{display:flex;gap:14px;align-items:flex-start}
+.cn-ok .big{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:50%;background:var(--ok);color:var(--surface-1)}
+.cn-ok .big .cc-i{width:22px;height:22px;stroke-width:3}
+.cn-ok .tx{flex:1;min-width:0}
+.cn-ok h4{margin:1px 0 2px;font-size:16px;font-weight:650;color:var(--ok)}
+.cn-ok p{margin:2px 0 0;font-size:13px;line-height:1.5;color:var(--text-2)}
+.cn-ok p b{color:var(--fg)}
+.cn-ok .btn{margin-top:10px;height:36px;border-radius:var(--r-sm)}
+.cn-test.won{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));background:var(--ok-soft)}
+.cn-trouble{margin:16px 0 0;padding:14px 0 0;border-top:1px solid var(--line)}
+.cn-trouble h4{margin:0 0 8px;font-size:13.5px;font-weight:680}
+.cn-q{border:1px solid var(--line);border-radius:var(--r-sm);margin:0 0 6px;background:var(--surface-1)}
+.cn-q>summary{display:flex;align-items:center;gap:8px;padding:10px 12px;font-size:13px;font-weight:620;cursor:pointer;list-style:none;border-radius:var(--r-sm)}
+.cn-q>summary::-webkit-details-marker{display:none}
+.cn-q>summary:hover{background:var(--hover)}
+.cn-q>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cn-q>summary .cc-i{width:15px;height:15px;color:var(--muted);transition:transform .18s var(--ease)}
+.cn-q[open]>summary .cc-i{transform:rotate(90deg)}
+.cn-q>div{padding:0 12px 12px 35px;font-size:12.5px;line-height:1.55;color:var(--text-2)}
+.cn-q>div p{margin:0 0 6px}
+.cn-q code{font:500 12px var(--mono);word-break:break-all}
+.cn-q .row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cn-q ul{margin:0;padding-left:18px}
+.cn-tech{margin:18px 0 0;border:1px solid var(--line);border-radius:var(--r-sm)}
+.cn-tech>summary{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:13px;font-weight:620;color:var(--text-2);cursor:pointer;
+  list-style:none;border-radius:var(--r-sm)}
+.cn-tech>summary::-webkit-details-marker{display:none}
+.cn-tech>summary:hover{background:var(--hover);color:var(--fg)}
+.cn-tech>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cn-tech>summary .cc-i{width:15px;height:15px;color:var(--muted);transition:transform .18s var(--ease)}
+.cn-tech[open]>summary .cc-i{transform:rotate(90deg)}
+.cn-tech>div{padding:2px 14px 14px;font-size:12.5px;line-height:1.55;color:var(--text-2);min-width:0}
+.cn-tech h5{margin:12px 0 5px;font-size:12px;font-weight:680;color:var(--fg)}
+.cn-tech p{margin:6px 0 0}
+.cn-tech code{font:500 12px var(--mono);padding:1px 5px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);word-break:break-word}
+.cn-tech pre{margin:0;padding:10px 12px;border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--line);font:500 12px/1.5 var(--mono);
+  white-space:pre-wrap;word-break:break-all;color:var(--text-2);max-height:220px;overflow:auto}
+
+.cn-wz{container:cnwz/inline-size}
+.cn-fp{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin:0 0 16px}
+/* Narrow: the count comes first so it stays in view after copying. */
+.cn-count{order:-1}
+.cn-count .nr{display:flex;align-items:center;gap:12px;margin-top:6px}
+.cn-count .nr .n{margin:0}
+@container cnwz (min-width:720px){
+  .cn-fp{grid-template-columns:minmax(0,1fr) 240px;align-items:start}
+  .cn-count{order:0;position:sticky;top:90px}
+  .cn-count .nr{display:block;margin:0}
+  .cn-count .nr .n{margin:8px 0 2px}
+  .cn-count ul{max-height:260px}
+}
+.cn-cards{display:flex;flex-direction:column;gap:10px;min-width:0}
+.cn-card{padding:14px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface-0);min-width:0}
+.cn-card.rec{border-color:var(--accent-line);box-shadow:inset 0 0 0 1px var(--accent-line)}
+.cn-card h4{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin:0 0 8px;font-size:13.5px;font-weight:680}
+.cn-card .tag{font-size:11.5px;font-weight:600;color:var(--accent)}
+.cn-card blockquote{margin:0 0 10px;padding:10px 12px;border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--line);
+  font-size:13px;line-height:1.55;color:var(--text-2)}
+.cn-card .row{display:flex;justify-content:flex-end}
+.cn-card .btn{height:36px;border-radius:var(--r-sm)}
+.cn-count{padding:14px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface-0);min-width:0}
+.cn-count h4{display:flex;align-items:center;gap:8px;margin:0;font-size:12.5px;font-weight:650;color:var(--text-2)}
+.cn-count .n{display:block;margin:8px 0 2px;font-size:40px;font-weight:300;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+  transform-origin:left center}
+.cn-count .n.bump{animation:cnBump .5s ease-out}
+@keyframes cnBump{0%{transform:scale(1)}40%{transform:scale(1.14);color:var(--ok)}100%{transform:scale(1)}}
+.cn-count .sub{margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.cn-count.got .sub{color:var(--ok);font-weight:620}
+.cn-count .wr{display:flex;align-items:center;gap:7px;min-height:18px;margin:8px 0 0;font-size:12px;color:var(--text-2)}
+.cn-count .wr:empty{display:none}
+.cn-count .wr i{width:7px;height:7px;flex:none;border-radius:50%;background:var(--accent);animation:cnBlink 1.2s ease-in-out infinite}
+@keyframes cnBlink{0%,100%{opacity:.3}50%{opacity:1}}
+.cn-count ul{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:5px;max-height:170px;overflow:auto}
+.cn-count ul:empty{display:none}
+.cn-count li{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;background:var(--surface-2);font-size:12.5px;min-width:0}
+.cn-count li .cc-i{width:14px;height:14px;flex:none;color:var(--accent)}
+.cn-count li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-count li.new{animation:cnIn .4s ease-out}
+@keyframes cnIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.cn-count .hint{margin:10px 0 0;font-size:12px;line-height:1.5;color:var(--text-2)}
+.cn-more{margin:4px 0 0;border:1px solid var(--line);border-radius:var(--r-sm)}
+.cn-more>summary{display:flex;align-items:center;gap:8px;padding:12px 14px;font-size:13.5px;font-weight:650;cursor:pointer;list-style:none;border-radius:var(--r-sm)}
+.cn-more>summary::-webkit-details-marker{display:none}
+.cn-more>summary:hover{background:var(--hover)}
+.cn-more>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cn-more>summary .cc-i{width:15px;height:15px;color:var(--muted);transition:transform .18s var(--ease)}
+.cn-more[open]>summary .cc-i{transform:rotate(90deg)}
+.cn-more>summary small{font-size:12px;font-weight:500;color:var(--muted)}
+.cn-more>div{padding:4px 14px 14px;min-width:0}
+.cn-more .lead{margin:0 0 12px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+
+.cn-where{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-radius:var(--r-sm);border:1px solid transparent;background:var(--surface-2);
   font-size:13px;line-height:1.55;margin:0 0 16px}
 .cn-where .ic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;flex:none;background:var(--surface-1);color:var(--muted);
   border:1px solid var(--line)}
 .cn-where b.k{display:block;font-size:12px;color:var(--muted);font-weight:650;margin-bottom:1px}
 .cn-pstyle{display:flex;flex-wrap:wrap;width:fit-content;overflow:visible;margin:0 0 8px}
-.cn-pstyle .rec{font-size:10.5px;font-weight:700;color:var(--accent);margin-left:6px}
+.cn-pstyle .rec{font-size:11.5px;font-weight:600;color:var(--accent);margin-left:6px}
 .cn-pdesc{margin:0 0 12px;font-size:12.5px;color:var(--muted);line-height:1.5}
 .cn-ptabs{margin:0 0 10px}
-.cn-ptabs .rec{font-size:10.5px;font-weight:700;color:var(--accent);margin-left:6px}
+.cn-ptabs .rec{font-size:11.5px;font-weight:600;color:var(--accent);margin-left:6px}
 .cn-prompt .cc-code{white-space:pre-wrap;word-break:break-word;max-height:300px}
 .cn-doc{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-size:13px;font-weight:620;color:var(--accent)}
 .cn-doc .cc-i{width:15px;height:15px}
@@ -427,7 +521,6 @@ const CSS = `
   .cn-h{font-size:17px}
   .cn-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
   .cn-tile{gap:10px;padding:10px;min-height:58px}
-  .cn-tile .top .cn-how,.cn-tile .top .cn-used{display:none}
   .cn-tile b{font-size:13px}
   .cn-group>h4 span{flex-basis:100%}
   .cn-key{flex-wrap:wrap}
@@ -438,16 +531,19 @@ const CSS = `
   .cn-unlock .row .btn{height:46px}
   .cn-steps li,.cn-steps li.code{padding-left:32px}
   .cn-steps li.code{padding-left:0}
-  .cn-live{flex-wrap:wrap}
+  .cn-wait-sub{margin-left:0}
 }
 @media (max-width:360px){.cn-grid{grid-template-columns:1fr}}
-@media (prefers-reduced-motion:reduce){.cn-live .pulse::after{animation:none}}
+@media (prefers-reduced-motion:reduce){
+  .cn-live .pulse::after,.cn-count .n.bump,.cn-count li.new,.cn-count .wr i{animation:none}
+  .cn-q>summary .cc-i,.cn-tech>summary .cc-i,.cn-more>summary .cc-i{transition:none}
+}
 `;
 
-export type StepId = 'app' | 'access' | 'setup' | 'prompt';
-const STEP_LABEL: Record<StepId, string> = { app: 'App', access: 'Name & access', setup: 'Set up', prompt: 'Instructions' };
+type StepId = 'app' | 'access' | 'setup' | 'prompt';
+const STEP_LABEL: Record<StepId, string> = { app: 'App', access: 'Name & access', setup: 'Set up', prompt: 'First prompt' };
 
-export interface WizardOptions {
+interface WizardOptions {
   /** Set up this existing agent; without it the wizard makes a new agent. */
   agent?: ConnectKey;
   /** The app: preselected for a new agent, or the app the agent is used with. */
@@ -500,15 +596,18 @@ export interface Wizard {
   destroy: () => void;
 }
 
-const mask = (s: string): string => s.slice(0, 10) + '•'.repeat(Math.max(4, Math.min(18, s.length - 14))) + s.slice(-4);
-
 const ICON = {
   lock: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   file: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg>',
   info: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
   pin: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   chev: '<svg class="cc-i go" viewBox="0 0 24 24" aria-hidden="true" style="color:var(--muted)"><path d="m9 6 6 6-6 6"/></svg>',
+  right: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
+  bolt: '<svg class="cc-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>',
 };
+
+/** After this long without a note the "did you send it?" hint shows (ms). */
+const NO_NOTE_HINT = 180_000;
 
 export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard {
   useStyles('cn-css', CSS);
@@ -533,6 +632,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   let shown = false;
   let promptKind: 'full' | 'short' | '' = '';
   let promptStyle = savedPromptStyle();
+  let moreOpen = false;
+  let techOpen = false;
   let destroyed = false;
 
   const secret = (): string => (agent && secrets.get(agent.id)) || '';
@@ -556,12 +657,13 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     for (let i = 2; ; i++) if (!taken.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
   };
 
-  // ── live check: the first call with the agent's key, or a new OAuth sign-in
-
   let watchFor = '';
   let stopWatch = (): void => {};
-  let connected: { name: string; what: string } | null = null;
+  let connected: { name: string; what: string; at: number } | null = null;
   let connectedId = '';
+  let connectedPerms: Permissions | null = null;
+  let waitStart = 0;
+  let troubleTimer = 0;
 
   const target = (): string => {
     const c = cur();
@@ -570,31 +672,153 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     return agent ? 'key:' + agent.id : '';
   };
 
+  /** Start (again) the two minutes before the troubleshooting list opens. */
+  const armTrouble = (): void => {
+    clearTimeout(troubleTimer);
+    waitStart = Date.now();
+    troubleTimer = window.setTimeout(() => !destroyed && host.isConnected && paintLive(), TROUBLE_AFTER * 1000 + 50);
+  };
+  // An agent that worked before only waits for its next call: nothing to troubleshoot.
+  const troubleOn = (): boolean =>
+    !connected && !!waitStart && Date.now() - waitStart >= TROUBLE_AFTER * 1000 && !(target().startsWith('key:') && agent?.used);
+
+  const say = (text: string): void => {
+    const el = host.querySelector<HTMLElement>('[data-say]');
+    if (el) el.textContent = text;
+  };
+
+  const primaryLabel = (c: ClientSnippet, again = false): string => {
+    if (c.method === 'signin' || c.id === 'http') return ICO.copy + 'Copy address';
+    if (c.method === 'deeplink') return ICO.arrow + (again ? 'Open ' : 'Open in ') + esc(appAgentName(c)) + (again ? ' again' : '');
+    return ICO.copy + (c.method === 'command' ? 'Copy command' : 'Copy setup') + (again ? ' again' : '');
+  };
+
+  const troubleHTML = (c: ClientSnippet): string => {
+    const url = mcpUrl();
+    const app = esc(c.label);
+    const q = (id: string, title: string, body: string): string =>
+      `<details class="cn-q" data-q="${id}"><summary>${ICON.right}<span>${title}</span></summary><div>${body}</div></details>`;
+    const reach =
+      `<p>Apps connect to <code>${esc(url)}</code>.</p>` +
+      (isLocalAddress(url)
+        ? c.oauth
+          ? `<p>That address only opens on this computer or its network. ${app} connects from the internet, so Memora needs an internet address with https. Ask whoever runs Memora to give it one.</p>`
+          : `<p>That address only opens on this computer or its network, which is fine when ${app} runs here too.</p>`
+        : `<p>Open it in a browser on the device where ${app} runs: it should answer, not time out.</p>`) +
+      (publicOrigin() !== location.origin ? `<p>You opened this page at ${esc(location.host)}; apps use the address above.</p>` : '');
+    const parts = [q('reach', `Can ${app} reach Memora's address?`, reach)];
+    if (c.oauth) {
+      parts.push(
+        q(
+          'allow',
+          'Did you press Allow on the Memora page?',
+          `<p>${app} opens a Memora page in your browser to ask for permission. If you closed it, start again from step 1.</p>`,
+        ),
+      );
+    } else {
+      parts.push(
+        q('restart', `Did you restart ${app}?`, `<p>Some apps only load a new connection after a restart. Quit ${app} fully and open it again.</p>`),
+        q(
+          'again',
+          'Copy it again',
+          `<p>The setup may have been pasted only partly. Copy it again, or make a new key if the old one is lost.</p>
+          <div class="row"><button type="button" class="btn sm" data-primary>${primaryLabel(c, true)}</button>
+          <button type="button" class="btn sm" data-roll>${ICO.key}Make a new key</button></div>`,
+        ),
+        q('refused', 'Refused attempts', '<div data-refused><p>Checking…</p></div>'),
+      );
+    }
+    return `<div class="cn-trouble"><h4>Not connected yet? Check these</h4>${parts.join('')}</div>`;
+  };
+
+  const liveFull = (c: ClientSnippet): string => {
+    if (connected) {
+      const id = connectedId || agent?.id || '';
+      const open = !forAgent && o.onOpenAgent && id;
+      const what = connected.what ? `called <code>${esc(connected.what)}</code>` : 'made its first call';
+      return `<div class="cn-ok"><span class="big" aria-hidden="true">${ICO.check}</span><span class="tx"><h4>Connected</h4>
+        <p><b>${esc(connected.name)}</b> ${what} at ${esc(clockOf(connected.at))}.</p>${
+          connectedPerms ? `<p>${esc(accessSentence(connectedPerms))}</p>` : ''
+        }${open ? `<button type="button" class="btn sm" data-open-agent>Open ${esc(connected.name)} ${ICO.arrow}</button>` : ''}</span></div>`;
+    }
+    const t = target();
+    if (!t) return '';
+    const who = t.startsWith('oauth:')
+      ? `Waiting for <b>${esc(c.label)}</b> to sign in…`
+      : agent?.used
+        ? `Waiting for the next call from <b>${esc(agent.name)}</b>…`
+        : `Waiting for the first call from <b>${esc(agent!.name)}</b>…`;
+    const ask = 'Call the Memora healthcheck tool, then search my memory for "project".';
+    return `<div class="cn-live"><span class="pulse" aria-hidden="true"></span><span>${who}</span></div>
+      <p class="cn-wait-sub">This page notices by itself as soon as ${esc(c.label)} connects. Keep it open.</p>${
+        t.startsWith('key:')
+          ? `<div class="cn-ask"><span>Not sure it is on? Ask ${esc(c.label)}: “${esc(ask)}”</span><button type="button" class="cc-ibtn" data-copy="${attr(
+              ask,
+            )}" aria-label="Copy the test question" title="Copy">${ICO.copy}</button></div>`
+          : ''
+      }${troubleOn() ? troubleHTML(c) : ''}`;
+  };
+
+  const liveMini = (c: ClientSnippet): string => {
+    if (connected)
+      return `<div class="cn-live on"><span class="ok" aria-hidden="true">${ICO.check}</span><span class="grow"><b>Connected</b> · ${esc(
+        connected.name,
+      )} can use Memora now.</span></div>`;
+    const t = target();
+    if (!t) return '';
+    return `<div class="cn-live"><span class="pulse" aria-hidden="true"></span><span>${
+      t.startsWith('oauth:') ? `Waiting for <b>${esc(c.label)}</b> to sign in…` : `Waiting for <b>${esc(agent!.name)}</b> to connect…`
+    }</span></div>`;
+  };
+
+  const fillRefused = (box: HTMLElement, c: ClientSnippet): void => {
+    const el = box.querySelector<HTMLElement>('[data-refused]');
+    if (!el) return;
+    // A little before the wait began, to catch the very first try.
+    const since = waitStart / 1000 - 300;
+    void apiGet<LogsResult>('/api/auth/events?limit=200')
+      .catch(() => null)
+      .then((r) => {
+        if (!el.isConnected) return;
+        if (!r) {
+          el.innerHTML = '<p>Could not check right now.</p>';
+          return;
+        }
+        const n = (r.events || []).filter((e) => e.event === 'key_fail' && Number((e as { at?: number }).at || 0) >= since).length;
+        el.innerHTML = n
+          ? `<p>${n === 1 ? 'Something' : `${n} times, something`} tried to connect with a key that does not work. If that was ${esc(c.label)}, copy the setup again.</p>`
+          : `<p>None. Memora has not heard from ${esc(c.label)} at all yet, so it probably has not loaded the setup.</p>`;
+      });
+  };
+
   const paintLive = (): void => {
     const c = cur();
     host.querySelectorAll<HTMLElement>('[data-live]').forEach((box) => {
-      box.classList.toggle('on', !!connected);
-      if (connected) {
-        const open = !forAgent && o.onOpenAgent && (connectedId || agent?.id);
-        box.innerHTML = `<span class="ok">${ICO.check}</span><span class="grow"><b>Connected</b> · ${esc(connected.name)} ${
-          connected.what ? 'called <code>' + esc(connected.what) + '</code>' : 'made its first call'
-        }.</span>${open ? `<button type="button" class="btn sm" data-open-agent>Open ${esc(connected.name)} ${ICO.arrow}</button>` : ''}`;
-        const ob = box.querySelector<HTMLButtonElement>('[data-open-agent]');
-        if (ob) ob.onclick = () => o.onOpenAgent?.(connectedId || agent!.id);
-      } else if (target().startsWith('oauth:') && c) {
-        box.innerHTML = `<span class="pulse" aria-hidden="true"></span><span>Waiting for <b>${esc(c.label)}</b> to sign in…</span>`;
-      } else if (agent) {
-        box.innerHTML = `<span class="pulse" aria-hidden="true"></span><span>Waiting for the first call from <b>${esc(agent.name)}</b>…</span>`;
-      } else box.innerHTML = '';
+      const mini = box.dataset.live === 'mini';
+      box.innerHTML = c ? (mini ? liveMini(c) : liveFull(c)) : '';
+      (mini ? box : box.closest('.cn-test'))?.classList.toggle('won', !!connected);
+      wireCopy(box);
+      wireActions(box);
+      const ob = box.querySelector<HTMLButtonElement>('[data-open-agent]');
+      if (ob) ob.onclick = () => o.onOpenAgent?.(connectedId || agent!.id);
+      if (c && box.querySelector('[data-refused]')) fillRefused(box, c);
     });
   };
 
-  const hit = (who: string, what: string, id = ''): void => {
+  const hit = (who: string, what: string, id = '', perms?: Permissions): void => {
     if (connected || destroyed) return;
-    connected = { name: who, what };
+    connected = { name: who, what, at: Date.now() };
     connectedId = id || agent?.id || '';
-    toast(who + ' is connected', 'ok');
-    paintLive();
+    connectedPerms = perms || agent?.perms || null;
+    clearTimeout(troubleTimer);
+    // The first call proves the app is the right one, so a guessed app is kept.
+    if (forAgent && agent && client) o.onAppChosen?.(agent.id, client);
+    // The page says so itself when the check is on screen.
+    const box = host.querySelector('[data-live]')?.getBoundingClientRect();
+    if (!box || box.bottom < 0 || box.top > window.innerHeight) toast(who + ' is connected', 'ok');
+    say(`Connected. ${who} made its first call.`);
+    if (step === 'prompt') paint();
+    else paintLive();
     o.onChange?.();
     o.onInfo?.(info());
   };
@@ -606,11 +830,13 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     watchFor = t;
     connected = null;
     if (!t) return;
+    armTrouble();
     const since = Date.now();
     let timer = 0;
     let unsub = (): void => {};
     stopWatch = () => {
       clearInterval(timer);
+      clearTimeout(troubleTimer);
       unsub();
       stopWatch = () => {};
     };
@@ -658,14 +884,147 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         const k = await apiGet<KeysResult | KeyRow[]>('/api/keys').catch(() => null);
         const row = k ? (Array.isArray(k) ? k : k.keys || []).find((r) => r.id === added) : undefined;
         if (row) o.onAppChosen?.(row.id, c.id);
-        hit(row?.name || c.label, '', row?.id || '');
+        hit(row?.name || c.label, '', row?.id || '', row ? { scopes: scopesOf(row), tools: toolsOf(row) } : undefined);
       };
       void poll();
       timer = window.setInterval(() => void poll(), 4000);
     }
   };
 
-  // ── markup
+  const cnt = {
+    id: '',
+    name: '',
+    /** Count notes created from this server time on; null: everything after the first look. */
+    since: null as number | null,
+    base: null as Set<string> | null,
+    notes: [] as CreatedNote[],
+    shown: 0,
+    fresh: new Set<string>(),
+    writing: '',
+    started: 0,
+    timer: 0,
+    soon: 0,
+    wr: 0,
+    busy: false,
+    again: false,
+    offs: [] as (() => void)[],
+  };
+
+  const stopCount = (): void => {
+    clearInterval(cnt.timer);
+    clearTimeout(cnt.soon);
+    clearTimeout(cnt.wr);
+    cnt.offs.forEach((f) => f());
+    cnt.offs = [];
+    cnt.timer = 0;
+  };
+
+  const paintCount = (): void => {
+    const box = host.querySelector<HTMLElement>('[data-count]');
+    const c = cur();
+    if (!box || !c) return;
+    const n = cnt.notes.length;
+    const num = box.querySelector<HTMLElement>('.n')!;
+    num.textContent = String(n);
+    if (n > cnt.shown) {
+      num.classList.remove('bump');
+      void num.offsetWidth;
+      num.classList.add('bump');
+    }
+    cnt.shown = n;
+    box.classList.toggle('got', n > 0);
+    box.querySelector<HTMLElement>('.sub')!.textContent = n
+      ? `${cnt.name} saved ${n} note${n === 1 ? '' : 's'} so far.`
+      : cnt.id
+        ? `Waiting for the first note from ${cnt.name}…`
+        : `Counting starts once ${c.label} is connected.`;
+    box.querySelector<HTMLElement>('.wr')!.innerHTML = cnt.writing ? `<i aria-hidden="true"></i><span>${esc(cnt.writing)}</span>` : '';
+    box.querySelector<HTMLElement>('ul')!.innerHTML = cnt.notes
+      .slice(0, 30)
+      .map((x) => `<li${cnt.fresh.has(x.path) ? ' class="new"' : ''} title="${attr(x.path)}">${ICON.file}<span>${esc(titleOfPath(x.path))}</span></li>`)
+      .join('');
+    cnt.fresh.clear();
+    const hint = box.querySelector<HTMLElement>('.hint')!;
+    hint.hidden = !(cnt.id && !n && cnt.started && Date.now() - cnt.started > NO_NOTE_HINT);
+  };
+
+  const pollCount = async (): Promise<void> => {
+    if (!cnt.id || destroyed) return;
+    if (cnt.busy) {
+      cnt.again = true;
+      return;
+    }
+    cnt.busy = true;
+    const id = cnt.id;
+    const r = await apiGet<LogsResult>(`/api/logs?range=7d&actor=${encodeURIComponent(cnt.name)}&limit=1000`).catch(() => null);
+    cnt.busy = false;
+    if (destroyed || id !== cnt.id) return;
+    if (r) {
+      let notes = createdBy((r.events || []) as Record<string, unknown>[], cnt.name, cnt.since ?? 0);
+      if (cnt.since === null) {
+        if (!cnt.base) cnt.base = new Set(notes.map((x) => x.path));
+        notes = notes.filter((x) => !cnt.base!.has(x.path));
+      }
+      const had = new Set(cnt.notes.map((x) => x.path));
+      notes.forEach((x) => !had.has(x.path) && cnt.fresh.add(x.path));
+      cnt.notes = notes;
+    }
+    paintCount();
+    if (cnt.again) {
+      cnt.again = false;
+      void pollCount();
+    }
+  };
+
+  const startCount = async (): Promise<void> => {
+    const id = connectedId || agent?.id || '';
+    if (!id || (cnt.id === id && cnt.timer)) return;
+    stopCount();
+    cnt.id = id;
+    cnt.name = connectedId && connected ? connected.name : agent?.name || '';
+    cnt.since = null;
+    cnt.base = null;
+    cnt.notes = [];
+    cnt.shown = 0;
+    cnt.started = Date.now();
+    cnt.timer = window.setInterval(() => void pollCount(), 8000);
+    // The count shows its notes as they arrive; a toast for each would only cover the page.
+    cnt.offs.push(quietToasts(id));
+    const soon = (): void => {
+      clearTimeout(cnt.soon);
+      cnt.soon = window.setTimeout(() => void pollCount(), 400);
+    };
+    cnt.offs.push(
+      on('mutation', (d) => {
+        if (d.type === 'node_created' && d.actor === cnt.name) soon();
+      }),
+      on('activity', (ev) => {
+        if (ev.kind === 'user' || (ev.actorId ? ev.actorId !== cnt.id : ev.actor !== cnt.name)) return;
+        const note = ev.phase === 'start' && ev.paths[0] ? titleOfPath(ev.paths[0]) : '';
+        if (ev.phase === 'start') cnt.writing = note ? `${cnt.name} is working on ${note}…` : `${cnt.name} is working…`;
+        else soon();
+        // Not every call reports its end, so the line clears by itself.
+        clearTimeout(cnt.wr);
+        cnt.wr = window.setTimeout(
+          () => {
+            cnt.writing = '';
+            paintCount();
+          },
+          ev.phase === 'start' ? 6000 : 2500,
+        );
+        paintCount();
+      }),
+    );
+    // A new agent counts every note since it was made (its name may be an old one's).
+    if (!forAgent) {
+      const d = await apiGet<KeysResult | KeyRow[]>('/api/keys').catch(() => null);
+      const row = d ? (Array.isArray(d) ? d : d.keys || []).find((k) => k.id === id) : undefined;
+      if (cnt.id !== id) return;
+      const made = Number((row as { created?: number } | undefined)?.created || 0);
+      if (made) cnt.since = made - 1;
+    }
+    void pollCount();
+  };
 
   const progHTML = (): string => {
     const ids = steps();
@@ -689,12 +1048,13 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
 
   const tile = (s: ClientSnippet): string => {
     const used = forAgent ? [] : sameApp(s.id);
-    const usedNote = used.length ? `${used.length === 1 ? used[0] : used.length + ' agents'} already uses it` : '';
+    const usedNote = used.length ? `${used.length === 1 ? used[0] : used.length + ' agents'} already use${used.length === 1 ? 's' : ''} it` : '';
+    const one = s.how === 'One click';
     return `<button type="button" class="cn-tile" data-client="${attr(s.id)}" data-q="${attr(
       (s.label + ' ' + s.kind + ' ' + s.how).toLowerCase(),
-    )}" aria-pressed="${s.id === client}"${usedNote ? ` aria-description="${attr(usedNote)}"` : ''}><span class="top">${appIconHTML(s.label, 34)}${
-      used.length ? `<span class="cn-used" title="${attr(usedNote)}">${used.length === 1 ? 'Has an agent' : used.length + ' agents'}</span>` : `<span class="cn-how">${esc(s.how)}</span>`
-    }</span><span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind)}<span class="how-m"> · ${esc(s.how)}</span></small></span>${ICON.chev}</button>`;
+    )}" aria-pressed="${s.id === client}"${usedNote ? ` aria-description="${attr(usedNote)}"` : ''}>${appIconHTML(s.label, 34)}<span class="tx"><b>${esc(
+      s.label,
+    )}</b><small>${used.length ? `<span class="cn-in">${ICO.check}${used.length === 1 ? 'Already added' : used.length + ' already added'}</span>` : esc(s.kind)}</small><span class="cn-how${one ? ' one' : ''}">${one ? ICON.bolt : ICO.copy}${esc(s.how)}</span></span>${ICON.chev}</button>`;
   };
 
   /** "You already have Cursor for Cursor": shown once an app with an agent is picked; continuing is fine. */
@@ -716,9 +1076,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
 
   const stepApp = (): string => {
     const all = snippets();
-    const head = forAgent
-      ? `Which app is ${esc(agent!.name)} used with?`
-      : 'Which app do you want to connect?';
+    const head = forAgent ? `Which app is ${esc(agent!.name)} used with?` : 'Which app do you want to connect?';
     const sub = forAgent
       ? `The setup is shown for that app, with ${esc(agent!.name)}'s key filled in.`
       : `Give each app or device its own agent. Activity then shows exactly who did what, and you can turn one off without touching the others.`;
@@ -726,11 +1084,11 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const keyed = all.filter((s) => !s.oauth);
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>${head}</h3><p class="cn-sub">${sub}</p>
       <label class="cn-search">${ICO.search}<span class="sr-only">Search apps</span><input class="ui-input" type="search" id="cnQ" placeholder="Search apps" autocomplete="off"></label>
-      <section class="cn-group" data-group><h4>Sign in <span>No key to copy: the app signs in with your Memora account</span></h4>
+      <section class="cn-group" data-group><h4>Sign in <span>Claude and ChatGPT sign in with your Memora account. Nothing to copy.</span></h4>
         <div class="cn-grid">${oauth.map(tile).join('')}</div></section>
-      <section class="cn-group" data-group><h4>With an API key <span>Paste a config with the agent's key</span></h4>
+      <section class="cn-group" data-group><h4>Apps on your computer <span>Each one gets its own key from Memora.</span></h4>
         <div class="cn-grid">${keyed.map(tile).join('')}</div></section>
-      <p class="cn-empty" id="cnNone" hidden>No app matches. <b>Any client</b> works with every MCP client.</p>`;
+      <p class="cn-empty" id="cnNone" hidden>No app matches. <b>Other app</b> works with any app that takes a server address.</p>`;
   };
 
   const accessHTML = (): string => {
@@ -741,10 +1099,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
           agent.perms ? summaryText(agent.perms) : 'Its key is filled in on the next step',
         )}. Change its permissions any time from its page.</small></span></div>`;
     }
-    const tools = cachedCatalog();
-    const ro = presetPerms('ro', tools);
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>Name it and choose what it may do</h3>
-      <p class="cn-sub">${esc(c.label)} gets its own agent and key. The key is made when you continue and filled in on the next step.</p>
+      <p class="cn-sub">${esc(c.label)} gets its own agent and key. The key is made when you continue.</p>
       ${sameAppNote()}<div class="ui-fld"><label for="cnName">Agent name</label>
         <input class="ui-input" id="cnName" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(nameEdited ? name : defaultName())}">
         <span class="ui-help">It shows up under this name in Activity, the brain and the graph. Name it after the device when you use ${esc(
@@ -752,92 +1108,116 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         )} in more than one place, like "${esc(appAgentName(c))} laptop".</span></div>
       <div class="ui-fld" style="margin:0"><span class="ui-lbl" id="cnAccL">Access</span>
         <div class="ui-rcs cn-acc" role="radiogroup" aria-labelledby="cnAccL">
-          ${radioCardHTML('rw', preset === 'rw', 'Read &amp; write', 'Search, read and save notes with every MCP tool. It cannot manage the server or other agents.', 'Recommended')}
-          ${radioCardHTML(
-            'ro',
-            preset === 'ro',
-            'Read only',
-            ro && Array.isArray(ro.tools)
-              ? `Search and read notes with the ${ro.tools.length} tools that change nothing.`
-              : 'Needs the tool list, which could not be loaded right now.',
-            '',
-            !ro,
-          )}
-          ${radioCardHTML('custom', preset === 'custom', 'Custom…', 'Pick exactly which capabilities and tools it gets.')}
+          ${radioCardHTML('rw', preset === 'rw', 'Can read and change', 'Searches, reads and saves notes. It cannot manage Memora or other agents.', 'Recommended')}
+          ${radioCardHTML('ro', preset === 'ro', 'Can only read', 'Searches and reads notes. Any change it tries is refused.')}
+          ${radioCardHTML('custom', preset === 'custom', 'Custom…', 'Pick exactly what it may do, tool by tool.')}
         </div></div>
       <div class="cn-custom" id="cnCustom" hidden></div>`;
   };
 
-  const keyHTML = (c: ClientSnippet): string => {
+  /** Before the steps: a key that has to be unlocked or made again first, or the no-key note. */
+  const keyFirstHTML = (c: ClientSnippet): string => {
     const a = agent;
     if (!a || (c.oauth && a.oauth)) {
-      return `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>No key needed.</b> ${esc(
-        c.label,
-      )} signs in with your Memora account over OAuth and shows up as its own agent, marked Signed in.</span></div>`;
+      return c.oauth
+        ? `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>No key needed.</b> ${esc(
+            c.label,
+          )} signs in with your Memora account and shows up as its own agent.</span></div>`
+        : '';
     }
-    const s = secrets.get(a.id);
-    if (s) {
-      return `${
-        fresh.has(a.id)
-          ? `<div class="cn-once" role="note">${ICO.key}<span><b>This key is shown once.</b> It is already filled in below; copy it now if you need it elsewhere. Anyone with it can read and write your notes as ${esc(
-              a.name,
-            )}.</span></div>`
-          : ''
-      }<div class="cn-key">${avatarHTML(a.name, 32, '', a.id)}<span class="kt"><b>${esc(a.name)}'s key · filled in below</b><code class="${
-        shown ? 'full' : ''
-      }">${esc(shown ? s : mask(s))}</code></span>
-        <span class="acts"><button type="button" class="btn sm" id="cnKeyEye" aria-pressed="${shown}">${shown ? 'Hide' : 'Show'}</button>
-        <button type="button" class="btn sm" id="cnKeyCopy">${ICO.copy}Copy key</button></span></div>`;
-    }
+    if (secrets.get(a.id)) return '';
     if (a.oauth) {
       return `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>${esc(
         a.name,
-      )} signed in over OAuth.</b> The app holds its own token, so there is no key to paste. To use ${esc(c.label)} with a key, connect it as a new agent.</span></div>`;
+      )} signed in with your Memora account.</b> The app holds its own key, so there is nothing to paste. To use ${esc(c.label)} with a key, connect it as a new agent.</span></div>`;
     }
     if (a.revealable) {
       return `<form class="cn-unlock" id="cnUnlock"><div class="hd"><span class="ic">${ICON.lock}</span><span><b>Unlock ${esc(
         a.name,
-      )}'s key</b><small>It is stored sealed on the server. Enter your Memora password to fill it into the setup below.</small></span></div>
+      )}'s key first</b><small>It is kept locked on the server. Enter your Memora password and the buttons below put it in for you.</small></span></div>
         <div class="row"><input class="ui-input" type="password" id="cnPw" autocomplete="current-password" placeholder="Your Memora password" aria-label="Your Memora password">
         <button type="submit" class="btn primary">${ICON.lock}Unlock key</button></div>
         <p class="alt">Or <button type="button" class="cn-link" data-roll>make a new key instead</button>; the current one stops working.</p></form>`;
     }
     return `<div class="cn-unlock"><div class="hd"><span class="ic">${ICO.key}</span><span><b>Make a new key for ${esc(
       a.name,
-    )}</b><small>Its key was shown only once, when it was made, so it cannot be filled in. A new key replaces it and the old one stops working at once.</small></span></div>
-      <div class="row"><button type="button" class="btn primary" data-roll>${ICO.key}Make a new key &amp; fill it in</button></div>
-      <p class="alt">Or copy the setup below and put the key in yourself.</p></div>`;
+    )} first</b><small>Its key was shown only once, when it was made. A new key replaces it and the old one stops working at once.</small></span></div>
+      <div class="row"><button type="button" class="btn primary" data-roll>${ICO.key}Make a new key</button></div></div>`;
+  };
+
+  /** After the steps: the key in its own box, shown once when it was just made. */
+  const keyBoxHTML = (c: ClientSnippet): string => {
+    const a = agent;
+    const s = a ? secrets.get(a.id) : '';
+    if (!a || !s || c.oauth) return '';
+    const once = fresh.has(a.id);
+    const note =
+      c.id === 'http'
+        ? 'Paste it into the app where it asks for a key.'
+        : `The button above already puts it in; copy it only if you need it somewhere else.`;
+    return `<div class="cn-key${once ? ' once' : ''}">${avatarHTML(a.name, 32, '', a.id)}<span class="kt"><b>${esc(a.name)}'s key${
+      once ? ' · shown once' : ''
+    }</b><code class="${shown ? 'full' : ''}">${esc(shown ? s : maskKey(s))}</code><small>${note}${
+      once ? ` Anyone with it can use your notes as ${esc(a.name)}.` : ''
+    }</small></span>
+      <span class="acts"><button type="button" class="btn sm" id="cnKeyEye" aria-pressed="${shown}">${shown ? 'Hide' : 'Show'}</button>
+      <button type="button" class="btn sm" id="cnKeyCopy">${ICO.copy}Copy key</button></span></div>`;
+  };
+
+  /** The button (and what it copies, with dots for the key) inside a step. */
+  const actionHTML = (c: ClientSnippet): string => {
+    if (c.method === 'signin' || c.id === 'http')
+      return `<pre class="cc-code cn-pre">${esc(mcpUrl())}</pre><div class="cn-copy"><span>${
+        c.oauth ? 'Paste it into ' + esc(c.label) : 'Your Memora address'
+      }</span><button type="button" class="btn primary" data-primary>${primaryLabel(c)}</button></div>`;
+    if (c.method === 'deeplink')
+      return `<div class="cn-act"><button type="button" class="btn primary" data-primary>${primaryLabel(
+        c,
+      )}</button><button type="button" class="cn-link" data-alt>Copy setup instead</button></div>`;
+    return `<pre class="cc-code cn-pre" aria-label="${attr(c.method === 'command' ? 'The command' : 'The setup')}">${esc(
+      setupText(c.id, mcpUrl(), KEY_DOTS),
+    )}</pre><div class="cn-copy"><span>${secret() ? 'The dots stand for the key; Copy puts it in.' : 'The dots stand for the key. Unlock it above first.'}</span>
+      <button type="button" class="btn primary" data-primary>${primaryLabel(c)}</button></div>`;
+  };
+
+  const techHTML = (c: ClientSnippet): string => {
+    const url = mcpUrl();
+    const away =
+      publicOrigin() !== location.origin
+        ? `<p>Apps use this address (set with <code>MEMORA_BASE_URL</code>), even though this page is open at ${esc(location.host)}.</p>`
+        : '';
+    const conf =
+      c.method === 'deeplink' || (c.method === 'copy' && c.id !== 'http')
+        ? `<h5>Setup${c.file ? ` · <code>${esc(c.file)}</code>` : ''}</h5><pre>${esc(setupText(c.id, url, KEY_DOTS))}</pre>`
+        : c.file
+          ? `<h5>File</h5><p><code>${esc(c.file)}</code></p>`
+          : '';
+    const test =
+      c.id === 'http'
+        ? `<h5>Test it</h5><pre>${esc(testCommand(url, KEY_DOTS))}</pre><p>A list of tools in the answer means the key works.</p>`
+        : '';
+    return `<details class="cn-tech"${techOpen ? ' open' : ''}><summary>${ICON.right}Technical details</summary><div>
+      <h5>Memora address (MCP endpoint)</h5><pre>${esc(url)}</pre>${away}${conf}${test}${c.tech ? `<p>${c.tech}</p>` : ''}</div></details>`;
   };
 
   const stepSetup = (): string => {
     const c = cur()!;
-    const away =
-      publicOrigin() !== location.origin
-        ? `<p class="cn-away">Agents connect through <code class="cc-mono">${esc(mcpUrl())}</code> (MEMORA_BASE_URL), even though this page is open at ${esc(location.host)}.</p>`
-        : '';
-    const copyLabel = c.oauth ? 'Copy server URL' : c.id === 'claude-code' || c.id === 'http' ? 'Copy command' : 'Copy config';
-    const copyValue = c.oauth ? mcpUrl() : c.code;
-    const filled = !c.oauth && !!secret();
-    const steps = c.steps
-      .map((st) =>
-        st === '{code}'
-          ? `<li class="code">${c.file ? `<div class="cn-file">${ICON.file}<code>${esc(c.file)}</code></div>` : ''}${codeHTML(c.code, 'Copy ' + c.label + ' config')}
-             <div class="cn-copy"><span>${c.oauth ? 'Paste these into ' + esc(c.label) : filled ? 'The key is filled in' : 'Put the key where <code>' + esc(KEY_PLACEHOLDER) + '</code> is'}</span>
-             <button type="button" class="btn primary" data-copy="${attr(copyValue)}">${ICO.copy}${copyLabel}</button></div></li>`
-          : `<li>${st}</li>`,
-      )
-      .join('');
-    const ask = 'Call the Memora healthcheck tool, then search my memory for "project".';
-    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Set up ${esc(c.label)}</h3>
-      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(c.how)}</span></div>${away}${agent ? '' : sameAppNote()}${keyHTML(c)}
-      <ol class="cn-steps">${steps}</ol>
-      <section class="cn-test" aria-label="Test the connection"><div class="cn-live" data-live role="status" aria-live="polite"></div>
-        <p>Restart or reload the app if it asks, then ask the agent:</p>
-        <div class="cn-ask"><span>${esc(ask)}</span><button type="button" class="cc-ibtn" data-copy="${attr(ask)}" aria-label="Copy the test question" title="Copy">${ICO.copy}</button></div></section>`;
+    const steps = c.steps.map((st) => `<li>${st.includes('{action}') ? st.replace('{action}', '') + actionHTML(c) : st}</li>`).join('');
+    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Connect ${esc(c.label)}</h3>
+      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(c.how)}</span></div>${agent ? '' : sameAppNote()}${keyFirstHTML(c)}
+      <ol class="cn-steps">${steps}</ol>${keyBoxHTML(c)}
+      <section class="cn-test" aria-label="Connection check"><p class="sr-only" role="status" aria-live="polite" data-say></p><div data-live="full"></div></section>
+      ${techHTML(c)}`;
   };
+
+  const countHTML = (who: string): string =>
+    `<aside class="cn-count" data-count aria-labelledby="cnCountH"><h4 id="cnCountH">Notes from ${esc(who)}</h4>
+      <div class="nr"><span class="n" aria-hidden="true">0</span><p class="sub" role="status" aria-live="polite"></p></div><p class="wr"></p>
+      <ul aria-label="Notes it saved"></ul><p class="hint" hidden>No notes yet. Did you send the prompt? Sometimes the app asks before it uses Memora the first time: allow it.</p></aside>`;
 
   const stepPrompt = (): string => {
     const c = cur()!;
+    const who = (connectedId && connected?.name) || agent?.name || c.label;
     const kind = promptKind || (c.short ? 'short' : 'full');
     const style = promptStyle;
     const text = kind === 'short' ? style.short : style.full;
@@ -846,10 +1226,20 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       `<button type="button" role="tab" data-pk="${k}" aria-selected="${kind === k}" aria-controls="cnPrompt" tabindex="${kind === k ? 0 : -1}">${label}${
         rec === k ? '<span class="rec">Recommended</span>' : ''
       }</button>`;
-    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Tell the agent to use its memory</h3>
-      <p class="cn-sub">The agent sees Memora's tools, but it works best when told when to recall and when to save. Paste these instructions where ${esc(
-        c.label,
-      )} reads them.</p>
+    const cards = firstPrompts(c.id)
+      .map(
+        (p, i) => `<section class="cn-card${p.recommended ? ' rec' : ''}" aria-labelledby="cnP${i}"><h4 id="cnP${i}">${esc(p.title)}${
+          p.recommended ? '<span class="tag">Recommended</span>' : ''
+        }</h4><blockquote>${esc(p.text)}</blockquote>
+        <div class="row"><button type="button" class="btn${p.recommended ? ' primary' : ''}" data-prompt="${i}" aria-label="Copy: ${attr(p.title)}">${ICO.copy}Copy</button></div></section>`,
+      )
+      .join('');
+    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Now ask ${esc(who)} to save what it knows</h3>
+      <p class="cn-sub">Copy one of these and send it to ${esc(c.label)} like a normal message. The notes it saves show up here as they arrive.</p>
+      <div class="cn-test mini" data-live="mini"></div>
+      <div class="cn-fp"><div class="cn-cards">${cards}</div>${countHTML(who)}</div>
+      <details class="cn-more"${moreOpen ? ' open' : ''}><summary>${ICON.right}<span>More instruction styles <small>· for every conversation</small></span></summary><div>
+      <p class="lead">Paste these once where ${esc(c.label)} reads its standing instructions, so it uses Memora in every conversation, not only when asked.</p>
       <div class="cn-where"><span class="ic">${ICON.pin}</span><span><b class="k">Where to paste it</b>${c.rules}</span></div>
       <div class="cc-seg cn-pstyle" role="group" aria-label="Instruction style">${PROMPT_STYLES.map(
         (st, i) =>
@@ -861,11 +1251,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       <div class="cn-prompt" id="cnPrompt" role="tabpanel">${codeHTML(text, 'Copy the instructions')}
         <div class="cn-copy"><span>${kind === 'short' ? 'A few lines, for small context windows' : 'The complete guide, best for most agents'}</span>
         <button type="button" class="btn primary" data-copy="${attr(text)}">${ICO.copy}Copy ${kind === 'short' ? 'short' : 'full'} instructions</button></div></div>
-      <a class="cn-doc" href="/docs/agent-instructions" id="cnDoc">Read the full documentation ${ICO.arrow}</a>
-      <div class="cn-test" style="margin-top:18px"><div class="cn-live" data-live role="status" aria-live="polite"></div></div>`;
+      <a class="cn-doc" href="/docs/agent-instructions" id="cnDoc">Read the full documentation ${ICO.arrow}</a></div></details>`;
   };
-
-  // ── paint and wire
 
   const nav = (): void => {
     const first = steps().indexOf(step) <= 0;
@@ -883,6 +1270,10 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     nav();
     watch();
     paintLive();
+    if (step === 'prompt') {
+      void startCount();
+      paintCount();
+    } else stopCount();
     o.setSub?.(cur()?.label || (forAgent ? agent!.name : 'Pick an app'));
     o.onInfo?.(info());
     if (focus) {
@@ -938,7 +1329,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     box.hidden = preset !== 'custom';
     if (preset !== 'custom' || editor) return;
     const tools = cachedCatalog();
-    const start = custom || presetPerms('rw', tools)!;
+    const start = custom || presetPerms('rw');
     box.innerHTML = permsHTML(start, tools);
     editor = wirePerms(box, start, tools);
   };
@@ -960,8 +1351,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         return;
       }
       perms = editor ? editor.read() : custom;
-    } else perms = presetPerms(preset, cachedCatalog());
-    if (!perms) perms = presetPerms('rw', null)!;
+    } else perms = presetPerms(preset);
+    if (!perms) perms = presetPerms('rw');
     const r = await o.createAgent(n, perms);
     if (!r || destroyed) return;
     agent = { ...r.key, perms };
@@ -970,6 +1361,64 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     o.onAppChosen?.(agent.id, client);
     step = 'setup';
     paint(true);
+  };
+
+  /** The step's one action: copy the address, open the app's install link, or copy the setup with the key in. */
+  const primary = async (alt = false): Promise<void> => {
+    const c = cur();
+    if (!c) return;
+    if (c.method === 'signin' || c.id === 'http') {
+      await copyText(mcpUrl(), 'Address copied');
+    } else {
+      const s = secret();
+      if (!s) {
+        toast(agent?.revealable ? 'Unlock the key first' : 'Make a new key first', 'warn');
+        host.querySelector<HTMLElement>('#cnPw, .cn-unlock [data-roll]')?.focus();
+        return;
+      }
+      if (c.method === 'deeplink' && !alt) {
+        window.location.href = oneClickLink(c.id, mcpUrl(), s);
+        toast(`Opening ${appAgentName(c)}…`, 'info', 2400);
+      } else await copyText(setupText(c.id, mcpUrl(), s), c.method === 'command' ? 'Command copied. Paste it in your terminal.' : 'Setup copied');
+    }
+    if (!connected && target()) {
+      armTrouble();
+      if (host.querySelector('.cn-trouble')) paintLive();
+    }
+  };
+
+  /** Buttons that can show up both in the steps and in the troubleshooting list. */
+  const wireActions = (scope: HTMLElement): void => {
+    scope.querySelectorAll<HTMLButtonElement>('[data-primary]').forEach((b) => (b.onclick = () => void primary()));
+    scope.querySelectorAll<HTMLButtonElement>('[data-alt]').forEach((b) => (b.onclick = () => void primary(true)));
+    const a = agent;
+    scope.querySelectorAll<HTMLButtonElement>('[data-roll]').forEach((roll) => {
+      if (!a) return;
+      roll.onclick = () =>
+        Modal.confirm(
+          'Make a new key',
+          `${a.name}'s current key stops working at once. The new one is put in here; update the app that uses the old one.`,
+          'Make a new key',
+          async () => {
+            try {
+              const r = await apiPost<{ key?: string }>('/api/keys/roll', { id: a.id });
+              Modal.close();
+              if (r && r.key) {
+                secrets.set(a.id, r.key);
+                fresh.add(a.id);
+                shown = false;
+                o.onChange?.();
+                toast('New key made', 'ok');
+                if (!connected && target()) armTrouble();
+                paint();
+              }
+            } catch (err) {
+              toast('Could not make a new key: ' + (err as Error).message, 'err');
+            }
+          },
+          false,
+        );
+    });
   };
 
   const wire = (): void => {
@@ -1016,6 +1465,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       });
       showCustom();
     }
+    wireActions(host.querySelector<HTMLElement>('.cn-step')!);
     const eye = host.querySelector<HTMLButtonElement>('#cnKeyEye');
     if (eye)
       eye.onclick = () => {
@@ -1042,9 +1492,9 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
           const r = await apiPost<{ key?: string }>('/api/keys/reveal', { id: a.id, current: pw.value });
           if (!r || !r.key) throw new Error('the server returned no key');
           secrets.set(a.id, r.key);
-          toast('Key unlocked and filled in', 'ok');
+          toast('Key unlocked', 'ok');
           paint();
-          host.querySelector<HTMLElement>('#cnKeyCopy')?.focus();
+          host.querySelector<HTMLElement>('[data-primary]')?.focus();
         } catch (err) {
           btn.disabled = false;
           toast((err as Error).message || 'Could not unlock the key', 'err');
@@ -1052,31 +1502,14 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         }
       };
     }
-    host.querySelectorAll<HTMLButtonElement>('[data-roll]').forEach((roll) => {
-      if (!a) return;
-      roll.onclick = () =>
-        Modal.confirm(
-          'Make a new key',
-          `${a.name}'s current key stops working at once. The new one is filled in here; update the app that uses the old one.`,
-          'Make a new key',
-          async () => {
-            try {
-              const r = await apiPost<{ key?: string }>('/api/keys/roll', { id: a.id });
-              Modal.close();
-              if (r && r.key) {
-                secrets.set(a.id, r.key);
-                fresh.add(a.id);
-                shown = false;
-                o.onChange?.();
-                toast('New key made and filled in', 'ok');
-                paint();
-              }
-            } catch (err) {
-              toast('Could not make a new key: ' + (err as Error).message, 'err');
-            }
-          },
-          false,
-        );
+    const tech = host.querySelector<HTMLDetailsElement>('.cn-tech');
+    if (tech) tech.ontoggle = () => (techOpen = tech.open);
+    const more = host.querySelector<HTMLDetailsElement>('.cn-more');
+    if (more) more.ontoggle = () => (moreOpen = more.open);
+    host.querySelectorAll<HTMLButtonElement>('[data-prompt]').forEach((b) => {
+      const c = cur();
+      const p = c ? firstPrompts(c.id)[Number(b.dataset.prompt)] : undefined;
+      if (c && p) b.onclick = () => void copyText(p.text, `Copied. Now paste it in ${c.label} and send it.`);
     });
     host.querySelectorAll<HTMLButtonElement>('[data-pstyle]').forEach((b) => {
       b.onclick = () => {
@@ -1131,6 +1564,11 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     destroy: () => {
       destroyed = true;
       stopWatch();
+      stopCount();
     },
   };
+}
+
+function clockOf(ms: number): string {
+  return new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }

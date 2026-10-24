@@ -1,7 +1,3 @@
-// Vault writes the canvas performs, through the same endpoints actions.ts
-// uses: POST /api/move {path,folder}, POST /api/rename {path,name},
-// POST /api/folder-meta {folder,color}. Every call returns the new path.
-
 import { apiPost } from '../api';
 import type { OkResult } from '../types';
 import { movedPath } from './model';
@@ -25,7 +21,7 @@ export interface BatchResult {
   failed: { path: string; error: string }[];
 }
 
-/** Move many notes, a few at a time; reports each outcome. */
+/** Moves three at a time; reports each outcome. */
 export async function moveMany(paths: string[], folder: string): Promise<BatchResult> {
   const out: BatchResult = { moved: [], failed: [] };
   const queue = paths.slice();

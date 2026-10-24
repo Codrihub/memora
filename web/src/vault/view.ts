@@ -1,20 +1,15 @@
-// Nodes page: an optional folder tree (when the shell sidebar does not show
-// one already) next to one main area. The main area is either the folder
-// browser (list.ts) or the node reader (note.ts), never both: browsing and
-// reading each get the whole width. Both layers stay mounted so going back
-// to a folder keeps its scroll position. Phones get the same two screens,
-// full width, with back navigation through the browser history.
+// Notes page: an optional folder tree beside one main area, either the folder browser or the note reader.
+// Both layers stay mounted so going back to a folder keeps its scroll position.
 
 import { $, el, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
-import { allNotes, state } from '../state';
+import { allNotes, noteTitle, state } from '../state';
 import { I } from './icons';
-import { renderList, resetListQuery } from './list';
+import { renderList, resetListQuery, resetListView } from './list';
 import { nav } from './nav';
 import { flushEditor, noteShown, renderNote } from './note';
 import { createFolder, createNote, onRefresh, relocating } from './ops';
 import {
-  baseName,
   dirOf,
   folderAt,
   isInside,
@@ -29,9 +24,9 @@ import {
   wireBus,
 } from './store';
 import { TreeView, refreshTrees } from './tree';
-import { promptName } from './ui';
+import { emptyState, promptName } from './ui';
+import { fadeScroll } from '../ui/scroll-fade';
 import { createFolderPicker, type FolderPicker } from './folder-picker';
-import { setSheetEditor } from './sheet';
 import { Modal } from '../modal';
 import { setToTopScroller } from '../ui/totop';
 import { VAULT_CSS } from './styles';
@@ -40,7 +35,7 @@ type Pane = 'list' | 'note';
 
 let shell: HTMLElement | null = null;
 let tree: TreeView | null = null;
-/** Path of a deep-linked node that is not in the vault ("node not found"). */
+/** Path of a deep-linked note that is not in the vault ("note not found"). */
 let missing: string | null = null;
 const MOBILE = '(max-width: 760px)';
 const isMobile = (): boolean => window.matchMedia(MOBILE).matches;
@@ -78,13 +73,14 @@ function build(host: HTMLElement): void {
     <div class="vx-resizer" data-r="tree" role="separator" aria-orientation="vertical" aria-label="Resize folders" tabindex="0"></div>
     <div class="vx-main">
       <div class="vx-pane vx-pane-list" aria-label="Folder"></div>
-      <div class="vx-pane vx-pane-note" aria-label="Node"></div>
+      <div class="vx-pane vx-pane-note" aria-label="Note"></div>
     </div>`;
   host.appendChild(shell);
   tree = new TreeView(shell.querySelector<HTMLElement>('.vx-pane-tree')!, {
     showNotes: prefs.showNotesInTree,
     showPins: true,
   });
+  fadeScroll(shell.querySelector<HTMLElement>('.vx-pane-tree')!);
   wireResizers(shell);
   shell.addEventListener('keydown', (e) => {
     if (e.key === 'F6') {
@@ -129,7 +125,8 @@ function wireResizers(s: HTMLElement): void {
 
 function drawList(): void {
   const h = listHost();
-  if (h) renderList(h, isMobile());
+  if (!h) return;
+  renderList(h, isMobile());
 }
 
 async function drawNote(quiet = false): Promise<void> {
@@ -137,9 +134,13 @@ async function drawNote(quiet = false): Promise<void> {
   if (!h) return;
   if (!state.note && missing) {
     setPane('note');
-    h.innerHTML = `<div class="vx-empty vx-missing">${I.note}<p><b>Node not found</b><br>“${esc(
-      baseName(missing).replace(/\.md$/, ''),
-    )}” is not in this vault. It may have been moved, renamed or deleted.</p><button class="btn sm" data-home>Show all nodes</button></div>`;
+    h.innerHTML = emptyState(
+      I.note,
+      'Note not found',
+      `“${esc(noteTitle(missing))}” may have been moved, renamed or deleted. Deleted notes wait in the Trash.`,
+      '<span><button class="btn sm primary" data-home>Show all notes</button> <button class="btn sm ghost" data-trash>Open Trash</button></span>',
+    ).replace('vx-empty', 'vx-empty vx-missing');
+    h.querySelector<HTMLElement>('[data-trash]')!.onclick = () => nav.openTrash();
     h.querySelector<HTMLElement>('[data-home]')!.onclick = () => {
       missing = null;
       selectFolder('');
@@ -157,17 +158,13 @@ async function drawNote(quiet = false): Promise<void> {
 function setCrumb(): void {
   const crumb = $('.crumb');
   crumb.textContent = state.note
-    ? state.note.split('/').pop()!.replace(/\.md$/i, '')
+    ? noteTitle(state.note)
     : prefs.folder
-      ? 'Nodes / ' + prefs.folder
-      : 'Nodes';
+      ? 'Notes / ' + prefs.folder
+      : 'Notes';
 }
 
-/**
- * When the shell sidebar already shows a vault tree (mountTree), the page
- * drops its own tree pane on desktop to avoid two trees side by side.
- * Phones never show it: the browser's folder tiles and breadcrumb navigate.
- */
+/** Hide the page's own tree on phones, or when the shell sidebar already shows one. */
 function syncTreePane(): void {
   if (!shell) return;
   const own = shell.querySelector('.vx-pane-tree');
@@ -206,12 +203,7 @@ function nodeExists(path: string): boolean {
   return allNotes().some((n) => n.path === path);
 }
 
-/**
- * Open a node in the reader, on every screen size (phones included: the
- * reader is the full node page, the bottom sheet is not used here). Deep
- * links land here too; a path that is not in the loaded tree only ever
- * shows "node not found" (it is never sent to the server).
- */
+/** Open a node in the reader; a path not in the loaded tree shows "not found" and is never sent to the server. */
 export async function openNote(path: string): Promise<void> {
   if (!nodeExists(path) && !Object.keys(state.tree).length) {
     try {
@@ -223,13 +215,7 @@ export async function openNote(path: string): Promise<void> {
   await openInPane(path);
 }
 
-/**
- * History depth of in-app node opens: each history entry a node open pushed
- * is stamped with `vxDepth`, so the reader's back button can go back to where
- * the user came from (a folder, another node, the brain) and, on a deep link
- * with nothing of ours behind it, falls back to the node's folder instead of
- * leaving the app.
- */
+/** Stamp in-app node opens with `vxDepth` so the reader's back button never leaves the app on a deep link. */
 function stampDepth(fromUrl: string, before: unknown): void {
   const now = location.pathname + location.search;
   if (now === fromUrl) return;
@@ -273,8 +259,7 @@ async function openInPane(path: string, edit = false): Promise<void> {
   state.note = path;
   state.editing = false;
   selection.clear();
-  // Keep the browser behind the reader on a folder that holds the node, so
-  // going back lands where the user was (or where the node lives).
+  // Keep the browser behind the reader on a folder that holds the node.
   if (!isInside(dirOf(path), prefs.folder || '')) {
     prefs.folder = dirOf(path);
     resetListQuery();
@@ -327,11 +312,17 @@ function selectFolder(path: string): void {
   });
 }
 
+/** "Notes" in the menu or the tab bar: All notes, with nothing left over from before. */
+function showAllNotes(): void {
+  prefs.filter = 'all';
+  resetListView();
+  selectFolder('');
+}
+
 nav.selectFolder = selectFolder;
+nav.allNotes = showAllNotes;
 nav.openNote = (p) => void openNote(p);
-setSheetEditor((p) => void openInPane(p, true));
 nav.newNote = (folder) => {
-  // Ask where it goes: the vault root or any folder, at any depth.
   const folders = pickerFolders();
   const start = folder && folder !== 'Root' && folders.includes(folder) ? folder : '';
   let picker: FolderPicker | null = null;
@@ -346,11 +337,10 @@ nav.newNote = (folder) => {
     Modal.close();
     const p = await createNote(where, title);
     if (!p) return;
-    // Start writing right away.
     await openInPane(p, true);
   };
   Modal.open({
-    title: 'New node',
+    title: 'New note',
     body:
       Modal.field('Title', 'vxName', { value: '' }) +
       `<div class="field"><label id="vxWhereL">Location</label><div id="vxWhere"></div></div>`,
@@ -391,8 +381,7 @@ onRefresh(() => {
   if (state.page === 'vault' && shell) void renderVault();
   else refreshTrees();
 });
-// Pins changed (here, on the server, in another browser): the list marks
-// pinned nodes and has a Pinned filter. The trees redraw themselves.
+// The trees redraw themselves on pin changes; the list does not.
 onPinsSynced(() => {
   if (state.page === 'vault' && shell) drawList();
 });

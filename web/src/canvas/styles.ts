@@ -1,26 +1,24 @@
-// Canvas styles, injected once with useStyles. Theme aware through
-// `html[data-theme]`; dark is the default.
-
 export const CANVAS_CSS = `
+:root.no-dots .cv{background-image:none!important}
 #view-canvas{padding:0;overflow:hidden}
 .cv{
   --cv-bg:var(--surface-0,#0b0e14); --cv-dot:rgba(148,163,184,.30); --cv-frame:rgba(148,163,184,.035);
   --cv-frame-line:rgba(148,163,184,.16); --cv-card:#141923; --cv-card-2:#1a2030; --cv-line:#252d3c;
   --cv-fg:#e6e9ef; --cv-muted:#8b98ad; --cv-faint:#5d6879; --cv-acc:#5eead4; --cv-acc-ink:#04221d;
-  --cv-sel:#5eead4; --cv-ui:#11151e; --cv-ui-line:rgba(148,163,184,.16);
-  --cv-ui-hover:rgba(148,163,184,.12); --cv-shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.28);
+  --cv-sel:#5eead4; --cv-ui:var(--surface-2,#131823); --cv-ui-line:var(--line-strong,rgba(148,163,184,.22));
+  --cv-ui-hover:rgba(148,163,184,.12); --cv-shadow:none;
   --cv-shadow-lg:0 2px 6px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.5);
   --cv-tag:rgba(148,163,184,.12); --z:1; --lz:1;
   position:absolute;inset:0;overflow:hidden;background:var(--cv-bg);color:var(--cv-fg);
   touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
-  font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;outline:none;
+  font:13px/1.45 var(--font);outline:none;
 }
 html[data-theme=light] .cv{
   --cv-bg:var(--surface-0,#f4f5f8); --cv-dot:rgba(15,23,42,.26); --cv-frame:rgba(255,255,255,.5);
   --cv-frame-line:rgba(15,23,42,.12); --cv-card:#ffffff; --cv-card-2:#f7f8fb; --cv-line:#e2e6ee;
   --cv-fg:#111827; --cv-muted:#5b6678; --cv-faint:#98a2b3; --cv-acc:#0d9488; --cv-acc-ink:#ffffff;
-  --cv-sel:#0d9488; --cv-ui:#ffffff; --cv-ui-line:rgba(15,23,42,.1);
-  --cv-ui-hover:rgba(15,23,42,.06); --cv-shadow:0 1px 2px rgba(15,23,42,.06),0 6px 18px rgba(15,23,42,.07);
+  --cv-sel:#0d9488; --cv-ui:#ffffff; --cv-ui-line:var(--line-strong,rgba(15,23,42,.16));
+  --cv-ui-hover:rgba(15,23,42,.06); --cv-shadow:none;
   --cv-shadow-lg:0 2px 6px rgba(15,23,42,.08),0 24px 60px rgba(15,23,42,.16); --cv-tag:rgba(15,23,42,.06);
 }
 .cv.panning,.cv.panning *{cursor:grabbing !important}
@@ -29,7 +27,6 @@ html[data-theme=light] .cv{
 .cv.moving .cv-layer{will-change:transform}
 .cv-links{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 
-/* frames */
 .cv-frame{position:absolute;left:0;top:0;border-radius:18px;background:var(--cv-frame);
   border:1px solid var(--cv-frame-line);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fc) 6%,transparent);
   transition:box-shadow .15s,background .15s}
@@ -54,7 +51,6 @@ html[data-theme=light] .cv{
   border-right:2px solid var(--cv-faint);border-bottom:2px solid var(--cv-faint);border-radius:0 0 3px 0;opacity:0;transition:opacity .15s}
 .cv-frame:hover .cv-fresize::after,.cv-frame.sel .cv-fresize::after{opacity:1}
 
-/* cards */
 .cv-card{position:absolute;left:0;top:0;width:240px;height:136px;border-radius:12px;background:var(--cv-card);
   border:1px solid var(--cv-line);box-shadow:var(--cv-shadow);padding:11px 13px 9px 15px;display:flex;flex-direction:column;
   gap:5px;cursor:default;overflow:hidden;transition:box-shadow .16s,border-color .16s,opacity .16s}
@@ -89,35 +85,32 @@ html[data-theme=light] .cv{
 .cv-card.touched{border-color:color-mix(in srgb,var(--ac) 55%,var(--cv-line))}
 .cv-card.touched.live{box-shadow:0 0 0 calc(2px / var(--z)) var(--ac),var(--cv-shadow)}
 
-/* level of detail */
 .cv.lod1 .cv-cex,.cv.lod1 .cv-ctags,.cv.lod1 .cv-cfoot,.cv.lod1 .cv-copen{display:none}
 .cv.lod1 .cv-ctitle{font-size:24px;-webkit-line-clamp:4;padding-right:0}
 .cv.lod1 .cv-card{justify-content:center;box-shadow:none}
 
-/* agent cursors */
 .cv-cursor{position:absolute;left:0;top:0;pointer-events:none;transition:transform .7s cubic-bezier(.22,.61,.36,1),opacity .4s;z-index:20}
 .cv-cursor-in{transform:scale(var(--iz));transform-origin:0 0;display:flex;align-items:flex-start}
 .cv-cursor svg{width:18px;height:18px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
 .cv-cursor b{margin:14px 0 0 -2px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:650;color:#0b0e14;
-  background:var(--ac);white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  background:var(--ac);white-space:nowrap;box-shadow:none}
 .cv-cursor small{display:block;font-weight:500;opacity:.75;font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 
-/* chrome */
-.cv-ui{position:absolute;z-index:30;background:var(--cv-ui);border:1px solid var(--cv-ui-line);border-radius:12px;
-  box-shadow:var(--cv-shadow);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);
-  touch-action:auto}
-.cv-btn{height:32px;min-width:32px;padding:0 9px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  color:var(--cv-muted);font-size:12.5px;font-weight:550;white-space:nowrap;transition:background .12s,color .12s}
+.cv-ui{position:absolute;z-index:30;background:var(--cv-ui);border:1px solid var(--cv-ui-line);border-radius:12px;box-shadow:none;touch-action:auto}
+.cv-btn{height:36px;min-width:36px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  color:var(--text-2,var(--cv-muted));font-size:13px;font-weight:550;white-space:nowrap;transition:background .12s,color .12s}
 .cv-btn:hover{background:var(--cv-ui-hover);color:var(--cv-fg)}
-.cv-btn.on{background:color-mix(in srgb,var(--cv-acc) 16%,transparent);color:var(--cv-acc)}
-.cv-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.cv-sep{width:1px;align-self:stretch;margin:6px 3px;background:var(--cv-ui-line)}
-.cv-tools{left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;padding:4px;gap:2px}
-.cv-zoom{min-width:52px;font-variant-numeric:tabular-nums}
-.cv-selbar{left:50%;bottom:68px;transform:translateX(-50%);display:flex;align-items:center;padding:4px;gap:2px}
-.cv-selbar .cnt{padding:0 8px;font-size:12px;color:var(--cv-muted)}
+.cv-btn:focus-visible{outline:2px solid var(--cv-acc);outline-offset:1px}
+.cv-btn.on{background:var(--accent-soft,color-mix(in srgb,var(--cv-acc) 14%,transparent));color:var(--cv-acc)}
+.cv-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cv-sep{width:1px;align-self:stretch;margin:8px 4px;background:var(--cv-ui-line)}
+.cv-tools{left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;height:44px;box-sizing:border-box;padding:3px;gap:2px}
+.cv-zoom{display:inline-flex;align-items:center;justify-content:center;height:36px;min-width:48px;padding:0 4px;font-size:12.5px;font-weight:600;
+  color:var(--cv-muted);font-variant-numeric:tabular-nums}
+.cv-selbar{left:50%;bottom:64px;transform:translateX(-50%);display:flex;align-items:center;height:44px;box-sizing:border-box;padding:3px;gap:2px}
+.cv-selbar .cnt{padding:0 8px;font-size:12.5px;color:var(--cv-muted);white-space:nowrap}
 .cv-fchips{display:inline-flex;align-items:center;gap:2px}
-.cv-fchip{max-width:150px;font-size:12px;font-weight:600;color:var(--cv-fg);border:1px solid var(--cv-ui-line)}
+.cv-fchip{max-width:150px;font-size:12.5px;font-weight:600;color:var(--cv-fg);background:var(--cv-ui-hover)}
 .cv-fchip .cv-fdot{flex:none}
 .cv-fchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cv-fmore{padding:0 6px;font-size:11.5px;color:var(--cv-muted)}
@@ -130,45 +123,42 @@ html[data-theme=light] .cv{
 .cv-toast .cv-btn{color:var(--cv-acc)}
 .cv-toast.err .msg{color:#f87171}
 .cv.has-sel .cv-toast{bottom:120px}
-.cv-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--cv-muted);font-size:14px;pointer-events:none}
 
-/* side panel */
 .cv.no-node-text .cv-cex,.cv.no-node-text .cv-ctags,.cv.no-node-text .cv-cfoot{visibility:hidden}
 .cv.no-folder-titles .cv-ftitle,.cv.no-folder-titles .cv-fcount{visibility:hidden}
 .cv.searching .cv-card:not(.hit){opacity:.28}
-.cv.searching .cv-card.hit{box-shadow:0 0 0 2px var(--accent,#5eead4),0 8px 30px -8px color-mix(in srgb,var(--accent,#5eead4) 60%,transparent)}
+.cv.searching .cv-card.hit{box-shadow:0 0 0 2px var(--accent,#5eead4)}
 .cv-frame.flash{animation:cv-flash 1.6s ease-out}
-@keyframes cv-flash{0%,40%{box-shadow:0 0 0 3px var(--fc),0 0 40px 6px color-mix(in srgb,var(--fc) 55%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
+@keyframes cv-flash{0%,40%{box-shadow:0 0 0 3px var(--fc)}100%{box-shadow:0 0 0 0 transparent}}
 .cv.panel-open .vc-tab-r{opacity:0;pointer-events:none}
-/* Preview open (desktop, tablet): the bottom bars centre in the space left of
-   it, and the zoom dock steps aside rather than sit under it. */
+.cv:has(>.vc.vc-is-empty) .cv-tools{display:none}
+/* Tablets: centre the bottom bars left of the zoom dock so they never touch. */
+@media (min-width:761px) and (max-width:1100px){.cv-tools,.cv-selbar{left:calc((100% - 196px) / 2)}}
 @media (min-width:761px){
   .cv.panel-open .cv-tools,.cv.panel-open .cv-selbar{left:calc((100% - min(380px,100% - 28px) - 14px) / 2)}
   .cv.panel-open .vc-dock,.cv.panel-open .vc>.vc-mini{opacity:0;pointer-events:none}
 }
 .cv-tools,.cv-selbar{transition:opacity .2s,transform .25s}
 .cv.vc-sheet-open .cv-tools,.cv.vc-sheet-open .cv-selbar{opacity:0;pointer-events:none}
-/* A drawer open (Regions, Activity): the editing bars step aside so nothing overlaps. */
 .cv[data-vc-open=regions] .cv-tools,.cv[data-vc-open=regions] .cv-selbar,.cv[data-vc-open=activity] .cv-tools,.cv[data-vc-open=activity] .cv-selbar{opacity:0;pointer-events:none}
 
-/* help */
-.cv-help{left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,calc(100% - 28px));max-height:calc(100% - 40px);overflow:auto;padding:18px 22px 20px;z-index:40}
-.cv-help h3{margin:0 0 4px;font-size:15px}
-.cv-help p{margin:0 0 14px;color:var(--cv-muted);font-size:12.5px}
-.cv-help .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px}
-.cv-help .row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px dashed var(--cv-ui-line)}
-.cv-help kbd{font:600 11px/1 var(--mono,monospace);padding:3px 6px;border-radius:5px;background:var(--cv-tag);border:1px solid var(--cv-ui-line);margin-left:3px}
-.cv-scrim{position:absolute;inset:0;z-index:39;background:rgba(0,0,0,.25)}
+.cv-help{left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,calc(100% - 24px));max-height:calc(100% - 40px);overflow:auto;padding:20px;z-index:40;
+  background:var(--ovl-bg);-webkit-backdrop-filter:var(--ovl-filter);backdrop-filter:var(--ovl-filter)}
+.cv-help h3{margin:0 0 6px;font-size:16px;font-weight:650}
+.cv-help p{margin:0 0 16px;color:var(--cv-muted);font-size:13px;line-height:1.55}
+.cv-help .cols{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}
+.cv-help .row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;min-height:34px;border-bottom:1px solid var(--line,var(--cv-ui-line))}
+.cv-help kbd{margin-left:6px;color:var(--text-2)}
+.cv-scrim{position:absolute;inset:0;z-index:39;background:var(--scrim,rgba(3,5,9,.4));-webkit-backdrop-filter:var(--scrim-filter,blur(4px));backdrop-filter:var(--scrim-filter,blur(4px))}
+html[data-theme=light] .cv-scrim{background:var(--scrim,rgba(15,23,42,.22))}
 
 @media (max-width:760px){
-  /* Phones: the tab bar's raised Brain circle owns the bottom centre, so the
-     editing tools stand as a column at the bottom left, level with the zoom
-     column at the bottom right. The column stays below the Regions tab
-     (mid height) and scrolls on short screens. */
-  .cv-tools{left:10px;bottom:10px;transform:none;flex-direction:column;max-height:calc(50% - 80px);overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+  /* The tab bar's raised Brain circle owns the bottom centre, so the tools stand as a column at the left. */
+  .cv-tools{left:10px;bottom:10px;transform:none;flex-direction:column;width:44px;height:auto;max-height:calc(50% - 80px);overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
   .cv-tools .cv-sep{width:auto;height:1px;align-self:stretch;margin:3px 6px;flex:none}
-  .cv-tools .cv-btn{flex:none}
-  .cv-tools .cv-zoom{min-width:0;width:32px;padding:0;font-size:10px}
+  .cv-tools .cv-btn{flex:none;width:100%;padding:0}
+  .cv-tools .cv-zoom{min-width:0;width:100%;height:24px;padding:0;font-size:10.5px;flex:none}
+  .cv-tools [data-act=zoom-100]{font-size:11px}
   .cv-tools .wide{display:none}
   .cv .vc-dock{bottom:10px}
   .cv-selbar{bottom:calc(40px + env(safe-area-inset-bottom));max-width:calc(100% - 20px);overflow-x:auto}

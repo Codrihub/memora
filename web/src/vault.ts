@@ -1,8 +1,7 @@
-// Vault folder chooser, shared by the first-run vault screen and Settings, and
-// the reload that follows a vault switch. The server validates the folder
-// (absolute, no '..', exists or is created, writable) and switches without a
-// restart; this module only shows its answer.
+// Vault folder chooser (first-run screen and Settings) and the reload after a vault switch.
 
+import { loadPins } from './vault/store';
+import { hooks } from './hooks';
 import { apiGet, apiPost } from './api';
 import { esc, useStyles } from './dom';
 import { loadCore } from './core-data';
@@ -16,7 +15,7 @@ const CSS = `
 .vf-suggest-txt{min-width:0;flex:1}
 .vf-suggest-k{font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .vf-suggest-v{font-family:var(--mono);font-size:13px;word-break:break-all}
-.vf-suggest-v small{display:block;font-family:system-ui,sans-serif;font-size:11.5px;color:var(--muted);margin-top:2px}
+.vf-suggest-v small{display:block;font-family:var(--font);font-size:11.5px;color:var(--muted);margin-top:2px}
 .vf .field input.vf-path{font-family:var(--mono);font-size:13px}
 .vf .field input.vf-path[aria-invalid=true]{border-color:rgba(248,113,113,.6)}
 .vf-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
@@ -35,6 +34,8 @@ interface VaultFormOptions {
   /** The vault in use now, if any; the suggestion is hidden when it matches. */
   current?: string | null;
   submitLabel: string;
+  /** true goes ahead, false stops quietly, a string stops with that message. */
+  confirm?: (path: string, create: boolean) => Promise<boolean | string>;
   onDone: (res: VaultSwitchResult) => void | Promise<void>;
 }
 
@@ -45,20 +46,17 @@ export function fetchSettings(): Promise<SettingsInfo> {
   return apiGet<SettingsInfo>('/api/settings');
 }
 
-/** An absolute folder path as the server accepts it: `/...` on any OS, plus
- *  `C:\...` (or `C:/...`) and `\\server\share` for a server on Windows. */
-export function isAbsolutePath(p: string): boolean {
+/** POSIX, drive-letter or UNC absolute path. */
+function isAbsolutePath(p: string): boolean {
   return p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
 }
 
-/** "12 notes" / "1 note" / "no notes yet". */
 export function notesLabel(n: number | undefined | null): string {
   const c = n || 0;
   if (!c) return 'no notes yet';
   return c === 1 ? '1 note' : `${c} notes`;
 }
 
-/** Render the folder form into `host` and wire it. */
 export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
   useStyles('vault-form-css', CSS);
   const showSuggest = !!o.suggested && o.suggested !== o.current;
@@ -100,12 +98,17 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
   create.onchange = clearError;
 
   const submit = async (path: string): Promise<void> => {
-    clearError();
     path = path.trim();
     if (!path) return showError('Enter the folder path.');
     if (!isAbsolutePath(path)) {
       return showError('Use an absolute path, starting with / (or C:\\ or \\\\server\\share on Windows).');
     }
+    if (o.confirm) {
+      const ok = await o.confirm(path, create.checked);
+      if (typeof ok === 'string') return showError(ok);
+      if (!ok) return;
+    }
+    clearError();
     go.disabled = true;
     if (use) use.disabled = true;
     const label = go.textContent;
@@ -141,7 +144,6 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
   }
 }
 
-/** Re-read everything that came from the previous vault. */
 export async function reloadVaultData(): Promise<void> {
   state.note = null;
   state.editing = false;
@@ -158,4 +160,6 @@ export async function reloadVaultData(): Promise<void> {
     state.graph.links = [];
   }
   await loadCore();
+  await loadPins().catch(() => undefined);
+  hooks.renderTree();
 }

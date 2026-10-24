@@ -1,6 +1,4 @@
-// Theme choice, kept per device in localStorage (`memora.theme`): dark, light
-// or system. Never stored on the server. The inline script in index.page.ts
-// applies it before first paint; this module keeps it live afterwards.
+// Per-device theme choice; the inline script in index.page.ts applies it before first paint.
 
 export type ThemePref = 'dark' | 'light' | 'system';
 
@@ -9,7 +7,7 @@ const LIGHT_QUERY = '(prefers-color-scheme: light)';
 
 let watching = false;
 
-/** The stored choice; missing or invalid means dark (the default). */
+/** Missing or invalid means system. */
 export function themePref(): ThemePref {
   try {
     const v = localStorage.getItem(KEY);
@@ -17,7 +15,7 @@ export function themePref(): ThemePref {
   } catch {
     /* storage can be unavailable in private mode */
   }
-  return 'dark';
+  return 'system';
 }
 
 function systemTheme(): 'dark' | 'light' {
@@ -28,7 +26,6 @@ function systemTheme(): 'dark' | 'light' {
   }
 }
 
-/** Set `data-theme` on <html> from the stored choice. */
 export function applyTheme(): void {
   const pref = themePref();
   const theme = pref === 'system' ? systemTheme() : pref;
@@ -36,7 +33,6 @@ export function applyTheme(): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme === 'light' ? '#f4f6fa' : '#07090e');
   if (!watching) {
-    // "system" follows the OS setting while the page is open.
     watching = true;
     try {
       window.matchMedia(LIGHT_QUERY).addEventListener('change', () => {
@@ -48,9 +44,7 @@ export function applyTheme(): void {
   }
 }
 
-/** Store a new choice for this device and apply it at once. */
 export function setThemePref(pref: ThemePref): void {
-  // Cross-fade colors for a moment so the switch feels smooth, not abrupt.
   const root = document.documentElement;
   root.classList.add('theme-anim');
   window.setTimeout(() => root.classList.remove('theme-anim'), 420);
@@ -60,13 +54,11 @@ export function setThemePref(pref: ThemePref): void {
     /* the choice still applies to this page */
   }
   applyTheme();
-  // Every theme control on screen (menu, Settings) follows the choice.
   window.dispatchEvent(new CustomEvent('memora:theme', { detail: pref }));
 }
 
 const ORDER: ThemePref[] = ['dark', 'light', 'system'];
 
-/** Dark, then light, then system. Returns the new choice. */
 export function cycleTheme(): ThemePref {
   const next = ORDER[(ORDER.indexOf(themePref()) + 1) % ORDER.length];
   setThemePref(next);

@@ -1,22 +1,12 @@
-// View router with real URLs (History API):
-//
-//   /brain /brain?mode=graph /brain?mode=canvas /nodes /node/<path> /tags /overview
-//   /activity /agents /tools /access /settings /docs /docs/<section>
-//   /agents/new /agents/new/<client> /agents/<key id> /agents/<key id>/<tab>
-//
-// `go()` swaps the visible view, updates the navigation (sidebar, tab bar),
-// the title and the URL. Back/forward and deep links work; the node path in
-// /node/<path> is validated (see `safeNodePath`) and only ever used to select
-// a node that exists in the loaded tree. Renderers register themselves, so
-// this module imports no view.
+// View router with real URLs (History API). Renderers register themselves, so this module imports no view.
 
 import { $, $$ } from './dom';
 import { clearPeek } from './peek';
-import { allNotes, onNoteChange, state, type Page } from './state';
+import { allNotes, noteTitle, onNoteChange, state, type Page } from './state';
 
-export type NavGroup = 'content' | 'system';
+type NavGroup = 'content' | 'system';
 
-export interface PageMeta {
+interface PageMeta {
   label: string;
   /** Longer title for the top bar. */
   title: string;
@@ -24,45 +14,38 @@ export interface PageMeta {
   hint: string;
   icon: string;
   group: NavGroup;
-  /** URL path. */
   path: string;
 }
 
 /** Every page, in navigation order; Alt+1..9 follow it. */
 export const PAGE_META: Record<Page, PageMeta> = {
-  home: { label: 'Overview', title: 'Overview', hint: 'Vault summary and recent changes', icon: 'overview', group: 'system', path: '/overview' },
+  home: { label: 'Overview', title: 'Overview', hint: 'Your notes and agents at a glance', icon: 'overview', group: 'system', path: '/overview' },
   brain: { label: 'Brain', title: 'Brain', hint: 'Your memory as a living brain', icon: 'brain', group: 'content', path: '/brain' },
-  vault: { label: 'Nodes', title: 'Nodes', hint: 'Browse, read and write your nodes', icon: 'note', group: 'content', path: '/nodes' },
-  graph: { label: 'Graph', title: 'Graph', hint: 'Map of every link between nodes', icon: 'graph', group: 'content', path: '/brain?mode=graph' },
-  canvas: { label: 'Canvas', title: 'Canvas', hint: 'Arrange nodes on an infinite board', icon: 'canvas', group: 'content', path: '/brain?mode=canvas' },
-  tags: { label: 'Tags', title: 'Tags', hint: 'Every tag and its nodes', icon: 'tags', group: 'content', path: '/tags' },
-  logs: { label: 'Activity', title: 'Activity', hint: 'Live agent and vault activity', icon: 'activity', group: 'system', path: '/activity' },
-  keys: { label: 'Agents & API keys', title: 'Agents & API keys', hint: 'Keys your agents connect with', icon: 'key', group: 'system', path: '/agents' },
-  tools: { label: 'Tools', title: 'MCP tools', hint: 'Turn MCP tools on or off', icon: 'tools', group: 'system', path: '/tools' },
-  access: { label: 'Access rules', title: 'Access rules', hint: 'IP and domain access rules', icon: 'shield', group: 'system', path: '/access' },
-  settings: { label: 'Settings', title: 'Settings', hint: 'Account, vault and preferences', icon: 'settings', group: 'system', path: '/settings' },
+  vault: { label: 'Notes', title: 'Notes', hint: 'Browse, read and write your notes', icon: 'note', group: 'content', path: '/nodes' },
+  graph: { label: 'Graph', title: 'Graph', hint: 'Map of every link between notes', icon: 'graph', group: 'content', path: '/brain?mode=graph' },
+  canvas: { label: 'Canvas', title: 'Canvas', hint: 'Arrange notes on an open board', icon: 'canvas', group: 'content', path: '/brain?mode=canvas' },
+  tags: { label: 'Tags', title: 'Tags', hint: 'Every tag and its notes', icon: 'tags', group: 'content', path: '/tags' },
+  logs: { label: 'Activity', title: 'Activity', hint: 'What your agents read and changed', icon: 'activity', group: 'system', path: '/activity' },
+  keys: { label: 'Agents', title: 'Agents & API keys', hint: 'Connect AI apps and choose what they may do', icon: 'key', group: 'system', path: '/agents' },
+  tools: { label: 'Tools', title: 'MCP tools', hint: 'Turn agent tools on or off', icon: 'tools', group: 'system', path: '/tools' },
+  access: { label: 'Access rules', title: 'Access rules', hint: 'Which addresses may reach Memora', icon: 'shield', group: 'system', path: '/access' },
+  settings: { label: 'Settings', title: 'Settings', hint: 'Account, appearance and preferences', icon: 'settings', group: 'system', path: '/settings' },
   docs: { label: 'Documentation', title: 'Documentation', hint: 'Guides, agent instructions and reference', icon: 'book', group: 'system', path: '/docs' },
+  // Last, so the Alt+1..9 shortcuts of the other pages stay where they are.
+  trash: { label: 'Trash', title: 'Trash', hint: 'Deleted notes, ready to restore', icon: 'trash', group: 'system', path: '/trash' },
 };
 
 export const PAGES = Object.keys(PAGE_META) as Page[];
-export const CONTENT_PAGES = PAGES.filter((p) => PAGE_META[p].group === 'content');
 
 export function isPage(v: unknown): v is Page {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(PAGE_META, v);
 }
 
-/* ───────────────────────── URLs ───────────────────────── */
-
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
-/**
- * Validate a vault-relative node path taken from a URL. Returns the
- * normalized path, or null when it is unsafe or malformed (absolute paths,
- * drive letters, backslashes, control characters, empty, "." or ".."
- * segments).
- */
-export function safeNodePath(raw: string): string | null {
+/** A vault-relative node path from a URL, or null when it is unsafe or malformed. */
+function safeNodePath(raw: string): string | null {
   if (!raw || raw.length > 1024) return null;
   if (raw.startsWith('/') || raw.includes('\\') || CONTROL.test(raw) || /^[a-zA-Z]:/.test(raw)) return null;
   const parts = raw.split('/');
@@ -72,7 +55,6 @@ export function safeNodePath(raw: string): string | null {
   return parts.join('/');
 }
 
-/** URL for a node: every segment percent-encoded. */
 export function nodeUrl(path: string): string {
   return '/node/' + path.split('/').map(encodeURIComponent).join('/');
 }
@@ -100,18 +82,28 @@ BY_PATH.set('/graph', 'graph');
 BY_PATH.set('/canvas', 'canvas');
 
 /** The sidebar entry a page lights up: brain modes count as Brain. */
-export function navPageOf(page: Page): Page {
+function navPageOf(page: Page): Page {
   return page === 'graph' || page === 'canvas' ? 'brain' : page;
 }
 
-/** The brain's mode from `?mode=` (graph, canvas; anything else is the 3D brain). */
 function brainMode(loc: Location): Page {
   const m = new URLSearchParams(loc.search).get('mode');
   return m === 'graph' || m === 'canvas' ? m : 'brain';
 }
 
 /** The key id of an /activity/<id> address, for the Activity page to open (it clears it). */
-export let routeAgent: string | null = null;
+let routeAgent: string | null = null;
+
+export function setRouteAgent(id: string): void {
+  routeAgent = id;
+}
+
+/** Whether the Activity page shows its timeline (/activity/timeline) instead of the summary. */
+export let logsTimeline = false;
+
+export function setLogsTimeline(on: boolean): void {
+  logsTimeline = on;
+}
 
 export function takeRouteAgent(): string | null {
   const id = routeAgent;
@@ -122,13 +114,9 @@ export function takeRouteAgent(): string | null {
 /** The tabs of an agent's own page, at /agents/<id>/<tab> (overview has no segment). */
 export const AGENT_TABS = ['overview', 'setup', 'activity', 'access', 'settings'] as const;
 
-/**
- * The address inside the Agents page to show next (/agents/new, /agents/<id>/setup...):
- * set by a parsed URL or by `setKeysRoute`, used once by the next URL sync.
- */
+/** The address inside the Agents page to show next, used once by the next URL sync. */
 let routeKeys: string | null = null;
 
-/** Make the next navigation to the Agents page land on this address (an /agents/... path). */
 export function setKeysRoute(path: string | null): void {
   routeKeys = path;
 }
@@ -161,7 +149,11 @@ export function parseLocation(loc: Location = location): Route {
     const node = safeNodePath(decoded.join('/'));
     return node ? { page: 'vault', node } : { page: 'vault', badNode: true };
   }
-  // /activity/<key id>: one agent's activity.
+  // /activity/timeline: the Activity page's timeline; /activity its summary.
+  if (path === '/activity/timeline' || path === '/activity') {
+    logsTimeline = path !== '/activity';
+    return { page: 'logs' };
+  }
   const ag = /^\/activity\/([A-Za-z0-9_-]{1,64})$/.exec(path);
   if (ag) {
     routeAgent = ag[1];
@@ -193,23 +185,15 @@ export function findNode(path: string): string | null {
   return hit ? hit.path : null;
 }
 
-/** A URL that leads nowhere: what was asked for, as the not-found page names it. */
 export interface RouteMissing {
   what: 'page' | 'node';
   /** The node path (or the raw address when it was malformed) or page address. */
   label: string;
 }
 
-/** What a parsed URL shows: a page, an existing node, or the not-found page. */
-export type RouteTarget = { kind: 'page'; page: Page } | { kind: 'node'; path: string } | { kind: 'missing'; missing: RouteMissing };
+type RouteTarget = { kind: 'page'; page: Page } | { kind: 'node'; path: string } | { kind: 'missing'; missing: RouteMissing };
 
-/**
- * Decide what a parsed route shows. Pure: `pathname` is the address as typed
- * (shown for unknown and malformed addresses) and `find` maps a URL node path
- * to a node of the loaded tree (`findNode`). Unknown addresses and node paths
- * that are malformed or name no node lead to the not-found page, never to
- * another page.
- */
+/** What a parsed route shows; unknown addresses and missing nodes lead to the not-found page. */
 export function resolveRoute(r: Route, pathname: string, find: (path: string) => string | null): RouteTarget {
   if (r.unknown) return { kind: 'missing', missing: { what: 'page', label: pathname } };
   if (r.page === 'vault' && (r.badNode || r.node)) {
@@ -242,6 +226,7 @@ function urlFor(page: Page): string {
   }
   // An /activity/<id> address being opened keeps its agent (the page reads it).
   if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
+  if (page === 'logs' && logsTimeline) return '/activity/timeline';
   if (page === 'keys' && routeKeys) {
     const to = routeKeys;
     routeKeys = null;
@@ -257,7 +242,6 @@ export function replaceHistory(): void {
   replaceNext = true;
 }
 
-/** Bring the URL in line with the visible page / open node. */
 export function syncUrl(): void {
   const url = urlFor(state.page);
   const replace = replaceNext;
@@ -271,12 +255,8 @@ export function syncUrl(): void {
   }
 }
 
-/* ───────────────────────── navigation ───────────────────────── */
+const renderers: Partial<Record<Page, () => void | Promise<void>>> = {};
 
-/** The page renderers, filled in by main.ts at boot. */
-export const renderers: Partial<Record<Page, () => void | Promise<void>>> = {};
-
-/** Called after every navigation (the shell repaints its nav state). */
 const listeners: ((page: Page) => void)[] = [];
 export function onNavigate(fn: (page: Page) => void): void {
   listeners.push(fn);
@@ -286,26 +266,32 @@ export function registerView(page: Page, render: () => void | Promise<void>): vo
   renderers[page] = render;
 }
 
-function leaf(path: string): string {
-  return (path.split('/').pop() || path).replace(/\.md$/i, '');
-}
-
-/** Top bar title for the current page. */
 export function paintTitle(): void {
   const page = state.page;
   const crumb = $('.crumb');
-  const title = page === 'vault' && state.note ? leaf(state.note) : PAGE_META[page].title;
+  const title = page === 'vault' && state.note ? noteTitle(state.note) : PAGE_META[page].title;
   crumb.textContent = title;
   crumb.title = page === 'vault' && state.note ? state.note : '';
   document.title = title + ' · Memora';
 }
 
-/**
- * Show a page. `keepEditing` is used by openNote, which navigates to the vault
- * without discarding the note the user is reading.
- */
+/** Returns true when it takes over a page change during editing (calling `next` or `stay`). */
+type LeaveGuard = (next: () => void, stay: () => void) => boolean;
+let leaveGuard: LeaveGuard | null = null;
+export function setLeaveGuard(fn: LeaveGuard): void {
+  leaveGuard = fn;
+}
+
+/** `keepEditing` lets openNote navigate to the vault without discarding the open note. */
 export function go(page: Page, keepEditing = false): void {
   if (!isPage(page)) page = 'brain';
+  if (!keepEditing && state.editing && leaveGuard) {
+    const stay = (): void => {
+      replaceHistory();
+      syncUrl();
+    };
+    if (leaveGuard(() => go(page, keepEditing), stay)) return;
+  }
   if (!keepEditing) state.editing = false;
   const prev = state.page;
   state.page = page;
@@ -343,12 +329,11 @@ export function openDocs(slug = '', hash = ''): void {
   go('docs');
 }
 
-/** Redraw whichever view is visible. */
 export function refreshPage(): void {
   void renderers[state.page]?.();
 }
 
-// Opening or closing a node while on the Nodes page updates the URL.
+// Opening or closing a note while on the Notes page updates the URL.
 onNoteChange(() => {
   if (state.page !== 'vault') return;
   syncUrl();

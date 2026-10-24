@@ -1,11 +1,10 @@
-// Service worker. Compiled by scripts/build-pages.mjs into
-// crates/http/assets/sw.js and registered from src/pwa.ts.
-//
-// It runs outside the page, so the DOM types do not describe it. Vault data
-// always comes from the network and is never cached.
+// Service worker, compiled by scripts/build-pages.mjs into crates/http/assets/sw.js. Vault data is never cached.
 
-const VERSION = 'memora-v1.3.8';
-const SHELL = 'shell-' + VERSION;
+// pwa.ts reads the build back from this file's text by the memora-build: tag.
+const BUILD = 'memora-build:__MEMORA_BUILD__'.slice('memora-build:'.length);
+const APP_JS = '__MEMORA_APP_JS__';
+const VERSION = BUILD;
+const SHELL = 'memora-' + BUILD;
 
 interface SWEvent extends Event {
   waitUntil(p: Promise<unknown>): void;
@@ -23,11 +22,18 @@ interface SWGlobal {
 
 const sw = self as unknown as SWGlobal;
 
-// Only the offline page and its icons are kept. Pages, scripts and styles
-// always come from the network, so an update shows on the next load.
-const OFFLINE_FILES = ['/offline.html', '/icon-192.png', '/icon-512.png'];
+// index.html always comes from the network: it carries the sign-in check and a per-response script nonce.
+const BUILD_FILES = [
+  APP_JS,
+  '/offline.html',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/apple-touch-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+];
+const CACHED = new Set(BUILD_FILES);
 
-// Paths the worker never touches: memory data, auth, OAuth, MCP and realtime.
 const NEVER_CACHE = [
   '/api/',
   '/mcp',
@@ -46,7 +52,7 @@ sw.addEventListener('install', ((event: SWEvent) => {
       const cache = await caches.open(SHELL);
       // Individually, so one failed file cannot abort the whole install.
       await Promise.all(
-        OFFLINE_FILES.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => null)),
+        BUILD_FILES.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => null)),
       );
       await sw.skipWaiting();
     })(),
@@ -57,15 +63,13 @@ sw.addEventListener('activate', ((event: SWEvent) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      const older = names.filter((n) => n !== SHELL);
+      const older = names.filter((n) => n !== SHELL && (n.startsWith('memora-') || n.startsWith('shell-')));
       await Promise.all(older.map((n) => caches.delete(n)));
       if (sw.registration.navigationPreload) {
         await sw.registration.navigationPreload.disable().catch(() => null);
       }
       await sw.clients.claim();
-      // An update (an older cache existed): bring every open window onto the
-      // new version. Pages that know this message answer and reload when it
-      // is safe (not mid-edit); older pages do not answer and are reloaded.
+      // Pages that know NEW_VERSION answer and reload when safe; older pages are reloaded.
       if (older.length) {
         const wins = (await sw.clients.matchAll({ type: 'window' })) as unknown as WinClient[];
         await Promise.all(wins.map(nudge));
@@ -111,14 +115,25 @@ function isNever(pathname: string): boolean {
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-// Navigations go to the network. Only when it fails twice in a row (the
-// server or the connection is down) does the offline page appear; it retries
-// on its own. Everything else is left to the browser.
+async function fromBuild(req: Request): Promise<Response> {
+  const cache = await caches.open(SHELL);
+  const hit = await cache.match(req, { ignoreVary: true });
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok) await cache.put(req, res.clone()).catch(() => null);
+  return res;
+}
+
+// Navigations show the offline page only after the network fails twice.
 sw.addEventListener('fetch', ((event: SWEvent) => {
   const req = event.request;
-  if (req.method !== 'GET' || req.mode !== 'navigate') return;
+  if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== sw.location.origin) return;
+  if (req.mode !== 'navigate') {
+    if (CACHED.has(url.pathname + url.search)) event.respondWith(fromBuild(req));
+    return;
+  }
   if (isNever(url.pathname)) return;
 
   event.respondWith(

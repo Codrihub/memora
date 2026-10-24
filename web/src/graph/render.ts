@@ -1,7 +1,4 @@
-// Canvas2D renderer: dot grid, soft folder hulls, curved links (batched per
-// colour and fade level), nodes, live agent pulses with initials badges and
-// collision-free labels. Drawn in screen space from world coordinates so text
-// and strokes stay crisp at any zoom.
+// Drawn in screen space from world coordinates so text and strokes stay crisp at any zoom.
 
 import { agentInitials } from '../control/agents';
 import type { Camera } from './camera';
@@ -69,6 +66,22 @@ function hexA(hex: string, a: number): string {
   return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
 }
 
+/** On the light theme, pale folder hues are darkened until they read at 4.5:1. */
+function labelInk(hex: string, light: boolean): string {
+  if (!light) return hex;
+  let h = hex.trim().replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const v = parseInt(h.slice(0, 6), 16);
+  if (h.length < 6 || Number.isNaN(v)) return hex;
+  const ch = [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  const lum = (c: number[]): number =>
+    c.map((x) => (x /= 255) <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4).reduce((a, x, i) => a + x * [0.2126, 0.7152, 0.0722][i], 0);
+  // A luminance of 0.16 or less is 4.5:1 against the light map background.
+  let c = ch;
+  for (let t = 0; t <= 1 && lum(c) > 0.16; t += 0.1) c = ch.map((x, i) => Math.round(x * (1 - t) + [15, 23, 42][i] * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
 function hull(pts: [number, number][]): [number, number][] {
   if (pts.length < 3) return pts;
   pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -118,11 +131,10 @@ export class Renderer {
     ctx.globalAlpha = 1;
     ctx.fillStyle = th.bg;
     ctx.fillRect(0, 0, W, H);
-    this.grid(cam, th);
+    if (!document.documentElement.classList.contains('no-dots')) this.grid(cam, th);
     const k = cam.k;
     const vb = cam.view(80);
 
-    // Ease each node's highlight toward its target.
     for (const n of sc.nodes) {
       const target = !sc.focus || sc.focus.has(n) ? 1 : th.light ? 0.13 : 0.1;
       n.fade += (target - n.fade) * 0.18;
@@ -154,8 +166,6 @@ export class Renderer {
 
   private grid(cam: Camera, th: Theme): void {
     const ctx = this.ctx;
-    // Figma-like dot grid: a dot every ~20-40 screen px, moving and scaling
-    // with the map, clear enough to read direction and zoom at a glance.
     let step = 24;
     while (step * cam.k < 18) step *= 2;
     while (step * cam.k > 40) step /= 2;
@@ -186,8 +196,12 @@ export class Renderer {
       }
       this.hullCache = [];
       by.forEach((g, group) => {
-        if (g.pts.length < 2) return;
-        const h = hull(g.pts);
+        // A lone note still gets a small round area so it does not read as a stray dot.
+        const pts: [number, number][] =
+          g.pts.length < 2
+            ? Array.from({ length: 10 }, (_, i) => [g.pts[0][0] + 22 * Math.cos((i / 10) * Math.PI * 2), g.pts[0][1] + 22 * Math.sin((i / 10) * Math.PI * 2)])
+            : g.pts;
+        const h = hull(pts);
         let top: [number, number] = h[0];
         let cx = 0;
         for (const p of h) {
@@ -245,7 +259,7 @@ export class Renderer {
     const oy = cam.h / 2 - cam.y * k;
     const curve = sc.links.length < 6000 && k > 0.12;
     const hot = sc.hover || sc.selected;
-    // Buckets: (colour|fade level) -> path.
+    // (colour|fade level) -> path.
     const buckets = new Map<string, Path2D>();
     const hotPath = new Path2D();
     let hotCount = 0;
@@ -301,7 +315,7 @@ export class Renderer {
       ctx.strokeStyle = hexA(th.accent, 0.95);
       ctx.lineWidth = Math.max(1.4, lw * 1.7);
       ctx.stroke(hotPath);
-      // Direction: small beads flowing from source to target.
+      // Beads flowing from source to target show direction.
       const t = (sc.now % 1600) / 1600;
       ctx.fillStyle = th.accent;
       for (const l of flows) {
@@ -336,7 +350,6 @@ export class Renderer {
       const a = n.fade * (n.dying ? sc1 : 1);
       ctx.globalAlpha = a;
       if (n.kind === 'folder') {
-        // Folder hubs: tinted disc with a thick ring and a centre dot.
         ctx.beginPath();
         ctx.arc(x, y, r, 0, TAU);
         ctx.fillStyle = hexA(n.color, th.light ? 0.22 : 0.2);
@@ -414,7 +427,6 @@ export class Renderer {
         ctx.arc(s.x, s.y, r + 2, 0, TAU);
         ctx.fillStyle = p.color;
         ctx.fill();
-        // Initials badge.
         const ini = agentInitials(p.actor);
         ctx.font = '700 9.5px system-ui, -apple-system, Segoe UI, sans-serif';
         const tw = ctx.measureText(ini).width;
@@ -448,9 +460,7 @@ export class Renderer {
     const occ = this.occ;
     occ.fill(0, 0, cols * rows);
     const k = cam.k;
-    // Screen-radius threshold falls as the density control rises.
     const thr = 12 - sc.labelDensity * 10.5;
-    // Keep the toolbar strip free.
     const topRows = Math.ceil(sc.reserveTop / CELL);
     occ.fill(1, 0, Math.min(rows, topRows) * cols);
     const cand: GNode[] = [];
@@ -499,22 +509,20 @@ export class Renderer {
       ctx.lineWidth = 3.2;
       ctx.strokeStyle = th.bg;
       ctx.strokeText(text, x, y);
-      ctx.fillStyle = n.kind === 'folder' ? n.color : force ? th.ink : hexA(th.ink, 0.86);
+      ctx.fillStyle = n.kind === 'folder' ? labelInk(n.color, th.light) : force ? th.ink : hexA(th.ink, th.light ? 0.92 : 0.86);
       ctx.fillText(text, x, y);
       placed++;
     };
-    // The node under the pointer always gets its label; its neighbours
-    // come next but still avoid overlapping each other.
+    // The hovered node always gets its label; neighbours still avoid overlapping.
     prio.forEach((n, i) => tryPlace(n, i < 1 || n === sc.selected));
-    // Folder group titles above each hull.
     if (sc.folderLabels && sc.hulls && sc.mode !== 'radial') {
       const focusGroups = sc.focus ? new Set(Array.from(sc.focus).map((n) => n.group)) : null;
       const pad = Math.max(16, 26 * cam.k);
-      const font = '650 11.5px system-ui, -apple-system, Segoe UI, sans-serif';
+      const font = '600 12.5px Geist, system-ui, -apple-system, Segoe UI, sans-serif';
       ctx.font = font;
       for (const g of this.hullCache) {
-        const text = g.group.toUpperCase();
-        const tw = this.measure(text, font) * 1.08;
+        const text = /^root$/i.test(g.group) ? 'Top level' : g.group;
+        const tw = this.measure(text, font);
         const s = cam.toScreen(g.top[0], g.top[1]);
         const x = s.x - tw / 2;
         const y = s.y - pad - 2;
@@ -527,12 +535,14 @@ export class Renderer {
         for (let rr = r0; rr <= r1 && free; rr++) for (let cc = c0; cc <= c1; cc++) if (occ[rr * cols + cc]) free = false;
         if (!free) continue;
         for (let rr = r0; rr <= r1; rr++) for (let cc = c0; cc <= c1; cc++) occ[rr * cols + cc] = 1;
-        ctx.globalAlpha = focusGroups && !focusGroups.has(g.group) ? 0.25 : 0.8;
+        ctx.globalAlpha = focusGroups && !focusGroups.has(g.group) ? 0.25 : th.light ? 1 : 0.85;
         ctx.font = font;
-        ctx.letterSpacing = '0.08em';
-        ctx.fillStyle = g.color;
-        ctx.fillText(text, x, y);
         ctx.letterSpacing = '0px';
+        ctx.lineWidth = 3.2;
+        ctx.strokeStyle = th.bg;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = labelInk(g.color, th.light);
+        ctx.fillText(text, x, y);
       }
     }
     for (const n of cand) {
@@ -553,7 +563,6 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-/** Minimap: every node as a dot plus the current viewport. */
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   w: number,

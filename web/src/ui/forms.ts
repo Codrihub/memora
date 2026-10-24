@@ -1,8 +1,3 @@
-// Custom form controls shared by the control pages: text inputs, radio cards
-// (role=radio buttons with a roving tab stop) and checkboxes (role=checkbox
-// buttons, with a mixed state). The markup is plain HTML; `wireRadios` adds
-// the keyboard behaviour of a radio group.
-
 import { useStyles } from '../dom';
 
 const CSS = `
@@ -68,7 +63,6 @@ export function radioCardHTML(value: string, checked: boolean, title: string, de
   }</span></button>`;
 }
 
-/** Radio group behaviour for `.ui-rc` buttons inside `group`: click, arrows, roving tabindex. */
 export function wireRadios(group: HTMLElement, onChange: (value: string) => void): void {
   const items = (): HTMLButtonElement[] => Array.from(group.querySelectorAll<HTMLButtonElement>('.ui-rc:not(:disabled)'));
   const pick = (b: HTMLButtonElement, focus: boolean): void => {

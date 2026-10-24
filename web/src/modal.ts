@@ -1,5 +1,4 @@
-// Modal dialog: one look for the whole app (a bottom sheet on phones), with a
-// focus trap and Esc handling.
+// App-wide modal dialog (a bottom sheet on phones) with a focus trap and Esc handling.
 
 import { $, $$, el, esc, attr } from './dom';
 import { icon } from './ui/icons';
@@ -27,6 +26,40 @@ interface ModalOptions {
 }
 
 let seq = 0;
+
+function dragToClose(box: HTMLElement, ...grips: HTMLElement[]): void {
+  let y0 = 0;
+  let dy = 0;
+  let t0 = 0;
+  let on = false;
+  const start = (e: PointerEvent): void => {
+    if (!window.matchMedia('(max-width: 760px)').matches || (e.target as HTMLElement).closest('button')) return;
+    on = true;
+    y0 = e.clientY;
+    dy = 0;
+    t0 = performance.now();
+    box.style.transition = 'none';
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const move = (e: PointerEvent): void => {
+    if (!on) return;
+    dy = Math.max(0, e.clientY - y0);
+    box.style.transform = `translateY(${dy}px)`;
+  };
+  const end = (): void => {
+    if (!on) return;
+    on = false;
+    box.style.transition = 'transform .2s ease';
+    if (dy > Math.min(140, box.offsetHeight / 3) || dy / Math.max(1, performance.now() - t0) > 0.6) Modal.close();
+    else box.style.transform = '';
+  };
+  for (const g of grips) {
+    g.addEventListener('pointerdown', start);
+    g.addEventListener('pointermove', move);
+    g.addEventListener('pointerup', end);
+    g.addEventListener('pointercancel', end);
+  }
+}
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 let lastFocus: HTMLElement | null = null;
 let prevOverflow = '';
@@ -51,12 +84,14 @@ export const Modal = {
     const bodyEl = el('div', 'modal-body');
     if (opts.body instanceof Node) bodyEl.appendChild(opts.body);
     else bodyEl.innerHTML = opts.body || '';
-    box.appendChild(head);
-    box.appendChild(bodyEl);
+    const grab = el('div', 'modal-grab');
+    grab.setAttribute('aria-hidden', 'true');
+    box.append(grab, head, bodyEl);
 
     if (opts.actions && opts.actions.length) {
       const foot = el('div', 'modal-foot');
-      for (const a of opts.actions) {
+      const main = (a: ModalAction): number => (/\b(primary|danger)\b/.test(a.cls || '') ? 1 : 0);
+      for (const a of [...opts.actions].sort((x, y) => main(x) - main(y))) {
         const b = el('button', 'btn ' + (a.cls || ''), esc(a.label));
         b.type = 'button';
         b.onclick = async () => {
@@ -78,6 +113,7 @@ export const Modal = {
     prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     $('.modal-x', head).onclick = () => Modal.close();
+    dragToClose(box, grab, head);
     host.onclick = (e) => {
       if (e.target === host) Modal.close();
     };
@@ -96,7 +132,6 @@ export const Modal = {
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      // Focus that escaped the dialog (a click on the backdrop) comes back in.
       if (!box.contains(document.activeElement)) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
@@ -118,7 +153,6 @@ export const Modal = {
   close(silent = false): void {
     $('#modalHost').classList.add('hidden');
     $('#modalHost').innerHTML = '';
-    // Callers close defensively; with no dialog open there is nothing to restore.
     if (!keyHandler) return;
     document.removeEventListener('keydown', keyHandler, true);
     keyHandler = null;
@@ -143,7 +177,7 @@ export const Modal = {
   ): void {
     Modal.open({
       title,
-      body: `<p style="margin:0 0 4px">${esc(text)}</p>`,
+      body: `<p>${esc(text)}</p>`,
       actions: [
         { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
         {

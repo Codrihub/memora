@@ -1,11 +1,3 @@
-// The node and folder card shared by Brain, Graph and Canvas. The three maps
-// are only different pictures of the same vault, so what you get when you
-// click a node or a folder is the same everywhere: same place, same layout,
-// same actions, same menu.
-//
-// Desktop: a panel on the right, above the map chrome (Regions, Activity,
-// Reset/Filter). Phones: a bottom sheet with a handle, swipe down to close.
-
 import { apiGet } from '../api';
 import { on } from '../bus';
 import { attr, esc, useStyles } from '../dom';
@@ -20,42 +12,34 @@ export interface CardLink {
   path: string;
   name: string;
   color: string;
-  /** Shown at the right of the row (links of that node). */
   degree?: number;
 }
 
-export interface CardExtra {
+interface CardExtra {
   id: string;
   label: string;
-  /** Inline SVG. */
   icon: string;
   on?: boolean;
   run: () => void;
 }
 
-/** What a map tells the card; everything else the card fetches itself. */
-export interface CardHost {
+interface CardHost {
   root: HTMLElement;
-  /** Center the map on this node. */
-  focusNode(path: string): void;
-  /** Show the whole folder (region, hull, frame) on the map. */
+  /** Without it the card has no Focus button. */
+  focusNode?(path: string): void;
   focusFolder(folder: string): void;
-  /** Hide every other folder from the map. */
   onlyFolder?(folder: string): void;
-  /** Select another node of this map (from the link lists). */
   pick(path: string): void;
-  /** Links as this map knows them. */
   links(path: string): { out: CardLink[]; in: CardLink[] };
-  /** Nodes directly in a folder (or region), most connected first. */
+  /** Most connected first. */
   folderItems(folder: string): CardLink[];
-  /** Search the map for a tag (the finder's #tag). */
   tag(tag: string): void;
-  /** Map-only buttons next to the menu (Graph: Pin). */
   extras?(path: string): CardExtra[];
-  /** The card closed itself (close button, Esc, swipe). */
   closed(): void;
-  /** Back to the map's centre view (Close means "done here"). */
   home?(): void;
+  /** Media query for the bottom-sheet layout (default: phones). */
+  sheetQuery?: string;
+  tagLabel?(tag: string): string;
 }
 
 const ICON = {
@@ -70,110 +54,114 @@ const ICON = {
 };
 
 const CSS = `
-.nc{position:absolute;z-index:35;right:14px;top:12px;bottom:14px;width:min(380px,calc(100% - 28px));display:flex;flex-direction:column;
-  background:var(--panel,#12161f);color:var(--fg,#e6e9ef);border:1px solid var(--vc-ctl-line,var(--line,#232a38));border-radius:16px;
-  box-shadow:0 24px 60px -18px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.25);overflow:hidden;
+/* Brings the map chrome tokens itself, for pages without a map. */
+.nc{--vc-ctl-line:var(--line-strong);--vc-tint:var(--hover);--vc-track:var(--seg-track);--vc-thumb:var(--seg-thumb);--vc-line:var(--line)}
+.nc{position:absolute;z-index:35;right:12px;top:12px;bottom:12px;width:min(380px,calc(100% - 24px));display:flex;flex-direction:column;
+  background:var(--ovl-bg);-webkit-backdrop-filter:var(--ovl-filter);backdrop-filter:var(--ovl-filter);
+  color:var(--fg,#e6e9ef);border:1px solid var(--vc-ctl-line,var(--line-strong,#232a38));border-radius:12px;box-shadow:none;overflow:hidden;
   transform:translateX(calc(100% + 40px));visibility:hidden;transition:transform .26s cubic-bezier(.2,.8,.2,1),visibility 0s .26s}
-:root[data-theme=light] .nc{box-shadow:0 20px 50px -18px rgba(15,23,42,.30),0 1px 2px rgba(15,23,42,.08)}
 .nc.open{transform:none;visibility:visible;transition:transform .26s cubic-bezier(.2,.8,.2,1)}
-.nc svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.nc svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .nc-grab{display:none}
 .nc-ib.nc-fold-b{display:none}
-/* The details fold like an accordion (phones): the rows shrink to nothing. */
 .nc-fold{display:grid;grid-template-rows:1fr;flex:1;min-height:0;transition:grid-template-rows .3s cubic-bezier(.2,.8,.2,1)}
 .nc-fold-in{min-height:0;overflow:hidden;display:flex;flex-direction:column}
 .nc-fold-in>.nc-body{flex:1;min-height:0}
 .nc-more{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:36px;margin-top:12px;
-  border-radius:10px;cursor:pointer;font-size:12.5px;font-weight:650;color:var(--accent,#5eead4);border:1px dashed var(--line-strong,var(--line))}
-.nc-more:hover,.nc-more:focus-visible{border-style:solid;border-color:var(--accent,#5eead4)}
-.nc-head{display:flex;align-items:center;gap:8px;padding:12px 12px 0 16px}
-.nc-crumb{display:flex;align-items:center;gap:7px;min-width:0;flex:1;font-size:12px;color:var(--muted,#8b98ad)}
-.nc-crumb i{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
-.nc-crumb i.sq{border-radius:3px}
+  border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--accent,#5eead4);background:var(--vc-tint,rgba(148,163,184,.08))}
+.nc-more:hover,.nc-more:focus-visible{background:var(--accent-soft,rgba(94,234,212,.11))}
+.nc-head{display:flex;align-items:center;gap:2px;padding:10px 8px 0 16px}
+.nc-crumb{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:12.5px;color:var(--muted,#8b98ad);margin-right:6px}
+.nc-crumb i{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+.nc-crumb i.sq{border-radius:2px}
 .nc-crumb span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nc-ib{all:unset;box-sizing:border-box;display:grid;place-items:center;width:32px;height:32px;border-radius:9px;cursor:pointer;color:var(--text-2,#a3afc2);flex:none}
-.nc-ib:hover,.nc-ib:focus-visible{background:var(--surface-2,#151a24);color:var(--fg,#e6e9ef)}
+.nc-ib{all:unset;box-sizing:border-box;display:grid;place-items:center;width:32px;height:32px;border-radius:8px;cursor:pointer;color:var(--text-2,#a3afc2);flex:none}
+.nc-ib:hover,.nc-ib:focus-visible{background:var(--vc-tint,rgba(148,163,184,.08));color:var(--fg,#e6e9ef)}
+.nc-ib:focus-visible{outline:2px solid var(--accent,#5eead4);outline-offset:-2px}
 .nc-ib.on{color:var(--accent,#5eead4)}
-.nc-title{margin:6px 16px 0;font-size:19px;line-height:1.25;font-weight:700;letter-spacing:-.01em;overflow-wrap:anywhere}
-.nc-kind{display:inline-block;margin:0 16px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#8b98ad)}
-.nc-stats{display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 16px 0;font-size:12px;color:var(--muted,#8b98ad)}
-.nc-stats b{color:var(--fg,#e6e9ef);font-weight:650}
-.nc-tags{display:flex;flex-wrap:wrap;gap:6px;margin:10px 16px 0}
-.nc-tags:empty{display:none}
-.nc-tag{all:unset;cursor:pointer;height:24px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:600;color:var(--accent,#5eead4);
-  background:color-mix(in srgb,var(--accent,#5eead4) 12%,var(--panel,#12161f));border:1px solid color-mix(in srgb,var(--accent,#5eead4) 28%,var(--panel,#12161f))}
-.nc-tag:hover,.nc-tag:focus-visible{border-color:var(--accent,#5eead4)}
-.nc-acts{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;margin:14px 16px 0}
-.nc-act{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 8px;border-radius:10px;cursor:pointer;
-  font-size:12.5px;font-weight:600;white-space:nowrap;color:var(--fg,#e6e9ef);background:var(--surface-2,#151a24);border:1px solid var(--vc-ctl-line,var(--line,#232a38))}
-.nc-act:hover,.nc-act:focus-visible{border-color:var(--accent,#5eead4)}
-.nc-act.pri{background:var(--primary,#08c6d4);border-color:var(--primary,#08c6d4);color:var(--on-primary,#03252a)}
-.nc-act.pri:hover{background:var(--primary-hover,var(--primary,#08c6d4));border-color:var(--primary-hover,var(--primary,#08c6d4))}
-.nc-tabs{display:flex;gap:4px;margin:16px 16px 0;padding:3px;border-radius:10px;background:var(--surface-2,#151a24);border:1px solid var(--line,#232a38)}
-.nc-tabs button{all:unset;flex:1;text-align:center;height:28px;line-height:28px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted,#8b98ad);white-space:nowrap}
-.nc-tabs button[aria-selected=true]{background:var(--panel,#12161f);color:var(--fg,#e6e9ef);box-shadow:0 1px 2px rgba(0,0,0,.25)}
-.nc-tabs button span{opacity:.7;margin-left:4px}
-.nc-body{flex:1;min-height:0;overflow:auto;padding:12px 16px 16px;margin-top:4px;overscroll-behavior:contain;scrollbar-width:thin}
-.nc-prev{font-size:13px;line-height:1.6;color:var(--text-2,#c6cfdb);overflow-wrap:anywhere}
-.nc-prev h1,.nc-prev h2,.nc-prev h3{font-size:14.5px;margin:12px 0 6px}
+.nc-title{margin:4px 16px 0;font-size:18px;line-height:1.3;font-weight:650;letter-spacing:-.01em;overflow-wrap:anywhere}
+.nc-props{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 16px;margin:10px 16px 0;padding-bottom:12px;border-bottom:1px solid var(--vc-line,var(--line,#232a38));font-size:13px}
+.nc-props dt{color:var(--muted,#8b98ad);min-height:28px;display:flex;align-items:center}
+.nc-props dd{margin:0;min-width:0;min-height:28px;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:4px;text-align:right;color:var(--fg,#e6e9ef)}
+.nc-props dd:empty::before{content:"–";color:var(--muted,#8b98ad)}
+.nc-props .nc-tagrow{padding:4px 0}
+.nc-tag{all:unset;cursor:pointer;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;color:var(--accent,#5eead4);background:var(--accent-soft,rgba(94,234,212,.11))}
+.nc-tag:hover{text-decoration:underline}
+.nc-tag:focus-visible{outline:2px solid var(--accent,#5eead4);outline-offset:1px}
+.nc-acts{display:flex;align-items:center;gap:4px;margin:12px 16px 0}
+.nc-act{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 10px;border-radius:8px;cursor:pointer;
+  font-size:13px;font-weight:600;white-space:nowrap;color:var(--text-2,#a3afc2);transition:background .15s,color .15s}
+.nc-act:hover,.nc-act:focus-visible{background:var(--vc-tint,rgba(148,163,184,.08));color:var(--fg,#e6e9ef)}
+.nc-act:focus-visible{outline:2px solid var(--accent,#5eead4);outline-offset:1px}
+.nc-act.pri{flex:1;padding:0 14px;background:var(--primary,#08c6d4);color:var(--on-primary,#03252a);margin-right:4px}
+.nc-act.pri:hover{background:var(--primary-hover,var(--primary,#08c6d4));color:var(--on-primary,#03252a)}
+.nc-tabs{display:flex;gap:2px;margin:14px 16px 0;padding:3px;border-radius:10px;background:var(--vc-track,var(--surface-2,#151a24))}
+.nc-tabs button{all:unset;box-sizing:border-box;flex:1;text-align:center;height:30px;line-height:28px;border-radius:7px;cursor:pointer;font-size:12.5px;font-weight:550;
+  color:var(--muted,#8b98ad);white-space:nowrap;border:1px solid transparent}
+.nc-tabs button:hover{color:var(--fg,#e6e9ef)}
+.nc-tabs button[aria-selected=true]{background:var(--vc-thumb,var(--panel,#12161f));color:var(--fg,#e6e9ef);border-color:var(--vc-ctl-line,var(--line,#232a38))}
+.nc-tabs button:focus-visible{outline:2px solid var(--accent,#5eead4);outline-offset:1px}
+.nc-tabs button span{color:var(--muted,#8b98ad);margin-left:5px;font-variant-numeric:tabular-nums}
+.nc-body{flex:1;min-height:0;overflow:auto;padding:12px 16px 16px;margin-top:2px;overscroll-behavior:contain;scrollbar-width:thin}
+.nc-prev{font-size:13.5px;line-height:1.6;color:var(--text-2,#c6cfdb);overflow-wrap:anywhere}
+.nc-prev h1,.nc-prev h2,.nc-prev h3{font-size:14.5px;margin:12px 0 6px;color:var(--fg,#e6e9ef)}
 .nc-prev p{margin:0 0 8px}
 .nc-prev img{max-width:100%}
 .nc-list{display:flex;flex-direction:column;gap:2px}
-.nc-row{all:unset;box-sizing:border-box;display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:9px;cursor:pointer;font-size:13px}
-.nc-row:hover,.nc-row:focus-visible{background:var(--surface-2,#151a24)}
+.nc-row{all:unset;box-sizing:border-box;display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.nc-row:hover,.nc-row:focus-visible{background:var(--vc-tint,rgba(148,163,184,.08))}
+.nc-row:focus-visible{outline:2px solid var(--accent,#5eead4);outline-offset:-2px}
 .nc-row i{width:8px;height:8px;border-radius:50%;background:var(--c)}
 .nc-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nc-row em{font-style:normal;font-size:11.5px;color:var(--muted,#8b98ad)}
-.nc-empty{padding:12px 2px;font-size:12.5px;color:var(--muted,#8b98ad)}
-@media (max-width:760px){
-  .nc{left:0;right:0;top:auto;bottom:0;width:auto;max-height:78%;height:auto;border-radius:18px 18px 0 0;border-bottom:0;
-    transform:translateY(105%);padding-bottom:env(safe-area-inset-bottom)}
-  .nc.open{transform:translateY(var(--nc-drag,0px))}
-  .nc.dragging{transition:none}
-  .nc-grab{display:block;flex:none;width:40px;height:5px;border-radius:3px;margin:8px auto 0;background:var(--line-2,var(--line,#2b3446));touch-action:none}
-  .nc-head{padding-top:6px;touch-action:none}
-  .nc-body{min-height:120px;max-height:calc(78vh - 260px)}
-  .nc-fold{flex:none}
-  /* Peek: only the name stays up, the map is free; tap or drag up to open. */
-  .nc.peek .nc-fold{grid-template-rows:0fr}
-  .nc.peek .nc-kind{display:none}
-  .nc-ib.nc-fold-b{display:grid}
-  .nc-fold-b svg{transform:rotate(180deg);transition:transform .3s cubic-bezier(.2,.8,.2,1)}
-  .nc.peek .nc-fold-b svg{transform:none}
-  .nc.peek .nc-title{margin-bottom:14px;font-size:16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .nc.peek .nc-head{cursor:pointer}
-}
-@media (prefers-reduced-motion:reduce){.nc,.nc.open,.nc-fold,.nc-fold-b svg{transition:none}}
+.nc-row em{font-style:normal;font-size:12px;color:var(--muted,#8b98ad);font-variant-numeric:tabular-nums}
+.nc-empty{padding:12px 2px;font-size:13px;color:var(--muted,#8b98ad)}
+@media (pointer:coarse){.nc-ib{width:40px;height:40px}.nc-act{height:40px}.nc-row{min-height:44px}.nc-tabs button{height:36px;line-height:34px}}
+.nc.sheet{left:0;right:0;top:auto;bottom:0;width:auto;max-height:88%;height:auto;border-radius:12px 12px 0 0;border-bottom:0;
+  transform:translateY(105%);padding-bottom:env(safe-area-inset-bottom)}
+.nc.sheet.open{transform:translateY(var(--nc-drag,0px))}
+.nc.sheet.dragging{transition:none}
+.nc.sheet .nc-grab{display:block;flex:none;width:36px;height:4px;border-radius:99px;margin:8px auto 0;background:var(--line-strong,#2b3446);touch-action:none}
+.nc.sheet .nc-head{padding-top:6px;touch-action:none}
+.nc.sheet .nc-body{min-height:120px;max-height:calc(88vh - 340px)}
+.nc.sheet .nc-fold{flex:none}
+.nc.sheet.peek .nc-fold{grid-template-rows:0fr}
+.nc.sheet .nc-ib.nc-fold-b{display:grid}
+.nc.sheet .nc-fold-b svg{transform:rotate(180deg);transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.nc.sheet.peek .nc-fold-b svg{transform:none}
+.nc.sheet.peek .nc-title{margin-bottom:14px;font-size:16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nc.sheet.peek .nc-head{cursor:pointer}
+@media (prefers-reduced-motion:reduce){.nc,.nc.open,.nc-fold,.nc.sheet .nc-fold-b svg{transition:none}}
 `;
 
 type Tab = 'preview' | 'out' | 'in' | 'items';
 
 export class NodeCard {
   readonly el: HTMLElement;
-  /** The open note's path, or the open folder's name with a trailing slash. */
+  /** Note path, or folder name with a trailing slash. */
   path: string | null = null;
   private seq = 0;
   private tab: Tab = 'preview';
   private mapTap = -1e9;
-  /** Listeners on the map root, removed on destroy. */
   private off = new AbortController();
-  /** What the server last said about a note (preview, size and date, tags). */
   private doc: { path: string; preview: string; meta: string; tags: string[] } | null = null;
-  /** `doc`'s note changed on the server after it was fetched. */
   private stale = false;
-  /** Everything the last `showNote` drew from, to skip redrawing the same card. */
   private drawn = '';
-  /** The note whose preview is being fetched. */
   private loading: string | null = null;
+  private sheetMq: MediaQueryList;
 
   constructor(private host: CardHost) {
     useStyles('node-card-css', CSS);
     this.el = document.createElement('section');
     this.el.className = 'nc';
+    this.sheetMq = window.matchMedia(host.sheetQuery || PHONE);
+    const sheet = (): void => {
+      this.el.classList.toggle('sheet', this.sheetMq.matches);
+    };
+    sheet();
+    this.sheetMq.addEventListener('change', sheet, { signal: this.off.signal });
     this.el.setAttribute('role', 'dialog');
-    this.el.setAttribute('aria-label', 'Node details');
+    this.el.setAttribute('aria-label', 'Note details');
     host.root.appendChild(this.el);
-    // Clicks and drags on the card never reach the map underneath.
     for (const ev of ['pointerdown', 'wheel', 'dblclick', 'contextmenu'] as const)
       this.el.addEventListener(ev, (e) => e.stopPropagation(), { passive: ev === 'wheel' });
     this.el.addEventListener('keydown', (e) => {
@@ -183,18 +171,15 @@ export class NodeCard {
       }
     });
     this.wireSwipe();
-    // Maps redraw the open card after every realtime update; only a change to
-    // this note itself needs a new preview from the server.
     const unsub = on('mutation', (m) => this.mutated(m));
     this.off.signal.addEventListener('abort', unsub);
-    // A tap on the map itself (not its controls) while the card is up.
     host.root.addEventListener(
       'pointerdown',
       (e) => {
         const t = e.target as HTMLElement;
         if (this.isOpen && !t.closest('.nc,.vc,.mf,.cv-ui')) {
           this.mapTap = performance.now();
-          if (phone()) this.collapse();
+          if (this.sheet) this.collapse();
         }
       },
       { capture: true, signal: this.off.signal },
@@ -202,8 +187,7 @@ export class NodeCard {
     this.el.addEventListener('click', (e) => {
       if (!this.el.classList.contains('peek')) return;
       const t = e.target as HTMLElement;
-      // Only the folded bar itself opens it (the Focus click that folded it
-      // bubbles here too).
+      // The Focus click that folded it bubbles here too.
       if (!t.closest('.nc-grab,.nc-head,.nc-title') || t.closest('[data-a=close],[data-a=menu],[data-a=fold],[data-x]')) return;
       this.expand();
     });
@@ -213,14 +197,14 @@ export class NodeCard {
     return this.el.classList.contains('open');
   }
 
-  /**
-   * Close. By the user (×, Esc, swiping a peeking card away) it also takes the
-   * map back to its centre. On phones a tap on the map only folds the card
-   * down to its name, like an accordion, instead of closing it.
-   */
+  get sheet(): boolean {
+    return this.sheetMq.matches;
+  }
+
+  /** On phones a map tap only folds the card to its name. */
   close(byUser = false): void {
     if (!this.isOpen) return;
-    if (!byUser && phone() && performance.now() - this.mapTap < 600) {
+    if (!byUser && this.sheet && performance.now() - this.mapTap < 600) {
       this.collapse();
       return;
     }
@@ -234,9 +218,8 @@ export class NodeCard {
     }
   }
 
-  /** Phones: fold down to the name (after Focus, a map tap, a swipe down). */
   collapse(): void {
-    if (this.isOpen && phone()) this.el.classList.add('peek');
+    if (this.isOpen && this.sheet) this.el.classList.add('peek');
   }
 
   expand(): void {
@@ -249,24 +232,21 @@ export class NodeCard {
     this.el.remove();
   }
 
-  /** A note: its links from the map, the rest from the server. */
   showNote(path: string, name: string, folder: string, color: string, tags: string[] = []): void {
     const reopen = this.path === path && this.isOpen;
     const { out, in: inc } = this.host.links(path);
     const extras = this.host.extras?.(path) || [];
     const row = (l: CardLink): unknown[] => [l.path, l.name, l.color, l.degree];
     const drawn = JSON.stringify([path, name, folder, color, tags, out.map(row), inc.map(row), extras.map((x) => [x.id, x.label, !!x.on])]);
-    // The same node redrawn (a map refresh): reuse the preview already loaded
-    // unless this note changed; with nothing new at all, leave the card alone.
+    // A map refresh redraws the same node: reuse the loaded preview unless the note changed.
     const cached = reopen && this.doc?.path === path ? this.doc : null;
     if (reopen && !this.stale && drawn === this.drawn && (cached || this.loading === path)) return;
     this.drawn = drawn;
     const seq = ++this.seq;
     this.path = path;
     if (!reopen) this.tab = 'preview';
-    // Another node opens unfolded; the same one redrawn keeps its state.
     if (!reopen) this.expand();
-    this.el.setAttribute('aria-label', `Node ${name}`);
+    this.el.setAttribute('aria-label', `Note ${name}`);
     this.el.innerHTML = `<div class="nc-grab" aria-hidden="true"></div>
       <div class="nc-head"><div class="nc-crumb"><i style="--c:${attr(color)}"></i><span title="${attr(path)}">${esc(this.crumb(folder))}</span></div>
         ${extras.map((x) => `<button type="button" class="nc-ib${x.on ? ' on' : ''}" data-x="${attr(x.id)}" title="${attr(x.label)}" aria-label="${attr(x.label)}">${x.icon}</button>`).join('')}
@@ -275,11 +255,14 @@ export class NodeCard {
         <button type="button" class="nc-ib" data-a="close" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>
       <h2 class="nc-title">${esc(name)}</h2>
       <div class="nc-fold"><div class="nc-fold-in">
-      <div class="nc-stats"><span><b>${out.length}</b> link${out.length === 1 ? '' : 's'} out</span><span><b>${inc.length}</b> backlink${inc.length === 1 ? '' : 's'}</span><span data-meta></span></div>
-      <div class="nc-tags">${this.tagChips(cached?.tags.length ? cached.tags : tags)}</div>
+      <dl class="nc-props">
+        <dt>Links</dt><dd>${out.length} out · ${inc.length} in</dd>
+        <dt>Edited</dt><dd data-meta></dd>
+        <dt>Tags</dt><dd class="nc-tags nc-tagrow">${this.tagChips(cached?.tags.length ? cached.tags : tags)}</dd>
+      </dl>
       <div class="nc-acts">
-        <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open node</button>
-        <button type="button" class="nc-act" data-a="node" title="Center the map on this node">${ICON.target}Focus</button>
+        <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open note</button>
+        ${this.host.focusNode ? `<button type="button" class="nc-act" data-a="node" title="Center the map on this note">${ICON.target}Focus</button>` : ''}
         <button type="button" class="nc-act" data-a="folder" title="Show its whole folder">${ICON.folder}Folder</button>
       </div>
       <div class="nc-tabs" role="tablist">
@@ -300,7 +283,7 @@ export class NodeCard {
       body.innerHTML =
         this.tab === 'preview'
           ? `<div class="nc-prev note-body">${preview}</div>`
-          : this.rows(this.tab === 'out' ? out : inc, this.tab === 'out' ? 'This node links to nothing yet.' : 'Nothing links here yet.');
+          : this.rows(this.tab === 'out' ? out : inc, this.tab === 'out' ? 'This note links to nothing yet.' : 'Nothing links here yet.');
       this.wireRows(body);
       body.querySelector<HTMLElement>('[data-a=more]')?.addEventListener('click', () => hooks.openNote(path));
     };
@@ -315,7 +298,7 @@ export class NodeCard {
     this.wireCommon(extras);
     this.on('open', () => hooks.openNote(path));
     this.on('node', () => {
-      this.host.focusNode(path);
+      this.host.focusNode?.(path);
       this.collapse();
     });
     this.on('folder', () => {
@@ -333,7 +316,7 @@ export class NodeCard {
       .then((d) => {
         if (seq !== this.seq) return;
         this.loading = null;
-        const metaText = [d.mtime ? 'edited ' + relTs(d.mtime) : '', d.size ? `${Math.max(1, Math.round(d.size / 1024))} KB` : ''].filter(Boolean).join(' · ');
+        const metaText = [d.mtime ? relTs(d.mtime) : '', d.size ? `${Math.max(1, Math.round(d.size / 1024))} KB` : ''].filter(Boolean).join(' · ');
         const meta = this.el.querySelector<HTMLElement>('[data-meta]');
         if (meta) meta.textContent = metaText;
         if (d.tags && d.tags.length) {
@@ -342,7 +325,7 @@ export class NodeCard {
           this.wireTags(host);
         }
         const text = d.html || (d.content ? `<pre>${esc(d.content)}</pre>` : '');
-        const fresh = text ? clipPreview(text) : '<div class="nc-empty">This node is empty.</div>';
+        const fresh = text ? clipPreview(text) : '<div class="nc-empty">This note is empty.</div>';
         this.doc = { path, preview: fresh, meta: metaText, tags: d.tags || [] };
         if (fresh === preview) return;
         preview = fresh;
@@ -351,25 +334,20 @@ export class NodeCard {
       .catch((e: Error) => {
         if (seq !== this.seq) return;
         this.loading = null;
-        // Keep showing a preview that was already there; only a first load fails visibly.
         if (cached) return;
         preview = `<div class="nc-empty">Could not load the preview: ${esc(e.message)}</div>`;
         if (this.tab === 'preview') paint();
       });
   }
 
-  /** A realtime vault change: the loaded (or loading) preview is out of date when it names that note. */
   private mutated(m: WsEvent): void {
     const mine = this.doc?.path ?? this.loading;
     if (!mine) return;
-    // node_created / node_updated / node_renamed carry the note in `node`; deletes and
-    // renames name paths at the top level.
     const node = m.node as { path?: unknown } | undefined;
     const paths = [m.path, m.to, m.new_path, m.old_path, m.from, node?.path].filter((v): v is string => typeof v === 'string');
     if (!paths.length || paths.includes(mine)) this.stale = true;
   }
 
-  /** A folder (region, hull, frame): what is in it and what you can do. */
   showFolder(folder: string, color: string, count?: number): void {
     ++this.seq;
     const again = this.path === folder + '/';
@@ -388,20 +366,19 @@ export class NodeCard {
         <button type="button" class="nc-ib nc-fold-b" data-a="fold" title="Fold or open the details" aria-label="Fold or open the details">${ICON.up}</button>
         <button type="button" class="nc-ib" data-a="close" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>
       <h2 class="nc-title">${esc(name)}</h2>
-      <span class="nc-kind">Folder</span>
       <div class="nc-fold"><div class="nc-fold-in">
-      <div class="nc-stats"><span><b>${n}</b> node${n === 1 ? '' : 's'}</span></div>
+      <dl class="nc-props"><dt>Kind</dt><dd>Folder</dd><dt>Notes</dt><dd>${n}</dd></dl>
       <div class="nc-acts">
         <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open folder</button>
         <button type="button" class="nc-act" data-a="folder" title="Show the whole folder">${ICON.target}Focus</button>
         ${
           this.host.onlyFolder
             ? `<button type="button" class="nc-act" data-a="only" title="Hide every other folder">${ICON.only}Only this</button>`
-            : `<button type="button" class="nc-act" data-a="new" title="New node in this folder">${ICON.plus}New node</button>`
+            : `<button type="button" class="nc-act" data-a="new" title="New note in this folder">${ICON.plus}New note</button>`
         }
       </div>
-      <div class="nc-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">Nodes<span>${n}</span></button></div>
-      <div class="nc-body" role="tabpanel">${this.rows(items, 'No nodes directly in this folder.')}</div>
+      <div class="nc-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">Notes<span>${n}</span></button></div>
+      <div class="nc-body" role="tabpanel">${this.rows(items, 'No notes directly in this folder.')}</div>
       </div></div>`;
     this.wireRows(this.el.querySelector('.nc-body')!);
     this.wireCommon([]);
@@ -422,14 +399,12 @@ export class NodeCard {
     this.el.classList.add('open');
   }
 
-  // ─────────── internals ───────────
-
   private crumb(folder: string): string {
     return !folder || folder === 'Root' ? 'Vault root' : folder.split('/').join(' / ');
   }
 
   private tagChips(tags: string[]): string {
-    return tags.map((t) => `<button type="button" class="nc-tag" data-tag="${attr(t)}" title="Find #${attr(t)} on the map">#${esc(t)}</button>`).join('');
+    return tags.map((t) => `<button type="button" class="nc-tag" data-tag="${attr(t)}" title="${attr(this.host.tagLabel ? this.host.tagLabel(t) : `Find #${t} on the map`)}">#${esc(t)}</button>`).join('');
   }
 
   private rows(list: CardLink[], empty: string): string {
@@ -468,13 +443,12 @@ export class NodeCard {
     if (b) b.onclick = () => run(b);
   }
 
-  /** Phones: drag the handle or header down to fold, again to close; up to open. */
   private wireSwipe(): void {
     let y0 = -1;
     let dy = 0;
     this.el.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
-      if (!window.matchMedia('(max-width:760px)').matches) return;
+      if (!this.sheet) return;
       if (!t.closest('.nc-grab,.nc-head') || t.closest('button')) return;
       y0 = e.clientY;
       dy = 0;
@@ -492,7 +466,6 @@ export class NodeCard {
       this.el.classList.remove('dragging');
       this.el.style.removeProperty('--nc-drag');
       const peek = this.el.classList.contains('peek');
-      // Down: open card folds to its name, a folded card goes away. Up: open.
       if (dy > 60) {
         if (peek) this.close(true);
         else this.collapse();
@@ -503,18 +476,10 @@ export class NodeCard {
   }
 }
 
-function phone(): boolean {
-  return window.matchMedia('(max-width:760px)').matches;
-}
+const PHONE = '(max-width:760px)';
 
-/** Characters of text a preview shows before "Read more". */
 const PREVIEW_CHARS = 700;
 
-/**
- * The start of a rendered note for the card: whole blocks up to about
- * PREVIEW_CHARS of text (or 6 blocks), then a Read more button that opens
- * the node. Short notes stay whole.
- */
 function clipPreview(html: string): string {
   const box = document.createElement('div');
   box.innerHTML = html;

@@ -1,12 +1,3 @@
-// Privacy panel: which agents (API keys and connected apps) may see a node or a
-// folder. Rules live on the server (/api/privacy); the owner always sees
-// everything. One question with three answers (all agents / all except… /
-// only these…); the agent picker appears for the last two. A centred dialog on
-// desktop, a bottom sheet on phones (Modal does both).
-//
-// Also the lock marks the sidebar tree and the Nodes list draw next to private
-// nodes and folders (`lockMark`).
-
 import { api } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
@@ -14,9 +5,8 @@ import { Modal } from '../modal';
 import { toast } from '../toast';
 import { avatarHTML } from '../control/agents';
 
-export type PrivacyKind = 'node' | 'folder';
+type PrivacyKind = 'node' | 'folder';
 type Mode = 'deny' | 'allow_only';
-/** The answer picked in the panel: no rule, or one of the two rule modes. */
 type Choice = 'all' | Mode;
 
 interface KeyRef {
@@ -73,7 +63,6 @@ const I_FOLDER = SVG(
 );
 const I_NOTE = SVG('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/>', 1.8);
 
-/** The lock glyph sized like the vault menu icons. */
 export const LOCK_ICON = LOCK.replace('<svg ', '<svg class="vx-i" ');
 
 const PV_CSS = `
@@ -174,10 +163,6 @@ function styles(): void {
   useStyles('ui-privacy', PV_CSS);
 }
 
-// ---------------------------------------------------------------------------
-// Lock marks
-// ---------------------------------------------------------------------------
-
 let marks: Set<string> | null = null;
 let loading = false;
 
@@ -185,7 +170,6 @@ const stem = (p: string): string => p.replace(/\.md$/i, '');
 const markKey = (kind: PrivacyKind, path: string): string =>
   kind + ':' + (kind === 'node' ? stem(path) : path).replace(/^\/+|\/+$/g, '').toLowerCase();
 
-/** Re-read which nodes and folders have a rule, then redraw tree and list. */
 async function loadPrivacyMarks(): Promise<void> {
   if (loading) return;
   loading = true;
@@ -193,7 +177,7 @@ async function loadPrivacyMarks(): Promise<void> {
     const r = await api<{ rules: RuleJson[] }>('/api/privacy');
     marks = new Set(r.rules.map((x) => markKey(x.kind, x.path)));
   } catch {
-    // Not signed in as the owner, or offline: no marks.
+    // Not the owner, or offline.
     marks = marks || new Set();
   } finally {
     loading = false;
@@ -206,7 +190,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('memora:privacy', () => void loadPrivacyMarks());
 }
 
-/** A small lock when the node or folder has its own privacy rule ('' otherwise). */
 export function lockMark(kind: PrivacyKind, path: string): string {
   if (!path) return '';
   if (marks === null) {
@@ -221,10 +204,6 @@ export function lockMark(kind: PrivacyKind, path: string): string {
     : '';
 }
 
-// ---------------------------------------------------------------------------
-// Panel
-// ---------------------------------------------------------------------------
-
 const baseName = (p: string): string => (p.split('/').pop() || p).replace(/\.md$/i, '');
 
 /** "a", "a and b", "a, b and c", "a, b and 3 more". */
@@ -237,7 +216,7 @@ function names(list: string[], max = 3): string {
 
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-/** Open the Privacy panel for a node (`kind` node, path with .md) or a folder. */
+/** Node paths include .md. */
 export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void> {
   styles();
   let d: Described;
@@ -250,7 +229,6 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
   const what = kind === 'node' ? 'node' : 'folder';
   const name = baseName(d.path) || d.path;
 
-  // Agents a parent folder already hides: shown locked, not editable here.
   const lockedBy = new Map<string, string>();
   for (const a of d.agents) {
     const h = a.hidden_by.find((x) => !x.own);
@@ -259,13 +237,12 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
   const free = d.agents.filter((a) => !lockedBy.has(a.id));
   const locked = d.agents.filter((a) => lockedBy.has(a.id));
 
-  // The picks are kept per mode so switching back and forth loses nothing.
   let choice: Choice = d.own ? d.own.mode : 'all';
   const picked: Record<Mode, Set<string>> = {
     deny: new Set(d.own?.mode === 'deny' ? d.own.keys : []),
     allow_only: new Set(d.own?.mode === 'allow_only' ? d.own.keys : []),
   };
-  // "Hide from nobody" is the same as no rule.
+  // Hiding from nobody equals no rule.
   const effective = (): string => {
     if (choice === 'all' || (choice === 'deny' && !picked.deny.size)) return 'all';
     return choice + ':' + Array.from(picked[choice]).sort().join(',');
@@ -281,7 +258,6 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
     return true;
   };
 
-  // ---- static markup ----
   const notice = (() => {
     if (!locked.length) return '';
     const byFolder = new Map<string, string[]>();
@@ -308,8 +284,6 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
       ? 'Covers everything inside it, now and later · You always see everything'
       : 'Rules follow the node when it’s renamed or moved · You always see everything';
 
-  // One row per agent; agents a folder already hides are locked rows at the end,
-  // folded into one row per folder when there are many of them.
   const rowHTML = (a: AgentState): string => {
     const by = lockedBy.get(a.id);
     const sub = by ? `Hidden by folder ${esc(by)}` : esc(a.id) + (a.enabled ? '' : ' · switched off');
@@ -486,7 +460,7 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
     } catch (e) {
       toast('Could not save: ' + (e as Error).message, 'err');
     } finally {
-      // Modal re-enables the button after the run; keep it honest if still open.
+      // Modal re-enables the button after the run.
       setTimeout(() => {
         if (applyBtn && document.body.contains(applyBtn)) applyBtn.disabled = !changed();
       }, 0);
@@ -521,7 +495,7 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
       }
       applyBtn = box.querySelector('.modal-foot .btn.primary');
       sync();
-      // Modal focuses its first control after 40ms; the chosen answer is the better start.
+      // Runs after Modal's own 40ms first-control focus.
       setTimeout(() => body.querySelector<HTMLInputElement>('input[name="pv-choice"]:checked')?.focus(), 60);
     },
   });

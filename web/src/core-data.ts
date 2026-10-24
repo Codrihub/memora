@@ -1,8 +1,4 @@
-// Core vault data: tree, folder list, stats, folder metadata and health. These calls
-// together feed the sidebar, the stat line and every view header.
-
 import { apiGet } from './api';
-import { $ } from './dom';
 import { hooks } from './hooks';
 import { state } from './state';
 import type { FolderMetaMap, Health, Stats, Tree } from './types';
@@ -22,12 +18,10 @@ export async function loadCore(): Promise<void> {
   state.folderMeta = meta || {};
   state.health = health || {};
   hooks.renderTree();
-  renderStats();
 }
 
-function renderStats(): void {
-  const n = (v: number | undefined, one: string): string => (v || 0).toLocaleString() + ' ' + one + (v === 1 ? '' : 's');
-  $('#statNotes').textContent = n(state.stats.notes, 'node');
-  $('#statLinks').textContent = n(state.stats.links, 'link');
-  $('#statFolders').textContent = n(state.stats.folders, 'folder');
+/** Top-level folders as the Notes tree lists them (the server's stat also counts "Root"). */
+export function folderCount(): number {
+  if (state.folders.length) return new Set(state.folders.map((f) => f.split('/')[0]).filter((f) => f && !/^root$/i.test(f) && !f.startsWith('.'))).size;
+  return state.stats.folders || 0;
 }

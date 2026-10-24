@@ -1,11 +1,4 @@
-// Orthogonal wire routing for the canvas, Figma style: a wire leaves a card
-// straight out of one side, runs in horizontal and vertical legs around the
-// cards and frames in its way, and enters the other card straight in.
-//
-// Brute force over a small candidate set: every side pair, each joined by an
-// "across first" and a "down first" dog-leg whose middle leg is tried at the
-// midpoint, at both stubs and just past the edges of nearby obstacles. The
-// cheapest path wins (length, bends, and a heavy cost per obstacle crossed).
+// Orthogonal wire routing, brute force over every side pair and a few dog-leg positions; cheapest path wins.
 
 export interface Rect {
   x: number;
@@ -27,7 +20,6 @@ function port(r: Rect, s: Side): Pt {
   return [r.x + r.w / 2, r.y];
 }
 
-/** Does the axis-aligned segment a-b pass through the inside of r? */
 function hits(a: Pt, b: Pt, r: Rect): boolean {
   const x0 = Math.min(a[0], b[0]);
   const x1 = Math.max(a[0], b[0]);
@@ -72,10 +64,7 @@ function cost(pts: Pt[], obstacles: Rect[], a: Rect, b: Rect): number {
   return len + crossed * 2400 + (pts.length - 2) * 40;
 }
 
-/**
- * A wire from card `a` to card `b` around `obstacles` (cards and frames,
- * already including some clearance). Returns the polyline, start to end.
- */
+/** `obstacles` already include some clearance. */
 export function route(a: Rect, b: Rect, obstacles: Rect[], stub = 9, clear = 9): Pt[] {
   let best: Pt[] | null = null;
   let bestCost = Infinity;
@@ -124,7 +113,6 @@ export function route(a: Rect, b: Rect, obstacles: Rect[], stub = 9, clear = 9):
   return best || [port(a, 0), port(b, 1)];
 }
 
-/** Stroke a polyline with rounded corners. */
 export function strokeRounded(ctx: CanvasRenderingContext2D, pts: Pt[], radius: number): void {
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);

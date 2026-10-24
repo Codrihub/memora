@@ -1,26 +1,20 @@
-// Activity: everything agents and people do in the brain, live. Search
-// first; every other filter (time, action type, source, agents, status)
-// lives in one sheet behind the Filters button and shows as removable chips.
-// Three views: By day (timeline with sticky day headers), By agent (one card
-// per agent, sorted into agent classes) and Summary (counts). Rows come from
-// the vault log, the gateway audit trail and the live bus `activity` stream.
-// /activity/<key id> is the same page in its other mode: that agent's own
-// page (views/activity-agent.ts). An agent card opens it with a shared
-// element transition (views/activity-vt.ts); back returns to the list at the
-// same scroll position.
+// Activity page: the summary at /activity and the timeline at /activity/timeline.
+// Old /activity/<id> addresses open the agent's page, or this page filtered to that actor.
 
-import { $, attr, esc, useStyles } from '../dom';
+import { $, esc, useStyles } from '../dom';
 import { debounce } from '../format';
 import { apiGet } from '../api';
 import { avatarHTML, setAgentColors } from '../control/agents';
-import { useActivityStyles, wireActRows } from '../control/activity';
-import { loadFeed, onLive, PausedQueue, pushLive, verb, type ActivityItem, type Source } from '../control/feed';
+import { openAgentPage, runUndo, useActivityStyles, wireActRows } from '../control/activity';
+import { actionLabel, groupBursts, isSystem } from '../control/sentence';
+import { fromAuth, fromLog, loadFeed, onLive, PausedQueue, pushLive, type ActivityItem, type Source } from '../control/feed';
 import { ICO, openMenu, plural, systemHeader, useControlStyles, whileVisible } from '../control/ui';
-import type { KeyRow, KeysResult } from '../types';
+import type { KeyRow, KeysResult, LogsResult } from '../types';
 import { toast } from '../toast';
-import { onNavigate, paintTitle, takeRouteAgent } from '../router';
-import { agentHero, agentLive, agentSlugShown, exportRows, focusAgentSearch, leaveAgent, showAgent } from './activity-agent';
-import { morph } from './activity-vt';
+import { logsTimeline, onNavigate, replaceHistory, setKeysRoute, setLogsTimeline, syncUrl, takeRouteAgent } from '../router';
+import { hooks } from '../hooks';
+import { skBlock } from '../ui/skeleton';
+import type { Select } from '../ui/select';
 import {
   CATS,
   F,
@@ -31,303 +25,227 @@ import {
   clearFilters,
   feedRange,
   inWindow,
-  loadView,
   matches,
-  saveView,
+  quickOf,
+  setQuick,
   stOf,
+  systemShown,
   timeLabel,
+  timeWindow,
   type AgentInfo,
   type Cat,
+  type Quick,
   type St,
-  type ViewKind,
+  type TimeKey,
 } from './activity-model';
-import { agentViewHTML, boardViewHTML, chip, CLOCK, dayViewHTML, skeletonHTML, CAT_COLOR, type ViewCtx } from './activity-views';
+import {
+  CAT_COLOR,
+  kpiSkeleton,
+  agentRowsHTML,
+  atLeast,
+  chartTitle,
+  chip,
+  dayViewHTML,
+  daySkeleton,
+  exportRows,
+  notesHTML,
+  paintChips,
+  paintPills,
+  problemsHTML,
+  refreshTime,
+  skLines,
+  statTile,
+  stickTimeline,
+  sumHTML,
+  timeChart,
+  timelineHTML,
+  timeSelect,
+  topActionsHTML,
+  touchedCount,
+  useTimelineStyles,
+  watchSentinel,
+  wireTimeline,
+} from './activity-views';
 import { openFilters, refreshFilters } from './activity-filters';
 
 const CSS = `
-.ax{--ax-stick:64px;--ax-gut:28px}
-/* sticky search bar: solid page colour, full bleed over the view padding */
-.ax-sbar{position:sticky;top:calc(-1 * var(--ax-pt,24px));z-index:6;margin:0;padding:10px 0;background:transparent;
-  border-bottom:1px solid transparent;transition:border-color .16s}
-/* Stuck: the same background as the page behind it (#app: the glow over the
-   base colour, fixed to the screen), so it reads as the page, not a band. */
-.ax-sbar.stuck{border-bottom-color:var(--line);background:var(--bg-grad),var(--bg);background-attachment:fixed}
-/* the stuck bar covers the view's top padding too, so nothing shows above it */
-.ax-sbar.stuck::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:var(--ax-pt,24px);background:var(--bg-grad),var(--bg);background-attachment:fixed}
-.ax-sbar-in{max-width:1240px;margin:0 auto;display:flex;gap:10px;align-items:center}
-.ax-q{flex:1 1 260px}
-.ax-q{display:flex;align-items:center;gap:10px;height:46px;padding:0 8px 0 15px;border-radius:13px;background:var(--panel);
-  border:1px solid var(--line-strong);min-width:0;transition:border-color .16s,box-shadow .16s;cursor:text}
-.ax-q:focus-within{border-color:color-mix(in srgb,var(--accent) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
-.ax-q>.cc-i{width:18px;height:18px;color:var(--muted)}
-.ax-q input{flex:1;min-width:0;height:100%;border:0;outline:none;background:none;color:var(--fg);font-size:15px;padding:0}
-.ax-q input::-webkit-search-cancel-button{display:none}
-.ax-q kbd{flex:none;display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:6px;border:1px solid var(--line-strong);
-  color:var(--muted);font:600 11.5px/1 var(--mono);background:var(--panel-2)}
-.ax-qx{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;color:var(--muted);flex:none}
-.ax-qx:hover{background:var(--panel-2);color:var(--fg)}
-.ax-qx[hidden],.ax-q.has kbd{display:none}
-.ax-fbtn{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 15px;border-radius:13px;border:1px solid var(--line-strong);
-  background:var(--panel);color:var(--fg);font-size:13.5px;font-weight:650;white-space:nowrap}
-.ax-fbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
-.ax-fbtn:focus-visible,.ax-q input:focus-visible{outline:none}
-.ax-fbtn:focus-visible{box-shadow:0 0 0 2px var(--accent)}
-.ax-fbtn .cc-i{width:17px;height:17px;color:var(--muted)}
-.ax-badge{display:grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--accent);
-  color:var(--on-accent);font-size:11px;font-weight:800}
-.ax-badge[hidden]{display:none}
-.ax-views{height:46px;box-sizing:border-box;align-items:stretch;border-radius:13px;padding:4px}
-.ax-views button{min-height:0;padding:0 14px;border-radius:9px;font-size:13px}
-
-/* chips + summary */
-.ax-sub{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin:4px 0 14px;min-height:34px}
-.ax-chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex:1 1 360px;min-width:0}
-.ax-chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 6px 0 11px;border-radius:99px;border:1px solid var(--line);
-  background:var(--panel);font-size:12.5px;font-weight:600;color:var(--fg);white-space:nowrap;max-width:240px}
-.ax-chip .t{overflow:hidden;text-overflow:ellipsis}
-.ax-chip .k{color:var(--muted);font-weight:600}
-.ax-chip .ag-av{margin-left:-6px}
-.ax-chip .sw,.ax-opt .sw,.ax-hb .sw{width:9px;height:9px;border-radius:3px;background:var(--c);flex:none}
-.ax-chip .x{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:var(--muted)}
-.ax-chip .x .cc-i{width:13px;height:13px}
-.ax-chip:hover .x{background:var(--panel-2);color:var(--fg)}
-.ax-chip.time{padding-right:11px;color:var(--fg);border-color:var(--line-strong)}
-.ax-chip.time .cc-i{width:14px;height:14px;color:var(--muted)}
-.ax-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ax-clear{font-size:12.5px;font-weight:650;color:var(--accent);padding:6px 4px}
-.ax-clear:hover{text-decoration:underline}
-.ax-sum{display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--muted);white-space:nowrap;flex-wrap:wrap}
-.ax-sum b{color:var(--fg);font-weight:680;font-variant-numeric:tabular-nums}
-.ax-sum .bad b,.ax-sum .bad{color:var(--danger)}
-.ax-tgl{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--muted);padding:4px 2px}
-.ax-tgl i{position:relative;width:30px;height:18px;border-radius:99px;background:var(--line-strong);transition:background .16s;flex:none}
-.ax-tgl i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg);transition:transform .16s}
-.ax-tgl[aria-pressed=true]{color:var(--fg)}
-.ax-tgl[aria-pressed=true] i{background:var(--accent)}
-.ax-tgl[aria-pressed=true] i::after{transform:translateX(12px);background:var(--on-accent)}
-.ax-tgl:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
-
-/* new events while paused: a button in the sticky bar, never over the list */
-.ax-newb{display:inline-flex;align-items:center;gap:7px;height:46px;padding:0 15px;border-radius:13px;background:var(--primary);
-  color:var(--on-primary);font-size:13px;font-weight:700;white-space:nowrap;flex:none}
-.ax-newb[hidden]{display:none}
-.ax-newb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.lg-live{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13px;border-radius:99px;border:1px solid var(--line);
-  background:var(--panel);font-size:12.5px;font-weight:650;color:var(--muted)}
-.lg-live[aria-pressed=true]{color:var(--fg);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.ax{container:ax/inline-size;--r14:14px;--tile:color-mix(in srgb,var(--fg) 5%,transparent)}
+@media (min-width:1101px){.ax{padding:8px 8px 0}}
+.ax .ag-av{border-radius:30%}
+.ax .ag-av.live::after{border-radius:34%}
+.ax .sys-head{align-items:flex-end;margin:0 0 24px}
+.ax .sys-head h1{font-size:26px;font-weight:650;letter-spacing:-.02em}
+.ax .sys-head p{margin-top:6px;font-size:14px}
+.ax .sys-acts .cc-ibtn{width:40px;height:40px;border-radius:10px;border-color:var(--line);background:var(--surface-1)}
+.ax .sys-acts .cc-ibtn:hover{border-color:var(--line-strong)}
+.lg-live{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line);flex:none;
+  background:var(--surface-1);font-size:13px;font-weight:550;color:var(--muted);transition:border-color .16s,color .16s;white-space:nowrap}
+.lg-live:hover{border-color:var(--line-strong);color:var(--fg)}
+.lg-live .cc-dot{width:6px;height:6px}
+.lg-live[aria-pressed=true]{color:var(--fg)}
+.lg-live[aria-pressed=true] .cc-dot{box-shadow:0 0 0 3px var(--ok-soft)}
 .lg-live:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* by day: one card per day, its header sticks under the search bar on a solid surface */
-.ax-body{min-height:240px}
-.ax-day{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:16px;overflow:clip}
-.ax-dh{position:sticky;top:var(--ax-stick);z-index:4;display:flex;align-items:baseline;gap:10px;margin:0;padding:12px 16px 11px;
-  background:var(--panel-2);border-bottom:1px solid var(--line);font-size:13px;font-weight:700;letter-spacing:0;color:var(--fg);
-  border-radius:0;min-height:44px;box-sizing:border-box}
-.ax-dh .grow{flex:1}
-.ax-dh-t{font-size:14px;font-weight:720}
-.ax-dh-d{color:var(--muted);font-weight:550;font-size:12.5px}
-.ax-dh-n{color:var(--muted);font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;display:inline-flex;gap:10px}
-.ax-dh-f{color:var(--danger)}
-.ax-day .act{min-height:58px}
-.ax-more{display:flex;justify-content:center;padding:4px 0 18px}
-.ax-more .btn{gap:10px;min-height:40px}
-.ax-end{text-align:center;color:var(--muted);font-size:12px;padding:6px 0 22px}
-.ax-skc{padding:6px 0;overflow:hidden}
-.ax-day[aria-busy] .ax-dh{align-items:center}
+.ax-sm{display:flex;flex-direction:column;gap:20px;margin:0 0 44px}
+.ax-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:20px;align-items:start}
+.ax-chart{grid-column:span 8;align-self:stretch}
+.ax-chart .sm-card-b{flex:1;display:flex;flex-direction:column;justify-content:flex-end}
+.ax-chart .ax-cols{flex:1;height:auto;min-height:150px}
+.ax-top{grid-column:span 4;align-self:stretch}
+.ax-agents{grid-column:span 8;container:agl/inline-size}
+.ax-probs,.ax-notes{grid-column:span 4}
+.sm-card-h .sub .ax-key{margin-left:2px}
 
-/* empty */
-.ax-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:44px 20px;text-align:center;color:var(--muted);font-size:13px}
-.ax-empty b{color:var(--fg);font-size:15px;font-weight:680}
-.ax-empty .btn{margin-top:10px}
-.ax-empty-i{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:var(--panel-2);border:1px solid var(--line);margin-bottom:4px}
-.ax-empty-i .cc-i{width:20px;height:20px;color:var(--muted)}
+.sm-ags{display:flex;flex-direction:column;padding:0 12px 10px}
+.sm-ag{position:relative;display:grid;grid-template-columns:36px minmax(110px,1fr) minmax(0,1.5fr) 56px 64px 84px 16px;align-items:center;gap:12px;
+  min-height:60px;padding:10px;border-radius:10px;text-align:left;color:inherit;text-decoration:none;width:100%;transition:background .12s}
+.sm-ag,.sm-ag:hover,.sm-ag:focus{text-decoration:none}
+.sm-ag+.sm-ag::before{content:"";position:absolute;top:0;left:58px;right:10px;border-top:1px solid var(--line)}
+a.sm-ag:hover,button.sm-ag:hover{background:var(--hover)}
+a.sm-ag:hover::before,button.sm-ag:hover::before,a.sm-ag:hover+.sm-ag::before,button.sm-ag:hover+.sm-ag::before{border-color:transparent}
+.sm-ag:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.sm-ag-h{min-height:30px;padding-top:0;padding-bottom:6px;font-size:12px;font-weight:500;color:var(--muted)}
+.sm-ag.sm-ag-h .r{font-size:12px;font-weight:500;color:var(--muted)}
+.sm-ag-g{font-size:12.5px;font-weight:500;color:var(--muted);padding:16px 10px 4px}
+.sm-ag-av{display:grid}
+.sm-ag-id{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sm-ag-id b{font-size:14px;font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm-st{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap;min-width:0}
+.sm-st::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--text-3);flex:none}
+.sm-st.active{color:var(--fg)}
+.sm-st.active::before{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.sm-st.recent::before{background:var(--accent)}
+.sm-st.off::before,.sm-st.removed::before{background:var(--warn)}
+.sm-st em{display:none;font-style:normal;color:var(--fg)}
+.sm-st em::before{content:"·";margin:0 6px 0 0;color:var(--muted)}
+.sm-ag-last{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sm-ag-last .t{font-size:13.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm-ag-last small{font-size:12px;color:var(--muted);white-space:nowrap}
+.sm-ag-last small:empty{display:none}
+.sm-ag .r{justify-self:end;font-size:14px;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
+.sm-ag .r.z{color:var(--text-3);font-weight:400}
+.sm-ag-f.bad{display:inline-flex;align-items:center;gap:6px}
+.sm-ag-f.bad::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--danger)}
+.sm-spark{display:flex;align-items:flex-end;gap:2px;height:24px;width:100%}
+.sm-spark i{flex:1;background:var(--ag);border-radius:2px;opacity:.85;min-height:2px}
+.sm-spark i.z{opacity:.16}
+.sm-ag-go{display:grid;place-items:center;color:var(--text-3)}
+.sm-ag-go .cc-i{width:16px;height:16px}
+.sm-ag:hover .sm-ag-go{color:var(--fg)}
+.sm-ag.dim .sm-ag-id b,.sm-ag.dim .sm-ag-av{opacity:.72}
+.sm-more{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 24px);height:40px;margin:0 12px 12px;border-radius:10px;
+  background:var(--tile);font-size:13px;font-weight:550;color:var(--text-2)}
+.sm-more:hover{background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
+.sm-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* by agent */
-.ax-sec{margin-bottom:20px}
-.ax-sec-t{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:11.5px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
-.ax-sec-t .n{font-variant-numeric:tabular-nums;letter-spacing:0;padding:1px 7px;border-radius:99px;background:var(--panel-2);border:1px solid var(--line)}
-.ax-agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,380px),1fr));gap:12px}
-/* agent cards open the agent's own page */
-.ax-ag{display:flex;flex-direction:column;text-align:left;color:inherit;text-decoration:none;cursor:pointer;width:100%;
-  transition:border-color .16s,box-shadow .16s,transform .16s}
-.ax-ag,.ax-ag:hover,.ax-ag:focus,.ax-ag *{text-decoration:none}
-.ax-ag:hover{border-color:color-mix(in srgb,var(--ag) 55%,var(--line));box-shadow:0 10px 26px -20px rgba(0,0,0,.55);transform:translateY(-1px)}
-.ax-ag:active{transform:translateY(0) scale(.995)}
-.ax-ag:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ax-ag.dim .ax-ag-h{opacity:.78}
-.ax-ag-h{display:flex;align-items:center;gap:13px;width:100%;padding:15px 14px 10px 16px;min-height:66px;box-sizing:border-box}
-.ax-ag-av{display:grid;flex:none}
-.ax-ag-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
-.ax-ag-n{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
-.ax-ag-nm{font-size:14.5px;font-weight:700;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;width:fit-content}
-.ax-ag-last{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ax-ag-last b{color:var(--fg);font-weight:600}
-.ax-go{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;color:var(--muted);flex:none;transition:transform .16s,color .16s,background .16s}
-.ax-go .cc-i{width:17px;height:17px}
-.ax-ag:hover .ax-go{color:var(--fg);background:var(--panel-2);transform:translateX(2px)}
-.ax-cls{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:99px;font-size:11px;font-weight:650;
-  background:var(--panel-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.ax-cls .cc-dot{width:6px;height:6px;box-shadow:none}
-.ax-cls.active{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.ax-cls.removed,.ax-cls.off{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
-.ax-ag-stats{display:flex;align-items:center;gap:16px;padding:0 16px 14px 71px;font-size:12.5px;color:var(--muted)}
-.ax-ag-stats b{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
-.ax-ag-stats .bad,.ax-ag-stats .bad b{color:var(--danger)}
-.ax-spark{flex:1;display:flex;align-items:flex-end;gap:2px;height:24px;min-width:60px;margin-left:auto;max-width:200px}
-.ax-spark i{flex:1;background:var(--ag);border-radius:2px;opacity:.75;min-height:2px}
-.ax-spark i.z{opacity:.18}
+.ax[data-view=summary] .ax-tl,.ax[data-view=timeline] .ax-sm{display:none}
+.ax-tl{scroll-margin-top:0}
+.ax-tl>.tl-h{display:none}
+.ax-tabs{margin:-4px 0 20px}
+.ax-wait{display:flex;align-items:center;gap:10px;margin:-8px 0 16px;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.45;color:var(--text-2);
+  background:color-mix(in srgb,var(--accent) 7%,transparent);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+.ax-wait[hidden]{display:none}
+.ax-wait i{flex:none;width:14px;height:14px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 30%,transparent);border-top-color:var(--accent);animation:ax-spin .8s linear infinite}
+@keyframes ax-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ax-wait i{animation:none}}
+.ax-tabs-in{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%}
+.ax-tab{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;padding:0 20px;border-radius:9px;border:1px solid transparent;
+  font-size:14px;font-weight:550;color:var(--muted);text-decoration:none;white-space:nowrap;transition:background .15s,color .15s}
+.ax-tab:hover{color:var(--fg)}
+.ax-tab .cc-i{width:16px;height:16px}
+.ax-tab b{font-size:12px;font-weight:600;color:var(--text-3);font-variant-numeric:tabular-nums}
+.ax-tab b:empty{display:none}
+.ax-tab[aria-current=page]{color:var(--fg);background:var(--seg-thumb);border-color:var(--line-strong)}
+.ax-tab[aria-current=page] b{color:var(--text-2)}
+.ax-tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ax-side{grid-column:span 4;display:flex;flex-direction:column;gap:20px;min-width:0}
 
-/* summary board */
-.ax-tiles{margin-bottom:14px}
-.ax-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:18px}
-.ax-wide{grid-column:1/-1}
-.ax-hbs{display:flex;flex-direction:column;gap:4px}
-.ax-hb{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;align-items:center;padding:7px 8px;margin:0 -8px;border-radius:9px;text-align:left}
-.ax-hb:hover{background:var(--panel-2)}
-.ax-hb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.ax-hb-l{display:flex;align-items:center;gap:9px;min-width:0;font-size:13px;font-weight:600}
-.ax-hb-l .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ax-hb-n{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
-.ax-hb-n em{font-style:normal;font-weight:550;color:var(--muted);margin-left:8px;display:inline-block;min-width:34px;text-align:right}
-.ax-hb-track{grid-column:1/-1;height:6px;border-radius:99px;background:var(--panel-2);overflow:hidden}
-.ax-hb-track span{display:block;height:100%;border-radius:99px;background:var(--c)}
-.ax-bempty{color:var(--muted);font-size:13px;padding:8px 0}
-.ax-cols{display:flex;align-items:flex-end;gap:3px;height:140px}
-.ax-col{flex:1;height:100%;display:flex;align-items:flex-end;min-width:0}
-.ax-col i{display:flex;flex-direction:column;justify-content:flex-start;width:100%;background:var(--accent);border-radius:3px 3px 0 0;overflow:hidden;min-height:0}
-.ax-col i b{display:block;width:100%;background:var(--danger)}
-.ax-col:hover i{filter:brightness(1.15)}
-.ax-ticks{display:flex;justify-content:space-between;margin-top:8px;font-size:11.5px;color:var(--muted)}
-.ax-key{display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--danger);margin-right:6px;vertical-align:-1px}
-.ax-nodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px 16px}
-.ax-node{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;border:1px solid var(--line);background:var(--panel-2);text-align:left;min-width:0}
-.ax-node:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
-.ax-node .t{flex:1;min-width:0;display:flex;flex-direction:column;font-size:13px;font-weight:600}
-.ax-node .t span,.ax-node small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ax-node small{color:var(--muted);font:500 11.5px var(--mono)}
-.ax-node .n{font-size:12px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
 
-/* filter sheet */
-.ax-sheet .cc-drawer-b{padding:4px 18px 18px}
-.ax-fg{padding:16px 0;border-top:1px solid var(--line)}
-.ax-fg:first-child{border-top:0}
-.ax-fg h3{display:flex;align-items:center;margin:0 0 11px;font-size:11.5px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
-.ax-lnk{margin-left:auto;text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:650;color:var(--accent)}
-.ax-opts{display:flex;flex-wrap:wrap;gap:7px}
-.ax-opt{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);
-  background:var(--panel-2);font-size:13px;font-weight:600;color:var(--fg)}
-.ax-opt .n{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-.ax-opt .cc-dot{width:7px;height:7px;box-shadow:none}
-.ax-opt:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
-.ax-opt[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,var(--panel));box-shadow:inset 0 0 0 1px var(--accent)}
-.ax-opt:focus-visible,.ax-agopt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ax-range{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-.ax-range label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--muted)}
-.ax-range input{height:40px;box-sizing:border-box;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);
-  color:var(--fg);font:500 13px/1 inherit;color-scheme:light dark;width:100%;min-width:0}
-.ax-range.on input{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
-.ax-range input:focus{outline:none;border-color:var(--accent)}
-.ax-acts{margin-top:12px}
-.ax-acts summary{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;font-weight:650;color:var(--muted);padding:4px 0;list-style:none}
-.ax-acts summary::-webkit-details-marker{display:none}
-.ax-acts summary::before{content:"";width:6px;height:6px;border-right:1.8px solid currentColor;border-bottom:1.8px solid currentColor;transform:rotate(-45deg);transition:transform .16s;margin-right:3px}
-.ax-acts[open] summary::before{transform:rotate(45deg)}
-.ax-acts summary .n{font-variant-numeric:tabular-nums}
-.ax-acts .ax-opts{margin-top:10px}
-.ax-acts .ax-opt{min-height:32px;font-size:12.5px}
-.ax-agq{display:flex;align-items:center;gap:8px;height:38px;padding:0 11px;margin-bottom:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2)}
-.ax-agq input{flex:1;min-width:0;border:0;outline:none;background:none;color:var(--fg);font-size:13px}
-.ax-agq .cc-i{color:var(--muted);width:15px;height:15px}
-.ax-aglist{display:flex;flex-direction:column;gap:2px}
-.ax-agc{font-size:11.5px;font-weight:650;color:var(--muted);padding:10px 2px 5px}
-.ax-agc:first-child{padding-top:0}
-.ax-agopt{display:flex;align-items:center;gap:11px;padding:7px 9px;border-radius:11px;text-align:left;min-height:48px;border:1px solid transparent}
-.ax-agopt[hidden]{display:none}
-.ax-agopt:hover{background:var(--panel-2)}
-.ax-agopt[aria-pressed=true]{background:color-mix(in srgb,var(--ag) 10%,var(--panel));border-color:color-mix(in srgb,var(--ag) 45%,transparent)}
-.ax-agopt .t{flex:1;min-width:0;display:flex;flex-direction:column}
-.ax-agopt b{font-size:13.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ax-agopt small{font-size:11.5px;color:var(--muted)}
-.ax-agopt .n{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
-.ax-box{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line-strong);flex:none}
-.ax-box .ax-ck{width:13px;height:13px;stroke-width:2.6;opacity:0;color:var(--on-accent)}
-.ax-agopt[aria-pressed=true] .ax-box{background:var(--accent);border-color:var(--accent)}
-.ax-agopt[aria-pressed=true] .ax-ck{opacity:1}
-
-.sys-acts .lg-live{height:38px;border-radius:11px}
-@media (max-width:1000px){
-  .ax-views button{padding:0 11px}
-  .ax-q kbd{display:none}
-  .ax-fbtn{padding:0 13px}
-  .ax-fbtn .l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@container agl (max-width:640px){
+  .sm-ags{padding:0 6px 8px}
+  .sm-ag{grid-template-columns:36px minmax(0,1fr) auto 16px;grid-template-areas:"av id n go" "av last n go";row-gap:2px;column-gap:12px;min-height:62px}
+  .sm-ag+.sm-ag::before{left:58px}
+  .sm-ag-av{grid-area:av}
+  .sm-ag-id{grid-area:id;flex-direction:row;align-items:center;gap:10px}
+  .sm-ag-last{grid-area:last;flex-direction:row;align-items:baseline;gap:6px}
+  .sm-ag-last small::before{content:"· "}
+  .sm-ag-n{grid-area:n}
+  .sm-ag-go{grid-area:go}
+  .sm-ags .sm-ag-f,.sm-ags .sm-ag-sp,.sm-ags .sm-ag-h{display:none}
+  .sm-st em{display:inline}
+  .sm-more{width:calc(100% - 12px);margin:0 6px 10px}
+}
+@container agl (max-width:400px){
+  .sm-ag-id{flex-direction:column;align-items:flex-start;gap:1px}
+  .sm-ag{grid-template-areas:"av id n go" "av last last last"}
+}
+@container ax (max-width:1000px){
+  .ax-side{display:contents}
+  .ax-chart,.ax-agents,.ax-notes{grid-column:1/-1;grid-row:auto}
+  .ax-top,.ax-probs{grid-column:span 6;align-self:stretch}
+  .ax-chart{order:1}.ax-top{order:2}.ax-probs{order:3}.ax-agents{order:4}.ax-notes{order:5}
+}
+@container ax (max-width:720px){
+  .ax-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ax-kpi:nth-child(3){border-left:0}
+  .ax-kpi:nth-child(n+3){border-top:1px solid var(--line)}
+}
+@container ax (max-width:640px){
+  .ax-sm{gap:16px;margin-bottom:36px}
+  .ax-grid{gap:16px}
+  .ax-grid>*,.ax-side>*{grid-column:1/-1!important}
+  .ax-tabs{margin:0 0 16px}
+  .ax-tabs-in{display:flex}
+  .ax-tab{flex:1;padding:0 12px}
+  .ax-chart{order:1}.ax-agents{order:2}.ax-probs{order:3}.ax-top{order:4}.ax-notes{order:5}
+  .ax-chart .ax-cols{min-height:120px}
+}
+@container ax (max-width:360px){
+  .ax .ax-kpi .h{white-space:normal}
 }
 @media (max-width:760px){
-  .ax{--ax-gut:14px}
-  .ax-sbar{padding:8px 0}
-  .ax-sbar-in{flex-wrap:wrap;gap:8px}
-  .ax-q{flex:1 1 0}
-  .ax-q{height:44px;padding-left:13px}
-  .ax-q input{font-size:16px}
-  .ax-fbtn{height:44px;padding:0 12px}
-  .sys-acts .lg-live{height:44px}
-  .ax-newb{height:44px;padding:0 12px}
-  .ax-views{order:3;flex:1 1 100%;height:40px;display:flex}
-  .ax-views button{flex:1}
-  .ax-sub{margin:2px 0 12px;flex-direction:column;align-items:stretch;gap:8px}
-  .ax-chips{flex:none;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--ax-gut));padding:2px var(--ax-gut)}
-  .ax-chips::-webkit-scrollbar{display:none}
-  .ax-chip{flex:none;height:34px}
-  .ax-sum{gap:12px}
-  .ax-tgl{margin-left:auto}
-  .ax-dh{padding:11px 13px 10px;flex-wrap:wrap;row-gap:2px}
-  .ax-dh-d{font-size:12px}
-  .ax-day{border-radius:14px;margin-bottom:12px}
-  .ax-board{grid-template-columns:minmax(0,1fr)}
-  .ax-nodes{grid-template-columns:minmax(0,1fr);padding:12px 13px}
-  .ax-ag-h{padding:12px 10px 8px 13px}
-  .ax-ag-stats{padding:0 13px 12px;gap:12px}
-  .ax-sheet .cc-drawer-b{padding:2px 16px 16px}
-  .ax-opt{min-height:40px}
-}
-@media (max-width:420px){
-  .ax-dh-d{display:none}
-}
-@media (prefers-reduced-motion:reduce){
-  .ax-ag,.ax-go,.ax-tgl i,.ax-tgl i::after{transition:none}
+  .ax .sys-acts{grid-column:1/-1;width:100%}
+  .ax .sys-acts .tl-time{flex:1 1 auto}
+  .ax .sys-acts .cc-ibtn{width:44px;height:44px}
+  .lg-live{height:44px}
 }
 `;
 
 const PAGE = 120;
-const FETCH = 800;
+// Enough to cover a range in full (the summary counts every event in it), loaded in pages of 2000.
+const FETCH = 20000;
+const AG_CAP = 8;
 
 let items: ActivityItem[] = [];
 let keys: KeyRow[] = [];
-/** The list, or one agent's page (/activity/<id>). */
-let mode: 'list' | 'agent' = 'list';
-/** Where the list was scrolled when an agent page opened. */
-let listScroll = 0;
-/** Another page was shown since the last render: no transition then. */
-let away = true;
-onNavigate((p) => {
-  if (p !== 'logs') away = true;
-});
-
-function slugFromUrl(): string | null {
-  const m = /^\/activity\/([A-Za-z0-9_-]{1,64})\/?$/.exec(location.pathname);
-  return m ? m[1] : null;
-}
 const pending = new PausedQueue();
+/** Held items that the current filters would show (what "N new" counts). */
+let pendingShown = 0;
 const fresh = new Set<string>();
-let view: ViewKind = loadView();
+/** Bursts shown expanded, by the id of their newest call. */
+const open = new Set<string>();
 let limit = PAGE;
 let fetchLimit = FETCH;
+/** The range the loaded events were asked for. */
+let loadedRange = '';
 let older = false;
 let compact = true;
 let live = true;
 let loading = true;
+let loadingMore = false;
+/** Older pages of the range are still coming in (the newest is on screen). */
+let filling = false;
+/** The timeline missed redraws while the summary was shown. */
+let timelineStale = false;
+/** More filtered groups than the list shows (set by each paint). */
+let localLeft = false;
+/** What the summary was last drawn from; it is redrawn only when that changes. */
+let sumKey = '';
+let allAgents = false;
 let loadSeq = 0;
 let paintQueued = false;
-let io: IntersectionObserver | null = null;
+let timeSel: Select | null = null;
+let onBarScroll: (() => void) | null = null;
 
 function host(): HTMLElement {
   return $('#view-logs');
@@ -337,306 +255,375 @@ function scoped(): ActivityItem[] {
   return inWindow(items);
 }
 
-function agentsOf(sc: ActivityItem[]): AgentInfo[] {
-  return classifyAgents(
-    items,
-    sc.filter((x) => matches(x, 'agents')),
-    keys,
-  );
+function narrowed(): boolean {
+  return !!(F.q || F.cats.size || F.actions.size || F.srcs.size || F.agents.size || F.status.size || F.system);
 }
 
-function narrowed(): boolean {
-  return !!(F.q || F.cats.size || F.actions.size || F.srcs.size || F.agents.size || F.status.size);
+/** Every filter but the hiding of system lines. */
+function matchesBut(it: ActivityItem): boolean {
+  F.system = true;
+  try {
+    return matches(it);
+  } finally {
+    F.system = false;
+  }
+}
+
+function slugFromUrl(): string | null {
+  const m = /^\/activity\/([A-Za-z0-9_-]{1,64})\/?$/.exec(location.pathname);
+  return m && m[1] !== 'timeline' ? m[1] : null;
+}
+
+async function fetchKeys(): Promise<KeyRow[]> {
+  return apiGet<KeysResult | KeyRow[]>('/api/keys')
+    .then((d) => (Array.isArray(d) ? d : d.keys || []))
+    .catch(() => [] as KeyRow[]);
 }
 
 export async function renderLogs(): Promise<void> {
   useControlStyles();
   useActivityStyles();
+  useTimelineStyles();
   useStyles('cc-logs-css', CSS);
   const h = host();
   if (!h.classList) return;
-  // The address is the truth: /activity/<id> is an agent page, /activity the list.
   takeRouteAgent();
-  const animate = !away;
-  away = false;
+  const slug = slugFromUrl();
+  if (slug && (await redirect(slug))) return;
 
+  let toTimeline = false;
   try {
     const a = sessionStorage.getItem('memora.activity.agent');
     if (a) {
       sessionStorage.removeItem('memora.activity.agent');
       F.agents = new Set([a]);
-      view = 'day';
-      syncViews();
+      toTimeline = true;
     }
   } catch {
     /* optional */
   }
 
-  if (!h.querySelector('#axRoot')) {
-    h.innerHTML = '<div id="axRoot"></div><div id="adRoot" hidden></div>';
-    mode = 'list';
-    // "/" jumps to the search field of whichever mode is shown.
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || h.classList.contains('hidden')) return;
-      const t = e.target as HTMLElement;
-      if (t.closest('input,textarea,select,[contenteditable=true],.cc-drawer,.modal')) return;
-      e.preventDefault();
-      if (mode === 'agent') {
-        focusAgentSearch();
-        return;
-      }
-      const q = document.getElementById('axQ') as HTMLInputElement | null;
-      q?.focus();
-      q?.select();
-    });
+  // Sent here filtered to one actor: that is the timeline's job.
+  if ((toTimeline || (slug && F.agents.size)) && !logsTimeline) {
+    setLogsTimeline(true);
+    replaceHistory();
+    syncUrl();
   }
+  const first = !h.querySelector('#axRoot');
+  if (first) build(h);
+  applyView();
   startLive(h);
-  const s = slugFromUrl();
-  if (s) await enterAgent(s, animate);
-  else await enterList(animate);
+  if (first || slug) await reload();
+  else {
+    paint(false);
+    if (live) softReload();
+  }
 }
 
-/** Open an agent's page from the list: its own address, then the animation. */
-function openAgent(slug: string): void {
-  try {
-    history.pushState({ page: 'logs', adFrom: 'list' }, '', '/activity/' + encodeURIComponent(slug));
-  } catch {
-    /* sandboxed frames can refuse history writes */
-  }
-  void enterAgent(slug, true);
+// Leaving Activity: the next visit starts on the summary.
+onNavigate((p) => {
+  if (p !== 'logs') setLogsTimeline(false);
+});
+
+/** Summary or timeline, from the address. */
+function applyView(): void {
+  const root = document.getElementById('axRoot');
+  if (!root) return;
+  const tl = logsTimeline;
+  const was = root.dataset.view;
+  root.dataset.view = tl ? 'timeline' : 'summary';
+  root.querySelector('.sys-t p')!.textContent = tl
+    ? 'Every action, newest first, with search and filters.'
+    : 'What your AIs read, write and search in your notes.';
+  root.querySelectorAll<HTMLElement>('.ax-tab').forEach((t) => {
+    if (t.dataset.v === root.dataset.view) t.setAttribute('aria-current', 'page');
+    else t.removeAttribute('aria-current');
+  });
+  if (was && was !== root.dataset.view) host().scrollTop = 0;
+  if (tl && timelineStale) paint(false);
 }
 
-/** "All activity" on an agent page: back in history when we came from the list. */
-function backToList(): void {
-  if ((history.state as { adFrom?: string } | null)?.adFrom === 'list') {
-    history.back();
-    return;
+/** Open the timeline (from the summary, or from anywhere in the app). */
+export function openTimeline(): void {
+  limit = PAGE;
+  setLogsTimeline(true);
+  hooks.go('logs');
+}
+
+/** An old /activity/<id> address: a connected key opens its agent's page, anything else filters this page. */
+async function redirect(slug: string): Promise<boolean> {
+  if (!keys.length) keys = await fetchKeys();
+  if (keys.some((k) => k.id === slug)) {
+    replaceHistory();
+    setKeysRoute('/agents/' + encodeURIComponent(slug) + '/activity');
+    hooks.go('keys');
+    return true;
+  }
+  const find = (list: ActivityItem[]): ActivityItem | undefined => list.find((x) => x.raw.actor_id === slug) || list.find((x) => x.actor === slug);
+  let hit = find(items);
+  if (!hit) {
+    const [ev, au] = await Promise.all([
+      apiGet<LogsResult>('/api/logs?range=all&limit=2000')
+        .then((d) => (d.events || []).map(fromLog))
+        .catch(() => [] as ActivityItem[]),
+      apiGet<LogsResult>('/api/auth/events?limit=300')
+        .then((d) => (d.events || []).map(fromAuth))
+        .catch(() => [] as ActivityItem[]),
+    ]);
+    hit = find(ev) || find(au);
   }
   try {
-    history.pushState({ page: 'logs' }, '', '/activity');
+    history.replaceState({ page: 'logs' }, '', '/activity');
   } catch {
     /* sandboxed frames */
   }
-  void enterList(true);
+  if (hit) {
+    clearFilters(true);
+    F.q = '';
+    F.agents = new Set([hit.actor]);
+    // Its last event is older than the range shown: widen it.
+    if (hit.ts < timeWindow().since) {
+      F.time = 'all';
+      F.from = F.to = '';
+    }
+    const q = document.getElementById('axQ') as HTMLInputElement | null;
+    if (q) q.value = '';
+  } else toast(`Nothing in the log goes by “${slug}”. Showing all activity.`, 'info');
+  return false;
 }
 
-async function enterAgent(slug: string, animate: boolean): Promise<void> {
-  const h = host();
-  const lr = $('#axRoot');
-  const ar = $('#adRoot');
-  const o = {
-    keys,
-    items,
-    time: { time: F.time, from: F.from, to: F.to },
-    back: backToList,
-  };
-  // Already showing this agent (a refresh): just reload its data.
-  if (mode === 'agent' && !ar.hidden && agentSlugShown() === slug) {
-    showAgent(ar, h, slug, o);
-    return;
-  }
-  const fromList = mode === 'list' && !lr.hidden && !!lr.querySelector('#axBody');
-  if (fromList) listScroll = h.scrollTop;
-  mode = 'agent';
-  const update = (): void => {
-    lr.hidden = true;
-    ar.hidden = false;
-    showAgent(ar, h, slug, o);
-    h.scrollTop = 0;
-  };
-  if (animate && fromList) {
-    const card = lr.querySelector<HTMLElement>(`#axBody [data-go="${window.CSS.escape(slug)}"]`);
-    await morph({ from: card, to: agentHero, update, reveal: () => ar });
-  } else update();
-}
-
-async function enterList(animate: boolean): Promise<void> {
-  const h = host();
-  const lr = $('#axRoot');
-  const ar = $('#adRoot');
-  const fromAgent = mode === 'agent' && !ar.hidden;
-  const hero = fromAgent ? agentHero() : null;
-  const was = fromAgent ? agentSlugShown() : '';
-  if (mode === 'agent') leaveAgent();
-  mode = 'list';
-  const first = !lr.querySelector('#axBody');
-  if (first) buildList(lr);
-  else paint(false);
-  const update = (): void => {
-    ar.hidden = true;
-    lr.hidden = false;
-    if (fromAgent) h.scrollTop = listScroll;
-    paintTitle();
-  };
-  if (animate && fromAgent)
-    await morph({
-      from: hero,
-      to: () => (was ? lr.querySelector<HTMLElement>(`#axBody [data-go="${window.CSS.escape(was)}"]`) : null),
-      update,
-      reveal: () => lr,
-    });
-  else update();
-  if (first) await reload();
-  else if (live) softReload();
-}
-
-function buildList(lr: HTMLElement): void {
-  const h = host();
-  lr.innerHTML = `<div class="cc ax">
+function build(h: HTMLElement): void {
+  h.innerHTML = `<div id="axRoot" class="cc ax">
     ${systemHeader(
       'logs',
       'Activity',
-      'Every read, write, search and sign-in in this brain, newest first.',
-      `<button type="button" class="lg-live" id="lgLive" aria-pressed="${live}"></button>
-        <button type="button" class="btn" id="axExport" aria-haspopup="menu">${ICO.download}Export</button>
-        <button type="button" class="cc-ibtn" id="axReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>`,
+      'What your AIs read, write and search in your notes.',
+      `<span id="axTime"></span><button type="button" class="lg-live" id="lgLive" aria-pressed="${live}"></button>
+        <button type="button" class="cc-ibtn" id="axMore" aria-haspopup="menu" aria-label="More: reload, export" title="More">${ICO.more}</button>`,
     )}
-    <div class="ax-sbar" id="axBar"><div class="ax-sbar-in">
-      <label class="ax-q" id="axQWrap">${ICO.search}<span class="sr-only">Search activity</span>
-        <input id="axQ" type="search" enterkeyhint="search" placeholder="Search agents, actions, nodes, details" autocomplete="off" spellcheck="false" value="${attr(
-          F.q,
-        )}">
-        <kbd aria-hidden="true">/</kbd><button type="button" class="ax-qx" id="axQx" aria-label="Clear search" hidden>${ICO.x}</button></label>
-      <button type="button" class="ax-fbtn" id="axFilt" aria-haspopup="dialog">${ICO.filter}<span class="l">Filters</span><span class="ax-badge" id="axBadge" hidden></span></button>
-      <div class="cc-seg ax-views" id="axViews" role="group" aria-label="View">${(
-        [
-          ['day', 'By day'],
-          ['agent', 'By agent'],
-          ['board', 'Summary'],
-        ] as [ViewKind, string][]
-      )
-        .map(([v, l]) => `<button type="button" data-view="${v}" aria-pressed="${v === view}">${l}</button>`)
-        .join('')}</div>
-      <button type="button" class="ax-newb" id="axNew" hidden></button>
-    </div></div>
-    <div class="ax-sub"><div class="ax-chips" id="axChips" aria-label="Active filters"></div><div class="ax-sum" id="axSum" aria-live="polite"></div></div>
-    <div class="ax-body" id="axBody">${skeletonHTML(view)}</div>
+    <nav class="ax-tabs" aria-label="Activity views"><div class="ax-tabs-in">
+      <a class="ax-tab" href="/activity" data-v="summary">${ICO.summary}Summary</a>
+      <a class="ax-tab" href="/activity/timeline" data-v="timeline">${ICO.activity}Timeline<b id="axTabN"></b></a>
+    </div></nav>
+    <p class="ax-wait" id="axWait" role="status" hidden></p>
+    <section class="ax-sm" id="axSm" aria-label="Summary">
+      <div class="ax-kpis" id="axKpis"></div>
+      <div class="ax-grid">
+        <section class="sm-card ax-chart" aria-labelledby="axChartH"><div class="sm-card-h"><h2 id="axChartH">Actions over time</h2><span class="sub" id="axChartS"></span></div>
+          <div class="sm-card-b" id="axChart"></div></section>
+        <section class="sm-card ax-top" aria-labelledby="axTopH"><div class="sm-card-h"><h2 id="axTopH">What agents do most</h2></div><div class="sm-card-b" id="axTop"></div></section>
+        <section class="sm-card ax-agents" aria-labelledby="axAgH"><div class="sm-card-h"><h2 id="axAgH">Agents</h2><span class="sub" id="axAgS"></span>
+          <a class="sm-lnk" href="/agents" id="axAgLnk">Manage ${ICO.arrow}</a></div><div id="axAgs"></div></section>
+        <div class="ax-side">
+          <section class="sm-card ax-probs" aria-labelledby="axPrH"><div class="sm-card-h"><h2 id="axPrH">Problems</h2><span id="axPrA"></span></div><div id="axProbs"></div></section>
+          <section class="sm-card ax-notes" aria-labelledby="axNtH"><div class="sm-card-h"><h2 id="axNtH">Most touched notes</h2></div><div id="axNotes"></div></section>
+        </div>
+      </div>
+
+    </section>
+    <section class="tl ax-tl" id="axTl" aria-labelledby="axTlH">
+      <div class="tl-h"><h2 id="axTlH">Timeline</h2><span class="sub">Every action, newest first</span></div>
+      ${timelineHTML('ax', F.q, 'Search AIs, notes, words')}
+    </section>
   </div>`;
-  wire(h);
+  const root = $('#axRoot');
+  timeSel = timeSelect(
+    () => F,
+    (v) => {
+      if (v === 'custom') {
+        refreshTime(timeSel);
+        openSheet();
+      } else setTime(v);
+    },
+  );
+  $('#axTime').replaceWith(timeSel.el);
+  wire(h, root);
   paintLive();
 }
 
-function wire(h: HTMLElement): void {
-  const q = $('#axQ') as HTMLInputElement;
-  const qx = $('#axQx');
-  const syncQ = (): void => {
-    qx.hidden = !q.value;
-    $('#axQWrap').classList.toggle('has', !!q.value);
-  };
-  syncQ();
-  const apply = debounce(() => {
-    F.q = q.value.trim();
-    limit = PAGE;
-    paint(false);
-  }, 140);
-  q.oninput = () => {
-    syncQ();
-    apply();
-  };
-  q.onkeydown = (e) => {
-    if (e.key === 'Escape' && q.value) {
-      e.stopPropagation();
-      q.value = '';
-      syncQ();
-      F.q = '';
-      paint(false);
-    }
-  };
-  qx.onclick = () => {
-    q.value = '';
-    syncQ();
-    F.q = '';
-    paint(false);
-    q.focus();
-  };
-  $('#axFilt').onclick = () =>
-    openFilters({
-      scoped,
-      agents: () => agentsOf(scoped()),
-      changed: (kind) => {
-        limit = PAGE;
-        if (kind === 'time') {
-          fetchLimit = FETCH;
-          void reload();
-        } else paint(false);
-      },
-    });
+function setTime(t: TimeKey): void {
+  F.time = t;
+  F.from = F.to = '';
+  timeChanged();
+}
 
-  $('#axViews').onclick = (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
-    if (!b) return;
-    setView(b.dataset.view as ViewKind);
-  };
+// The last load of each server range, so going back to a range shows at once.
+const rangeCache = new Map<string, { items: ActivityItem[]; older: boolean; whole: boolean }>();
+/** The next full load keeps what is on screen instead of showing skeletons. */
+let keepShown = false;
 
-  $('#axChips').onclick = (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest('[data-open]')) return $('#axFilt').click();
-    if (t.closest('[data-clear]')) {
-      const tc = F.time !== '7d';
-      clearFilters();
-      F.q = '';
-      (q as HTMLInputElement).value = '';
-      syncQ();
+function remember(range: string, whole: boolean): void {
+  rangeCache.delete(range);
+  rangeCache.set(range, { items, older, whole });
+  while (rangeCache.size > 4) rangeCache.delete(rangeCache.keys().next().value!);
+}
+
+/** The time changed (select or sheet): load again only when the server range changes. */
+function timeChanged(): void {
+  limit = PAGE;
+  refreshTime(timeSel);
+  const range = feedRange();
+  if (range === loadedRange) return paint(false);
+  fetchLimit = FETCH;
+  const hit = rangeCache.get(range);
+  if (!hit) return void reload();
+  loadSeq++;
+  items = hit.items;
+  older = hit.older;
+  loadedRange = range;
+  loading = false;
+  filling = !hit.whole;
+  paint(false);
+  if (hit.whole) void reload(true, true);
+  else {
+    // Left before it finished: load it in full again, without skeletons.
+    keepShown = true;
+    void reload();
+  }
+}
+
+function openSheet(): void {
+  openFilters({
+    scoped,
+    agents: () => agentsOf(scoped(), true),
+    changed: (kind) => {
       limit = PAGE;
-      if (tc) void reload();
+      if (kind === 'time') timeChanged();
       else paint(false);
-      return;
-    }
-    const rm = t.closest<HTMLElement>('[data-rm]');
-    if (rm) removeFilter(rm.dataset.rm!);
-  };
+    },
+  });
+}
 
-  $('#axSum').onclick = (e) => {
-    if (!(e.target as HTMLElement).closest('#axCompact')) return;
-    compact = !compact;
-    paint(false);
+/** A pick on the summary filtered the rows: show them on the timeline. */
+function scrollToTimeline(): void {
+  if (logsTimeline) return;
+  openTimeline();
+}
+
+/** Apply a filter picked from the summary (`<facet>:<value>`) and show the timeline. */
+function pick(spec: string): void {
+  const [k, ...rest] = spec.split(':');
+  const v = rest.join(':');
+  limit = PAGE;
+  if (k === 'time') return setTime(v as TimeKey);
+  if (k === 'clear') {
+    clearFilters(true);
+    F.q = '';
+    const q = document.getElementById('axQ') as HTMLInputElement | null;
+    if (q) q.value = '';
+    q?.dispatchEvent(new Event('input'));
+    return paint(false);
+  }
+  if (k === 'cats') setQuickCats([v as Cat]);
+  else if (k === 'actions') {
+    F.cats.clear();
+    F.status.clear();
+    F.actions = new Set([v]);
+  } else if (k === 'agents') F.agents = new Set([v]);
+  else if (k === 'srcs') F.srcs = new Set([v as Source]);
+  else if (k === 'status') setQuick(v === 'fail' ? 'fail' : 'all');
+  paint(false);
+  scrollToTimeline();
+}
+
+function setQuickCats(c: Cat[]): void {
+  F.cats = new Set(c);
+  F.actions.clear();
+}
+
+function filterActor(actor: string): void {
+  F.agents = new Set([actor]);
+  limit = PAGE;
+  paint(false);
+  scrollToTimeline();
+}
+
+function wire(h: HTMLElement, root: HTMLElement): void {
+  wireTimeline(root, 'ax', {
+    query: (q) => {
+      F.q = q;
+      limit = PAGE;
+      paint(false);
+    },
+    quick: (id: Quick) => {
+      setQuick(id);
+      limit = PAGE;
+      paint(false);
+    },
+    filters: openSheet,
+    remove: removeFilter,
+    clear: () => {
+      clearFilters(true);
+      F.q = '';
+      limit = PAGE;
+      paint(false);
+    },
+    compact: () => {
+      compact = !compact;
+      paint(false);
+    },
+    system: () => {
+      F.system = true;
+      paint(false);
+    },
+  });
+
+  const plain = (e: MouseEvent): boolean => !(e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0);
+  // Summary: bars, problems, agents and notes filter the timeline or open what they name.
+  $('#axSm').addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    let el: HTMLElement | null;
+    if ((el = t.closest<HTMLElement>('a[data-kid]'))) {
+      if (!plain(e)) return;
+      e.preventDefault();
+      openAgentPage(el.dataset.kid!, 'activity');
+    } else if ((el = t.closest<HTMLElement>('[data-only]'))) filterActor(el.dataset.only!);
+    else if ((el = t.closest<HTMLElement>('[data-prob]'))) {
+      F.agents = new Set([el.dataset.prob!]);
+      setQuick('fail');
+      limit = PAGE;
+      paint(false);
+      scrollToTimeline();
+    } else if ((el = t.closest<HTMLElement>('[data-f]'))) pick(el.dataset.f!);
+    else if ((el = t.closest<HTMLElement>('[data-note]'))) hooks.openNote(el.dataset.note!);
+    else if (t.closest('[data-allag]')) {
+      allAgents = !allAgents;
+      paintSummary(true);
+    }
+  });
+  root.querySelectorAll<HTMLElement>('.ax-tab').forEach((t) => {
+    t.onclick = (e) => {
+      if (!plain(e)) return;
+      e.preventDefault();
+      if (t.dataset.v === root.dataset.view) return;
+      if (t.dataset.v === 'timeline') openTimeline();
+      else {
+        setLogsTimeline(false);
+        hooks.go('logs');
+      }
+    };
+  });
+  const lnk = $('#axAgLnk');
+  lnk.onclick = (e) => {
+    if (!plain(e)) return;
+    e.preventDefault();
+    setKeysRoute(null);
+    hooks.go('keys');
   };
 
   const body = $('#axBody');
-  wireActRows(body, (id) => items.find((x) => x.id === id), filterActor);
-  body.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    const hit = (sel: string): HTMLElement | null => t.closest<HTMLElement>(sel);
-    let el: HTMLElement | null;
-    if (hit('[data-more]')) {
-      limit += PAGE;
+  wireActRows(body, (id) => items.find((x) => x.id === id), filterActor, {
+    onBurst: (id) => {
+      if (!open.delete(id)) open.add(id);
       paint(true);
-    } else if (hit('[data-older]')) {
-      fetchLimit += FETCH;
-      void reload(true);
-    } else if ((el = hit('a[data-go]'))) {
-      const me = e as MouseEvent;
-      // New tab / window keep the browser's own handling of the link.
-      if (me.metaKey || me.ctrlKey || me.shiftKey || me.button !== 0) return;
-      e.preventDefault();
-      openAgent(el.dataset.go!);
-    } else if ((el = hit('[data-only]'))) {
-      filterActor(el.dataset.only!);
-    } else if ((el = hit('[data-f]'))) {
-      const [k, ...rest] = el.dataset.f!.split(':');
-      const v = rest.join(':');
-      if (k === 'cats') F.cats = new Set([v as Cat]);
-      else if (k === 'actions') F.actions = new Set([v]);
-      else if (k === 'agents') F.agents = new Set([v]);
-      else if (k === 'srcs') F.srcs = new Set([v as Source]);
-      setView('day');
-    } else if ((el = hit('[data-time]'))) {
-      F.time = 'all';
-      F.from = F.to = '';
-      void reload();
-    } else if (hit('[data-clear]')) {
-      clearFilters(true);
-      F.q = '';
-      q.value = '';
-      syncQ();
-      paint(false);
-    }
+    },
+    onUndo: (it) => void runUndo(it).then(() => paint(true)),
+  });
+  body.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-pick]');
+    if (el) pick(el.dataset.pick!);
   });
 
-  $('#axReload').onclick = () => {
-    keys = [];
-    void reload();
-  };
   $('#lgLive').onclick = () => {
     live = !live;
     if (live) {
@@ -645,78 +632,84 @@ function wire(h: HTMLElement): void {
     }
     paintLive();
   };
-  $('#axExport').onclick = (e) =>
-    openMenu(e.currentTarget as HTMLElement, [
-      { label: 'Export shown as JSON', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'json') },
-      { label: 'Export shown as CSV', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'csv') },
-    ]);
+  // Rarely used: reload (the page is live) and export.
+  $('#axMore').onclick = (e) =>
+    openMenu(
+      e.currentTarget as HTMLElement,
+      [
+        {
+          label: 'Reload',
+          desc: 'Fetch the activity again from the server.',
+          icon: ICO.refresh,
+          run: () => {
+            keys = [];
+            void reload();
+          },
+        },
+        { sep: true, label: '' },
+        { label: 'Export timeline as JSON', desc: 'The actions the timeline shows, for scripts.', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'json') },
+        { label: 'Export timeline as CSV', desc: 'The actions the timeline shows, for a spreadsheet.', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'csv') },
+      ],
+      { title: 'Activity' },
+    );
 
-  // Sticky geometry: day headers stick right under the search bar.
-  const bar = $('#axBar');
-  const cc = h.querySelector<HTMLElement>('.ax')!;
-  const setStick = (): void => {
-    const pt = parseFloat(getComputedStyle(h).paddingTop) || 0;
-    cc.style.setProperty('--ax-pt', pt + 'px');
-    cc.style.setProperty('--ax-stick', bar.offsetHeight - pt + 'px');
-  };
-  setStick();
-  new ResizeObserver(setStick).observe(bar);
-  // "Back to top" is the shared floating button (ui/totop.ts).
-  const onScroll = (): void => {
-    if (mode !== 'list') return;
-    const y = h.scrollTop;
-    const stuck = y > 0 && bar.getBoundingClientRect().top <= h.getBoundingClientRect().top + 1;
-    bar.classList.toggle('stuck', stuck);
-  };
-  h.addEventListener('scroll', onScroll, { passive: true });
-}
+  // "/" jumps to the timeline search.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || h.classList.contains('hidden')) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('input,textarea,select,[contenteditable=true],.cc-drawer,.modal')) return;
+    e.preventDefault();
+    const q = document.getElementById('axQ') as HTMLInputElement | null;
+    q?.focus();
+    q?.select();
+  });
 
-function setView(v: ViewKind): void {
-  view = v;
-  saveView(v);
-  limit = PAGE;
-  syncViews();
-  paint(false);
-  const h = host();
-  const bar = $('#axBar');
-  // Keep the bar in place: jump back to where the list starts if scrolled past.
-  const sub = h.querySelector<HTMLElement>('.ax-sub');
-  if (sub && h.scrollTop > sub.offsetTop) h.scrollTop = Math.max(0, bar.offsetTop);
-}
-
-function syncViews(): void {
-  document.querySelectorAll<HTMLElement>('#axViews [data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+  onBarScroll = stickTimeline(root, 'ax', h, () => 0);
+  h.addEventListener(
+    'scroll',
+    () => {
+      if (h.classList.contains('hidden')) return;
+      onBarScroll?.();
+      // Back at the top of the timeline with the stream on: what arrived meanwhile flows in.
+      if (live && (pending.length || reloadWanted) && flowing()) {
+        flushPending();
+        paintLive();
+      }
+    },
+    { passive: true },
+  );
 }
 
 function removeFilter(spec: string): void {
   const [k, ...rest] = spec.split(':');
   const v = rest.join(':');
   limit = PAGE;
-  if (k === 'time') {
-    F.time = '7d';
-    F.from = F.to = '';
-    void reload();
-    return;
-  }
   if (k === 'cats') F.cats.delete(v as Cat);
   else if (k === 'actions') F.actions.delete(v);
   else if (k === 'srcs') F.srcs.delete(v as Source);
   else if (k === 'agents') F.agents.delete(v);
   else if (k === 'status') F.status.delete(v as St);
+  else if (k === 'system') F.system = false;
   paint(false);
 }
 
-function filterActor(actor: string): void {
-  F.agents = new Set([actor]);
-  setView('day');
+/** Whether new rows may appear right away: the stream is on and the reader is not down in the timeline. */
+function flowing(): boolean {
+  if (!live || document.querySelector('.cc-drawer.in')) return false;
+  const body = document.getElementById('axBody');
+  if (!body) return true;
+  return body.getBoundingClientRect().top >= host().getBoundingClientRect().top + 40;
 }
 
 function startLive(h: HTMLElement): void {
   whileVisible(h, () =>
     onLive((it) => {
-      agentLive(it, mode === 'agent');
-      if (!live) {
+      // An end only settles a row already on screen: apply it quietly.
+      const cid = (it.raw as { call_id?: unknown }).call_id;
+      const ends = (it.raw as { phase?: unknown }).phase === 'end' && items.some((x) => x.running && x.raw.call_id === cid);
+      if (!ends && !flowing()) {
         pending.push(it);
+        if ((it.raw as { phase?: unknown }).phase !== 'end' && matches(it)) pendingShown++;
         paintLive();
         return;
       }
@@ -730,125 +723,275 @@ function ingest(it: ActivityItem): void {
   pushLive(items, it);
   if (paintQueued) return;
   paintQueued = true;
+  // Batched, so a busy agent repaints the page about once a second, not per call.
   setTimeout(() => {
     paintQueued = false;
     paint(true);
-  }, 150);
+  }, 900);
 }
 
 function flushPending(): void {
   const p = pending.take();
+  pendingShown = 0;
   p.forEach(ingest);
+  if (reloadWanted) softReload();
 }
 
 function paintLive(): void {
   const b = document.getElementById('lgLive');
   if (!b) return;
   b.setAttribute('aria-pressed', String(live));
-  b.innerHTML = live
-    ? '<span class="cc-dot ok"></span>Live'
-    : `<span class="cc-dot idle"></span>Paused${pending.length ? ` · ${pending.length} new` : ''}`;
-  b.title = live ? 'Pause the live stream' : 'Resume the live stream';
+  b.innerHTML = live ? '<span class="cc-dot ok"></span>Live' : '<span class="cc-dot idle"></span>Paused';
+  b.title = live ? 'Pause: new activity waits until you show it' : 'Resume: show new activity as it happens';
   const nb = $('#axNew') as HTMLButtonElement;
-  nb.hidden = live || !pending.length;
-  nb.textContent = `${pending.length} new`;
-  nb.setAttribute('aria-label', `Show ${plural(pending.length, 'new event')}`);
+  nb.hidden = !pendingShown;
+  nb.textContent = `${pendingShown} new · Show`;
+  nb.setAttribute('aria-label', `Show ${plural(pendingShown, 'new action')}`);
   nb.onclick = () => {
     live = true;
     flushPending();
     softReload();
     paintLive();
-    host().scrollTo({ top: 0 });
+    scrollToTimeline();
   };
 }
 
 const softReload = debounce(() => void reload(true), 900);
+/** A background refresh came while new rows were held: it runs when they are shown. */
+let reloadWanted = false;
 
-async function reload(soft = false): Promise<void> {
-  const seq = ++loadSeq;
+/** Load from the server. `soft` keeps the page on screen and waits while new rows are held, unless `now`. */
+async function reload(soft = false, now = false): Promise<void> {
+  if (soft && !now && items.length && !flowing()) {
+    reloadWanted = true;
+    return;
+  }
+  reloadWanted = false;
   if (!soft) {
+    pending.take();
+    pendingShown = 0;
+    paintLive();
+  }
+  const seq = ++loadSeq;
+  const keep = keepShown && items.length > 0;
+  keepShown = false;
+  if (!soft && !keep) {
     loading = true;
     paint(false);
   }
-  try {
-    const keysP = keys.length
-      ? Promise.resolve(keys)
-      : apiGet<KeysResult | KeyRow[]>('/api/keys')
-          .then((d) => (Array.isArray(d) ? d : d.keys || []))
-          .catch(() => [] as KeyRow[]);
-    const [fetched, ks] = await Promise.all([loadFeed(feedRange(), fetchLimit), keysP]);
-    if (seq !== loadSeq) return;
-    keys = ks;
-    setAgentColors(keys);
+  const range = feedRange();
+  // Live rows are matched to stored ones through an index: a range can hold 20000 events.
+  const before = items;
+  const absorb = (fetched: ActivityItem[]): ActivityItem[] => {
+    const lives = before.filter((x) => x.live);
+    if (!lives.length) return fetched;
+    const near = new Map<string, number[]>();
+    for (const f of fetched) {
+      const k = f.actor + '\u0000' + f.action;
+      (near.get(k) || near.set(k, []).get(k)!).push(f.ts);
+    }
+    const close = (x: ActivityItem, gap: number): boolean => (near.get(x.actor + '\u0000' + x.action) || []).some((t) => Math.abs(t - x.ts) < gap);
     // Keep live items newer than the server snapshot (the log can lag a bit).
     const newest = fetched.length ? fetched[0].ts : 0;
-    const keep = items.filter(
-      (x) =>
-        x.live &&
-        x.ts > newest - 15 &&
-        !fetched.some((f) => f.actor === x.actor && f.action === x.action && Math.abs(f.ts - x.ts) < 15),
-    );
-    // Stored starts carry no outcome (`end` phases are realtime only): take
-    // it from the live copy of the same call when there is one.
-    for (const f of fetched) {
-      if (f.ok !== undefined && !f.running) continue;
-      const m = items.find((x) => x.live && x.actor === f.actor && x.action === f.action && Math.abs(x.ts - f.ts) < 5);
-      if (m && !m.running) {
-        f.running = false;
-        f.ok = m.ok;
-        f.ms = m.ms;
-      }
+    const keep = lives.filter((x) => x.ts > newest - 15 && !close(x, 15));
+    // Stored starts carry no outcome (`end` phases are realtime only): take it from the live copy.
+    const byKey = new Map<string, ActivityItem[]>();
+    for (const x of lives) {
+      if (x.running) continue;
+      const k = x.actor + '\u0000' + x.action;
+      (byKey.get(k) || byKey.set(k, []).get(k)!).push(x);
     }
-    if (soft && items.length) {
+    if (byKey.size)
+      for (const f of fetched) {
+        if (f.ok !== undefined && !f.running) continue;
+        const m = byKey.get(f.actor + '\u0000' + f.action)?.find((x) => Math.abs(x.ts - f.ts) < 5);
+        if (m) {
+          f.running = false;
+          f.ok = m.ok;
+          f.ms = m.ms;
+        }
+      }
+    return [...keep, ...fetched];
+  };
+  try {
+    // The newest page shows at once; older pages fill the range in behind it.
+    const onPage = (sofar: ActivityItem[]): void => {
+      if (seq !== loadSeq || soft) return;
+      items = absorb(sofar);
+      loading = false;
+      filling = true;
+      older = true;
+      loadedRange = range;
+      remember(range, false);
+      paint(true);
+    };
+    // A background refresh of the same range only needs the newest page.
+    const top = soft && !now && before.length && loadedRange === range;
+    const [got, ks] = await Promise.all([loadFeed(range, top ? 2000 : fetchLimit, top ? undefined : onPage), keys.length ? Promise.resolve(keys) : fetchKeys()]);
+    if (seq !== loadSeq) return;
+    let fetched = got;
+    if (top) {
+      const edge = got.length ? got[got.length - 1].ts : Infinity;
+      fetched = [...got, ...before.filter((x) => !x.live && x.ts < edge)];
+    }
+    keys = ks;
+    setAgentColors(keys);
+    if (soft && items.length && !now) {
       const known = new Set(items.map((x) => x.actor + x.action + Math.round(x.ts)));
       fetched.forEach((x) => {
         if (!known.has(x.actor + x.action + Math.round(x.ts))) fresh.add(x.id);
       });
     }
-    older = F.time !== '1h' && F.time !== 'today' && fetched.filter((x) => x.source !== 'auth').length >= fetchLimit * 0.9;
-    items = [...keep, ...fetched];
+    const logged = fetched.filter((x) => x.source !== 'auth');
+    if (!top) older = logged.length >= fetchLimit * 0.9;
+    loadedRange = range;
+    items = absorb(fetched);
+    // A full load covers the range; a background refresh keeps what it was.
+    remember(range, soft ? (rangeCache.get(range)?.whole ?? false) : true);
   } catch (e) {
     if (seq !== loadSeq) return;
     toast('Could not load activity: ' + (e as Error).message, 'err');
+    // Do not ask again and again from the end of the list.
+    if (now) older = false;
   }
   loading = false;
+  loadingMore = false;
+  if (seq === loadSeq) filling = false;
   paint(soft);
 }
 
-// ── painting ────────────────────────────────────────────────────────────
-
-function paintChips(): void {
-  const c: string[] = [
-    `<button type="button" class="ax-chip time" data-open aria-label="${attr(`Time: ${timeLabel()}. Change filters`)}">${CLOCK}<span class="t">${esc(
-      timeLabel(),
-    )}</span></button>`,
-  ];
-  F.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', 'Status ')));
-  F.cats.forEach((k) => c.push(chip('cats:' + k, CATS.find((x) => x.id === k)!.label, `<i class="sw" style="--c:${CAT_COLOR[k]}"></i>`)));
-  F.actions.forEach((a) => c.push(chip('actions:' + a, verb(a), '', 'Action ')));
-  F.srcs.forEach((s) => c.push(chip('srcs:' + s, SRCS.find((x) => x.id === s)!.label, '', 'Source ')));
-  F.agents.forEach((a) => c.push(chip('agents:' + a, a, avatarHTML(a, 22))));
-  if (narrowed() || F.time !== '7d') c.push('<button type="button" class="ax-clear" data-clear>Clear all</button>');
-  $('#axChips').innerHTML = c.join('');
-  const n = activeCount();
-  const badge = $('#axBadge');
-  badge.hidden = !n;
-  badge.textContent = String(n);
-  $('#axFilt').setAttribute('aria-label', n ? `Filters, ${n} active` : 'Filters');
+/** Every actor (agents, people, the server) with its counts in the range. */
+function agentsOf(sc: ActivityItem[], filtered = false): AgentInfo[] {
+  return classifyAgents(items, filtered ? sc.filter((x) => matches(x, 'agents')) : sc.filter((x) => !x.echo), keys);
 }
 
-function paintSum(rows: ActivityItem[]): void {
+function oldestLoaded(): number {
+  return items.length ? items[items.length - 1].ts : Date.now() / 1000;
+}
+
+function kpisHTML(rows: ActivityItem[], agents: AgentInfo[]): string {
+  const now = Date.now() / 1000;
+  const mid = new Date();
+  mid.setHours(0, 0, 0, 0);
+  const midTs = mid.getTime() / 1000;
+  const mine = items.filter((x) => !isSystem(x));
+  const oldest = oldestLoaded();
+  const today = atLeast(mine.filter((x) => x.ts >= midTs).length, midTs, oldest, older);
+  const week = atLeast(mine.filter((x) => x.ts >= now - 7 * 86400).length, now - 7 * 86400, oldest, older);
+  const ais = new Set(rows.filter((x) => x.source === 'agent').map((x) => x.actor));
+  const working = agents.filter((a) => a.cls === 'active').length;
   const fails = rows.filter((x) => stOf(x) === 'fail').length;
+  const t = touchedCount(rows);
+  // The first number follows the chosen range; today's count goes under it.
+  const short = F.time === 'today' || F.time === '1h';
+  return `${short ? statTile(timeLabel(), rows.length, `${week} in the last 7 days`) : statTile(timeLabel(), rows.length, `${today} today`)}
+    ${statTile('Agents used', ais.size, working ? `${working} active right now` : 'None active right now')}
+    ${statTile('Problems', fails, rows.length ? `${Math.round((fails / rows.length) * 100)}% failed or refused` : 'Nothing in this range', fails > 0, fails ? 'status:fail' : '')}
+    ${statTile('Notes touched', t.n, t.top ? `Most: ${t.top}` : 'None in this range')}`;
+}
+
+function summarySkeleton(): void {
+  $('#axKpis').innerHTML = kpiSkeleton().repeat(4);
+  $('#axChart').innerHTML = skBlock('100%', 168);
+  $('#axChartS').textContent = '';
+  $('#axTop').innerHTML = skLines(5);
+  $('#axAgs').innerHTML = `<div class="sm-card-b">${skLines(6)}</div>`;
+  $('#axAgS').textContent = '';
+  $('#axProbs').innerHTML = `<div class="sm-card-b">${skLines(3)}</div>`;
+  $('#axPrA').innerHTML = '';
+  $('#axNotes').innerHTML = `<div class="sm-card-b">${skLines(4)}</div>`;
+}
+
+/** While a range loads: say so plainly, so nobody reads half the numbers as the answer. */
+function paintWait(): void {
+  const w = document.getElementById('axWait');
+  if (!w) return;
+  const on = loading || filling;
+  w.hidden = !on;
+  if (on)
+    w.innerHTML = `<i aria-hidden="true"></i>${
+      loading
+        ? `Gathering the real activity for ${esc(timeLabel().toLowerCase())}. This can take a moment on a big log, please wait.`
+        : `Showing the newest first. Still bringing in older activity for ${esc(timeLabel().toLowerCase())}: the numbers fill in as it arrives.`
+    }`;
+}
+
+function paintSummary(force = false): void {
+  paintWait();
+  if (!document.getElementById('axKpis')) return;
+  const key = [loading, filling, items.length, items[0]?.id, items[0]?.running, F.time, F.from, F.to, allAgents, keys.length, Math.floor(Date.now() / 30000)].join('|');
+  if (key === sumKey && !force) return;
+  sumKey = key;
+  if (loading) return summarySkeleton();
+  const sc = scoped();
+  // The summary leaves out system lines (server, sign-in, note saves that echo an AI's call).
+  const rows = sc.filter((x) => !isSystem(x));
+  const agents = agentsOf(sc);
+  const w = timeWindow();
+  $('#axKpis').innerHTML = kpisHTML(rows, agents);
+  $('#axChartH').textContent = rows.length ? chartTitle(rows, w) : 'Actions over time';
+  $('#axChartS').innerHTML = rows.length ? `${plural(rows.length, 'action')} · ${timeLabel()}${rows.some((x) => stOf(x) === 'fail') ? ' · <i class="ax-key"></i>problems' : ''}` : timeLabel();
+  $('#axChart').innerHTML = timeChart(rows, w);
+  $('#axTop').innerHTML = topActionsHTML(rows.filter((x) => x.source === 'agent'));
+  if (!rows.some((x) => x.source === 'agent')) $('#axTop').innerHTML = '<div class="ax-bempty">No agent actions in this range</div>';
+
+  // One row per agent: connected keys always, others when they did something in the range.
+  const byActor = new Map<string, ActivityItem[]>();
+  sc.forEach((x) => {
+    if (x.echo) return;
+    (byActor.get(x.actor) || byActor.set(x.actor, []).get(x.actor)!).push(x);
+  });
+  const shown = agents.filter((a) => byActor.has(a.name) || (a.id && a.cls !== 'removed' && a.cls !== 'people'));
+  const connected = agents.filter((a) => a.id && a.cls !== 'removed' && a.cls !== 'people');
+  const active = connected.filter((a) => a.cls === 'active').length;
+  $('#axAgS').textContent = connected.length ? `${connected.length} connected${active ? ` · ${active} active` : ''}` : '';
+  const cap = allAgents ? shown.length : AG_CAP;
+  $('#axAgs').innerHTML =
+    agentRowsHTML(shown, (a) => byActor.get(a.name) || [], w, cap) +
+    (shown.length > AG_CAP
+      ? `<button type="button" class="sm-more" data-allag aria-expanded="${allAgents}">${allAgents ? 'Show fewer' : `Show all ${shown.length}`}</button>`
+      : '');
+
+  const fails = rows.filter((x) => stOf(x) === 'fail').length;
+  $('#axPrA').innerHTML = fails ? `<button type="button" class="sm-lnk" data-f="status:fail">Show all ${fails} ${ICO.arrow}</button>` : '';
+  $('#axProbs').innerHTML = problemsHTML(rows);
+  $('#axNotes').innerHTML = notesHTML(rows);
+  const n = rows.length;
+  $('#axTabN').textContent = n ? n.toLocaleString('en-US') : '';
+}
+
+function chipsOf(): string[] {
+  const c: string[] = [];
+  // A pill already shows its action types and status; chips only for another mix.
+  if (!quickOf()) {
+    F.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', 'Result ')));
+    F.cats.forEach((k) => c.push(chip('cats:' + k, CATS.find((x) => x.id === k)!.label, `<i class="sw" style="--c:${CAT_COLOR[k]}"></i>`)));
+  }
+  F.actions.forEach((a) => c.push(chip('actions:' + a, actionLabel(a), '', '')));
+  F.agents.forEach((a) => c.push(chip('agents:' + a, a, avatarHTML(a, 22))));
+  F.srcs.forEach((s) => c.push(chip('srcs:' + s, SRCS.find((x) => x.id === s)!.label, '', 'From ')));
+  if (F.system) c.push(chip('system:1', 'System lines shown', '', ''));
+  return c;
+}
+
+function paintSum(rows: ActivityItem[], sc: ActivityItem[]): void {
+  const el = $('#axSum');
+  if (loading) {
+    el.innerHTML = '<span>Loading…</span>';
+    return;
+  }
+  // System lines the other filters would show, were they not hidden.
+  const hidden = F.system ? 0 : sc.filter((x) => isSystem(x) && !systemShown(x) && matchesBut(x)).length;
   const actors = new Set(rows.map((x) => x.actor)).size;
-  $('#axSum').innerHTML = loading
-    ? '<span>Loading…</span>'
-    : `<span><b>${rows.length}</b> ${rows.length === 1 ? 'event' : 'events'}</span><span><b>${actors}</b> ${
-        actors === 1 ? 'actor' : 'actors'
-      }</span>${fails ? `<span class="bad"><b>${fails}</b> failed</span>` : ''}${
-        view === 'day'
-          ? `<button type="button" class="ax-tgl" id="axCompact" aria-pressed="${compact}" title="Collapse repeated calls by the same agent"><i></i>Group repeats</button>`
-          : ''
-      }`;
+  el.innerHTML = sumHTML({
+    n: rows.length.toLocaleString('en-US'),
+    unit: ['action', 'actions'],
+    note: timeLabel(),
+    extra: `<span class="ppl"><b>${actors}</b> ${actors === 1 ? 'AI or person' : 'AIs and people'}</span>`,
+    fails: rows.filter((x) => stOf(x) === 'fail').length,
+    hidden,
+    compact,
+  });
 }
 
 /** Keep the first visible row where it is while the list above it changes. */
@@ -856,7 +999,7 @@ function anchor(): () => void {
   const h = host();
   const stick = h.querySelector<HTMLElement>('#axBar')?.offsetHeight || 0;
   const top = h.getBoundingClientRect().top + stick;
-  const rows = h.querySelectorAll<HTMLElement>('#axBody [data-act],#axBody .ax-ag');
+  const rows = h.querySelectorAll<HTMLElement>('#axBody [data-act]');
   let el: HTMLElement | null = null;
   for (const r of rows) {
     if (r.getBoundingClientRect().bottom > top + 40) {
@@ -865,15 +1008,10 @@ function anchor(): () => void {
     }
   }
   if (!el || h.scrollTop < 40) return () => {};
-  const key = el.dataset.act ? `[data-act="${window.CSS.escape(el.dataset.act)}"]` : null;
-  const name = el.querySelector<HTMLElement>('[data-agent]')?.dataset.agent;
+  const key = `[data-act="${window.CSS.escape(el.dataset.act!)}"]`;
   const before = el.getBoundingClientRect().top;
   return () => {
-    const again = key
-      ? h.querySelector<HTMLElement>(`#axBody ${key}`)
-      : name
-        ? h.querySelector<HTMLElement>(`#axBody [data-agent="${window.CSS.escape(name)}"]`)?.closest<HTMLElement>('.ax-ag') || null
-        : null;
+    const again = h.querySelector<HTMLElement>(`#axBody ${key}`);
     if (again) h.scrollTop += again.getBoundingClientRect().top - before;
   };
 }
@@ -881,48 +1019,56 @@ function anchor(): () => void {
 function paint(keepPlace = true): void {
   const body = document.getElementById('axBody');
   if (!body) return;
-  paintChips();
+  const root = $('#axRoot');
+  paintSummary();
+  // The timeline is drawn when it is on screen; on the summary it waits.
+  if (root.dataset.view === 'summary') {
+    timelineStale = true;
+    return;
+  }
+  timelineStale = false;
+  const restore = keepPlace ? anchor() : () => {};
+  paintPills(root, 'ax', quickOf());
+  paintChips(root, 'ax', chipsOf(), activeCount());
   const sc = scoped();
   const rows = sc.filter((x) => matches(x));
-  paintSum(rows);
+  paintSum(rows, sc);
   refreshFilters();
   if (loading) {
     body.setAttribute('aria-busy', 'true');
-    body.innerHTML = skeletonHTML(view);
+    body.innerHTML = daySkeleton();
+    restore();
     return;
   }
   body.removeAttribute('aria-busy');
-  const ctx: ViewCtx = {
+  localLeft = groupBursts(rows, compact).length > limit;
+  body.innerHTML = dayViewHTML({
     rows,
-    agents: agentsOf(sc),
     fresh,
     limit,
     compact,
-    older,
+    open,
+    older: older && oldestLoaded() > timeWindow().since,
     narrowed: narrowed(),
     none: !sc.length,
-  };
-  const restore = keepPlace ? anchor() : () => {};
-  body.innerHTML = view === 'agent' ? agentViewHTML(ctx) : view === 'board' ? boardViewHTML(ctx) : dayViewHTML(ctx);
+  });
   restore();
   fresh.clear();
-  watchMore(body);
+  watchSentinel(body, host(), more);
 }
 
-/** "Show more" loads itself when it scrolls into view. */
-function watchMore(body: HTMLElement): void {
-  io?.disconnect();
-  const more = body.querySelector<HTMLElement>('[data-more]');
-  if (!more || typeof IntersectionObserver === 'undefined') return;
-  io = new IntersectionObserver(
-    (en) => {
-      if (en.some((x) => x.isIntersecting)) {
-        io?.disconnect();
-        limit += PAGE;
-        paint(true);
-      }
-    },
-    { root: host(), rootMargin: '0px 0px 300px 0px' },
-  );
-  io.observe(more);
+/** The end of the timeline came near: show more of what is loaded, or load older activity. */
+function more(): void {
+  if (loadingMore) return;
+  if (localLeft) {
+    limit += PAGE;
+    paint(true);
+    return;
+  }
+  // Everything loaded is on screen: ask the server for older activity.
+  if (older) {
+    loadingMore = true;
+    fetchLimit += FETCH;
+    void reload(true, true);
+  }
 }

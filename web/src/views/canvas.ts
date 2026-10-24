@@ -1,5 +1,4 @@
-// Canvas view: an infinite, Figma-like board of note cards inside folder
-// frames, with wikilink connectors. The board itself lives in canvas/*.
+// Canvas view: mounts the board from ../canvas/*.
 
 import { useStyles } from '../dom';
 import { Board } from '../canvas/board';
@@ -8,6 +7,12 @@ import { setFlightTarget } from '../ui/agent-flight';
 
 let board: Board | null = null;
 let booting: Promise<void> | null = null;
+
+/** Entering Canvas (ui/map-enter.ts): tidy the board, then zoom to fit. */
+export async function enterCanvas(): Promise<void> {
+  if (booting) await booting;
+  await board?.enter();
+}
 
 export async function renderCanvas(): Promise<void> {
   const host = document.getElementById('view-canvas');

@@ -1,5 +1,4 @@
-// Small UI primitives for the vault: context menu, undo toast, inline rename
-// and the folder look dialog (the folder picker lives in folder-picker.ts).
+// Small vault UI primitives: context menu, undo toast, inline rename and dialogs.
 
 import { el, esc, attr } from '../dom';
 import { Modal } from '../modal';
@@ -7,10 +6,6 @@ import { notify } from '../toast';
 import { SWATCH_COLORS } from '../icons';
 import { colorPickHTML, wireColorPick } from '../ui/color-pick';
 import { I, FOLDER_ICONS, folderGlyph, folderIconKey } from './icons';
-
-// ---------------------------------------------------------------------------
-// Context menu
-// ---------------------------------------------------------------------------
 
 export interface MenuItem {
   label: string;
@@ -25,7 +20,7 @@ export interface MenuItem {
 let menuEl: HTMLElement | null = null;
 let menuCleanup: (() => void) | null = null;
 
-export function closeMenu(): void {
+function closeMenu(): void {
   if (menuCleanup) menuCleanup();
   menuCleanup = null;
   menuEl?.remove();
@@ -112,9 +107,10 @@ export function openMenu(items: MenuItem[], at: { x: number; y: number } | HTMLE
   };
 }
 
-// ---------------------------------------------------------------------------
-// Undo toast (bottom center, one at a time)
-// ---------------------------------------------------------------------------
+/** Empty state: one icon, a short title, one sentence, at most one action. */
+export function emptyState(icon: string, title: string, text: string, extra = ''): string {
+  return `<div class="vx-empty">${icon}<b>${esc(title)}</b><p>${text}</p>${extra}</div>`;
+}
 
 export function undoToast(
   msg: string,
@@ -124,10 +120,6 @@ export function undoToast(
 ): void {
   notify(msg, kind, ms, undo ? { label: 'Undo', icon: I.undo, run: undo } : undefined);
 }
-
-// ---------------------------------------------------------------------------
-// Inline rename
-// ---------------------------------------------------------------------------
 
 /** Swap `target` for a text input; resolves the new value or null when cancelled. */
 export function inlineEdit(target: HTMLElement, value: string): Promise<string | null> {
@@ -166,10 +158,6 @@ export function inlineEdit(target: HTMLElement, value: string): Promise<string |
   });
 }
 
-// ---------------------------------------------------------------------------
-// Dialogs
-// ---------------------------------------------------------------------------
-
 /** Folder color and icon. */
 export function folderLookDialog(
   folder: string,
@@ -190,7 +178,7 @@ export function folderLookDialog(
     )
     .join('')}</div>
   <label class="vx-look-emoji"><span>Or any emoji</span><input type="text" maxlength="4" value="${attr(emoji)}" placeholder="e.g. 🚀" aria-label="Emoji icon"></label>`;
-  let cur = { color: color || '', icon: icon || '' };
+  const cur = { color: color || '', icon: icon || '' };
   const ico = box.querySelector<HTMLElement>('.vx-look-ico')!;
   const paint = (): void => {
     const c = cur.color || 'var(--muted)';

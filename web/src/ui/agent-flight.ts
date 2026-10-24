@@ -1,16 +1,11 @@
-// Agents fly between the header pill and the open view: when one wakes up, a
-// glowing orb in its color leaves the robot in the pill and arcs to what it
-// touches (a note in the brain, a node in the graph, a card on the canvas, the
-// middle of any other page); when it goes idle, the orb flies home to the moon.
-
-import { esc, useStyles } from '../dom';
-import { agentColor, agentInitials, avatarHTML } from '../control/agents';
+import { useStyles } from '../dom';
+import { agentColor, agentInitials } from '../control/agents';
 import { state } from '../state';
 
-/** Where an agent shows on the open view, in client pixels; null when unknown. */
-export type FlightTarget = (actor: string, id: string | undefined, paths: string[]) => { x: number; y: number } | null;
+/** Client pixels; null when unknown. */
+type FlightTarget = (actor: string, id: string | undefined, paths: string[]) => { x: number; y: number } | null;
 
-export interface Flyer {
+interface Flyer {
   actor: string;
   id?: string;
   paths: string[];
@@ -27,25 +22,16 @@ const CSS = `
 @keyframes af-fade{to{opacity:0;transform:var(--t) scale(.2)}}
 .rt.af-glow{animation:af-glow 1.3s ease-out}
 @keyframes af-glow{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--afc) 70%,transparent)}35%{box-shadow:0 0 0 6px color-mix(in srgb,var(--afc) 35%,transparent),0 0 26px 4px color-mix(in srgb,var(--afc) 55%,transparent);border-color:var(--afc)}100%{box-shadow:0 0 0 14px transparent}}
-.af-note{position:fixed;z-index:86;display:flex;align-items:center;gap:9px;padding:6px 12px 6px 6px;border-radius:99px;pointer-events:none;
-  background:var(--glass-strong,var(--panel));border:1px solid color-mix(in srgb,var(--c) 45%,var(--line));color:var(--fg);font-size:12.5px;font-weight:600;
-  box-shadow:0 10px 30px -10px color-mix(in srgb,var(--c) 55%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  transform-origin:top right;animation:af-note 2.6s cubic-bezier(.2,.8,.2,1) forwards}
-.af-note.sleep .ag-av{filter:saturate(.6);opacity:.85}
-.af-note small{color:var(--muted);font-weight:500}
-@keyframes af-note{0%{opacity:0;transform:translateY(-10px) scale(.6)}12%{opacity:1;transform:translateY(0) scale(1.04)}18%{transform:scale(1)}82%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-6px) scale(.9)}}
 .af-ring{position:absolute;left:0;top:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;border:2px solid var(--c);
   box-shadow:0 0 14px var(--c);animation:af-ring .75s ease-out forwards}
 @keyframes af-ring{from{opacity:.95;transform:var(--t) scale(.4)}to{opacity:0;transform:var(--t) scale(3.4)}}
 `;
 
 const targets = new Map<string, FlightTarget>();
-/** Where each agent last landed, so it can fly home from there. */
 const landed = new Map<string, { x: number; y: number }>();
 let flying = 0;
 const MAX_FLIGHTS = 6;
 
-/** Register (or clear with null) how the given page locates an agent. */
 export function setFlightTarget(page: string, fn: FlightTarget | null): void {
   if (fn) targets.set(page, fn);
   else targets.delete(page);
@@ -71,14 +57,12 @@ function center(el: Element | null): { x: number; y: number } | null {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
-/** The open view's point for the agent, when it knows one on screen. */
 function targetPoint(f: Flyer): { x: number; y: number } | null {
   const fn = targets.get(state.page);
   const p = fn?.(f.actor, f.id, f.paths) || null;
   return p && p.x >= 0 && p.y >= 0 && p.x <= innerWidth && p.y <= innerHeight ? p : null;
 }
 
-/** The middle of the main area. */
 function mainPoint(): { x: number; y: number } {
   const main = document.getElementById('main')?.getBoundingClientRect();
   return main ? { x: main.left + main.width / 2, y: main.top + main.height * 0.45 } : { x: innerWidth / 2, y: innerHeight / 2 };
@@ -97,7 +81,6 @@ function fly(from: { x: number; y: number }, to: { x: number; y: number }, f: Fl
   orb.style.setProperty('--c', color);
   orb.textContent = agentInitials(f.actor);
   l.appendChild(orb);
-  // A curve that bows away from the straight line, toward the top of the screen.
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -149,11 +132,7 @@ function fly(from: { x: number; y: number }, to: { x: number; y: number }, f: Fl
 
 const slot = (f: Flyer): string => f.id || f.actor;
 
-let noteStack = 0;
-
-/** Outside the brain pages: the pill glows in the agent's color and a small
- * card drops out of it, "claude-code is working" or "claude-code went idle". */
-function badgeNotice(f: Flyer, kind: 'wake' | 'sleep'): void {
+function badgeNotice(f: Flyer): void {
   if (reduced() || document.hidden) return;
   const pill = document.getElementById('rtPill');
   const r = pill?.getBoundingClientRect();
@@ -164,34 +143,19 @@ function badgeNotice(f: Flyer, kind: 'wake' | 'sleep'): void {
   pill.classList.remove('af-glow');
   void pill.offsetWidth;
   pill.classList.add('af-glow');
-  const n = document.createElement('div');
-  n.className = 'af-note ' + kind;
-  n.style.setProperty('--c', color);
-  n.style.top = r.bottom + 8 + noteStack * 40 + 'px';
-  n.style.right = Math.max(8, innerWidth - r.right) + 'px';
-  const what = kind === 'wake' ? (f.paths[0] ? `working on ${f.paths[0].split('/').pop()!.replace(/\.md$/i, '')}` : 'is working') : 'went idle';
-  n.innerHTML = `${avatarHTML(f.actor, 24, kind === 'wake' ? 'live' : '', f.id)}<span>${esc(f.actor)} <small>${esc(what)}</small></span>`;
-  document.body.appendChild(n);
-  noteStack++;
-  window.setTimeout(() => {
-    n.remove();
-    noteStack = Math.max(0, noteStack - 1);
-  }, 2700);
 }
 
-/** Pages with a map to fly onto (the brain draws its own agents coming in). */
+/** The brain draws its own incoming agents. */
 const FLY_PAGES = new Set(['graph', 'canvas']);
 
-/** An agent woke up: from the robot in the pill to what it is working on. */
 export function flyIn(f: Flyer): void {
   if (state.page === 'brain') return;
   if (!FLY_PAGES.has(state.page)) {
-    badgeNotice(f, 'wake');
+    badgeNotice(f);
     return;
   }
   const from = center(document.querySelector('#rtAgents .i')) || center(document.getElementById('rtPill'));
   if (!from) return;
-  // Let the view take in the activity first (the brain places the agent).
   window.setTimeout(() => {
     const to = targetPoint(f) || mainPoint();
     landed.set(slot(f), to);
@@ -199,12 +163,11 @@ export function flyIn(f: Flyer): void {
   }, 120);
 }
 
-/** An agent went idle: from where it was back home to the moon in the pill. */
 export function flyHome(f: Flyer): void {
   if (state.page === 'brain') return;
   if (!FLY_PAGES.has(state.page)) {
     landed.delete(slot(f));
-    badgeNotice(f, 'sleep');
+    badgeNotice(f);
     return;
   }
   const to = center(document.querySelector('#rtIdle .i')) || center(document.getElementById('rtPill'));

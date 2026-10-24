@@ -1,8 +1,6 @@
-// Graph model: turns /api/graph into simulation nodes (notes plus folder
-// hubs), keeps every node object alive across refreshes so positions and
-// velocities survive live updates, and applies the view filters.
+// Node objects stay alive across refreshes so positions and velocities survive live updates.
 
-import { state } from '../state';
+import { noteTitle, state } from '../state';
 import type { GraphData } from '../types';
 import { FOLDER_PREFIX, type GLink, type GNode } from './model';
 
@@ -47,14 +45,14 @@ function noteRadius(deg: number): number {
 
 export class GraphModel {
   all = new Map<string, GNode>();
-  /** Raw wikilinks by note id (deduplicated, undirected for physics). */
+  /** Deduplicated, undirected wikilinks for the physics. */
   refs: [string, string][] = [];
   outgoing = new Map<string, Set<string>>();
   incoming = new Map<string, Set<string>>();
   byPath = new Map<string, GNode>();
-  /** Tags per note path, filled lazily (API or a background scan). */
+  /** Filled lazily (API or a background scan). */
   tagsByPath = new Map<string, string[]>();
-  /** Note name -> node key (the first note with that name), for wikilinks. */
+  /** Note name -> key of the first note with that name, for wikilinks. */
   byName = new Map<string, string>();
 
   private make(id: string, kind: GNode['kind'], label: string, path: string, group: string, dir: string, color: string): GNode {
@@ -85,18 +83,13 @@ export class GraphModel {
     };
   }
 
-  /**
-   * Merge a fresh payload. Returns the ids that appeared and disappeared, so
-   * the view can animate them (new nodes start at a neighbour's position).
-   */
   ingest(g: GraphData, now: number, animate: boolean): { added: GNode[]; removed: GNode[] } {
     const rawNodes = (g.nodes || []) as RawNode[];
     const seen = new Set<string>();
     const added: GNode[] = [];
     this.byPath.clear();
     const dirs = new Set<string>();
-    // Notes are keyed by path: two notes may share a name in different
-    // folders (Brain and Canvas count them both, so must the graph).
+    // Keyed by path: two notes may share a name in different folders.
     this.byName.clear();
     for (const r of rawNodes) {
       const path = r.path || r.id + '.md';
@@ -106,7 +99,7 @@ export class GraphModel {
       if (!this.byName.has(r.id)) this.byName.set(r.id, key);
       let n = this.all.get(key);
       if (!n || n.kind !== 'note') {
-        n = this.make(key, 'note', r.id, path, group, dir, '');
+        n = this.make(key, 'note', noteTitle(path) || r.id, path, group, dir, '');
         this.all.set(key, n);
         added.push(n);
         if (animate) n.born = now;
@@ -147,14 +140,12 @@ export class GraphModel {
       }
     });
 
-    // Links, deduplicated and undirected for the physics; direction kept for
-    // the card's "links out" and "backlinks".
+    // Direction is kept for the card's "links out" and "backlinks".
     this.outgoing.clear();
     this.incoming.clear();
     const pairs = new Set<string>();
     this.refs = [];
     for (const raw of g.links || []) {
-      // Wikilinks name notes; resolve to the node keys (paths).
       const l = { source: this.byName.get(raw.source) || raw.source, target: this.byName.get(raw.target) || raw.target };
       if (l.source === l.target || !this.all.has(l.source) || !this.all.has(l.target)) continue;
       if (!this.outgoing.has(l.source)) this.outgoing.set(l.source, new Set());
@@ -186,8 +177,7 @@ export class GraphModel {
       }
     });
 
-    // New nodes start beside an existing neighbour (or their folder) so they
-    // grow out of the graph instead of flying in from the origin.
+    // New nodes grow out of a neighbour instead of flying in from the origin.
     for (const n of added) {
       if (!Number.isNaN(n.x)) continue;
       const anchor = this.anchorFor(n);
@@ -200,11 +190,7 @@ export class GraphModel {
     return { added, removed };
   }
 
-  /**
-   * Colour groups: an explicit folder colour wins; otherwise a categorical
-   * palette by group size, so neighbouring groups never share a hue. Sub
-   * folders get a slightly lighter or darker shade of their group.
-   */
+  /** Explicit folder colour wins, else a palette by group size; sub folders get shades. */
   recolor(light: boolean): void {
     const pal = light ? LIGHT : DARK;
     const sizes = new Map<string, number>();
@@ -233,7 +219,6 @@ export class GraphModel {
         n.color = c;
         return;
       }
-      // Alternate lighter and darker shades for sibling sub folders.
       const step = Math.ceil(i / 2) * 0.13;
       n.color = i % 2 ? mix(c, light ? 0 : 255, Math.min(0.4, step)) : mix(c, light ? 255 : 0, Math.min(0.35, step));
     });
@@ -256,7 +241,6 @@ export class GraphModel {
     return this.all.get(FOLDER_PREFIX + n.dir) || this.all.get(FOLDER_PREFIX + n.path.split('/')[0]);
   }
 
-  /** Finish removals whose fade-out completed. */
   reap(now: number, ms: number): boolean {
     let changed = false;
     this.all.forEach((n, id) => {
@@ -268,7 +252,6 @@ export class GraphModel {
     return changed;
   }
 
-  /** The visible subset and its links (folder tree + wikilinks). */
   visible(f: Filters): { nodes: GNode[]; links: GLink[] } {
     const tagOk = (n: GNode): boolean => {
       if (!f.tags.size) return true;
@@ -282,7 +265,6 @@ export class GraphModel {
       keep.add(n);
     });
     if (f.folders) {
-      // A folder is visible when it has a visible descendant.
       const needed = new Set<string>();
       keep.forEach((n) => {
         for (let d = n.dir; d; d = dirOf(d)) needed.add(d);

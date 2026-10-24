@@ -1,24 +1,22 @@
-// Command palette (Ctrl/Cmd+K or "/"): search notes by title instantly, note
-// text through /api/search, jump to any page, and run actions (new note, open
-// brain, switch theme ...). Fully keyboard driven, ARIA combobox + listbox.
+// Command palette (Ctrl/Cmd+K or "/"): notes, note text, pages and actions.
 
 import { apiGet } from './api';
 import { $, esc, safeSnip } from './dom';
 import { debounce } from './format';
 import { hooks } from './hooks';
 import { PAGE_META, PAGES } from './router';
-import { allNotes, type Page } from './state';
+import { allNotes, noteTitle, type Page } from './state';
 import { icon } from './ui/icons';
+import { fadeScroll } from './ui/scroll-fade';
 import { score, similar, type Near } from './ui/match';
 import type { NoteRef, SearchHit, SearchResult } from './types';
 
-export interface Command {
+interface Command {
   id: string;
   title: string;
   hint?: string;
   icon: string;
   keywords?: string;
-  /** Shortcut shown on the right, e.g. "Alt 1". */
   kbd?: string;
   run: () => void;
 }
@@ -38,7 +36,6 @@ interface Option {
 
 const commands: Command[] = [];
 
-/** Actions offered by the palette (registered by main.ts at boot). */
 export function registerCommands(list: Command[]): void {
   for (const c of list) {
     const i = commands.findIndex((x) => x.id === c.id);
@@ -58,24 +55,19 @@ let seq = 0;
 const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 export const MOD_LABEL = isMac ? '⌘K' : 'Ctrl K';
 
-/* ───────────────────────── matching ───────────────────────── */
-
-/** Mark one word of a title (the near match). */
 function markWord(text: string, word: string): string {
   const at = text.indexOf(word);
   if (at < 0) return esc(text);
   return esc(text.slice(0, at)) + '<mark>' + esc(word) + '</mark>' + esc(text.slice(at + word.length));
 }
 
-/** The line over the suggestions (plain sentence case, not a section title). */
 let suggestNote = '';
 
 function highlight(text: string, q: string): string {
   if (!q) return esc(text);
   const t = text.toLowerCase();
   const at = t.indexOf(q);
-  // Lower-casing can change the length of some characters; then the index
-  // would not line up with the original text, so nothing is marked.
+  // Lower-casing can change the length; then the index would not line up.
   if (at >= 0 && t.length === text.length) {
     return esc(text.slice(0, at)) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length));
   }
@@ -85,8 +77,8 @@ function highlight(text: string, q: string): string {
 function noteOption(n: NoteRef, q: string, section: string): Option {
   return {
     section,
-    title: n.name,
-    titleHtml: highlight(n.name, q),
+    title: noteTitle(n.path),
+    titleHtml: highlight(noteTitle(n.path), q),
     sub: (n.folder || '') + (n.path ? ' · ' + n.path : ''),
     icon: 'note',
     run: () => hooks.openNote(n.path),
@@ -121,7 +113,7 @@ function build(raw: string): void {
       .filter((n) => n.mtime)
       .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
       .slice(0, 5);
-    for (const n of recent) out.push(noteOption(n, '', 'Recent nodes'));
+    for (const n of recent) out.push(noteOption(n, '', 'Recent notes'));
     for (const c of commands.slice(0, 6)) out.push(cmdOption(c, ''));
     for (const p of PAGES) out.push(pageOption(p, ''));
     options = out;
@@ -142,13 +134,11 @@ function build(raw: string): void {
     .filter((x) => x.s > 10)
     .sort((a, b) => b.s - a.s);
 
-  // Nodes whose name or path contains the query, best first.
   const notes = allNotes()
     .map((n) => ({ n, s: Math.max(score(n.name, q), score(n.path, q) * 0.7) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || (b.n.mtime || 0) - (a.n.mtime || 0))
     .slice(0, 8);
-  // Near misses (a typo away), offered after the real matches.
   const exactPaths = new Set(notes.map((x) => x.n.path));
   const near = allNotes()
     .filter((n) => !exactPaths.has(n.path))
@@ -165,21 +155,20 @@ function build(raw: string): void {
     ...pages.slice(0, 4).map((x) => pageOption(x.p, q)),
     ...cmds.slice(0, 5).map((x) => cmdOption(x.c, q)),
   ];
-  const noteBlock = notes.map((x) => noteOption(x.n, q, 'Nodes'));
+  const noteBlock = notes.map((x) => noteOption(x.n, q, 'Notes'));
   out.push(...(navFirst ? navBlock : noteBlock), ...(navFirst ? noteBlock : navBlock));
 
   if (fullTextQ === raw.trim()) {
     const seen = new Set(notes.map((x) => x.n.path));
     for (const h of fullText) {
       if (seen.has(h.path)) {
-        // Enrich the title hit with the text snippet instead of repeating it.
-        const o = out.find((x) => x.section === 'Nodes' && x.sub?.endsWith(' · ' + h.path));
+        const o = out.find((x) => x.section === 'Notes' && x.sub?.endsWith(' · ' + h.path));
         if (o && h.snippet) o.snip = h.snippet;
         continue;
       }
       out.push({
-        section: 'In node text',
-        title: h.name,
+        section: 'In note text',
+        title: noteTitle(h.path),
         sub: (h.folder || '') + ' · ' + h.path,
         snip: h.snippet,
         icon: 'search',
@@ -188,8 +177,6 @@ function build(raw: string): void {
     }
   }
   if (near.length) {
-    // Nothing contains what was typed: say so, then offer the near misses,
-    // each with the word that comes close and why.
     const none = !out.length && fullTextQ === raw.trim();
     suggestNote = none ? `Nothing matches “${raw.trim()}”. Maybe you meant one of these:` : 'Maybe you meant:';
     const shown = new Set(out.map((o) => o.sub));
@@ -202,8 +189,6 @@ function build(raw: string): void {
   }
   options = out;
 }
-
-/* ───────────────────────── rendering ───────────────────────── */
 
 function render(): void {
   const list = $('#palList');
@@ -220,7 +205,7 @@ function render(): void {
         section === 'suggest'
           ? `<div class="pal-note" role="presentation">${esc(suggestNote)}</div>`
           : `<div class="pal-sec" role="presentation">${esc(section)}${
-              section === 'In node text' && loading ? '<span class="pal-spin"></span>' : ''
+              section === 'In note text' && loading ? '<span class="pal-spin"></span>' : ''
             }</div>`;
     }
     html += `<div class="pal-opt" role="option" id="pal-o${i}" data-i="${i}" aria-selected="${i === sel}">
@@ -233,12 +218,12 @@ function render(): void {
   const q = input.value.trim();
   if (!options.length) {
     html = loading
-      ? '<div class="pal-sec">Searching node text <span class="pal-spin"></span></div>'
+      ? '<div class="pal-sec">Searching note text <span class="pal-spin"></span></div>'
       : q
-        ? `<div class="pal-empty"><span class="pe-ico">${icon('search')}</span><b>No results for “${esc(q)}”</b><span>Nothing in node names, paths or text, and nothing spelled close to it. Try fewer letters, another spelling, or a word from inside a node.</span></div>`
+        ? `<div class="pal-empty"><span class="pe-ico">${icon('search')}</span><b>No results for “${esc(q)}”</b><span>Nothing in note names, folders or text, and nothing spelled close to it. Try fewer letters, another spelling, or a word from inside a note.</span></div>`
         : '<div class="pal-empty">Type to search.</div>';
-  } else if (q && loading && !options.some((o) => o.section === 'In node text')) {
-    html += '<div class="pal-sec">In node text <span class="pal-spin"></span></div>';
+  } else if (q && loading && !options.some((o) => o.section === 'In note text')) {
+    html += '<div class="pal-sec">In note text <span class="pal-spin"></span></div>';
   }
   list.innerHTML = html;
   input.setAttribute('aria-activedescendant', options.length ? 'pal-o' + sel : '');
@@ -299,15 +284,12 @@ function onInput(): void {
   render();
 }
 
-/* ───────────────────────── open / close ───────────────────────── */
-
-export function isOpen(): boolean {
+function isOpen(): boolean {
   return !$('#palette').classList.contains('hidden');
 }
 
 export function openPalette(initial = ''): void {
   const host = $('#palette');
-  // Reopened while the close animation runs: finish closing first.
   if (host.classList.contains('closing')) {
     clearTimeout(closeTimer);
     finishClose(false);
@@ -322,24 +304,24 @@ export function openPalette(initial = ''): void {
   host.innerHTML = `<div class="pal" role="dialog" aria-modal="true" aria-label="Search and commands">
     <div class="pal-in">${icon('search')}
       <input id="palInput" type="search" placeholder="${
-        window.matchMedia?.('(max-width: 760px)').matches ? 'Search nodes, pages, > actions' : 'Search nodes, jump to a page, or type > for actions'
+        window.matchMedia?.('(max-width: 760px)').matches ? 'Search notes, pages, > actions' : 'Search notes, jump to a page, or type > for actions'
       }" autocomplete="off" spellcheck="false"
-        role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list" aria-label="Search nodes, pages and actions">
-      <button class="icon-btn" type="button" id="palClose" aria-label="Close search">${icon('close')}</button>
+        role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list" aria-label="Search notes, pages and actions">
+      <button class="icon-btn" type="button" id="palClose" aria-label="Close search" title="Close (Esc)">${icon('close')}</button>
     </div>
     <div class="pal-list" id="palList" role="listbox" aria-label="Results"></div>
     <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>&gt;</kbd> actions</span><span style="margin-left:auto"><kbd>esc</kbd> close</span></div>
     <div class="pal-closebar"><button class="pal-closebtn" type="button" id="palCloseBottom"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>Close search</button></div>
   </div>`;
   host.classList.remove('hidden');
+  fadeScroll(document.getElementById('palList'));
   const input = document.getElementById('palInput') as HTMLInputElement;
   input.value = initial;
   input.oninput = onInput;
   input.onkeydown = onKey;
   $('#palClose').onclick = () => closePalette();
   $('#palCloseBottom').onclick = () => closePalette();
-  // Phones: the full-screen search fits the part of the screen the keyboard
-  // leaves, so the Close bar at the bottom stays above it.
+  // Phones: fit above the on-screen keyboard so the Close bar stays visible.
   fitToViewport();
   window.visualViewport?.addEventListener('resize', fitToViewport);
   window.visualViewport?.addEventListener('scroll', fitToViewport);
@@ -364,7 +346,6 @@ let closeTimer = 0;
 export function closePalette(restore = true): void {
   const host = $('#palette');
   if (!isOpen() || host.classList.contains('closing')) return;
-  // Phones: the full-screen search slides down and fades instead of vanishing.
   const soft = window.matchMedia?.('(max-width: 760px)').matches && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (soft) {
     host.classList.add('closing');
@@ -425,14 +406,9 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
-/** Example queries the header search shows while it is open for a hint. */
-const SEARCH_HINTS = ['Search nodes, pages, actions…', 'Try: open brain', 'Try: new node', 'Try: > theme', 'Try: a node title'];
+const SEARCH_HINTS = ['Search notes, pages, actions…', 'Try: open brain', 'Try: new note', 'Try: > theme', 'Try: a note title'];
 
-/**
- * Make the header search noticeable: compact "Search" by default; on hover it
- * widens to the left and rotates example queries; the first few visits play
- * that once on its own.
- */
+/** On hover the header search rotates example queries; the first few visits play that once on their own. */
 function advertiseSearch(): void {
   const btn = $('#searchBtn');
   const label = btn.querySelector<HTMLElement>('.tb-search-label');
@@ -493,7 +469,6 @@ function advertiseSearch(): void {
   }, 4800);
 }
 
-/** Global shortcuts: Ctrl/Cmd+K anywhere, "/" when not typing. */
 export function wireSearch(): void {
   $('#searchBtn').onclick = () => openPalette();
   advertiseSearch();

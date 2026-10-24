@@ -1,9 +1,5 @@
-// Agents & API keys. An agent is one API key used by one app. The list
-// answers what is connected, whether it is working and what it may do: a
-// compact summary, then one row per agent (its app, status, access, calls and
-// last call). A row opens the agent's own page at /agents/<id>; a new agent
-// is made on /agents/new. This module routes between the three and draws the
-// list; the data and the actions live in views/agents-data.ts.
+// Agents & API keys: routes /agents, /agents/new and /agents/<id>, and draws the list (an agent is one key used by
+// one app). The data and the actions live in views/agents-data.ts.
 
 import { $, $$, esc, attr, useStyles } from '../dom';
 import { setKeysRoute } from '../router';
@@ -43,148 +39,129 @@ import { renderAgentPage } from './agent-page';
 import { renderNewAgent } from './agent-new';
 
 const KEYS_CSS = `
-.ky{container:ky/inline-size}
+.ky{container:ky/inline-size;--r14:14px;--tile:color-mix(in srgb,var(--fg) 5%,transparent);--tile-h:color-mix(in srgb,var(--fg) 8%,transparent)}
+@media (min-width:1101px){.ky{padding:8px 8px 0}}
 .ky a.btn{text-decoration:none}
+.ky .ag-av{border-radius:30%}
+.ky .sys-head{align-items:flex-end;margin:0 0 24px}
+.ky .sys-head h1{font-size:26px;font-weight:650;letter-spacing:-.02em}
+.ky .sys-head p{margin-top:6px;font-size:14px}
+.ky .sys-acts .btn{height:40px;padding:0 16px;border-radius:10px;font-size:13.5px}
 
-/* summary strip */
-.ky-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.9fr);margin:0 0 24px;background:var(--panel);
-  border:1px solid var(--line);border-radius:var(--r-lg);min-width:0}
-.ky-st{display:flex;flex-direction:column;justify-content:center;gap:3px;padding:14px 18px;min-width:0;border-left:1px solid var(--line)}
-.ky-st:first-child{border-left:0}
-.ky-st .k{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
-.ky-st .v{display:flex;align-items:center;gap:9px;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.ky-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.7fr);margin:0 0 32px;min-width:0;background:var(--surface-1);
+  border:1px solid var(--line);border-radius:var(--r14);overflow:hidden}
+.ky-st{display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:20px 22px;min-width:0}
+.ky-st+.ky-st{border-left:1px solid var(--line)}
+.ky-st .k{font-size:12.5px;font-weight:500;color:var(--muted);white-space:nowrap}
+.ky-st .v{display:flex;align-items:center;gap:12px;font-size:30px;font-weight:400;letter-spacing:-.03em;line-height:1.15;font-variant-numeric:tabular-nums}
 .ky-st .v small{font-size:12.5px;font-weight:500;letter-spacing:0;color:var(--muted)}
-.ky-st .sp{width:72px;height:22px;flex:none}
-.ky-st .sp .cc-spark{height:22px}
-.ky-ep .row{display:flex;align-items:center;gap:6px;min-width:0}
-.ky-ep code{flex:1;min-width:0;font:500 12.5px/1.3 var(--mono);color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ky-ep .cc-ibtn{width:30px;height:30px;margin:-4px -6px -4px 0}
-#kReload.spin svg{animation:kySpin .8s linear infinite}
-@keyframes kySpin{to{transform:rotate(360deg)}}
-.ky-live{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
+.ky-st .sp{width:88px;height:26px;flex:none}
+.ky-st .sp .cc-spark{height:26px}
+.ky-ep{background:color-mix(in srgb,var(--fg) 2%,transparent)}
+.ky-ep .row{display:flex;align-items:center;gap:8px;min-width:0;height:36px;padding:0 4px 0 12px;border-radius:10px;background:var(--surface-1);border:1px solid var(--line)}
+.ky-ep code{flex:1;min-width:0;font:500 13px/1.3 var(--mono);color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ky-ep .cc-ibtn{width:30px;height:30px}
+.ky-ep .hint{font-size:12.5px;color:var(--muted)}
+.ky-live{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
 
-/* section heading */
-.ky-h{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;min-width:0}
-.ky-h h2{margin:0;font-size:15px;font-weight:680}
-.ky-h span{font-size:12.5px;color:var(--muted)}
+.ky-h{display:flex;align-items:center;gap:10px;margin:0 0 14px;min-width:0}
+.ky-h::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--gt,var(--brand-mark,var(--accent)));flex:none}
+.ky-h h2{margin:0;font-size:15px;font-weight:600}
+.ky-h span{font-size:13px;color:var(--muted)}
 
-/* agents list */
-.kl{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;min-width:0}
-.kl ul{list-style:none;margin:0;padding:0}
-.kl-head,.kr{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1.2fr) minmax(0,.9fr) minmax(0,1.35fr) minmax(0,.95fr) minmax(0,.8fr) 36px;
-  align-items:center;gap:16px;padding:0 12px 0 18px}
-.kl-head{height:40px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);
-  background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
-.kr{position:relative;min-height:66px;border-top:1px solid var(--line);transition:background .12s}
-.kr:first-child{border-top:0}
-.kr:hover{background:var(--hover)}
-.kr-hit{position:absolute;inset:0;z-index:0;display:block;width:100%;border-radius:0;cursor:pointer}
-.kr-hit:focus-visible{border-radius:0;box-shadow:inset 0 0 0 2px var(--accent)}
-.kr>:not(.kr-hit){position:relative;min-width:0;pointer-events:none}
-.kr>.kr-act{pointer-events:auto;z-index:1}
-.kr-agent{display:flex;align-items:center;gap:12px}
-.kr-agent .t{display:flex;flex-direction:column;min-width:0}
-.kr-agent b{font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kr-agent .kid{font:500 11.5px/1.3 var(--mono);color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
-.kr-agent .sub2{display:none;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
-.kr-app{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2)}
-.kr-app span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kr-app .none{color:var(--text-3)}
-.kr-st{display:flex;align-items:center;gap:9px;font-size:13px}
-.kr-st .t{display:flex;flex-direction:column;min-width:0}
-.kr-st b{font-weight:600;white-space:nowrap}
-.kr-st small{display:none;font-size:12px;color:var(--muted);white-space:nowrap}
-.kr-perm{display:flex;flex-direction:column;font-size:13px;min-width:0}
-.kr-perm b{font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kr-perm small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kr-perm.warn b{color:var(--warn)}
-.kr-perm.none b{color:var(--danger)}
-.kr-calls{display:flex;align-items:center;gap:10px}
-.kr-calls b{font-size:13.5px;font-weight:620;font-variant-numeric:tabular-nums;min-width:1.6em}
-.kr-calls b.z{color:var(--text-3);font-weight:500}
-.kr-calls .sp{width:56px;height:20px;flex:none}
-.kr-calls .sp .cc-spark{height:20px}
-.kr-seen{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kr-act .cc-ibtn{width:34px;height:34px}
-.kr.off .ag-av{filter:grayscale(1);opacity:.55}
-.kr.off .kr-agent b{color:var(--muted)}
-.kr .tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;margin-left:6px;border-radius:99px;font-size:10.5px;font-weight:650;
-  color:var(--muted);border:1px solid var(--line);vertical-align:1px}
+.kl{min-width:0}
+.kl ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:16px}
+.kc{position:relative;display:flex;flex-direction:column;min-width:0;padding:20px 20px 10px;background:var(--surface-1);border:1px solid var(--line);
+  border-radius:var(--r14);transition:border-color .16s}
+.kc:hover{border-color:var(--line-strong)}
+.kr-hit{position:absolute;inset:0;z-index:0;display:block;border-radius:var(--r14);cursor:pointer}
+.kr-hit:focus-visible{box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--r14)}
+.kc>:not(.kr-hit){position:relative;min-width:0;pointer-events:none}
+.kc .kr-act{pointer-events:auto;z-index:1}
+.kc-h{display:flex;align-items:center;gap:12px}
+.kc-h .t{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.kc-h b{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-h .st{font-size:12.5px;gap:7px;color:var(--text-2)}
+.kc-h .st::before{width:6px;height:6px}
+.kc-h .st.ok::before{box-shadow:0 0 0 3px var(--ok-soft)}
+.kc-h .st.never::before{background:transparent;box-shadow:inset 0 0 0 1.5px var(--text-3)}
+.kc-d{margin:14px 0 0;font-size:13.5px;line-height:1.5;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-d.none{color:var(--text-3)}
+.kc-props{margin:14px 0 0;padding:6px 0 0;border-top:1px solid var(--line);display:flex;flex-direction:column}
+.kc-props>div{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:36px;font-size:13.5px}
+.kc-props dt{color:var(--muted);flex:none}
+.kc-props dd{margin:0;display:flex;align-items:center;gap:8px;min-width:0;justify-content:flex-end;font-weight:500;color:var(--fg)}
+.kc-props dd>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-props dd.warn{color:var(--warn)}
+.kc-props dd.none{color:var(--danger)}
+.kc-props dd .z{color:var(--text-3);font-weight:400}
+.kc-props dd .muted{color:var(--text-3);font-weight:400}
+.kc-props .sp{width:60px;height:20px;flex:none}
+.kc-props .sp .cc-spark{height:20px}
+.kr-act .cc-ibtn{width:34px;height:34px;opacity:0;transition:opacity .16s,background .16s}
+.kc:hover .kr-act .cc-ibtn,.kr-act .cc-ibtn:focus-visible,.kr-act .cc-ibtn[aria-expanded=true]{opacity:1}
+@media (hover:none),(pointer:coarse){.kr-act .cc-ibtn{opacity:1}}
+.kc.off .ag-av{filter:grayscale(1);opacity:.55}
+.kc.off .kc-h b{color:var(--muted)}
+.kc-add{display:flex}
+.ky-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;width:100%;min-height:200px;padding:24px;border-radius:var(--r14);
+  background:var(--tile);border:1px dashed var(--line-strong);color:var(--text-2);font-size:14px;font-weight:550;text-decoration:none;text-align:center;
+  transition:background .16s,color .16s,border-color .16s}
+.ky-add .ic{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--surface-1);border:1px solid var(--line);color:var(--fg)}
+.ky-add .ic .cc-i{width:18px;height:18px}
+.ky-add small{display:block;margin-top:-4px;font-size:12.5px;font-weight:400;color:var(--muted)}
+.ky-add:hover{background:var(--tile-h);color:var(--fg);border-color:var(--text-3);text-decoration:none}
+.ky-add:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* deleted */
-.ky-del{margin-top:28px}
-.ky-del .kl{background:transparent}
-.kd{display:flex;align-items:center;gap:12px;padding:10px 12px 10px 18px;border-top:1px solid var(--line);min-height:58px}
+.ky-del{margin-top:36px}
+.ky-del .kl{background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r14);overflow:hidden}
+.kd{display:flex;align-items:center;gap:12px;padding:10px 16px 10px 20px;border-top:1px solid var(--line);min-height:60px}
 .kd:first-child{border-top:0}
 .kd .ag-av{filter:grayscale(1);opacity:.6}
 .kd .tx{flex:1;min-width:0}
-.kd b{display:block;font-size:13.5px;font-weight:600;color:var(--text-2)}
-.kd small{display:block;font:500 11.5px/1.3 var(--mono);color:var(--text-3)}
-.kd .btn{height:34px}
+.kd b{display:block;font-size:14px;font-weight:500;color:var(--text-2)}
+.kd small{display:block;font:500 12px/1.3 var(--mono);color:var(--text-3)}
+.kd .btn{height:34px;border-radius:8px}
 
-/* empty */
-.ky-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:44px 22px 40px}
-.ky-empty .ic{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;margin-bottom:16px;background:var(--accent-soft);color:var(--accent);
-  border:1px solid var(--accent-line)}
-.ky-empty .ic .cc-i{width:24px;height:24px}
-.ky-empty h3{margin:0 0 6px;font-size:17px;font-weight:700}
-.ky-empty p{margin:0 0 18px;max-width:52ch;font-size:13.5px;line-height:1.6;color:var(--muted)}
-.ky-empty .btn.primary{height:40px;padding:0 18px;border-radius:11px}
-.ky-pop{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:20px}
-.ky-pop a{text-decoration:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:99px;font-size:13px;font-weight:600;
-  border:1px solid var(--line);background:var(--surface-0);color:var(--text-2)}
-.ky-pop a:hover{text-decoration:none;border-color:var(--line-strong);color:var(--fg)}
-.ky-err{padding:28px 20px;text-align:center;color:var(--muted);font-size:13px}
+.ky-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:56px 24px 48px;background:var(--surface-1);
+  border:1px solid var(--line);border-radius:var(--r14)}
+.ky-empty .ic{display:grid;place-items:center;width:44px;height:44px;margin-bottom:14px;border-radius:12px;color:#5eead4;background:linear-gradient(180deg,#17202e,#0b0f17)}
+.ky-empty .ic .cc-i{width:20px;height:20px}
+.ky-empty h3{margin:0 0 6px;font-size:15px;font-weight:600}
+.ky-empty p{margin:0 0 20px;max-width:52ch;font-size:14px;line-height:1.6;color:var(--muted)}
+.ky-empty .btn.primary{height:40px;padding:0 18px;border-radius:10px}
+.ky-pop{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}
+.ky-pop a{text-decoration:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 6px;border-radius:99px;font-size:13px;font-weight:550;
+  border:1px solid var(--line-strong);color:var(--text-2)}
+.ky-pop a:hover{text-decoration:none;background:var(--hover);color:var(--fg)}
+.ky-err{padding:36px 20px;text-align:center;color:var(--muted);font-size:13.5px;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r14)}
 .ky-err b{display:block;color:var(--fg);margin-bottom:4px}
-.ky-sk{display:flex;align-items:center;gap:14px;padding:0 18px;min-height:66px;border-top:1px solid var(--line)}
-.ky-sk:first-child{border-top:0}
+.ky-sk{display:flex;flex-direction:column;gap:14px;padding:20px;min-height:200px;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r14)}
+.kl[aria-busy] ul,.kl .ky-sks{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:16px}
 
-/* tablet: condensed rows */
 @container ky (max-width:899px){
-  .ky-sum{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .ky-ep{grid-column:1/-1;border-left:0;border-top:1px solid var(--line);flex-direction:row;align-items:center;gap:12px;padding:11px 18px}
-  .ky-ep .row{flex:1}
-  .kl-head{display:none}
-  .kr{grid-template-columns:minmax(0,1fr) minmax(0,150px) 128px 104px 36px;gap:14px;min-height:70px}
-  .kr-perm,.kr-seen{display:none}
-  .kr-agent .kid{display:none}
-  .kr-agent .sub2{display:block}
-  .kr-agent .sub2 .app{display:none}
-  .kr-st{align-items:flex-start}
-  .kr-st .sd{margin-top:6px}
-  .kr-st small{display:block}
+  .ky-sum{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:28px}
+  .ky-st:nth-child(3){border-left:0}
+  .ky-st:nth-child(n+3){border-top:1px solid var(--line)}
 }
-/* phone: stacked cards */
 @container ky (max-width:599px){
-  .kr-agent .sub2 .app{display:inline}
-  .kr-app{display:none}
-  .ky-sum{margin-bottom:20px}
-  .ky-st{padding:12px 14px}
-  .ky-st .v{font-size:20px}
-  .ky-st .sp,.ky-st .v small{display:none}
-  .ky-ep{padding:10px 14px}
-  .ky-ep .k{display:none}
-  .kl{background:transparent;border:0;border-radius:0;overflow:visible}
-  .kl ul{display:flex;flex-direction:column;gap:8px}
-  .kr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"agent act" "st calls";gap:12px 10px;padding:14px 10px 13px 14px;
-    border:1px solid var(--line);border-radius:14px;background:var(--panel)}
-  .kr:first-child{border-top:1px solid var(--line)}
-  .kr-hit{border-radius:14px}
-  .kr-hit:focus-visible{border-radius:14px}
-  .kr-agent{grid-area:agent}
-  .kr-act{grid-area:act;align-self:start;justify-self:end;margin:-6px -2px 0 0}
-  .kr-st{grid-area:st;flex-direction:row;align-items:center;padding-left:52px}
-  .kr-st .sd{margin-top:0}
-  .kr-st .t{flex-direction:row;align-items:baseline;gap:6px}
-  .kr-calls{grid-area:calls;justify-self:end;padding-right:6px}
-  .kr-act .cc-ibtn{width:40px;height:40px}
-  .ky-del .kl{border:1px solid var(--line);border-radius:14px;overflow:hidden}
-  .kd{padding:10px 12px 10px 14px}
-  .ky-empty{padding:34px 18px 30px}
+  .ky-sum{margin-bottom:24px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ky-st:nth-child(3){border-left:1px solid var(--line)}
+  .ky-st:nth-child(-n+3){border-top:0}
+  .ky-ep{grid-column:1/-1;border-left:0!important}
+  .ky-st{padding:16px}
+  .ky-st .k{font-size:12px}
+  .ky-st .v{font-size:26px}
+  .ky-st .sp,.ky-st .v small,.ky-ep .hint{display:none}
+  .kl ul{gap:12px}
+  .kc{padding:16px 16px 8px}
+  .kr-act .cc-ibtn{width:44px;height:44px;margin:-6px -8px -6px 0}
+  .ky-add{min-height:120px}
+  .kd{padding:10px 12px 10px 16px}
+  .ky-empty{padding:40px 18px 34px}
 }
+@media (prefers-reduced-motion:reduce){.kr-act .cc-ibtn{transition:none}}
 `;
-
-// ── routing ─────────────────────────────────────────────────────────────
 
 type KeysView = { kind: 'list' } | { kind: 'new'; client: string } | { kind: 'agent'; id: string; tab: string };
 
@@ -224,27 +201,20 @@ export async function renderKeys(): Promise<void> {
   return renderList(host);
 }
 
-// ── list ────────────────────────────────────────────────────────────────
-
 async function renderList(host: HTMLElement): Promise<void> {
   useStyles('keys-css-4', KEYS_CSS);
   host.innerHTML = `<div class="cc ky">
     ${systemHeader(
       'keys',
       'Agents & API keys',
-      'Each agent is one API key used by one app. Give every app or device its own agent, so Activity shows exactly who did what.',
-      `<button type="button" class="cc-ibtn" id="kReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>
-       <a class="btn primary" id="kNew" href="/agents/new" data-nav="new">${ICO.plus}New agent</a>`,
+      'Each AI app you connect is an agent with its own key, so you see what each one does and can turn one off on its own.',
+      `<a class="btn primary" id="kNew" href="/agents/new" data-nav="new">${ICO.plus}New agent</a>`,
     )}
     <div class="ky-sum" id="kStats" aria-live="polite">${statsHTML(data.loaded ? data.keys : null)}</div>
     <div class="ky-h"><h2>Agents</h2><span id="kCount"></span></div>
     <div class="kl" id="kList" aria-busy="true">${skeletonRows()}</div>
     <div id="kDel"></div></div>`;
   wireAgentLinks(host);
-  $('#kReload').onclick = () => {
-    $('#kReload').classList.add('spin');
-    void loadAgents(true);
-  };
   wireCopy($('#kStats'));
   whileVisible(host, () => {
     let t = 0;
@@ -267,16 +237,15 @@ async function renderList(host: HTMLElement): Promise<void> {
 }
 
 function skeletonRows(): string {
-  return Array.from(
-    { length: 4 },
-    () => `<div class="ky-sk">${skBlock('32px', 32)}<span style="flex:1">${skBlock('28%', 11)}</span><span style="flex:1">${skBlock('40%', 10)}</span></div>`,
-  ).join('');
+  return `<div class="ky-sks">${Array.from(
+    { length: 3 },
+    () => `<div class="ky-sk">${skBlock('36px', 36)}${skBlock('45%', 12)}${skBlock('100%', 10)}${skBlock('80%', 10)}${skBlock('60%', 10)}</div>`,
+  ).join('')}</div>`;
 }
 
 function paint(): void {
   const list = document.getElementById('kList');
   if (!list || !document.querySelector('#view-keys .ky')) return;
-  document.getElementById('kReload')?.classList.remove('spin');
   if (!data.loaded && data.error) {
     $('#kStats').innerHTML = statsHTML(null);
     list.removeAttribute('aria-busy');
@@ -294,8 +263,9 @@ function paint(): void {
 
 function statsHTML(rows: KeyRowFull[] | null): string {
   const url = mcpUrl();
-  const ep = `<div class="ky-st ky-ep"><span class="k">MCP endpoint</span><span class="row"><code title="${attr(url)}">${esc(url)}</code>
-    <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the MCP endpoint" title="Copy">${ICO.copy}</button></span></div>`;
+  const ep = `<div class="ky-st ky-ep"><span class="k">Address for AI apps</span><span class="row"><code title="${attr(url)}">${esc(url)}</code>
+    <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the address (MCP endpoint)" title="Copy">${ICO.copy}</button></span>
+    <span class="hint">The MCP endpoint every agent connects to</span></div>`;
   if (!rows) {
     const sk = (k: string): string => `<div class="ky-st"><span class="k">${k}</span><span class="v">${skBlock('38px', 22)}</span></div>`;
     return sk('Agents') + sk('Active now') + sk('Calls in 24h') + ep;
@@ -314,10 +284,10 @@ function statsHTML(rows: KeyRowFull[] | null): string {
     <div class="ky-st"><span class="k">Calls in 24h</span><span class="v">${day}${day ? `<span class="sp">${sparkSVG(all24, 72, 22)}</span>` : ''}</span></div>${ep}`;
 }
 
-/** Live agents first, most recent call first; never used next; turned off last. */
+/** Most recent activity first (live calls, the loaded history or the key's last use); never used last, newest first. */
 function sorted(): KeyRowFull[] {
-  const rank = (k: KeyRowFull): number => (k.enabled === false ? 2 : usageOf(k) || k.uses ? 0 : 1);
-  return [...data.keys].sort((a, b) => rank(a) - rank(b) || (usageOf(b)?.last || 0) - (usageOf(a)?.last || 0) || nameOf(a).localeCompare(nameOf(b)));
+  const last = (k: KeyRowFull): number => Math.max(usageOf(k)?.last || 0, k.last_used || 0);
+  return [...data.keys].sort((a, b) => last(b) - last(a) || (b.created || 0) - (a.created || 0) || nameOf(a).localeCompare(nameOf(b)));
 }
 
 function paintList(list: HTMLElement): void {
@@ -338,10 +308,9 @@ function paintList(list: HTMLElement): void {
     return;
   }
   const now = Date.now() / 1000;
-  list.innerHTML = `<div class="kl-head" aria-hidden="true"><span>Agent</span><span>App</span><span>Status</span><span>Access</span><span>Calls 24h</span><span>Last call</span><span></span></div>
-    <ul aria-label="Agents">${sorted()
-      .map((k) => rowHTML(k, now))
-      .join('')}</ul>`;
+  list.innerHTML = `<ul aria-label="Agents">${sorted()
+    .map((k) => rowHTML(k, now))
+    .join('')}<li class="kc-add"><a class="ky-add" href="/agents/new" data-nav="new"><span class="ic">${ICO.plus}</span>Connect another AI<small>Claude, ChatGPT, Cursor and more</small></a></li></ul>`;
   wireAgentLinks(list);
   $$<HTMLElement>('[data-more]', list).forEach(
     (b) =>
@@ -359,18 +328,23 @@ function rowHTML(k: KeyRowFull, now: number): string {
   const u = usageOf(k);
   const app = appFor(k);
   const p = summarize(permsOf(k));
-  const signed = data.oauth.has(k.id) ? '<span class="tag">Signed in</span>' : '';
+  const signed = data.oauth.has(k.id);
+  const kind = app.id ? appById(app.id)?.kind || '' : '';
+  const desc = kind ? kind + (signed ? ' · signed in' : '') : signed ? 'Signed in' : 'No app picked yet';
   const day = u ? u.day : 0;
-  return `<li class="kr${s.st === 'off' ? ' off' : ''}" style="--ag:${agentColor(name, k.id)}">
+  const dot = s.st === 'active' ? 'ok' : s.st === 'off' ? 'danger' : s.st;
+  return `<li class="kc${s.st === 'off' ? ' off' : ''}" style="--ag:${agentColor(name, k.id)}">
     <a class="kr-hit" href="${attr(agentsHref(k.id))}" data-nav="${attr(k.id)}" aria-label="${attr(`${name}: ${s.label}, ${app.label || 'app not set'}, ${p.level}`)}"></a>
-    <div class="kr-agent">${avatarHTML(name, 34, '', k.id)}<span class="t"><b>${esc(name)}${signed}</b><span class="kid">${esc(k.id)}</span>
-      <span class="sub2"><span class="app">${esc(app.label || 'App not set')} · </span>${esc(p.level)}</span></span></div>
-    <div class="kr-app">${appIconHTML(app.label, 24)}<span class="${app.label ? '' : 'none'}">${esc(app.label || 'Not set')}</span></div>
-    <div class="kr-st"><span class="sd ${s.st}" aria-hidden="true"></span><span class="t"><b>${s.label}</b><small>${esc(s.st === 'never' ? 'No calls yet' : s.seen)}</small></span></div>
-    <div class="kr-perm${p.tone ? ' ' + p.tone : ''}"><b>${esc(p.level)}</b><small>${esc(p.tools)}</small></div>
-    <div class="kr-calls"><b class="${day ? '' : 'z'}">${day}</b><span class="sp">${day ? sparkSVG(u!.spark, 56, 20) : ''}</span></div>
-    <div class="kr-seen">${esc(s.seen)}</div>
-    <div class="kr-act"><button type="button" class="cc-ibtn" data-more="${attr(k.id)}" aria-haspopup="menu" aria-label="Actions for ${attr(name)}" title="Actions">${ICO.more}</button></div>
+    <div class="kc-h">${avatarHTML(name, 40, '', k.id)}<span class="t"><b title="${attr(k.id)}">${esc(name)}</b>
+      <span class="st ${dot}">${s.label}${s.st === 'active' || s.st === 'off' ? '' : s.st === 'never' ? ' · no calls yet' : ''}</span></span>
+      <span class="kr-act"><button type="button" class="cc-ibtn" data-more="${attr(k.id)}" aria-haspopup="menu" aria-label="Actions for ${attr(name)}" title="Actions">${ICO.more}</button></span></div>
+    <p class="kc-d${kind || signed ? '' : ' none'}">${esc(desc)}</p>
+    <dl class="kc-props">
+      <div><dt>Access</dt><dd class="${p.tone || ''}" title="${attr(p.tools)}"><span>${esc(p.level)}</span></dd></div>
+      <div><dt>Last active</dt><dd><span class="${s.st === 'never' ? 'muted' : ''}">${esc(s.seen)}</span></dd></div>
+      <div><dt>Calls in 24h</dt><dd>${day ? `<span class="sp">${sparkSVG(u!.spark, 56, 20)}</span>` : ''}<span class="${day ? '' : 'z'}">${day}</span></dd></div>
+      <div><dt>App</dt><dd>${appIconHTML(app.label, 20)}<span class="${app.label ? '' : 'muted'}">${esc(app.label || 'Not set')}</span></dd></div>
+    </dl>
   </li>`;
 }
 
@@ -380,7 +354,7 @@ function paintDeleted(): void {
     box.innerHTML = '';
     return;
   }
-  box.innerHTML = `<section class="ky-del"><div class="ky-h"><h2>Recently deleted</h2><span>Restore until you reload the app</span></div>
+  box.innerHTML = `<section class="ky-del"><div class="ky-h" style="--gt:var(--warn)"><h2>Recently deleted</h2><span>Restore until you reload the app</span></div>
     <div class="kl">${state.keysDeleted
       .map(
         (k) => `<div class="kd">${avatarHTML(nameOf(k), 32, '', k.id)}<span class="tx"><b>${esc(nameOf(k))}</b><small>${esc(k.id)}</small></span>

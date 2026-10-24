@@ -1,15 +1,13 @@
-// Reading settings for the node reader ("Aa"): text size, font and reading
-// colour. Stored per browser and applied only to the reading area (title,
-// body and the outline rail), never to the rest of the app or the editor.
+// Reading settings ("Aa"), stored per browser and applied only to the reading area.
 
 import { el } from '../dom';
 import { openPanel } from './panel';
 
-export type ReadFont = 'sans' | 'serif' | 'mono' | 'rounded' | 'legible';
-export type ReadTone = 'default' | 'sepia' | 'contrast' | 'night' | 'paper' | 'mint';
-export type ReadLeading = 'compact' | 'normal' | 'relaxed';
-export type ReadWidth = 'narrow' | 'wide' | 'full';
-export type ReadAlign = 'left' | 'justify';
+type ReadFont = 'sans' | 'serif' | 'mono' | 'rounded' | 'legible';
+type ReadTone = 'default' | 'sepia' | 'contrast' | 'night' | 'paper' | 'mint';
+type ReadLeading = 'compact' | 'normal' | 'relaxed';
+type ReadWidth = 'narrow' | 'wide' | 'full';
+type ReadAlign = 'left' | 'justify';
 
 interface ReadPrefs {
   size: number;
@@ -24,9 +22,9 @@ const LS = 'memora.reader.v2';
 const LS_OLD = 'memora.reader.v1';
 /** Body text sizes in px; index 2 is the default. */
 const SIZES = [13, 14.5, 16, 17.5, 19, 21, 24];
-const DEFAULTS: ReadPrefs = { size: 2, font: 'sans', tone: 'default', leading: 'normal', width: 'full', align: 'left' };
+const DEFAULTS: ReadPrefs = { size: 2, font: 'sans', tone: 'default', leading: 'normal', width: 'wide', align: 'left' };
 /** The text column's widest line for each width choice. */
-const WIDTHS: Record<ReadWidth, string> = { narrow: '720px', wide: '1100px', full: '100%' };
+const WIDTHS: Record<ReadWidth, string> = { narrow: '640px', wide: '760px', full: '100%' };
 
 const FONTS: { k: ReadFont; label: string }[] = [
   { k: 'sans', label: 'Sans' },

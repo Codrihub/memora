@@ -1,6 +1,5 @@
-// The documentation sections: the repository's Markdown docs (bundled as raw
-// text at build time, so the page always matches the docs that shipped) plus
-// a few hand-written guides that only make sense inside the app.
+// The documentation sections: the repository's Markdown docs (bundled at build time, so they match what shipped)
+// plus a few hand-written guides that only make sense inside the app.
 
 import readme from '../../../README.md?raw';
 import installMd from '../../../docs/INSTALL.md?raw';
@@ -20,11 +19,11 @@ import { categoryDesc, categoryLabel, groupTools, riskChip, toolRisk, toolTitle 
 import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyle, type PromptStyleId } from './agent-prompt';
 import { calloutHTML, codeBlockHTML, headingHTML, inline, mdPart, renderMarkdown, uniqueSlug, type LinkTarget, type MdOptions } from './markdown';
 
-export const REPO_URL = 'https://github.com/Codrihub/memora';
+const REPO_URL = 'https://github.com/Codrihub/memora';
 const BLOB = REPO_URL + '/blob/main/';
 
 /** Builds one page; `slugs` keeps heading anchors unique across its parts. */
-export interface PageCtx {
+interface PageCtx {
   slugs: Map<string, number>;
   h2(text: string): string;
   h3(text: string): string;
@@ -45,8 +44,6 @@ export interface DocSection {
   mount?(root: HTMLElement, ctx: PageCtx): Promise<void>;
 }
 
-/* ───────────────────────── links ───────────────────────── */
-
 const FILE_SLUG: Record<string, string> = {
   'README.md': 'get-started',
   'docs/INSTALL.md': 'install',
@@ -61,7 +58,7 @@ const FILE_SLUG: Record<string, string> = {
   'CHANGELOG.md': 'changelog',
 };
 
-/** `base` directory joined with a relative path; null when it leaves the repository. */
+/** `file`'s directory joined with a relative path; null when it leaves the repository. */
 function joinPath(file: string, rel: string): string | null {
   const parts = file.split('/').slice(0, -1);
   for (const seg of rel.split('/')) {
@@ -75,7 +72,7 @@ function joinPath(file: string, rel: string): string | null {
 }
 
 /** How a link in `file` resolves: another docs page, GitHub, or nothing. */
-export function linkResolver(file: string, selfSlug: string): (href: string) => LinkTarget {
+function linkResolver(file: string, selfSlug: string): (href: string) => LinkTarget {
   return (href) => {
     if (!href) return null;
     if (href.startsWith('#')) return { kind: 'doc', slug: selfSlug, hash: decodeHash(href.slice(1)) };
@@ -112,8 +109,6 @@ export function pageCtx(slug: string): PageCtx {
   return { slugs, h2: h(2), h3: h(3), md };
 }
 
-/* ───────────────────────── small builders ───────────────────────── */
-
 const p = (html: string): string => `<p>${html}</p>`;
 const code = (s: string): string => `<code>${esc(s)}</code>`;
 const docLink = (slug: string, text: string, hash = ''): string =>
@@ -148,8 +143,6 @@ const keys = (...k: string[]): string => `<span class="dc-keys">${k.map((x) => `
 function mcpUrlHere(): string {
   return location.origin + '/mcp';
 }
-
-/* ───────────────────────── hand-written pages ───────────────────────── */
 
 function getStarted(c: PageCtx): string {
   return (
@@ -406,7 +399,7 @@ function shortcuts(c: PageCtx): string {
     p('Shortcuts work anywhere outside a text field unless noted. On a Mac, Ctrl is ⌘ and Alt is ⌥.') +
     c.h2('Everywhere') +
     rows([
-      [keys(mod, 'K'), 'Search nodes, jump to pages, run actions'],
+      [keys(mod, 'K'), 'Search notes, jump to pages, run actions'],
       [keys('/'), 'Open search'],
       [keys('?'), 'Help & shortcuts'],
       [keys('['), 'Collapse or expand the sidebar'],
@@ -416,20 +409,20 @@ function shortcuts(c: PageCtx): string {
     rows(pages) +
     c.h2('Search') +
     rows([
-      [keys('>'), 'Typed first: actions only (new node, theme ...)'],
+      [keys('>'), 'Typed first: actions only (new note, theme ...)'],
       [code('tag:name'), 'Narrow results by tag'],
       [keys('↑') + keys('↓'), 'Move through results'],
       [keys('Enter'), 'Open the result'],
     ]) +
-    c.h2('Nodes') +
+    c.h2('Notes') +
     rows([
-      [keys('N'), 'New node in the open folder'],
-      [keys('E'), 'Edit the open node'],
+      [keys('N'), 'New note in the open folder'],
+      [keys('E'), 'Edit the open note'],
       [keys(mod, 'E'), 'Switch between reading and editing'],
-      [keys('P'), 'Pin or unpin the node'],
-      [keys('M'), 'Move the node'],
-      [keys('F2'), 'Rename the node'],
-      [keys('Delete'), 'Delete the node'],
+      [keys('P'), 'Pin or unpin the note'],
+      [keys('M'), 'Move the note'],
+      [keys('F2'), 'Rename the note'],
+      [keys('Delete'), 'Move the note to the Trash (Undo brings it back)'],
     ]) +
     c.h2('Editor') +
     rows([
@@ -442,7 +435,7 @@ function shortcuts(c: PageCtx): string {
       [keys(mod, 'Shift', '8'), 'Bullet list'],
       [keys(mod, 'Shift', '9'), 'Task list'],
       [keys('Tab') + keys('Shift', 'Tab'), 'Indent or outdent'],
-      [keys('Esc'), 'Back to reading'],
+      [keys('Esc'), 'Back to reading (asks first when there are unsaved changes)'],
     ]) +
     c.h2('Graph') +
     rows([
@@ -454,8 +447,6 @@ function shortcuts(c: PageCtx): string {
     ])
   );
 }
-
-/* ───────────────────────── tool reference ───────────────────────── */
 
 function toolReference(c: PageCtx): string {
   return (
@@ -509,8 +500,6 @@ async function mountTools(root: HTMLElement, c: PageCtx): Promise<void> {
   host.innerHTML = html;
   host.removeAttribute('aria-busy');
 }
-
-/* ───────────────────────── registry ───────────────────────── */
 
 const part = (src: string, ...names: string[]): string => names.map((n) => mdPart(src, n)).join('\n\n');
 

@@ -1,19 +1,24 @@
-// Documentation page: /docs and /docs/<section>#<heading>. A sidebar of
-// sections with search, the article, an "On this page" list with scroll-spy
-// and previous / next links. Section changes inside the page push history
-// entries themselves; back and forward come through the router.
+// Documentation page: /docs and /docs/<section>#<heading>. Section changes inside the page push history entries
+// themselves; back and forward come through the router.
 
 import { $, esc, useStyles } from '../dom';
 import { copyText } from '../control/ui';
 import { go, isPage } from '../router';
 import { icon } from '../ui/icons';
-import { toast } from '../toast';
+import { fadeScroll } from '../ui/scroll-fade';
 import { HEADING_PREFIX } from '../docs/markdown';
 import { SECTIONS, SOURCE_URL, findSection, pageCtx, type DocSection } from '../docs/content';
 import { DOCS_CSS } from '../docs/styles';
 import { TOOL_ROW_CSS } from './tools';
 
 const DEFAULT = SECTIONS[0].slug;
+/** `current` while the "Page not found in help" article is shown. */
+const MISSING = '\0missing';
+
+const MISSING_CSS = `
+.dc-miss-acts{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 8px}
+.dc-miss-sug{margin:0 0 10px;font-size:13px;font-weight:650;color:var(--muted)}
+`;
 
 interface Heading {
   level: number;
@@ -61,14 +66,12 @@ function routeOf(): { slug: string; hash: string; known: boolean } {
     /* keep raw */
   }
   if (!slug) return { slug: DEFAULT, hash, known: true };
-  return findSection(slug) ? { slug, hash, known: true } : { slug: DEFAULT, hash: '', known: false };
+  return { slug, hash, known: !!findSection(slug) };
 }
 
 function docUrl(slug: string, hash = ''): string {
   return '/docs/' + slug + (hash ? '#' + encodeURIComponent(hash) : '');
 }
-
-/* ───────────────────────── shell ───────────────────────── */
 
 function navHTML(): string {
   const groups: [string, DocSection[]][] = [];
@@ -109,6 +112,7 @@ function buildShell(host: HTMLElement): void {
   </div>`;
   const root = $('.dc', host);
   root.addEventListener('click', onClick);
+  fadeScroll($('#dcSide', root));
   $('#dcMain', root).addEventListener('scroll', () => {
     if (heldAnchor) {
       clearTimeout(heldTimer);
@@ -136,8 +140,6 @@ function setDrawer(open: boolean): void {
   $('.dc-mtoggle', root).setAttribute('aria-expanded', String(open));
 }
 
-/* ───────────────────────── article ───────────────────────── */
-
 function articleHTML(sec: DocSection, body: string): string {
   const i = SECTIONS.indexOf(sec);
   const prev = SECTIONS[i - 1];
@@ -153,7 +155,7 @@ function articleHTML(sec: DocSection, body: string): string {
         SOURCE_URL(sec.source),
       )}" target="_blank" rel="noopener noreferrer">${icon('arrow')}View on GitHub</a></div>`
     : '<div class="dc-meta"></div>';
-  return `<p class="dc-eyebrow">${esc(sec.group)}</p><h1>${esc(sec.title)}</h1><p class="dc-lead">${esc(sec.lead)}</p>${meta}
+  return `<p class="dc-eyebrow"><span>Documentation</span>${icon('chev-right')}<span>${esc(sec.group)}</span></p><h1>${esc(sec.title)}</h1><p class="dc-lead">${esc(sec.lead)}</p>${meta}
     <div class="dc-body">${body}</div>${pager}`;
 }
 
@@ -193,8 +195,7 @@ function spy(): void {
     if (!el || el.getBoundingClientRect().top > line) break;
     at = h.id;
   }
-  // At the very bottom, the last heading on screen counts, even when it
-  // cannot scroll up to the line.
+  // At the very bottom, the last heading on screen counts, even when it cannot scroll up to the line.
   if (main.scrollTop + main.clientHeight >= main.scrollHeight - 4) {
     for (const h of headings) {
       const el = document.getElementById(HEADING_PREFIX + h.id);
@@ -206,7 +207,7 @@ function spy(): void {
 
 function paintSpy(at: string): void {
   const i = headings.findIndex((h) => h.id === at);
-  const at2 = i < 0 ? '' : [...headings.slice(0, i + 1)].reverse().find((h) => h.level === 2)?.id || '';
+  const at2 = i < 0 ? '' : headings.slice(0, i + 1).reverse().find((h) => h.level === 2)?.id || '';
   document.querySelectorAll<HTMLElement>('#dcToc a').forEach((a) => a.classList.toggle('on', a.dataset.anchor === at));
   document.querySelectorAll<HTMLElement>('#dcNav .dc-sub a').forEach((a) => a.classList.toggle('on', a.dataset.anchor === at2));
 }
@@ -229,8 +230,57 @@ function scrollToAnchor(id: string, smooth: boolean): boolean {
   return true;
 }
 
+/** Sections whose title or text mention the words of a missing slug, best first. */
+function suggestions(slug: string): DocSection[] {
+  const words = slug
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2);
+  if (!words.length) return [];
+  return buildIndex()
+    .map((e) => {
+      const title = e.sec.title.toLowerCase();
+      const score = words.reduce((n, w) => n + (title.includes(w) ? 10 : 0) + (e.text.includes(w) ? 1 : 0), 0);
+      return { sec: e.sec, score, inTitle: words.some((w) => title.includes(w)) };
+    })
+    .filter((x) => x.sec !== SECTIONS[0] && (x.inTitle || x.score >= words.length))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((x) => x.sec);
+}
+
+/** An unknown section: say so plainly, with the closest pages, Get started and search. */
+function showMissing(slug: string): void {
+  current = MISSING;
+  headings = [];
+  const sug = suggestions(slug);
+  const first = SECTIONS[0];
+  const card = (sec: DocSection): string =>
+    `<a class="dc-card" href="${docUrl(sec.slug)}" data-doc="${sec.slug}" data-hash=""><b>${esc(sec.title)}</b><span>${esc(sec.lead)}</span></a>`;
+  $('#dcArticle').innerHTML = `<p class="dc-eyebrow"><span>Documentation</span></p><h1>Page not found in help</h1>
+    <p class="dc-lead">There is no help page called “${esc(slug)}”. The link may be old or mistyped.</p>
+    <div class="dc-miss-acts">
+      <a class="btn primary" href="${docUrl(first.slug)}" data-doc="${first.slug}" data-hash="">Go to ${esc(first.title)}</a>
+      <button type="button" class="btn" data-miss-search>${icon('search')}Search the help</button>
+    </div>
+    ${sug.length ? `<div class="dc-body"><p class="dc-miss-sug">Maybe you meant</p><div class="dc-cards">${sug.map(card).join('')}</div></div>` : ''}`;
+  $('#dcMain').scrollTop = 0;
+  document.querySelectorAll<HTMLElement>('#dcNav .dc-link').forEach((a) => {
+    a.classList.remove('active');
+    a.removeAttribute('aria-current');
+  });
+  $('#dcMTitle').textContent = 'Page not found';
+  document.title = 'Page not found · Documentation · Memora';
+  paintToc();
+  setDrawer(false);
+}
+
 function show(slug: string, hash: string): void {
-  const sec = findSection(slug) || SECTIONS[0];
+  const sec = findSection(slug);
+  if (!sec) {
+    showMissing(slug);
+    return;
+  }
   const main = $('#dcMain');
   if (sec.slug !== current) {
     current = sec.slug;
@@ -279,8 +329,6 @@ function open(slug: string, hash: string): void {
   if (!same) $('#dcMain').focus({ preventScroll: true });
 }
 
-/* ───────────────────────── events ───────────────────────── */
-
 function onClick(e: MouseEvent): void {
   const t = e.target as HTMLElement;
   const copy = t.closest<HTMLElement>('[data-copy-code]');
@@ -293,6 +341,13 @@ function onClick(e: MouseEvent): void {
       copy.textContent = 'Copy';
       copy.classList.remove('done');
     }, 1600);
+    return;
+  }
+  if (t.closest('[data-miss-search]')) {
+    const q = $('#dcQ') as HTMLInputElement;
+    setDrawer(true);
+    q.focus();
+    q.select();
     return;
   }
   const a = t.closest<HTMLAnchorElement>('a');
@@ -320,8 +375,6 @@ function onClick(e: MouseEvent): void {
     go(a.dataset.app);
   }
 }
-
-/* ───────────────────────── search ───────────────────────── */
 
 function buildIndex(): NonNullable<typeof index> {
   if (!index) {
@@ -405,24 +458,15 @@ function onSearchKey(e: KeyboardEvent): void {
   }
 }
 
-/* ───────────────────────── entry ───────────────────────── */
-
 export function renderDocs(): void {
   // The risk chips of the tool reference come from the Tools page styles.
-  useStyles('docs-css', DOCS_CSS + TOOL_ROW_CSS);
+  useStyles('docs-css', DOCS_CSS + TOOL_ROW_CSS + MISSING_CSS);
   const host = $('#view-docs');
   if (!host.querySelector('.dc')) {
     current = '';
     buildShell(host);
   }
   const r = routeOf();
-  if (!r.known) {
-    toast('There is no such documentation page', 'warn', 2600);
-    try {
-      history.replaceState({ page: 'docs' }, '', '/docs');
-    } catch {
-      /* sandboxed frames */
-    }
-  }
+  // An unknown slug keeps its URL, so the reader sees what was asked for.
   show(r.slug, r.hash);
 }

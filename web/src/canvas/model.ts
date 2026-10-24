@@ -1,12 +1,10 @@
-// Canvas board model: folder frames that hold note cards, positions in world
-// units, and the pure layout helpers (tidy a frame, pack frames, find a free
-// slot). Nothing here touches the DOM.
+// Pure board model and layout helpers in world units; nothing here touches the DOM.
 
 export const CARD_W = 240;
 export const CARD_H = 136;
 const GAP = 20;
 const PAD = 22;
-export const HEAD = 24;
+const HEAD = 24;
 const FRAME_GAP = 140;
 
 export interface Cam {
@@ -22,7 +20,6 @@ export interface Box {
   h: number;
 }
 
-/** What the board persists through the layout API (`canvas`). */
 export interface SavedLayout {
   v: 1;
   view?: Cam;
@@ -45,18 +42,18 @@ export interface Card {
   name: string;
   folder: string;
   mtime: number;
-  /** Position relative to the frame. */
+  /** Relative to the frame. */
   x: number;
   y: number;
   el: HTMLElement | null;
   touch: Touch | null;
-  /** True while the card is being dragged: its frame does not grow around it. */
+  /** While dragged, its frame does not grow around it. */
   drag: boolean;
 }
 
 export interface Frame {
   name: string;
-  /** World position and the user's size; the drawn size also fits the cards. */
+  /** The user's size; the drawn size also fits the cards. */
   x: number;
   y: number;
   w: number;
@@ -69,7 +66,7 @@ export function emptyLayout(): SavedLayout {
   return { v: 1, frames: {}, cards: {} };
 }
 
-/** Smallest box that holds every card, measured from the frame origin. */
+/** Measured from the frame origin. */
 export function contentSize(f: Frame): { w: number; h: number } {
   let w = PAD * 2 + CARD_W;
   let h = HEAD + PAD + CARD_H;
@@ -81,7 +78,6 @@ export function contentSize(f: Frame): { w: number; h: number } {
   return { w, h };
 }
 
-/** The frame as drawn, in world units. */
 export function frameBox(f: Frame): Box {
   const s = contentSize(f);
   return { x: f.x, y: f.y, w: Math.max(f.w, s.w), h: Math.max(f.h, s.h) };
@@ -99,7 +95,6 @@ export function contains(b: Box, x: number, y: number): boolean {
   return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 }
 
-/** Shift cards so none sits left of or above the padding; the frame moves to compensate. */
 export function normalizeFrame(f: Frame): void {
   if (!f.cards.length) return;
   let minX = Infinity;
@@ -123,7 +118,7 @@ function gridCols(n: number): number {
   return Math.max(1, Math.min(8, Math.round(Math.sqrt(n * 1.5))));
 }
 
-/** Lay the frame's cards out on a grid, newest first, and fit the frame to them. */
+/** Grid layout, newest first; the frame fits the cards. */
 export function tidyFrame(f: Frame): void {
   const cards = f.cards.slice().sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name));
   const cols = gridCols(cards.length);
@@ -136,13 +131,13 @@ export function tidyFrame(f: Frame): void {
   f.h = HEAD + PAD + rows * CARD_H + (rows - 1) * GAP;
 }
 
-/** Shelf-pack frames into rows of roughly square overall shape. */
+/** Shelf-pack frames into a roughly square overall shape. */
 export function packFrames(frames: Frame[], originX = 0, originY = 0): void {
   if (!frames.length) return;
   const boxes = frames.map((f) => ({ f, b: frameBox(f) }));
   const area = boxes.reduce((s, o) => s + (o.b.w + FRAME_GAP) * (o.b.h + FRAME_GAP), 0);
   const rowW = Math.max(Math.sqrt(area) * 1.5, Math.max(...boxes.map((o) => o.b.w)));
-  // Root first, then larger frames first so rows are even.
+  // Larger frames first so rows are even.
   boxes.sort((a, b) =>
     a.f.name === 'Root' ? -1 : b.f.name === 'Root' ? 1 : b.b.h - a.b.h || a.f.name.localeCompare(b.f.name),
   );
@@ -162,7 +157,6 @@ export function packFrames(frames: Frame[], originX = 0, originY = 0): void {
   }
 }
 
-/** First grid slot in the frame that no card covers. */
 export function freeSlot(f: Frame, skip?: Set<Card>): { x: number; y: number } {
   const cols = gridCols(f.cards.length + 1);
   const taken = f.cards.filter((c) => !skip || !skip.has(c));
@@ -175,7 +169,7 @@ export function freeSlot(f: Frame, skip?: Set<Card>): { x: number; y: number } {
   return { x: PAD, y: HEAD + contentSize(f).h };
 }
 
-/** Free world spot for a new frame: right of everything on the first row. */
+/** Right of everything on the first row. */
 export function freeFramePos(frames: Frame[]): { x: number; y: number } {
   if (!frames.length) return { x: 0, y: 0 };
   let maxX = -Infinity;
@@ -203,7 +197,7 @@ export function boundsOf(boxes: Box[]): Box | null {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-/** File name the server would give a note moved to `folder`. */
+/** Path the server gives a note moved to `folder`. */
 export function movedPath(path: string, folder: string): string {
   const base = path.split('/').pop() || path;
   return !folder || folder === 'Root' ? base : folder + '/' + base;
@@ -215,7 +209,7 @@ export function renamedPath(path: string, name: string): string {
   return parts.join('/');
 }
 
-/** Folder names the server accepts (mirrors create_folder_impl). */
+/** Mirrors the server's create_folder_impl. */
 export function cleanFolderName(name: string): string {
   return name
     .replace(/[^\w\s-]/g, '')
@@ -234,10 +228,7 @@ export function initials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-/**
- * Push frames that overlap `anchor` (after it grew or moved) down or right,
- * cascading, so frames never sit on top of each other.
- */
+/** Cascade frames overlapping `anchor` down or right so frames never stack. */
 export function separateFrames(frames: Frame[], anchor: Frame): void {
   const gap = 60;
   const queue = [anchor];
@@ -250,7 +241,6 @@ export function separateFrames(frames: Frame[], anchor: Frame): void {
       if (f === a) continue;
       const fb = frameBox(f);
       if (!overlaps(grown, fb)) continue;
-      // Move along the axis that needs the smaller push.
       const down = ab.y + ab.h + gap - fb.y;
       const right = ab.x + ab.w + gap - fb.x;
       if (fb.y >= ab.y && (down <= right || fb.x < ab.x)) f.y += down;

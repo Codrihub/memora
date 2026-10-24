@@ -1,8 +1,4 @@
-// Force simulation in the spirit of d3-force: velocity Verlet with an
-// annealed alpha, many-body repulsion through a Barnes–Hut quadtree (typed
-// arrays, no per-tick allocation), springy links with degree bias, a grid
-// based collision pass, a gentle centering pull and, for the radial and
-// cluster layouts, a positional pull toward each node's target.
+// d3-force style simulation; the Barnes–Hut quadtree uses typed arrays to avoid per-tick allocation.
 
 import type { GLink, GNode, LayoutMode } from './model';
 
@@ -79,8 +75,7 @@ class QuadTree {
       this.next[i] = -1;
       this.insert(i, nodes[i].x, nodes[i].y, nodes);
     }
-    // Children are always allocated after their parent: a reverse sweep is a
-    // post-order accumulation of charge and charge-weighted centres.
+    // Children are allocated after their parent, so a reverse sweep is a post-order accumulation.
     for (let q = this.count - 1; q >= 0; q--) {
       let m = 0,
         w = 0,
@@ -130,7 +125,6 @@ class QuadTree {
         this.next[b] = i;
         return;
       }
-      // Split the leaf and push its bodies one level down.
       const h = this.size[q] / 2;
       const x0 = this.x0[q];
       const y0 = this.y0[q];
@@ -153,7 +147,6 @@ class QuadTree {
     return (x >= this.x0[q] + h ? 1 : 0) + (y >= this.y0[q] + h ? 2 : 0);
   }
 
-  /** Accumulate the repulsion on node i into (vx, vy). */
   apply(i: number, p: GNode, nodes: GNode[], charge: Float64Array, alpha: number, distMax2: number): void {
     const st = this.stack;
     let sp = 0;
@@ -215,7 +208,7 @@ export class Simulation {
   alphaDecay = 1 - Math.pow(0.002, 1 / 320);
   velocityDecay = 0.42;
   mode: LayoutMode = 'force';
-  /** Strength of the pull toward (tx, ty) in radial and cluster modes. */
+  /** Pull toward (tx, ty) in radial and cluster modes. */
   targetPull = 0;
   /** Global charge multiplier (the "spacing" control). */
   spacing = 1;
@@ -259,7 +252,7 @@ export class Simulation {
     const alpha = this.alpha;
     const clusterish = this.mode !== 'force';
 
-    // Links: spring toward the rest length, split by degree so hubs move less.
+    // Split by degree so hubs move less.
     const linkScale = clusterish ? (this.mode === 'radial' ? 0.015 : 0.06) : 1;
     for (const l of this.links) {
       const s = l.s;
@@ -277,7 +270,6 @@ export class Simulation {
       s.vy += y * (1 - l.bias);
     }
 
-    // Many-body repulsion (Barnes–Hut). Bigger nodes push harder.
     if (this.charge.length < n) this.charge = new Float64Array(n * 2);
     const chargeScale = (clusterish ? (this.mode === 'radial' ? 0.04 : 0.12) : 1) * this.spacing;
     for (let i = 0; i < n; i++) {
@@ -288,8 +280,6 @@ export class Simulation {
     const distMax2 = clusterish ? 120 * 120 : 1600 * 1600;
     for (let i = 0; i < n; i++) this.tree.apply(i, nodes[i], nodes, this.charge, alpha, distMax2);
 
-    // Gentle centering keeps islands from drifting off; layout targets win in
-    // the radial and cluster modes.
     const pull = this.targetPull;
     const center = clusterish ? 0 : 0.035;
     for (let i = 0; i < n; i++) {
@@ -331,7 +321,7 @@ export class Simulation {
     }
   }
 
-  /** Soft collision through a uniform grid (counting sort, no allocation). */
+  /** Soft collision through a uniform grid, without allocation. */
   private collide(strength: number): void {
     const nodes = this.nodes;
     const n = nodes.length;

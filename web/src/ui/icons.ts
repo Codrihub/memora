@@ -1,6 +1,3 @@
-// Icon set for the shell and design system: 24x24 stroke icons drawn with
-// currentColor. `icon(name)` returns an inline SVG string.
-
 const P: Record<string, string> = {
   brain:
     '<path d="M9.5 4.5A2.5 2.5 0 0 0 7 7a2.6 2.6 0 0 0-2.5 3.2A3 3 0 0 0 5 15.6 2.8 2.8 0 0 0 9.5 19.5V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.6 2.6 0 0 1 2.5 3.2 3 3 0 0 1-.5 5.4 2.8 2.8 0 0 1-4.5 3.9V4.5z"/><path d="M9.5 9H8M14.5 9H16M9.5 14H7.5M14.5 14h2"/>',
@@ -34,6 +31,7 @@ const P: Record<string, string> = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   note: '<path d="M7 3.5h7l4.5 4.5v11a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M13.5 3.5V8h4.5M8.5 13h7M8.5 16.5h5"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   'folder-plus':
     '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
@@ -61,15 +59,11 @@ const P: Record<string, string> = {
   command: '<path d="M9 6.5A2.5 2.5 0 1 0 6.5 9H9zM15 6.5A2.5 2.5 0 1 1 17.5 9H15zM9 17.5A2.5 2.5 0 1 1 6.5 15H9zM15 17.5a2.5 2.5 0 1 0 2.5-2.5H15zM9 9h6v6H9z"/>',
 };
 
-export type IconName = keyof typeof P;
-
-/** An icon's drawing alone (the PWA shortcut icons in scripts/icons.ts). */
+/** Used by scripts/icons.ts for the PWA shortcut icons. */
 export function iconPaths(name: string): string {
   return P[name] || P.note;
 }
 
-/** Inline SVG markup for an icon. `cls` defaults to the shared `.i` size. */
 export function icon(name: string, cls = 'i'): string {
-  const body = P[name] || P.note;
-  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">${body}</svg>`;
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false">${iconPaths(name)}</svg>`;
 }

@@ -1,6 +1,4 @@
 // Rebuild the UI into crates/http/assets whenever a file under web/src changes.
-// The server reads assets from disk on every request, so a browser refresh
-// picks up the new build without restarting memora.
 
 import { readdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -43,8 +41,7 @@ function build(): void {
   });
 }
 
-// Poll file mtimes instead of fs.watch: recursive fs.watch on Linux misses
-// writes that replace a file in place. The tree is small, so a scan is cheap.
+// Polling, because recursive fs.watch on Linux misses writes that replace a file in place.
 function snapshot(dir: string, out = new Map<string, string>()): Map<string, string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);

@@ -1,6 +1,6 @@
-// Account chip and quick guide. The chip shows the signed-in username and
-// opens a panel with the session details and a sign out action.
+// Account chip, account panel, quick guide and the profile menu.
 
+import { openWhatsNew } from './ui/whats-new';
 import { apiGet, apiPost } from './api';
 import { $, $$, esc } from './dom';
 import { hooks } from './hooks';
@@ -45,10 +45,7 @@ export function paintAccountChip(me: SessionInfo | null): void {
 
 let myName = '';
 
-/**
- * The account was renamed: update state.me, the chip, an open profile menu
- * and the realtime "me" so every place shows the new name at once.
- */
+/** The account was renamed: update state.me, the chip and an open profile menu at once. */
 export function setAccountName(name: string): void {
   const n = name.trim();
   if (!n) return;
@@ -124,7 +121,7 @@ export async function openAccount(): Promise<void> {
 }
 
 /** Dark / Light / System segmented control. */
-export function themeControl(): HTMLElement {
+function themeControl(): HTMLElement {
   const prefs: ThemePref[] = ['light', 'dark', 'system'];
   return segmented<ThemePref>(
     prefs.map((p) => ({ value: p, label: THEME_LABEL[p], icon: THEME_ICON[p] })),
@@ -151,16 +148,17 @@ export function openGuide(): void {
           <span class="guide-btns"><button type="button" class="btn sm guide-wl" id="guideWelcome">Read the full welcome</button>
           <button type="button" class="btn sm guide-wl" id="guideDocs">${icon('book')}Open documentation</button></span>
         </section>
-        <p><b>Brain</b> is home: every note is a point of light, and agent activity pulses through it live.</p>
+        <p><b>Brain</b> shows every note as a point of light; agent activity pulses through it live.</p>
         <div class="guide-keys">
           <span><kbd>${mod}</kbd><kbd>K</kbd></span><span>Search notes, jump to pages, run actions</span>
           <span><kbd>/</kbd></span><span>Open search from anywhere</span>
           <span><kbd>&gt;</kbd></span><span>In search: actions only (new note, theme ...)</span>
-          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>Overview, Brain, Nodes, Graph, Canvas, Tags, Activity, Agents, Tools</span>
+          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>Overview, Brain, Notes, Graph, Canvas, Tags, Activity, Agents, Tools</span>
           <span><kbd>[</kbd></span><span>Collapse or expand the sidebar</span>
+          <span><kbd>?</kbd></span><span>Open this help</span>
         </div>
-        <p><b>Live</b> in the top bar shows the realtime connection and how many agents are working right now. Click it for details.</p>
-        <p><b>Agents</b> groups the activity feed, API keys and MCP tools; <b>System</b> holds access rules and settings.</p>
+        <p>The <b>Connected</b> dot in the top bar shows Memora is reachable, and how many agents are working right now. Click it for details.</p>
+        <p>The sidebar lists your pages; settings, tools, access rules and help are in the menu under your name.</p>
         <p>Search understands <code>tag:name</code> to narrow by tag.</p>
       </div>`,
     actions: [{ label: 'Got it', cls: 'primary', run: () => Modal.close() }],
@@ -175,15 +173,8 @@ export function openGuide(): void {
   });
 }
 
-/* ───────────────────────── profile menu ───────────────────────── */
-
-// Three shapes from one menu: a panel as wide as the sidebar rising from the
-// account chip, a popover beside the collapsed rail, and a bottom sheet in
-// the phone layout. Same items, same order, same keyboard.
-
-/** Only the phone layout (drawer + bottom tab bar) gets the bottom sheet;
- *  wherever the sidebar or its rail is on screen, the menu hangs off it. */
-export const SHEET_QUERY = '(max-width: 760px)';
+// The profile menu is a panel above the sidebar chip, a popover beside the rail, or a bottom sheet on phones.
+const SHEET_QUERY = '(max-width: 760px)';
 
 type MenuMode = 'panel' | 'rail' | 'sheet';
 
@@ -193,7 +184,7 @@ let menuMode: MenuMode = 'panel';
 let closeTimer = 0;
 let unwire: (() => void) | null = null;
 
-export function profileMenuOpen(): boolean {
+function profileMenuOpen(): boolean {
   const menu = $('#profileMenu');
   return !menu.classList.contains('hidden') && !menu.classList.contains('pm-closing');
 }
@@ -218,8 +209,7 @@ function placeMenu(menu: HTMLElement, anchor: HTMLElement): void {
     st.bottom = Math.max(10, window.innerHeight - r.bottom) + 'px';
     st.maxHeight = Math.max(240, r.bottom - 12) + 'px';
   } else {
-    // As wide as the sidebar's content (its width minus the footer's side
-    // padding, the same inset as the rows above), just above the chip.
+    // As wide as the sidebar footer's content box, just above the chip.
     const foot = anchor.closest<HTMLElement>('.side-foot');
     const box = (foot || anchor).getBoundingClientRect();
     const cs = foot ? getComputedStyle(foot) : null;
@@ -266,7 +256,12 @@ export function openProfileMenu(anchor: HTMLElement): void {
   const keys = (n: number): string => `<span class="pm-keys alt" aria-hidden="true"><kbd>${alt}</kbd><kbd>${n}</kbd></span>`;
   const group = (id: string, label: string, body: string): string =>
     `<div class="pm-group" role="group" aria-labelledby="pmg-${id}"><div class="pm-glabel" id="pmg-${id}">${label}</div>${body}</div>`;
+  // On phones this sheet is the tab bar's "More": it also lists the pages the bar has no room for.
+  // On wider screens the everyday pages are in the sidebar; the menu keeps the workspace ones.
+  const sheet = window.matchMedia(SHEET_QUERY).matches;
+  const pages = sheet ? group('pages', 'Pages', item('tags', 'Tags', 'tags') + item('trash', 'Trash', 'trash')) : '';
   menu.innerHTML = `
+    <div class="pm-top">
     <div class="pm-grab" aria-hidden="true"></div>
     <div class="pm-head">
       <span class="user-avatar lg">${esc(initialOf(myName))}</span>
@@ -274,19 +269,25 @@ export function openProfileMenu(anchor: HTMLElement): void {
       <button class="pm-close icon-btn" type="button" aria-label="Close menu">${icon('close')}</button>
     </div>
     <div class="pm-theme" role="group" aria-labelledby="pmg-theme"><div class="pm-glabel" id="pmg-theme">Appearance</div><span id="pmTheme"></span></div>
-    ${group(
-      'agents',
-      'Agents',
-      item('logs', 'Activity', 'activity', live ? `<span class="pm-live"><i></i>${live} live</span>` : keys(7)) +
-        item('keys', 'Agents & API keys', 'key', keys(8)) +
-        item('tools', 'Tools', 'tools', keys(9)),
-    )}
-    ${group('system', 'System', item('access', 'Access rules', 'shield') + item('settings', 'Settings', 'settings'))}
+    </div>
+    ${pages}
+    ${
+      sheet
+        ? group(
+            'agents',
+            'Agents',
+            item('logs', 'Activity', 'activity', live ? `<span class="pm-live"><i></i>${live} live</span>` : keys(7)) +
+              item('keys', 'Agents & API keys', 'key', keys(8)) +
+              item('tools', 'Tools', 'tools', keys(9)),
+          ) + group('system', 'System', item('access', 'Access rules', 'shield') + item('settings', 'Settings', 'settings'))
+        : group('system', 'Workspace', item('tools', 'Tools', 'tools') + item('access', 'Access rules', 'shield'))
+    }
     ${group(
       'help',
       'Help',
       item('docs', 'Documentation', 'book') +
         `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">Help & shortcuts</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
+      <button class="pm-item" role="menuitem" type="button" data-act="whatsnew">${icon('bolt')}<span class="pm-label">What's new</span></button>
       <button class="pm-item" role="menuitem" type="button" data-act="welcome">${icon('sparkle')}<span class="pm-label">Welcome to Memora</span></button>` +
         (canInstall()
           ? `<button class="pm-item" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">Install app</span></button>`
@@ -320,6 +321,7 @@ export function openProfileMenu(anchor: HTMLElement): void {
       if (page) hooks.go(page);
       else if (act === 'guide') openGuide();
       else if (act === 'welcome') openWelcome();
+      else if (act === 'whatsnew') openWhatsNew();
       else if (act === 'install') void PWA.install();
       else if (act === 'signout') void signOut();
     };
