@@ -823,7 +823,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memora-cli"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "console",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "memora-core"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "memora-gateway"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "memora-http"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "memora-mcp"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "libc",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "memora-state"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "rusqlite",
  "serde",

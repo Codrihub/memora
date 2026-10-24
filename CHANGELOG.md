@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-24
+
+A calmer reader. Notes read like a clean page whatever the reading settings.
+
+### Changed
+
+- Note text has a new type scale: clearer headings, even list spacing,
+  quieter code, quotes and tables, and real check boxes for tasks.
+- The side panel beside a note has two tabs, Contents and Details. Contents
+  has its own tabs for the outline, links and mentions.
+- Reading settings keep the choices that look right on every system: Sans,
+  Serif and Mono; Default, Sepia and High contrast. Justified text, the
+  Rounded and Legible fonts and the Night, Paper and Mint colours are gone;
+  a saved choice moves to the nearest one left.
+
 ## [2.0.0] - 2026-10-24
 
 A redesign of every page around one calm look, with new tools where people
@@ -646,6 +661,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[2.0.1]: https://github.com/Codrihub/memora/releases/tag/v2.0.1
 [2.0.0]: https://github.com/Codrihub/memora/releases/tag/v2.0.0
 [1.3.8]: https://github.com/Codrihub/memora/releases/tag/v1.3.8
 [1.3.7]: https://github.com/Codrihub/memora/releases/tag/v1.3.7
