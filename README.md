@@ -10,7 +10,7 @@
   <a href="https://github.com/Codrihub/memora/releases/latest"><img src="https://img.shields.io/github/v/release/Codrihub/memora?sort=semver" alt="Latest release"></a>
   <a href="https://www.npmjs.com/package/@codrihub/memora"><img src="https://img.shields.io/npm/v/@codrihub/memora?logo=npm&label=npm" alt="npm: @codrihub/memora"></a>
   <a href="https://github.com/Codrihub/memora/actions/workflows/ci.yml"><img src="https://github.com/Codrihub/memora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Codrihub/memora" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Codrihub/memora" alt="License: AGPL-3.0"></a>
   <a href="https://github.com/Codrihub/memora/pkgs/container/memora"><img src="https://img.shields.io/badge/ghcr.io-codrihub%2Fmemora-blue?logo=docker" alt="Docker image"></a>
 </p>
 
@@ -195,8 +195,8 @@ service: `sudo ./scripts/install.sh --from-source`. The web UI is built from
 4. Add an agent: Agents, then New agent. Pick the app and paste the config it
    shows. One agent per app or device.
 
-If a setup window expires unused, the instance locks until you run
-`memora-cli setup` or `memora-cli unlock` on the server.
+If a setup code expires unused, nothing breaks: run `memora-cli setup` again
+for a new code.
 
 ## Configuration
 
@@ -358,4 +358,11 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Memora by Codrihub Tech.
+Memora is free software under the [GNU Affero General Public License v3.0 or
+later](LICENSE). You may use, modify and share it, including commercially. If
+you distribute a modified version, or run one as a service for others, you must
+publish its source under the same license and keep the attribution in
+[NOTICE](NOTICE): "Based on Memora by Codrihub Tech". The name and logo are
+covered by [TRADEMARK.md](TRADEMARK.md).
+
+Versions 1.3.8 and earlier were released under the MIT License.

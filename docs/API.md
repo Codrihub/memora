@@ -24,7 +24,7 @@ needs is decided by its path and method:
 | Scope | Routes |
 |---|---|
 | `mcp` | `/mcp` |
-| `admin` | `/api/tools`, `/api/keys` and `/api/keys/*`, `/api/access` and `/api/access/*`, `/api/logs/settings`, `/api/oauth/clients` and `/api/oauth/clients/*`, `/api/privacy` and `/api/privacy/*` |
+| `admin` | `/api/tools`, `/api/keys` and `/api/keys/*`, `/api/access` and `/api/access/*`, `/api/logs/settings`, `/api/settings/server`, `/api/oauth/clients` and `/api/oauth/clients/*`, `/api/privacy` and `/api/privacy/*`, `/api/trash/delete`, `/api/trash/empty`; deleting for good with `/api/delete` |
 | `read` | Every other `GET` or `HEAD` under `/api/` |
 | `write` | Every other method under `/api/` |
 
@@ -82,6 +82,9 @@ Until a vault folder is configured, `/mcp` and every `/api/*` route except
   not limited.
 - A request that takes longer than 30 seconds is answered with `408`.
 - A password hashing pool that is busy answers `503` with `Retry-After: 2`.
+- `GET` answers under `/api/` (except `/api/auth/*`) are gzip-compressed when the
+  request sends `Accept-Encoding: gzip`. Pages, writes, sign-in, `/mcp` and
+  server-sent events are never compressed.
 
 Responses are JSON unless stated otherwise. Errors are `{"error": "..."}`. Vault
 errors map to `404` for not-found (including paths hidden from the caller) and
@@ -149,7 +152,7 @@ unmatched request is `404 {"error":"not found"}`.
 
 | Method | Path | Auth | Returns |
 |---|---|---|---|
-| GET | `/api/tree` | Session or key (`read`) | Notes grouped by folder. |
+| GET | `/api/tree` | Session or key (`read`) | Notes grouped by folder: `{folder: [{path, name, folder, mtime, title}]}`; `title` is what the app shows (front matter `title`, else the first `# heading`, else the file name with `_` as spaces). |
 | GET | `/api/folders` | Session or key (`read`) | Every folder the caller may see, empty and nested ones included (`{folders:[path]}`); dot folders such as `.Trash` are left out. |
 | GET | `/api/note` | Session or key (`read`) | `{path, name, content, html, tags, frontmatter, backlinks, size, mtime}`. Query: `path` (`400` when empty). |
 | GET | `/api/vault/file` | Session or key (`read`) | The raw bytes of one image file in the vault (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO; never SVG). Query: `path` (vault-relative). The file content must match its type. At most 10 MiB (`413`). Sent with an `ETag` (`304` on `If-None-Match`), `Cache-Control: private, max-age=300`, and a sandbox CSP. `400` invalid path, `403` path not allowed, `404` not found, `415` not an image. |
@@ -158,16 +161,36 @@ unmatched request is `404 {"error":"not found"}`.
 | POST | `/api/create` | Session or key (`write`, +CSRF) | `{ok, path}`. Body: `{title, folder?, content?}`. |
 | POST | `/api/rename` | Session or key (`write`, +CSRF) | `{ok, path}` with the new path. Body: `{path, name}`. |
 | POST | `/api/move` | Session or key (`write`, +CSRF) | `{ok, path}` with the new path. Body: `{path, folder?}`. |
-| POST | `/api/delete` | Session or key (`write`, +CSRF) | `{ok:true}`. Body: `{path}`. Deletes the note file for good (no trash); with version history on, `restore_memory` can bring it back. |
+| POST | `/api/delete` | Session or key (`write`; `admin` to delete for good, +CSRF) | `{ok:true}`. Body: `{path, mode?}`. Deletes the note for good (no trash); with version history on, its earlier versions are erased from the history too, so nothing can bring it back. Because that cannot be undone, an API key needs the `admin` scope for it (`403 {error, required_scope: "admin"}` otherwise, as MCP `delete_memory` with `permanent`); the owner's browser session may. `mode: "trash"` (what the web app sends) moves it to `.Trash` instead, remembering where it was and who deleted it: `{ok, trashed, to}`. |
+| GET | `/api/trash` | Session or key (`read`) | Notes in `.Trash` the caller may see, newest first: `{items: [{name, path, original, deleted, by, title}]}` (`by` = `{id, name, kind}`, null when unknown). Nothing is removed automatically. |
+| POST | `/api/trash/restore` | Session or key (`write`, +CSRF) | Body: `{name, into?}`. Back to where the note was deleted from (or into the folder `into`); a taken name gets `-1`, `-2` ...: `{ok, path, from, renamed?}`. 404 when the name is not in the trash. |
+| POST | `/api/trash/delete` | Session or key (`admin`, +CSRF) | Body: `{name}`. Deletes one trash entry for good: `{ok, deleted, name, history?}`. With version history on, the note is also erased from the history (every earlier version under every name it had, its trash record and its path in commit messages), and `history` is `{erased, ms, commits}`. Other notes keep their versions; their revision ids change. |
+| POST | `/api/trash/empty` | Session or key (`admin`, +CSRF) | Deletes every trash entry the caller may see, for good: `{ok, count, names, history?}`, erasing them from the version history in one rewrite (as `/api/trash/delete`). |
 | POST | `/api/folder` | Session or key (`write`, +CSRF) | `{ok, path}`. Body: `{name}`. |
 | POST | `/api/folder/rename` | Session or key (`write`, +CSRF) | `{ok, from, to, notes}`. Body: `{folder, name}`. |
 | POST | `/api/folder/move` | Session or key (`write`, +CSRF) | Moves a folder and everything in it. `{ok, from, to, notes}`. Body: `{folder, into}`; `into` empty or `Root` means the top level. |
 | POST | `/api/folder/move-contents` | Session or key (`write`, +CSRF) | Moves everything inside a folder into another one, then removes the emptied folder. Name clashes get a `-N` suffix. `{ok, from, to, moved}`. Body: `{folder, into}`; `into` empty or `Root` means the top level. |
-| POST | `/api/delete-folder` | Session or key (`write`, +CSRF) | Deletes a folder. Body: `{folder, into?, mode?}`. By default its notes move to the folder's parent (the top level for a top-level folder), keeping the sub folder structure below it, and wikilinks are rewritten: `{ok, deleted_folder, moved_to, moved, links_updated}` (`moved` lists the new paths; `moved_to_root` repeats it when they went to the top level). `into` names another existing folder for the notes (`Root` = top level). `mode: "trash"` moves every note to `.Trash` instead (restorable with the MCP tools `list_trash` / `restore_trash`): `{ok, deleted_folder, mode, count, trashed}`. Other files in the folder are deleted. |
+| POST | `/api/delete-folder` | Session or key (`write`, +CSRF) | Deletes a folder. Body: `{folder, into?, mode?}`. By default its notes move to the folder's parent (the top level for a top-level folder), keeping the sub folder structure below it, and wikilinks are rewritten: `{ok, deleted_folder, moved_to, moved, links_updated}` (`moved` lists the new paths; `moved_to_root` repeats it when they went to the top level). `into` names another existing folder for the notes (`Root` = top level). `mode: "trash"` moves every note to `.Trash` instead (restorable from the Trash on the Notes page, `/api/trash/restore`, or the MCP tools `list_trash` / `restore_trash`): `{ok, deleted_folder, mode, count, trashed}`. Other files in the folder are deleted. |
 | POST | `/api/folder-meta` | Session or key (`write`, +CSRF) | `{ok, folder}`. Body: `{folder, color?, icon?, desc?}`. |
 
 The three folder operations also publish a `folder_changed` realtime event so
 open browsers reload their tree.
+
+### Version history
+
+| Method | Path | Auth | Returns |
+|---|---|---|---|
+| GET | `/api/history?path=&limit=` | Session or key (`read`) | A note's revisions, newest first (the vault's git history, following renames): `{path, total, versions: [{rev, date, author, message, version, total, path?, owner}]}`. `version` counts from 1 (the oldest) to `total` (the current one); `owner` is true when the signed-in owner made the change. `limit` defaults to 100 (at most 500). |
+| GET | `/api/note-at?path=&rev=` | Session or key (`read`) | The note as it was at one revision (a `rev` from `/api/history`, `snap-<label>`, `HEAD~1`, `HEAD@{<date>}`): `{path, rev, content, html}`, `html` rendered like `/api/note`. |
+| GET | `/api/diff?path=&a=&b=` | Session or key (`read`) | Unified diff of the note from revision `a` to `b`, or to the note as it is now when `b` is left out: `{path, from, to, changed, diff}`. |
+| POST | `/api/history/restore` | Session or key (`write`, +CSRF) | Body: `{path, rev}`. Gives the note its content from `rev` again as a new revision (restoring version 3 of 5 makes version 6; nothing is lost): `{ok, path, rev, changed, version, total}` (`changed` false when the note already had that content). |
+
+The four history routes answer `409 {error, history: false}` while version history
+is off (the vault folder is not a git repository; see
+[CONFIGURATION.md](CONFIGURATION.md#version-history)) and `404` for a path that is
+not in the vault or its history, or is hidden from the calling key. Web writes
+(save, create, rename, move, delete, restore) are committed with the caller as the
+author: the owner's username for the browser, the key's name for an API key.
 
 ## Search and graph
 
@@ -212,11 +235,11 @@ realtime event.
 | GET | `/api/access` | Session or key (`admin`) | `{default_allow, rules, count}`. |
 | POST | `/api/access/test` | Session or key (`admin`) | `{action, would_lock_out_caller}` for the given address or domain. Body: `{ip?, domain?}`. |
 | POST | `/api/access/rules` | Session or key (`admin`, +CSRF) | `{ok, count, persisted}`. Body: `{op, kind, value, action}`. `op` is `add` (default) or `remove`. `kind` is `ip`, `range`, `cidr`, `domain`, or `all`; `value` is required unless `kind` is `all`. `action` is `allow` or `block` (default `block`). `remove` deletes every rule matching the given `kind` and `value`; `404` when none match. |
-| GET | `/api/config` | Session or key (`read`) | `{realm, min_password_len, session_ttl, vault, version, gateway, update}`. `update` is the cached release check: `{current, latest, available, url, checked_at, state}`, `state` one of `ok`, `none` (no release published), `error`, `disabled`, `pending`. |
+| GET | `/api/config` | Session or key (`read`) | `{realm, min_password_len, session_ttl, vault, version, gateway, update}`. `update` is the cached release check: `{current, latest, available, url, checked_at, state, repo, stars}`, `state` one of `ok`, `none` (no release published), `error`, `disabled`, `pending`; `stars` is the repository's GitHub star count from the same check (`null` until known). |
 
 ## Settings
 
-All settings endpoints need a signed-in browser.
+All settings endpoints need a signed-in browser, except `/api/settings/server`, which also takes an API key with the `admin` scope.
 
 | Method | Path | Auth | Returns |
 |---|---|---|---|
@@ -224,6 +247,7 @@ All settings endpoints need a signed-in browser.
 | POST | `/api/settings/password` | Session only (+CSRF) | Body: `{current, password, confirm}`. Returns `{ok, user, password_changed, revoked_sessions, persisted}`. Every other session is signed out. `400` for a short, mismatched, or unchanged password; `403` for a wrong current password (counts toward the login cooldown). |
 | POST | `/api/settings/username` | Session only (+CSRF) | Renames the account. Body: `{username, current}`. Returns `{ok, user, changed}` (plus `persisted` when changed). The username is stored lowercase. Sessions stay signed in. `400` for an invalid username, `403` for a wrong password. |
 | POST | `/api/settings/vault` | Session only (+CSRF) | Sets the vault folder and switches the running server to it. Body: `{path, create?}`. `path` must be absolute, without `..`, writable, not a system folder, and not overlap the state folder; with `create` a missing folder is created (its parent must exist). Returns `{ok, vault, created, stats}`. `400` with a message when the folder is refused. |
+| POST | `/api/settings/server` | Session or key (`admin`, +CSRF) | Body: `{realm?, session_ttl?, session_max_age?}` (at least one). Sets the server name (1-64 characters), how long a browser may stay idle before it must sign in again (300 to 2592000 seconds) and the longest sign-in (`0` for no limit, else at least `session_ttl`). Returns `{realm, session_ttl, session_max_age}`; open sessions follow the new limits at once. `400` for a value out of range. |
 | GET | `/api/settings/sessions` | Session only | `{sessions:[{id, current, source, alias, ip, user_agent, created_at, last_seen, expires_in}], count}`: live browser sessions. API keys are not sessions and never appear here. |
 | POST | `/api/settings/sessions/revoke` | Session only (+CSRF) | Signs other browsers out. Body: `{id}` or `{others:true}`. Returns `{ok, revoked}`. `400` for the current session (use logout), `404` when the session has already ended. |
 | POST | `/api/settings/sessions/rename` | Session only (+CSRF) | Names a device. Body: `{id, alias}`; an empty alias clears it. Returns `{ok, alias}`. |

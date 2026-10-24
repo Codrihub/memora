@@ -73,4 +73,5 @@ The state database is migrated on the next start.
 
 ## License
 
-MIT
+GNU AGPL v3.0 or later, with the attribution terms in NOTICE. Versions 1.3.8
+and earlier were MIT. See https://github.com/Codrihub/memora

@@ -141,7 +141,7 @@ in this order, outermost first:
 7. Auth and lock gate (`mw_auth`):
    - If the instance is LOCKED and the path is neither in the lock allow list
      nor a static asset: `/api/*` and `/mcp` return `423`; other paths redirect
-     to `/login?locked=1`.
+     to `/login`.
    - Public paths pass: `/healthz`, `/.well-known/mcp.json`, `/tools`,
      `/login`, `/logout`, `/_bus`, `/`, `/index.html`, static assets, the OAuth
      discovery and flow endpoints, and the auth endpoints
@@ -236,9 +236,10 @@ First-run and recovery (the arm window):
 - `memora-cli reset-password` arms a `reset` window; `/api/auth/reset`
   replaces the password.
 - A wrong code spends that IP's small budget (3, then a cooldown); 50 wrong
-  codes in one window void it. If a window expires unfinished, the instance
-  becomes LOCKED. While locked, only the lock allow list and static assets are
-  reachable. `memora-cli unlock`, `setup`, or `reset-password` clears the lock.
+  codes in one window void it. A window that expires unfinished just closes
+  (back to idle; agents and signed-in browsers keep working). LOCKED is only
+  entered on purpose. While locked, only the lock allow list and static assets
+  are reachable. `memora-cli unlock`, `setup`, or `reset-password` clears the lock.
 
 Lock allow list (`LOCK_ALLOWED`): `/login`, `/logout`, `/api/auth/state`,
 `/api/auth/verify`, `/api/auth/login`, `/api/auth/logout`,

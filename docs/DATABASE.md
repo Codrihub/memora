@@ -118,7 +118,7 @@ and are read from the database when needed.
 - Hot-path writes are buffered: session `last_seen` is flushed every 5 seconds
   and key usage every 30 seconds. Pending control requests are served every 2
   seconds. Buffers are flushed on shutdown.
-- Window expiry is a conditional update (`armed` to `locked`), and a setup code
+- Window expiry is a conditional update (`armed` to `idle`, never `locked`), and a setup code
   is checked and consumed in the same transaction, so a code works at most
   once.
 

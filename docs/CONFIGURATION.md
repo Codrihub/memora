@@ -52,7 +52,7 @@ most 2048 bytes).
 | `MEMORA_ASSETS` | the `crates/http/assets` folder of the build tree | Directory of the web UI assets. |
 | `MEMORA_INSTALL` | set by the npm launcher (`npm`) and the Docker image (`docker`) | How this copy was installed: `npm`, `docker`, `native`, `zip` or `source`. `memora-cli update`, `start`, `stop`, `restart` and `uninstall` use it to pick the right steps; when unset they work it out from the program's path. |
 | `MEMORA_SETUP_HINT` | `memora-cli setup (run on the server)` | Hint returned by `GET /api/auth/state` and shown on the login screen. |
-| `MEMORA_UPDATE_CHECK` | `true` | Release check: shortly after start and then every 6 hours the server asks GitHub (`api.github.com/repos/Codrihub/memora/releases/latest`) for the newest release and the web UI shows when an update is available. `false` (also `0`, `no`, `off`) turns it off; no network call is made. |
+| `MEMORA_UPDATE_CHECK` | `true` | Release check: shortly after start and then every 6 hours the server asks GitHub (`api.github.com/repos/Codrihub/memora/releases/latest`) for the newest release and the web UI shows when an update is available. The same check reads the repository's star count (`api.github.com/repos/Codrihub/memora`), shown in What's new. `false` (also `0`, `no`, `off`) turns both off; no network call is made. |
 
 The two secrets can never be stored in `server_config` (the schema rejects
 them). The `_FILE` variants read the value from a file, for example a Docker
@@ -157,3 +157,12 @@ vault inside another repository still needs its own `git init`.
 A snapshot (`snapshot` tool) commits pending changes and tags the last commit
 as `snap-<label>`; pass that tag as `rev` to `get_note_at`, `diff` or
 `restore_memory`.
+
+Deleting a note for good (Delete forever or Empty trash in the app,
+`/api/trash/delete`, `/api/trash/empty`, `delete_memory` with `permanent`)
+also erases it from the history: Memora rewrites the vault's git history so
+no commit, snapshot tag or object keeps its text, any name it had, its trash
+record or its path in a commit message, then expires the reflog and runs
+`git gc --prune=now`. Other notes keep all their versions, but their revision
+ids change, so old revision ids (and clones or pushes of the vault made
+before) no longer match. Moving a note to the Trash keeps its history.
