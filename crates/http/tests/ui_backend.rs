@@ -1,8 +1,5 @@
-//! UI backend through the router: `ai_activity` events from `/mcp` carry the
-//! API key's NAME (`actor_kind: "agent"`) or the browser user, with `start`/`end`
-//! pairs; `/api/aliases`, `/api/events` and `/api/auth/events` expose the name; and
-//! `GET/PUT /api/ui/layout/{name}` (browser session only, same-origin, size and name
-//! checks).
+//! UI backend through the router: agent names in activity, aliases and events, and
+//! `/api/ui/layout/{name}` (browser session only).
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -208,8 +205,7 @@ fn drain(rx: &mut tokio::sync::broadcast::Receiver<Arc<str>>, actor: &str) -> Ve
 #[tokio::test]
 async fn mcp_activity_is_named_after_the_key() {
     let mut e = env("actor");
-    // Persist events into this vault (main.rs does this at start; the hub is global and
-    // only this test in this binary reads the log).
+    // Persist events into this vault (the hub is global; only this test reads the log).
     memora_core::events::hub().set_events_path(e.vault.join(".events.jsonl"));
     let sid = signed_in(&mut e).await;
     let (raw, id) = new_key(&mut e, &sid, "http-ui-bot", &["mcp", "read", "admin"]).await;
@@ -306,8 +302,7 @@ async fn mcp_activity_is_named_after_the_key() {
     assert_eq!(evs[0]["actor_kind"], "agent");
     assert_eq!(r.body["count"], 1);
 
-    // An activity row from an API-key call (admin tool) shows the key's name, the old
-    // `user` field keeps `key:<id>`.
+    // An API-key activity row shows the key's name; `user` keeps `key:<id>`.
     let r = call(
         &mut e,
         Method::POST,

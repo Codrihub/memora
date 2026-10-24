@@ -1,16 +1,6 @@
-//! OAuth 2.1 authorization server for remote MCP clients (Claude, ChatGPT, ...).
-//!
-//! * Discovery: `/.well-known/oauth-protected-resource` (RFC 9728) and
-//!   `/.well-known/oauth-authorization-server` (RFC 8414); `/mcp` answers 401
-//!   with a `WWW-Authenticate` header pointing at the former.
-//! * Clients: dynamic registration (RFC 7591, `/oauth/register`), a client
-//!   metadata document URL as `client_id` (CIMD, fetched over HTTPS), or one the
-//!   owner registers in the dashboard.
-//! * Flow: authorization code + PKCE S256 only. `/oauth/authorize` sends the
-//!   browser to the sign-in page, which shows a consent card; the signed-in owner
-//!   approves through `/api/oauth/approve`. `/oauth/token` swaps the code for an
-//!   access token, which is a fresh API key (so permissions, colors, activity and
-//!   revocation work as for any agent), plus a rotating refresh token.
+//! OAuth 2.1 authorization server for remote MCP clients: discovery (RFC 9728/8414),
+//! client registration (RFC 7591 and CIMD), authorization code + PKCE S256 only.
+//! Access tokens are fresh API keys, with rotating refresh tokens.
 
 use axum::{
     extract::State,
@@ -36,24 +26,15 @@ const CIMD_TTL: i64 = 86_400;
 /// Largest client metadata document accepted.
 const CIMD_MAX_BYTES: u64 = 64 * 1024;
 
-// ---------------------------------------------------------------------------
-// URLs
-// ---------------------------------------------------------------------------
-
-/// `https://host` as the client sees it. Proxies signal the scheme in different
-/// ways (`X-Forwarded-Proto`, `Forwarded`, Cloudflare's `CF-Visitor`); without
-/// any, a plain domain name (no port, not an IP or localhost) is taken as HTTPS,
-/// since public MCP endpoints are always served over TLS.
+/// `https://host` as the client sees it: `MEMORA_BASE_URL`, else guessed from the request.
 pub(crate) fn base_url(headers: &HeaderMap) -> String {
-    // A configured public URL is the server's identity, whatever the request says.
     if let Some(b) = configured_base() {
         return b.to_string();
     }
     guess_base(headers)
 }
 
-/// `MEMORA_BASE_URL` (env or `memora-cli /config`, read at start), when it is an
-/// http(s) URL: the issuer, resource and endpoints OAuth clients see.
+/// `MEMORA_BASE_URL` (read at start) when it is an http(s) URL.
 pub(crate) fn configured_base() -> Option<&'static str> {
     static BASE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     BASE.get_or_init(|| {
@@ -65,7 +46,8 @@ pub(crate) fn configured_base() -> Option<&'static str> {
     .as_deref()
 }
 
-/// The public URL guessed from the request (no `MEMORA_BASE_URL` set).
+/// The public URL guessed from proxy headers; without any, a plain domain name is
+/// taken as HTTPS (public MCP endpoints are served over TLS).
 fn guess_base(headers: &HeaderMap) -> String {
     let h = |k: &str| {
         headers
@@ -167,10 +149,8 @@ fn with_query(uri: &str, params: &[(&str, &str)]) -> String {
     format!("{uri}{sep}{}", q.join("&"))
 }
 
-/// A redirect URI a client may register: HTTPS anywhere, or plain HTTP on the
-/// loopback interface (desktop and CLI clients); no fragment, no userinfo
-/// (`http://localhost:1@evil.example/` must not pass as loopback, and the
-/// consent card must show the real host).
+/// A redirect URI a client may register: HTTPS, or HTTP on loopback; no fragment and
+/// no userinfo (`http://localhost:1@evil.example/` must not pass as loopback).
 fn valid_redirect(u: &str) -> bool {
     if u.len() > 2000 || u.contains('#') || u.chars().any(char::is_whitespace) {
         return false;
@@ -190,10 +170,6 @@ fn valid_redirect(u: &str) -> bool {
     let name = host.rsplit_once(':').map_or(host, |(h, _)| h);
     matches!(name, "localhost" | "127.0.0.1" | "[::1]")
 }
-
-// ---------------------------------------------------------------------------
-// Discovery
-// ---------------------------------------------------------------------------
 
 async fn h_protected_resource(headers: HeaderMap) -> Response {
     let base = base_url(&headers);
@@ -227,10 +203,6 @@ async fn h_authorization_server(headers: HeaderMap) -> Response {
     }))
     .into_response()
 }
-
-// ---------------------------------------------------------------------------
-// Clients
-// ---------------------------------------------------------------------------
 
 fn uris_of(v: &Value) -> Result<Vec<String>, String> {
     let list: Vec<String> = v
@@ -397,9 +369,8 @@ fn fetch_cimd(url: &str, now: i64) -> Result<Client, String> {
         Some((h, p)) => (h, p.parse::<u16>().map_err(|_| "invalid port")?),
         None => (host, 443),
     };
-    // One answer for "does not resolve" and "resolves to a private address":
-    // this is reachable without signing in, and two answers would let anyone
-    // probe which internal host names exist.
+    // One answer for "does not resolve" and "private address", so this public path
+    // cannot probe internal host names.
     let not_public = || "client_id host does not resolve to a public address".to_string();
     let addrs: Vec<SocketAddr> = (name, port)
         .to_socket_addrs()
@@ -492,8 +463,7 @@ async fn resolve_client(
                 created_at: known.as_ref().map_or(now, |k| k.created_at),
                 ..c
             };
-            // A new metadata client takes a row like a registration does, under
-            // the same cap: this path is reachable without signing in.
+            // Same cap as a registration: this path is reachable without signing in.
             let stored = st
                 .db
                 .write(|tx| {
@@ -516,10 +486,6 @@ async fn resolve_client(
         Err(e) => known.ok_or(e),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Authorization
-// ---------------------------------------------------------------------------
 
 /// A checked authorization request.
 struct AuthRequest {
@@ -708,10 +674,6 @@ async fn h_approve(
     );
     Json(json!({"ok": true, "redirect": to})).into_response()
 }
-
-// ---------------------------------------------------------------------------
-// Tokens
-// ---------------------------------------------------------------------------
 
 fn token_response(access: &str, refresh: &str) -> Response {
     let mut r = Json(json!({
@@ -951,10 +913,6 @@ async fn h_token(State(st): State<AppState>, headers: HeaderMap, body: String) -
         ),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Dashboard: clients and connections
-// ---------------------------------------------------------------------------
 
 /// `GET /api/oauth/clients` -> `{clients, connections:[{key_id, client_id}]}`.
 async fn h_clients(State(st): State<AppState>) -> Response {

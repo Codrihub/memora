@@ -1,16 +1,5 @@
-//! HTTP + MCP server for the Memora memory vault.
-//!
-//! Every access path (public domain, LAN IP, VPN IP) enters through this server:
-//!   * `/healthz`              - liveness probe
-//!   * `/.well-known/mcp.json` - discovery card for agents (MCP auto-detection)
-//!   * `/mcp`                  - MCP streamable HTTP (JSON-RPC 2.0)
-//!   * `/tools`                - human-readable tool catalog
-//!   * `/api/*`                - JSON API for the web UI (requires an API key)
-//!   * `/`                     - static web UI
-//!
-//! Middleware runs in order: guard (caller IP, rate limits, cooldowns) ->
-//! access stack (IP/domain) -> API key -> lock gate -> vault gate (409 on
-//! vault routes until a vault folder is chosen).
+//! HTTP + MCP server for the Memora vault: `/mcp`, `/api/*`, the web UI and discovery.
+//! Middleware order: guard -> access stack -> auth and lock gate -> vault gate.
 
 use axum::{
     extract::{
@@ -32,6 +21,7 @@ use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
+use tower_http::compression::Predicate as _;
 
 pub mod api;
 mod assets;
@@ -54,17 +44,15 @@ pub struct AppState {
     pub mcp: Arc<McpServer>,
     /// The state database (`<MEMORA_STATE>/memora.db`).
     pub db: Db,
-    /// Owner, keys, settings, arm window and access stack, reloaded on change
-    /// (see [`cache`]).
+    /// Owner, keys, settings, arm window and access stack (see [`cache`]).
     pub cache: Arc<Caches>,
     /// Key usage and key events, written in batches by a background task.
     pub usage: Arc<Mutex<memora_state::usage::UsageBuffer>>,
     /// Session `last_seen` updates, written in batches by a background task.
     pub last_seen: Arc<Mutex<memora_state::session::LastSeenBuffer>>,
-    /// Directory holding the web UI assets (index.html, app.css, app.js, login.html, login.css).
+    /// Directory holding the web UI assets.
     pub assets: String,
-    /// The configured vault folder (`settings.vault_path`); `None` until one is
-    /// chosen. Switched at runtime from Settings or by `memora-cli vault`.
+    /// The configured vault folder; `None` until one is chosen.
     pub vault: Arc<RwLock<Option<String>>>,
     /// Rate limits, failure cooldowns and bounded argon2.
     pub guard: Arc<Guard>,
@@ -116,9 +104,8 @@ pub struct ApiKeyCaller {
     pub ip: String,
 }
 
-/// The vault store locked for one request: an API key works under its privacy view
-/// (hidden notes and folders do not exist for it; fail closed), a browser session sees
-/// everything. The view is cleared when the guard drops.
+/// The vault store locked for one request: an API key sees it through its privacy
+/// view (fail closed), a browser session sees everything.
 pub fn store_as<'a>(
     st: &'a AppState,
     key: Option<&ApiKeyCaller>,
@@ -127,16 +114,13 @@ pub fn store_as<'a>(
     memora_core::privacy::lock_as(&st.store, view)
 }
 
-/// A copy of the store for one read-only request, under the caller's view (see
-/// [`store_as`] and [`MemoryStore::snapshot`]): the store lock is held only to take
-/// the copy, so long reads never queue behind writes or agent calls.
+/// A snapshot of the store under the caller's view; the lock is held only for the copy,
+/// so long reads never queue behind writes.
 pub fn snapshot_as(st: &AppState, key: Option<&ApiKeyCaller>) -> MemoryStore {
     store_as(st, key).snapshot()
 }
 
-/// Run blocking vault or database work on the blocking pool, so a slow call (or one
-/// waiting for the store lock) never holds up the async workers that serve every
-/// other request. A panic in `f` resumes here, as if `f` had run inline.
+/// Run blocking vault or database work on the blocking pool; a panic in `f` resumes here.
 pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     match tokio::task::spawn_blocking(f).await {
         Ok(v) => v,
@@ -147,10 +131,8 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static)
     }
 }
 
-/// Scope an API key needs for `method path`, or `None` when the route does
-/// not take keys into account (public or session-only routes).
-/// `mcp` for /mcp; `admin` for tool, key and access-stack management;
-/// `read` for other GET /api routes; `write` for other mutating /api routes.
+/// Scope an API key needs for `method path` (`mcp`, `admin`, `read` or `write`),
+/// or `None` for routes that do not take keys.
 pub fn required_scope(method: &axum::http::Method, path: &str) -> Option<&'static str> {
     if path == "/mcp" || path.starts_with("/mcp/") {
         return Some("mcp");
@@ -161,8 +143,11 @@ pub fn required_scope(method: &axum::http::Method, path: &str) -> Option<&'stati
         "keys",
         "access",
         "logs/settings",
+        "settings/server",
         "oauth/clients",
         "privacy",
+        "trash/delete",
+        "trash/empty",
     ]
     .iter()
     .any(|p| rest == *p || rest.starts_with(&format!("{p}/")));
@@ -176,10 +161,6 @@ pub fn required_scope(method: &axum::http::Method, path: &str) -> Option<&'stati
     }
 }
 
-// ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
-
 /// The caller IP resolved by `mw_guard` (forwarding headers are honoured only
 /// from a trusted proxy), falling back to the TCP peer.
 fn client_ip(req: &Request, peer: Option<SocketAddr>) -> String {
@@ -189,26 +170,21 @@ fn client_ip(req: &Request, peer: Option<SocketAddr>) -> String {
         .unwrap_or_default()
 }
 
-/// Front-door guard, the outermost layer: refuse hosts outside the domain
-/// allow-list, resolve the caller IP, apply the
-/// per-IP token buckets and refuse callers that are cooling down after
-/// failed attempts. Requests from this machine itself are not limited.
+/// Front-door guard: domain allow-list, caller IP, per-IP rate limits and failure
+/// cooldowns. Direct local requests are not limited.
 async fn mw_guard(
     State(st): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     mut req: Request,
     next: Next,
 ) -> Response {
-    // A request for any other domain gets a bare 404, as if nothing were here.
-    // HTTP/2 carries the host in `:authority` (the URI) instead of `Host`.
+    // Unknown domains get a bare 404, as if nothing were here.
     let host = request_host(&req);
     if !memora_gateway::host_allowed(&st.domains, &host) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
-    // Forwarding headers are believed only from a trusted proxy: drop the
-    // scheme/host hints an outside caller sent, so `is_https` (cookie Secure,
-    // HSTS), the CSRF host check and the OAuth base URL cannot be steered by a
-    // direct client.
+    // Only a trusted proxy may set forwarding headers, so a direct client cannot
+    // steer `is_https`, the CSRF host check or the OAuth base URL.
     if !st.guard.trusted_peer(peer) {
         let h = req.headers_mut();
         for name in [
@@ -224,17 +200,14 @@ async fn mw_guard(
     let ip = st.guard.client_ip(peer, req.headers());
     guard::set_header_ip(req.headers_mut(), &ip);
     let path = req.uri().path().to_string();
-    // Only a direct local caller skips the limits: a loopback address that came
-    // with forwarding headers is a proxied request.
+    // Loopback with forwarding headers is a proxied request, not a local one.
     if path == "/healthz" || (ip.is_loopback() && !guard::forwarded(req.headers())) {
         return next.run(req).await;
     }
     if let Err(wait) = st.guard.take(Bucket::Global, &ip) {
         return guard::too_many(wait, false);
     }
-    // Match the rate-limited routes on a canonical form of the path, so a
-    // variant (trailing slash, doubled slash, case, %-escapes) can never reach
-    // an auth handler without passing the auth buckets.
+    // Canonical path, so no variant (slashes, case, %-escapes) skips the auth buckets.
     let canon = canonical_path(&path);
     let auth_write = req.method() == axum::http::Method::POST
         && matches!(
@@ -259,7 +232,6 @@ async fn mw_guard(
             return guard::too_many(wait, false);
         }
     } else if req.method() == axum::http::Method::POST && canon == "/oauth/register" {
-        // Each registration adds a client row.
         if let Err(wait) = st.guard.take(Bucket::Register, &ip) {
             return guard::too_many(wait, false);
         }
@@ -311,11 +283,9 @@ async fn mw_access(
     if path == "/healthz" {
         return next.run(req).await;
     }
-    // Changes made by memora-cli (owner, keys, tools, access, settings, arm) take
-    // effect on the next request: one PRAGMA when nothing changed.
+    // Picks up changes made by memora-cli (one PRAGMA when nothing changed).
     cache::refresh(&st);
     let ip = client_ip(&req, Some(peer));
-    // Host without port; IPv6 literals keep their address (`[::1]:80` -> `::1`).
     let domain = memora_gateway::url_host(&request_host(&req));
     let action = rd(&st.cache.access).evaluate(Some(&ip), domain.as_deref());
     if action == AccessAction::Block {
@@ -340,11 +310,7 @@ fn extract_key(h: &HeaderMap) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
-/// Authentication gate: API key (agents/MCP) or session cookie (browser).
-///
-/// Static assets and a small set of `/api/auth/*` endpoints are deliberately
-/// public, so the login page can load and the recovery form stays reachable
-/// while the instance is locked.
+/// Authentication and lock gate: API key (agents/MCP) or session cookie (browser).
 async fn mw_auth(
     State(st): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -353,8 +319,7 @@ async fn mw_auth(
 ) -> Response {
     let path = req.uri().path().to_string();
 
-    // Static assets are always public: a locked login page still needs its
-    // CSS/JS in order to render the CLI instructions.
+    // Static assets stay public so the locked login page can render.
     let is_asset = path.starts_with("/assets/")
         || matches!(
             path.as_str(),
@@ -373,16 +338,11 @@ async fn mw_auth(
                 | "/offline.html"
         );
 
-    // Lock gate: while the instance is LOCKED the UI is redirected to the lock
-    // screen and API calls are rejected.
-    // IMPORTANT: never create a redirect loop; `/login` is the terminal
-    // destination while LOCKED.
+    // While locked, pages redirect to `/login` (never a loop) and API calls get 423.
     if cache::arm_window(&st).status == ArmStatus::Locked
         && !memora_gateway::lock_allows(&path)
         && !is_asset
     {
-        // Machine endpoints (API, MCP, OAuth token/registration, discovery)
-        // get JSON; only pages a browser opens are sent to the lock screen.
         let machine = path.starts_with("/api/")
             || path.starts_with("/mcp")
             || path.starts_with("/.well-known/")
@@ -398,14 +358,11 @@ async fn mw_auth(
             )
                 .into_response();
         }
-        return redirect("/login?locked=1");
+        return redirect("/login");
     }
 
-    // Public paths: healthz, discovery, tools, the login page, static assets,
-    // and only the auth endpoints that are meant to run without a session.
-    // IMPORTANT: match exactly rather than by the `/api/auth/` prefix - a loose
-    // prefix would let /api/auth/me, /api/auth/profile and /api/auth/events
-    // through unauthenticated.
+    // Public paths. Auth endpoints are matched exactly: an `/api/auth/` prefix
+    // would let /api/auth/me and friends through unauthenticated.
     if oauth::is_public(&path)
         || path == "/healthz"
         || path == "/.well-known/mcp.json"
@@ -434,8 +391,7 @@ async fn mw_auth(
         return next.run(req).await;
     }
 
-    // The realtime stream carries note paths and actor names: it needs a
-    // signed-in browser, and the upgrade must come from our own origin
+    // The realtime stream needs a session and a same-origin upgrade
     // (cross-site WebSocket hijacking sends the cookie along).
     if path == "/ws" {
         if session_of(&st, req.headers()).is_none() {
@@ -455,15 +411,12 @@ async fn mw_auth(
         return next.run(req).await;
     }
 
-    // Browser session from the cookie: when valid, refresh the sliding TTL and continue.
     if let Some(sess) = session_of(&st, req.headers()) {
         tracing::debug!(user = %sess.user, path = %path, "browser session");
         return next.run(req).await;
     }
 
-    // Auth UI endpoints reached here have no valid session. Answer with a plain
-    // 401 so the client routes to sign-in; the API-key message below is meant
-    // for agents and only confuses a browser.
+    // Plain 401 for auth UI endpoints; the API-key message below is for agents.
     if path.starts_with("/api/auth/") {
         return (
             StatusCode::UNAUTHORIZED,
@@ -472,7 +425,6 @@ async fn mw_auth(
             .into_response();
     }
 
-    // Everything else (/api and /mcp) requires an API key.
     if path.starts_with("/api/") || path.starts_with("/mcp") {
         let Some(key) = extract_key(req.headers()) else {
             let mut resp = (
@@ -498,7 +450,6 @@ async fn mw_auth(
                     perms: cache::perms_of(&k),
                     ip: String::new(),
                 };
-                // Per-key usage (buffered; written every 30 s).
                 let ip = client_ip(&req, Some(peer));
                 {
                     let mut usage = cache::lock(&st.usage);
@@ -511,7 +462,6 @@ async fn mw_auth(
                     }
                     usage.record(&id, Some(ip.clone()), &path, None, memora_state::now());
                 }
-                // Scope gate: the key must carry the scope this route needs.
                 if let Some(scope) = required_scope(req.method(), &path) {
                     if !caller.perms.has_scope(scope) {
                         return (
@@ -554,8 +504,7 @@ async fn mw_auth(
     next.run(req).await
 }
 
-/// Whether a path needs the vault. Account, settings, keys, the access stack,
-/// shutting down and the UI work without one; notes, the graph, logs and MCP do not.
+/// Whether a path needs a configured vault (notes, graph, logs, MCP).
 fn needs_vault(path: &str) -> bool {
     if path == "/mcp" || path.starts_with("/mcp/") {
         return true;
@@ -580,8 +529,7 @@ fn needs_vault(path: &str) -> bool {
     !free
 }
 
-/// Vault gate: until a vault folder is configured, every vault route answers
-/// `409 {"needs_vault":true}` so the UI can show the vault chooser.
+/// Vault gate: `409 {"needs_vault":true}` on vault routes until a vault is chosen.
 async fn mw_vault(State(st): State<AppState>, req: Request, next: Next) -> Response {
     if needs_vault(req.uri().path()) && st.vault_path().is_none() {
         return (
@@ -593,19 +541,12 @@ async fn mw_vault(State(st): State<AppState>, req: Request, next: Next) -> Respo
     next.run(req).await
 }
 
-// ---------------------------------------------------------------------------
-// Handler
-// ---------------------------------------------------------------------------
-
-/// `/healthz`. Anyone gets `{ok, server}`; the vault path, version and window
-/// state are only shown to a signed-in browser or a caller on this machine, so
-/// an outside prober learns nothing about the install.
+/// `/healthz`: `{ok, server}` for anyone; details only for a session or a local caller.
 async fn h_health(State(st): State<AppState>, headers: HeaderMap) -> Json<Value> {
     let local = guard::header_ip(&headers).is_some_and(|ip| ip.is_loopback());
     if !local && session_of(&st, &headers).is_none() {
         return Json(json!({"ok": true, "server": "memora"}));
     }
-    // Where agents reach this server (MEMORA_BASE_URL, else this request's host).
     let public = oauth::base_url(&headers);
     let s = cache::arm_window(&st);
     let vault = st.vault_path();
@@ -626,8 +567,7 @@ async fn h_discovery(State(st): State<AppState>) -> Json<Value> {
     Json(discovery_card("/mcp", &st.mcp.disabled_tools()))
 }
 
-/// `/tools`: the app shell for a signed-in browser (the UI's Tools page is a
-/// client-side route), the public HTML tool catalog for everyone else.
+/// `/tools`: the app shell for a signed-in browser, the public HTML catalog otherwise.
 async fn h_tools(State(st): State<AppState>, headers: HeaderMap) -> Response {
     if session_of(&st, &headers).is_some() {
         return h_index(State(st), headers).await;
@@ -691,11 +631,8 @@ fn inline_code(s: &str) -> String {
     out
 }
 
-/// The Streamable HTTP session header. `initialize` issues `<catalog epoch>.<random>`
-/// (see `McpServer::new_session_id`). An id is never refused: stale or unknown ids
-/// work, malformed ones count as no session. When the caller's catalog moved past
-/// the epoch the session last saw, the answer is streamed with
-/// `notifications/tools/list_changed` in front (see `h_mcp`).
+/// The Streamable HTTP session header (`<catalog epoch>.<random>`). Ids are never
+/// refused; malformed ones count as no session.
 const MCP_SESSION: &str = "mcp-session-id";
 
 /// `/mcp` - MCP streamable HTTP: accepts JSON-RPC and replies with JSON-RPC.
@@ -706,9 +643,7 @@ async fn h_mcp(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    // Streamable HTTP: requests are POSTed; there is no standalone server stream
-    // (GET). Nothing is kept per session but the last catalog epoch it was told about
-    // (see `MCP_SESSION`), so ending one (DELETE with its id) always succeeds.
+    // No standalone server stream (GET); sessions hold no state, so DELETE always succeeds.
     let session = headers
         .get(MCP_SESSION)
         .map(|v| v.to_str().unwrap_or("").to_string());
@@ -723,8 +658,7 @@ async fn h_mcp(
         )
             .into_response();
     }
-    // A browser session may reach /mcp (its tools write notes), so it gets the
-    // same CSRF check as the JSON API; API-key clients send no cookie.
+    // A browser session may reach /mcp, so it gets the same CSRF check as the API.
     if !origin_ok(&headers) {
         return (
             StatusCode::FORBIDDEN,
@@ -761,7 +695,6 @@ async fn h_mcp(
         }
     };
 
-    // API keys get their own permissions; a browser session has full access.
     let caller = match key {
         Some(axum::Extension(k)) => {
             memora_mcp::Caller::key(k.id, k.perms, Some(k.ip)).named(k.name)
@@ -776,7 +709,6 @@ async fn h_mcp(
         }
     };
     let initialize = req.method == "initialize";
-    // Notifications (no id) get no JSON-RPC answer, just 202 Accepted.
     if req.id.is_none() && req.method.starts_with("notifications/") {
         return StatusCode::ACCEPTED.into_response();
     }
@@ -794,17 +726,15 @@ async fn h_mcp(
         }
         return out;
     }
-    // A key changed its own color: the key cache feeds /api/keys.
+    // The key cache feeds /api/keys.
     if req.method == "tools/call"
         && req.params.get("name").and_then(|v| v.as_str()) == Some("set_my_color")
     {
         cache::reload(&st, memora_state::Domain::Keys);
     }
     let body = serde_json::to_value(resp).unwrap();
-    // The catalog changed since this session last heard (server upgraded, a tool
-    // switched, the key's grant changed): a client that takes event streams gets
-    // `notifications/tools/list_changed` first, then the answer, once per change.
-    // JSON-only clients and requests without a (well-formed) session id get JSON.
+    // When the catalog changed since this session last heard, an SSE-capable client
+    // gets `notifications/tools/list_changed` before the answer, once per change.
     let sse_ok = headers
         .get(header::ACCEPT)
         .and_then(|v| v.to_str().ok())
@@ -851,13 +781,12 @@ async fn h_tree(
     key: Option<axum::Extension<ApiKeyCaller>>,
 ) -> Json<Value> {
     let key = key.map(|k| k.0);
-    let t = blocking(move || snapshot_as(&st, key.as_ref()).tree()).await;
+    let t = blocking(move || snapshot_as(&st, key.as_ref()).titled_tree()).await;
     Json(serde_json::to_value(t).unwrap())
 }
 
-/// `GET /api/folders` -> `{folders:[path...]}`: every folder the caller may see,
-/// empty and nested ones included (`/api/tree` only knows folders that hold
-/// notes, grouped by top level). Dot folders such as `.Trash` are left out.
+/// `GET /api/folders` -> `{folders:[path...]}`: every visible folder, empty ones
+/// included; dot folders are left out.
 async fn h_folders(
     State(st): State<AppState>,
     key: Option<axum::Extension<ApiKeyCaller>>,
@@ -936,8 +865,7 @@ async fn h_keys(State(st): State<AppState>) -> Json<Value> {
             let last_ip = buf_use
                 .and_then(|u| u.last_ip.clone())
                 .or_else(|| db_use.and_then(|u| u.last_ip.clone()));
-            // Latest call (unix seconds), 0 = never: the live panel shows it before its
-            // history has loaded, and for agents whose calls are older than that history.
+            // Unix seconds, 0 = never.
             let last_used = db_use
                 .map_or(0, |u| u.last_used)
                 .max(buf_use.map_or(0, |u| u.last_used));
@@ -961,11 +889,9 @@ async fn h_keys(State(st): State<AppState>) -> Json<Value> {
                 "scopes": cache::scope_names(&k.scopes),
                 "tools": cache::grant_from_db(&k.tools).to_value(),
                 "prefix": k.prefix, "created": k.created_at, "color": k.color,
-                // The secret can be shown again on the Agents page.
                 "revealable": sealed.contains(&k.id),
                 "uses": uses, "last_ip": last_ip,
                 "last_used": (last_used > 0).then_some(last_used),
-                // Routes / tools this key used recently.
                 "used_tools": used,
             })
         })
@@ -973,10 +899,8 @@ async fn h_keys(State(st): State<AppState>) -> Json<Value> {
     Json(json!({"count": out.len(), "keys": out}))
 }
 
-/// `GET /api/aliases` -> `{aliases:[{alias,key_id,key_name,first_seen,last_seen,
-/// connections,actor,actor_kind}]}`: one record per API key that opened an MCP
-/// connection. `key_name` / `actor` are the key's current name (fallback: the name
-/// at connect time, then the key id).
+/// `GET /api/aliases`: one record per API key that opened an MCP connection, named
+/// by the key's current name (else its name at connect time, then its id).
 async fn h_aliases(State(st): State<AppState>) -> Json<Value> {
     let keys = cache::rd(&st.cache.keys).clone();
     let list: Vec<Value> = st
@@ -996,15 +920,8 @@ async fn h_aliases(State(st): State<AppState>) -> Json<Value> {
     Json(json!({"aliases": list}))
 }
 
-/// `/login` - login page rendered from the UI assets (`login.html`).
-///
-/// Design note: while the instance is LOCKED the login page is the terminal
-/// destination. It must not redirect to `/`, because `/` redirects back to
-/// `/login`, which would form a redirect loop. Only a caller that already has a
-/// session on an unlocked instance is sent on to `/`.
-///
-/// When the assets are not installed it falls back to a minimal status page so
-/// an operator can still see why the instance is locked.
+/// `/login`: the login page, or a minimal status page when assets are missing.
+/// While locked it never redirects to `/` (that would loop).
 async fn h_login_page(
     State(st): State<AppState>,
     uri: axum::http::Uri,
@@ -1013,7 +930,7 @@ async fn h_login_page(
     let s = cache::arm_window(&st);
     let locked = s.status == ArmStatus::Locked;
     let signed_in = session_of(&st, &headers).is_some();
-    // An app connecting over OAuth: the page shows its consent card even when signed in.
+    // An OAuth consent card shows even when signed in.
     let oauth = query_value(&uri, "oauth").is_some();
     if signed_in && !locked && !oauth {
         return redirect("/");
@@ -1022,7 +939,7 @@ async fn h_login_page(
         return html_page(body);
     }
     let status = if locked {
-        "LOCKED - run `memora-cli unlock` or `memora-cli setup` on the server"
+        "sign-in paused - run `memora-cli unlock` on the server"
     } else if s.status == ArmStatus::Armed {
         "setup session open - please complete the form"
     } else {
@@ -1055,11 +972,7 @@ fn asset_type(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Whether an asset name may be served (explicit whitelist).
-///
-/// Covers the PWA files (manifest, service worker, icons, offline page) and
-/// `robots.txt`. The whitelist is explicit, so no other file in the asset
-/// directory can be read from outside.
+/// Whether an asset name may be served; no other file in the asset directory is reachable.
 fn asset_allowed(name: &str) -> bool {
     matches!(
         name,
@@ -1084,10 +997,7 @@ fn asset_allowed(name: &str) -> bool {
     )
 }
 
-/// Read an asset as raw bytes.
-///
-/// PWA assets include PNG icons, which are not valid UTF-8. Every asset goes
-/// through this path so HTML, CSS, JS and PNG are all returned intact.
+/// Read a whitelisted asset as raw bytes.
 fn read_asset(st: &AppState, name: &str) -> Option<Vec<u8>> {
     if !asset_allowed(name) {
         return None;
@@ -1095,11 +1005,8 @@ fn read_asset(st: &AppState, name: &str) -> Option<Vec<u8>> {
     std::fs::read(std::path::Path::new(&st.assets).join(name)).ok()
 }
 
-/// `POST /logout` - revoke the session cookie and return to the login page.
-///
-/// POST only, with the same-origin check every cookie write gets: a GET (a
-/// link or image on any page) or a cross-site form must not sign the owner
-/// out (logout CSRF).
+/// `POST /logout`: revoke the session and return to the login page. POST plus the
+/// origin check, so no link or cross-site form can sign the owner out.
 async fn h_logout(State(st): State<AppState>, headers: HeaderMap) -> Response {
     if !origin_ok(&headers) {
         return (
@@ -1127,18 +1034,13 @@ fn redirect(to: &str) -> Response {
         .into_response()
 }
 
-/// `/` - the vault UI. Requires a session (or an API key); otherwise the caller
-/// is redirected to `/login`.
-///
-/// Design note: keep this redirect one-way. While LOCKED, `/login` is the
-/// terminal destination, so `/` must not bounce back and forth with it.
+/// `/`: the vault UI for a signed-in browser, otherwise a redirect to `/login`.
 async fn h_index(State(st): State<AppState>, headers: HeaderMap) -> Response {
     if session_of(&st, &headers).is_none() {
         return redirect("/login");
     }
     match read_asset(&st, "index.html") {
-        // The shell references the bundle, so it must never be cached
-        // (html_page sets no-store).
+        // The shell must never be cached (html_page sets no-store).
         Some(body) => html_page(body),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1162,10 +1064,8 @@ fn has_control_chars(path: &str) -> bool {
             .any(char::is_control)
 }
 
-/// Client-side routes of the web app (`/brain`, `/graph`, `/node/<path>`, ...): the
-/// same app shell as `/`, behind the same session gate (no session: 302 `/login`).
-/// The path is only checked for control characters; it is never used to read a
-/// file (the vault path in `/node/...` is resolved by the browser through the API).
+/// Client-side routes of the web app: the app shell behind the session gate. The path
+/// is never used to read a file.
 async fn h_app_route(
     State(st): State<AppState>,
     uri: axum::http::Uri,
@@ -1178,16 +1078,14 @@ async fn h_app_route(
         )
             .into_response();
     }
-    // Signed out: sign in, then come back here (`/login?r=<this path>`).
     if session_of(&st, &headers).is_none() {
         return redirect(&login_return(&uri));
     }
     h_index(State(st), headers).await
 }
 
-/// `/login?r=<path and query>` for a page the browser asked for, or plain
-/// `/login` when the path is not a clean local one. The value is fully
-/// percent-encoded; the login page checks it again before following it.
+/// `/login?r=<percent-encoded path and query>`, or plain `/login` when the path is
+/// not a clean local one.
 fn login_return(uri: &axum::http::Uri) -> String {
     let path = uri.path();
     let ok = path.starts_with('/')
@@ -1215,9 +1113,7 @@ fn login_return(uri: &axum::http::Uri) -> String {
     format!("/login?r={enc}")
 }
 
-/// Serve a generated HTML page (login.html, index.html, offline.html) with a
-/// per-response CSP nonce: every inline `<script>` the build emits gets the
-/// nonce, so the policy can forbid any other inline or injected script.
+/// Serve an HTML page with a per-response CSP nonce on every `<script>` it ships.
 fn html_page(body: Vec<u8>) -> Response {
     let nonce = csp_nonce();
     let html = String::from_utf8_lossy(&body)
@@ -1243,12 +1139,10 @@ fn csp_nonce() -> String {
     k.rsplit('_').next().unwrap_or(&k).to_string()
 }
 
-/// sha256 of the one inline handler the offline page uses
-/// (`onclick="location.reload()"`), allowed by hash rather than unsafe-inline.
+/// sha256 of the offline page's inline `onclick="location.reload()"`.
 const OFFLINE_RELOAD_HASH: &str = "sha256-9gOBGqEQINNDuds+tkXbNzih6klbz+KeCyxEj4KRLeM=";
 
-/// CSP for the app and login pages. Styles stay `'unsafe-inline'` (the pages
-/// and the UI set `style=` attributes); scripts need the nonce or same origin.
+/// CSP for HTML pages; styles stay `'unsafe-inline'` because the UI sets `style=`.
 fn page_csp(nonce: &str) -> String {
     format!(
         "default-src 'self'; script-src 'self' 'nonce-{nonce}' 'unsafe-hashes' '{OFFLINE_RELOAD_HASH}'; style-src 'self' 'unsafe-inline'; \
@@ -1258,13 +1152,11 @@ fn page_csp(nonce: &str) -> String {
     )
 }
 
-/// CSP for the service worker script. A worker obeys the CSP of its own
-/// script, so it needs `connect-src 'self'` to fetch pages and assets.
+/// CSP for the service worker script (it fetches pages and assets).
 const SW_CSP: &str =
     "default-src 'none'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
 
-/// CSP for every other response (JSON, plain text, the small fallback pages):
-/// nothing may load except inline styles of the fallback pages.
+/// CSP for every other response.
 const DEFAULT_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; \
      base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
@@ -1297,10 +1189,6 @@ pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// Helpers shared with the `api` module
-// ---------------------------------------------------------------------------
-
 /// Redirect to the login page and clear the session cookie. Callers revoke the
 /// server-side session themselves.
 pub(crate) fn logout_response() -> Response {
@@ -1315,10 +1203,7 @@ pub(crate) fn logout_response() -> Response {
         .into_response()
 }
 
-/// `Set-Cookie` header for a new session. HttpOnly + SameSite=Lax.
-///
-/// `Secure` is added when the request arrived over HTTPS (X-Forwarded-Proto),
-/// so the cookie survives behind a TLS-terminating proxy.
+/// `Set-Cookie` header for a new session (HttpOnly, SameSite=Lax, `Secure` over HTTPS).
 pub(crate) fn session_cookie_header(sid: &str, ttl: i64, https: bool) -> String {
     let secure = if https { "; Secure" } else { "" };
     format!(
@@ -1335,13 +1220,38 @@ pub(crate) fn clear_cookie_header() -> String {
     )
 }
 
-/// Whether the request arrived over HTTPS (drives the cookie `Secure` flag).
+/// Whether a proxy says the request arrived over HTTPS; the first of
+/// `X-Forwarded-Proto`, `Forwarded`, `CF-Visitor`, `X-Forwarded-Ssl` present decides.
 pub(crate) fn is_https(headers: &HeaderMap) -> bool {
-    headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.eq_ignore_ascii_case("https"))
-        .unwrap_or(false)
+    let h = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase()
+    };
+    let xfp = h("x-forwarded-proto");
+    if let Some(first) = xfp
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        return first == "https";
+    }
+    let fwd = h("forwarded");
+    if let Some(p) = fwd.split(',').next().and_then(|hop| {
+        hop.split(';')
+            .find_map(|kv| kv.trim().strip_prefix("proto="))
+    }) {
+        return p.trim_matches('"') == "https";
+    }
+    let visitor = h("cf-visitor");
+    if !visitor.is_empty() {
+        return visitor.replace(' ', "").contains("\"scheme\":\"https\"");
+    }
+    h("x-forwarded-ssl") == "on"
 }
 
 /// Whether `url` (an `Origin` or `Referer` value) names the same host:port as
@@ -1467,10 +1377,25 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
+/// A response the compression layer may compress.
+#[derive(Clone, Copy)]
+struct Compressible;
+
+/// Mark GET answers under `/api/` (not `/api/auth/`) as compressible; nothing else is
+/// compressed, so no secret sits next to request-controlled text (BREACH).
+async fn mw_compressible(req: Request, next: Next) -> Response {
+    let p = req.uri().path();
+    let ok = req.method() == axum::http::Method::GET
+        && p.starts_with("/api/")
+        && !p.starts_with("/api/auth/");
+    let mut res = next.run(req).await;
+    if ok {
+        res.extensions_mut().insert(Compressible);
+    }
+    res
+}
+
 /// Middleware: forbid search-engine indexing on every response.
-///
-/// The vault UI is private, so the header is sent unconditionally rather than
-/// relying on the page's meta tags alone.
 async fn mw_noindex(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
     res.headers_mut().insert(
@@ -1480,19 +1405,15 @@ async fn mw_noindex(req: Request, next: Next) -> Response {
     res
 }
 
-/// Middleware: attach the security headers every response should carry.
-///
-/// Installed as the outermost layer, so 404s from the host allow-list, 429s
-/// from the guard, 403s from the access stack, 401/423/redirects from the auth
-/// gate and the 408 timeout all carry them too.
+/// Middleware: security headers on every response (outermost layer, so errors from
+/// the other layers carry them too).
 async fn mw_security_headers(
     State(st): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     req: Request,
     next: Next,
 ) -> Response {
-    // HTTPS only counts when the connection came through a trusted proxy that
-    // says so; this server itself speaks plain HTTP.
+    // This server speaks plain HTTP: only a trusted proxy can vouch for HTTPS.
     let https = st.guard.trusted_peer(peer) && is_https(req.headers());
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
@@ -1551,10 +1472,8 @@ async fn mw_security_headers(
     res
 }
 
-/// Fallback handler for unmatched routes.
-/// No route: a page the browser navigates to (GET, wants HTML, not an API or
-/// file path) gets the app, which shows its "page not found" view; anything
-/// else gets a JSON 404.
+/// Fallback: browser page navigations get the app (its "not found" view), anything
+/// else a JSON 404.
 async fn h_notfound(
     State(st): State<AppState>,
     method: axum::http::Method,
@@ -1577,10 +1496,6 @@ async fn h_notfound(
     }
     (StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response()
 }
-
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
 
 pub fn build_router(st: AppState) -> Router {
     Router::new()
@@ -1607,6 +1522,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/welcome", get(h_app_route))
         .route("/docs", get(h_app_route))
         .route("/docs/{*section}", get(h_app_route))
+        .route("/trash", get(h_app_route))
         // Older page names the web app still understands.
         .route("/home", get(h_app_route))
         .route("/vault", get(h_app_route))
@@ -1655,9 +1571,21 @@ pub fn build_router(st: AppState) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             std::time::Duration::from_secs(30),
         ))
+        .layer(middleware::from_fn(mw_compressible))
+        .layer(
+            tower_http::compression::CompressionLayer::new().compress_when(
+                tower_http::compression::predicate::DefaultPredicate::new().and(
+                    |_: StatusCode,
+                     _: axum::http::Version,
+                     _: &HeaderMap,
+                     ext: &axum::http::Extensions| {
+                        ext.get::<Compressible>().is_some()
+                    },
+                ),
+            ),
+        )
         .layer(tower::limit::GlobalConcurrencyLimitLayer::new(1024))
-        // Outermost: every response, including ones the layers above produce
-        // on their own (404 host, 429, 403, 401, 423, 408), gets these headers.
+        // Outermost, so every response gets these headers.
         .layer(middleware::from_fn(mw_noindex))
         .layer(middleware::from_fn_with_state(
             st.clone(),
@@ -1681,9 +1609,7 @@ async fn h_asset_root(State(st): State<AppState>, req: Request) -> Response {
     if !asset_allowed(&name) {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }
-    // Code is revalidated on every load (ETag, so usually a 304): a cached
-    // bundle must never keep serving the previous UI after a redeploy. Only
-    // images and the manifest, which change rarely, get a short cache.
+    // Code is revalidated on every load so a redeploy is never masked by a cached bundle.
     let cacheable = name.ends_with(".png")
         || name.ends_with(".svg")
         || name.ends_with(".ico")
@@ -1712,31 +1638,20 @@ async fn h_favicon() -> Response {
     (StatusCode::NO_CONTENT, "").into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Realtime: WS fan-out + intake /_bus
-// ---------------------------------------------------------------------------
-
-/// Most concurrent WebSocket clients. The global concurrency limit does not
-/// cover upgraded connections (the upgrade request completes immediately), so
-/// without this a flood of sockets would each hold a task and a receiver.
+/// Most concurrent WebSocket clients (upgraded sockets escape the global concurrency limit).
 const WS_MAX_CLIENTS: usize = 512;
-/// Largest inbound WebSocket message. Clients never need to send anything
-/// substantial (the server ignores their messages); the axum default is 64 MiB.
+/// Largest inbound WebSocket message; clients never need to send anything substantial.
 const WS_MAX_MESSAGE: usize = 16 * 1024;
 /// A send that cannot complete in this time means the client stopped reading.
 const WS_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Ping interval; also the cadence of the idle check.
 const WS_PING_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
-/// Close a client from which nothing (not even a pong) arrived for this long:
-/// half-open TCP connections otherwise keep their task alive forever.
+/// Close a client silent this long (not even a pong), so half-open sockets do not linger.
 const WS_IDLE: std::time::Duration = std::time::Duration::from_secs(75);
 /// Largest `/_bus` body.
 const BUS_MAX_BODY: usize = 64 * 1024;
 
-/// `GET /ws` - one realtime channel per browser.
-///
-/// The WebSocket endpoint and the event intake bus share this port, so no
-/// second port has to be opened or proxied.
+/// `GET /ws`: one realtime channel per browser.
 async fn h_ws(ws: WebSocketUpgrade) -> Response {
     if memora_core::events::hub().clients() >= WS_MAX_CLIENTS {
         return (
@@ -1774,13 +1689,11 @@ async fn ws_session(mut socket: WebSocket) {
     drop(rx);
     let _ = ws_send(&mut socket, Message::Close(None)).await;
     drop(socket);
-    // Tell the remaining clients the new client count.
     hub.publish(json!({"type": "presence", "clients": hub.clients()}));
 }
 
 async fn ws_pump(socket: &mut WebSocket, rx: &mut broadcast::Receiver<Arc<str>>) {
     let hub = memora_core::events::hub();
-    // Greeting followed by a replay of the most recent buffered events.
     let hello = json!({"type": "hello", "clients": hub.clients()});
     if !ws_send(socket, Message::Text(hello.to_string().into())).await {
         return;
@@ -1834,19 +1747,8 @@ pub(crate) fn ip_is_loopback(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// `POST /_bus` - local event intake, used by other processes on the same host
-/// to inject activity.
-///
-/// Only loopback callers are accepted, so nothing on the network can forge
-/// agent activity. A loopback TCP peer is not enough on its own: a local
-/// reverse proxy / tunnel (cloudflared) also connects from loopback, so the
-/// caller IP resolved by `mw_guard` from the forwarding headers must be
-/// loopback too. The body is capped at `BUS_MAX_BODY`.
-///
-/// A web page open in a browser on the same machine can also reach loopback,
-/// and a `text/plain` POST needs no CORS preflight, so requests a browser
-/// marks as its own (`Origin`, `Sec-Fetch-*`) are refused too: the intake is
-/// for local processes, never for pages.
+/// `POST /_bus`: event intake for local processes only. A loopback peer is not
+/// enough (a local tunnel or a browser page can reach loopback), see [`bus_caller_ok`].
 async fn h_bus(ConnectInfo(peer): ConnectInfo<SocketAddr>, req: Request) -> Response {
     if !bus_caller_ok(peer, req.headers()) {
         return (StatusCode::FORBIDDEN, Json(json!({"error":"forbidden"}))).into_response();
@@ -1892,9 +1794,7 @@ mod ws_bus_tests {
     use super::{bus_caller_ok, ip_is_loopback, ws_mark_replay};
     use axum::http::HeaderMap;
 
-    /// A page in a local browser can POST to loopback without a preflight; the
-    /// headers the browser adds must get it refused, while a plain local
-    /// process (curl, a hook script) is still accepted.
+    /// A local browser page is refused; a plain local process is accepted.
     #[test]
     fn bus_refuses_browsers_and_proxies() {
         let local: std::net::SocketAddr = "127.0.0.1:5000".parse().unwrap();
@@ -2122,6 +2022,45 @@ mod front_door_tests {
 mod tests {
 
     #[test]
+    fn is_https_reads_every_proxy_header() {
+        use super::is_https;
+        let hm = |pairs: &[(&'static str, &'static str)]| {
+            let mut h = axum::http::HeaderMap::new();
+            for (k, v) in pairs {
+                h.insert(*k, axum::http::HeaderValue::from_static(v));
+            }
+            h
+        };
+        assert!(!is_https(&hm(&[])));
+        assert!(is_https(&hm(&[("x-forwarded-proto", "https")])));
+        assert!(is_https(&hm(&[("x-forwarded-proto", "HTTPS")])));
+        assert!(is_https(&hm(&[("x-forwarded-proto", "https, http")])));
+        assert!(!is_https(&hm(&[("x-forwarded-proto", "http, https")])));
+        assert!(is_https(&hm(&[(
+            "forwarded",
+            "for=1.2.3.4;proto=https;host=a.example"
+        )])));
+        assert!(is_https(&hm(&[(
+            "forwarded",
+            "proto=\"https\", proto=http"
+        )])));
+        assert!(!is_https(&hm(&[("forwarded", "for=1.2.3.4;proto=http")])));
+        assert!(is_https(&hm(&[("cf-visitor", "{\"scheme\":\"https\"}")])));
+        assert!(is_https(&hm(&[("cf-visitor", "{\"scheme\": \"https\"}")])));
+        assert!(!is_https(&hm(&[("cf-visitor", "{\"scheme\":\"http\"}")])));
+        assert!(is_https(&hm(&[("x-forwarded-ssl", "on")])));
+        // The first proxy header present decides.
+        assert!(!is_https(&hm(&[
+            ("x-forwarded-proto", "http"),
+            ("cf-visitor", "{\"scheme\":\"https\"}")
+        ])));
+        assert!(is_https(&hm(&[
+            ("cf-visitor", "{\"scheme\":\"https\"}"),
+            ("x-forwarded-ssl", "off")
+        ])));
+    }
+
+    #[test]
     fn login_return_keeps_only_clean_local_paths() {
         use super::login_return;
         let u = |p: &str| p.parse::<axum::http::Uri>().unwrap();
@@ -2214,6 +2153,14 @@ mod tests {
             Some("admin")
         );
         assert_eq!(required_scope(&Method::GET, "/api/toolsx"), Some("read"));
+        assert_eq!(required_scope(&Method::GET, "/api/trash"), Some("read"));
+        assert_eq!(
+            required_scope(&Method::POST, "/api/trash/restore"),
+            Some("write")
+        );
+        for p in ["/api/trash/delete", "/api/trash/empty"] {
+            assert_eq!(required_scope(&Method::POST, p), Some("admin"), "{p}");
+        }
         assert_eq!(required_scope(&Method::GET, "/healthz"), None);
         assert!(!needs_vault("/api/tools"));
     }

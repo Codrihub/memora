@@ -1,6 +1,5 @@
-//! `/api/pins` through the router: browser session only (API keys 403, cross-site
-//! writes 403), path and size checks, and pins that follow renames, folder moves and
-//! deletes made over HTTP and over MCP, with missing paths reported.
+//! `/api/pins` through the router: browser session only, input checks, and pins that
+//! follow renames, moves and deletes over HTTP and MCP.
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;

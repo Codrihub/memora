@@ -1,21 +1,19 @@
-//! Release check: the newest published release on GitHub, compared with the
-//! running version and reported to the signed-in owner through `/api/config`.
-//!
-//! The fetch runs on a background task (never in a request handler) and the
-//! result is cached in memory. `MEMORA_UPDATE_CHECK=false` turns it off: no
-//! network call is made.
+//! Background check for the newest GitHub release, reported through `/api/config`.
+//! `MEMORA_UPDATE_CHECK=false` disables it (no network call).
 
 use serde_json::{json, Value};
 use std::io::Read;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// The version this binary was built as (the workspace version in Cargo.toml).
+/// The version this binary was built as.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 pub const RELEASES_URL: &str = "https://github.com/Codrihub/memora/releases";
 const LATEST_API: &str = "https://api.github.com/repos/Codrihub/memora/releases/latest";
+const REPO_API: &str = "https://api.github.com/repos/Codrihub/memora";
+pub const REPO_URL: &str = "https://github.com/Codrihub/memora";
 
 /// First check this long after start, so it never competes with startup.
 const FIRST_CHECK: Duration = Duration::from_secs(30);
@@ -44,6 +42,49 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 static ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+/// GitHub stars of the repository from the last check; -1 = not known.
+static STARS: AtomicI64 = AtomicI64::new(-1);
+
+/// `stargazers_count` of a GitHub repository answer.
+pub fn star_count(doc: &Value) -> Option<i64> {
+    doc.get("stargazers_count")?.as_i64().filter(|n| *n >= 0)
+}
+
+/// A GET request to the GitHub API.
+fn request(url: &str) -> ureq::Request {
+    ureq::AgentBuilder::new()
+        .timeout(TIMEOUT)
+        .user_agent(concat!("memora/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .get(url)
+        .set("Accept", "application/vnd.github+json")
+}
+
+/// The response body, capped at `MAX_BYTES`.
+fn read_body(resp: ureq::Response) -> std::io::Result<String> {
+    let mut raw = String::new();
+    resp.into_reader()
+        .take(MAX_BYTES)
+        .read_to_string(&mut raw)?;
+    Ok(raw)
+}
+
+/// One blocking request for the repository's star count (kept when it fails).
+fn fetch_stars() {
+    let Ok(resp) = request(REPO_API).call() else {
+        return;
+    };
+    let Ok(raw) = read_body(resp) else {
+        return;
+    };
+    if let Some(n) = serde_json::from_str::<Value>(&raw)
+        .ok()
+        .as_ref()
+        .and_then(star_count)
+    {
+        STARS.store(n, Ordering::Relaxed);
+    }
+}
 
 /// False when `MEMORA_UPDATE_CHECK` is `false`, `0`, `no` or `off`.
 pub fn enabled() -> bool {
@@ -109,15 +150,7 @@ pub fn tag_version(doc: &Value) -> Option<String> {
 /// One blocking request to GitHub.
 fn fetch() -> Outcome {
     ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-    let agent = ureq::AgentBuilder::new()
-        .timeout(TIMEOUT)
-        .user_agent(concat!("memora/", env!("CARGO_PKG_VERSION")))
-        .build();
-    let resp = match agent
-        .get(LATEST_API)
-        .set("Accept", "application/vnd.github+json")
-        .call()
-    {
+    let resp = match request(LATEST_API).call() {
         Ok(r) => r,
         Err(ureq::Error::Status(404, _)) => return Outcome::NoRelease,
         Err(ureq::Error::Status(code, _)) => {
@@ -125,10 +158,10 @@ fn fetch() -> Outcome {
         }
         Err(e) => return Outcome::Failed(format!("cannot reach GitHub: {e}")),
     };
-    let mut raw = String::new();
-    if let Err(e) = resp.into_reader().take(MAX_BYTES).read_to_string(&mut raw) {
-        return Outcome::Failed(format!("cannot read the answer: {e}"));
-    }
+    let raw = match read_body(resp) {
+        Ok(raw) => raw,
+        Err(e) => return Outcome::Failed(format!("cannot read the answer: {e}")),
+    };
     match serde_json::from_str::<Value>(&raw)
         .ok()
         .as_ref()
@@ -157,9 +190,13 @@ pub fn spawn() {
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
         loop {
-            let outcome = tokio::task::spawn_blocking(fetch)
-                .await
-                .unwrap_or_else(|e| Outcome::Failed(e.to_string()));
+            let outcome = tokio::task::spawn_blocking(|| {
+                let o = fetch();
+                fetch_stars();
+                o
+            })
+            .await
+            .unwrap_or_else(|e| Outcome::Failed(e.to_string()));
             let wait = match &outcome {
                 Outcome::Failed(why) => {
                     tracing::warn!("release check failed: {why}");
@@ -177,9 +214,8 @@ pub fn spawn() {
     });
 }
 
-/// `{current, latest, available, url, checked_at, state}` for the UI. `state` is
-/// `ok`, `none` (no release published), `error`, `disabled` or `pending` (not
-/// checked yet).
+/// `{current, latest, available, url, checked_at, state, repo, stars}` for the UI;
+/// `state` is `ok`, `none`, `error`, `disabled` or `pending`.
 pub fn status() -> Value {
     if !enabled() {
         return report(None, None, "disabled");
@@ -204,6 +240,7 @@ fn report(latest: Option<&str>, checked_at: Option<i64>, state: &str) -> Value {
         Some(v) if available => format!("{RELEASES_URL}/tag/v{v}"),
         _ => RELEASES_URL.to_string(),
     };
+    let stars = STARS.load(Ordering::Relaxed);
     json!({
         "current": CURRENT,
         "latest": latest,
@@ -211,12 +248,21 @@ fn report(latest: Option<&str>, checked_at: Option<i64>, state: &str) -> Value {
         "url": url,
         "checked_at": checked_at,
         "state": state,
+        "repo": REPO_URL,
+        "stars": (stars >= 0).then_some(stars),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn star_count_reads_the_repository_answer() {
+        assert_eq!(star_count(&json!({"stargazers_count": 128})), Some(128));
+        assert_eq!(star_count(&json!({"stargazers_count": -1})), None);
+        assert_eq!(star_count(&json!({"name": "memora"})), None);
+    }
 
     #[test]
     fn parses_strict_versions() {

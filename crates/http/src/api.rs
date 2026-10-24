@@ -1,21 +1,5 @@
-//! JSON API surface for the Memora web UI.
-//!
-//! This module holds the axum handlers behind `/api/*` and a single public
-//! entry point, [`api_router()`]. The router it returns deliberately does not
-//! call `.with_state()`, so the parent router can attach shared state:
-//!
-//! ```ignore
-//! Router::new().merge(api::api_router()).with_state(st)
-//! ```
-//!
-//! `lib.rs::build_router()` already registers
-//! `GET /api/{stats,graph,tree,search,access,keys,aliases}` and
-//! `POST /api/access/test`; they are not registered again here, because
-//! `Router::merge` panics when two handlers claim the same method and path.
-//!
-//! Vault mutations go through the `*_impl` methods on `MemoryStore` and never
-//! touch the vault filesystem directly. Passwords are hashed with argon2id,
-//! API keys with SHA-256.
+//! JSON API handlers behind `/api/*`, exposed through [`api_router()`] (stateless; the
+//! parent router attaches state). Routes registered in `lib.rs` are not repeated here.
 
 use axum::{
     extract::{DefaultBodyLimit, Request, State},
@@ -41,9 +25,8 @@ pub(crate) const MAX_PASSWORD_BYTES: usize = 1024;
 /// Request body cap for the auth and settings endpoints.
 const AUTH_BODY_LIMIT: usize = 16 * 1024;
 
-/// Serialises the account-creating and account-replacing handlers (setup and
-/// reset), so two concurrent submits of one window cannot both pass the
-/// "no account yet" / "window open" checks across the argon2 await.
+/// Serialises setup and reset, so two concurrent submits cannot both pass the
+/// window checks across the argon2 await.
 static ACCOUNT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn too_long_password() -> Response {
@@ -51,10 +34,6 @@ fn too_long_password() -> Response {
         "password must be at most {MAX_PASSWORD_BYTES} bytes"
     ))
 }
-
-// ---------------------------------------------------------------------------
-// Local helpers
-// ---------------------------------------------------------------------------
 
 fn realm(st: &AppState) -> String {
     rd(&st.cache.settings).realm.clone()
@@ -209,19 +188,13 @@ pub(crate) fn body_str(v: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// The `password` field exactly as sent, or `None` when missing or blank.
-/// Never trimmed: setup, reset, login, the password change and the CLI must all
-/// hash and check the same bytes.
+/// The `password` field exactly as sent (never trimmed), or `None` when blank.
 fn body_password(b: &Value) -> Option<String> {
     b.get("password")
         .and_then(|x| x.as_str())
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
 }
-
-// ---------------------------------------------------------------------------
-// Handler - vault / data (GET)
-// ---------------------------------------------------------------------------
 
 /// `GET /api/note?path=X` -> `{path,name,content,html,tags,frontmatter,backlinks,size,mtime}`
 async fn h_api_note(State(st): State<AppState>, req: Request) -> Response {
@@ -260,9 +233,8 @@ fn looks_like(mime: &str, b: &[u8]) -> bool {
     }
 }
 
-/// `GET /api/vault/file?path=<vault-relative>` -> the bytes of one image file
-/// in the vault (png, jpg, gif, webp, avif, bmp, ico; never svg). The path must
-/// resolve inside the vault after symlinks; other file types are refused.
+/// `GET /api/vault/file?path=<vault-relative>` -> one raster image from the vault
+/// (never svg); the path must resolve inside the vault.
 async fn h_api_vault_file(State(st): State<AppState>, req: Request) -> Response {
     use memora_core::vault::{image_mime, VaultFileErr};
     let path = super::query_value(req.uri(), "path").unwrap_or_default();
@@ -318,8 +290,7 @@ async fn h_api_vault_file(State(st): State<AppState>, req: Request) -> Response 
         return (StatusCode::NOT_MODIFIED, base, [(header::ETAG, etag)]).into_response();
     }
     match tokio::fs::read(&full).await {
-        // Pixels only: the bytes must be the format the name claims (a script
-        // or page renamed to .png is refused).
+        // The bytes must match the claimed format (a page renamed to .png is refused).
         Ok(body) if !looks_like(mime, &body) => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Json(json!({"error": "not an image"})),
@@ -433,7 +404,7 @@ async fn h_api_logs(State(st): State<AppState>, req: Request) -> Response {
         .unwrap_or(400);
     let actor = super::query_value(req.uri(), "actor").unwrap_or_default();
     let q = super::query_value(req.uri(), "q").unwrap_or_default();
-    // `since` / `until` (unix seconds) pick an exact window, e.g. one local day.
+    // `since` / `until` (unix seconds) pick an exact window.
     let num = |k: &str| super::query_value(req.uri(), k).and_then(|v| v.trim().parse::<f64>().ok());
     let (since, until) = (num("since"), num("until"));
     let window = (since.is_some() || until.is_some()).then_some((since, until));
@@ -455,8 +426,7 @@ async fn h_api_log_settings(State(st): State<AppState>) -> Response {
     }
 }
 
-/// `POST /api/logs/settings` `{max_mb, max_days}` -> same as GET. The new limits
-/// apply at once: the log is trimmed to them right away.
+/// `POST /api/logs/settings` `{max_mb, max_days}` -> same as GET; applied at once.
 async fn h_api_log_settings_set(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -491,8 +461,51 @@ async fn h_api_log_settings_set(
     h_api_log_settings(State(st)).await
 }
 
-/// `GET /api/config` -> `{realm,min_password_len,session_ttl,vault,version,gateway,update}`
-/// (`update`: the cached release check, see [`crate::release::status`]).
+/// `POST /api/settings/server` `{realm?, session_ttl?, session_max_age?}` (admin) ->
+/// the same fields; open sessions follow the new limits at once.
+async fn h_api_server_settings_set(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let patch = memora_state::settings::SettingsPatch {
+        realm: b.get("realm").and_then(|v| v.as_str()).map(str::to_string),
+        session_ttl: b.get("session_ttl").and_then(|v| v.as_i64()),
+        session_max_age: b.get("session_max_age").and_then(|v| v.as_i64()),
+        min_password_len: None,
+    };
+    if patch.realm.is_none() && patch.session_ttl.is_none() && patch.session_max_age.is_none() {
+        return bad("send realm, session_ttl or session_max_age");
+    }
+    let user = actor_name(&st, &headers, &key);
+    let res = st.db.write(|tx| {
+        let s = memora_state::settings::update(tx, &patch, memora_state::now())?;
+        act_tx(
+            tx,
+            &headers,
+            "server_settings",
+            user.as_deref(),
+            &format!(
+                "name {:?}, idle {} s, longest {} s",
+                s.realm, s.session_ttl, s.session_max_age
+            ),
+        )?;
+        Ok(s)
+    });
+    match res {
+        Ok(s) => {
+            cache::reload(&st, Domain::Settings);
+            Json(json!({"realm": s.realm, "session_ttl": s.session_ttl, "session_max_age": s.session_max_age})).into_response()
+        }
+        Err(e) => db_err(e, "settings not found"),
+    }
+}
+
+/// `GET /api/config` -> `{realm,min_password_len,session_ttl,vault,version,gateway,update}`.
 async fn h_api_config(State(st): State<AppState>) -> Response {
     Json(json!({
         "realm": realm(&st),
@@ -531,17 +544,19 @@ async fn h_auth_state(State(st): State<AppState>, headers: HeaderMap) -> Respons
         "code_required": true,
         "cooldown": cooldown.unwrap_or(0),
     });
-    // Only whether a vault is configured: the path and the suggested folder
-    // are for the signed-in owner (`/api/settings`), not for anyone who can
-    // reach the login page.
+    // Only whether a vault is configured; the path is for the signed-in owner.
     if let Some(o) = out.as_object_mut() {
         o.insert("vault_configured".into(), json!(st.vault_path().is_some()));
     }
-    // A browser holding a cookie whose session was ended on purpose (password
-    // changed or signed out from another device) learns why, once per page.
+    // Why a deliberately ended session was ended (password change, remote sign-out).
     if let Some(reason) = signed_out_reason(&st, &headers) {
         if let Some(o) = out.as_object_mut() {
             o.insert("signed_out".into(), json!(reason));
+        }
+    }
+    if let Some(mode) = s.expired() {
+        if let Some(o) = out.as_object_mut() {
+            o.insert("expired".into(), json!(mode.as_str()));
         }
     }
     if armed {
@@ -557,12 +572,8 @@ async fn h_auth_state(State(st): State<AppState>, headers: HeaderMap) -> Respons
     Json(out).into_response()
 }
 
-/// Instance checks that must all pass before the setup form may open. Nothing
-/// is written: this runs on every `/api/auth/state` poll.
-///
-/// `vault` passes when no vault is configured yet: the folder is chosen after
-/// the account exists, so a missing vault must not block the account setup.
-/// `state` needs a database opened read-write and a writable state folder.
+/// Read-only instance checks that must all pass before the setup form may open.
+/// `vault` passes while none is configured (it is chosen after the account exists).
 fn readiness(st: &AppState) -> serde_json::Map<String, Value> {
     let mut m = serde_json::Map::new();
     let vault_ok = st.vault_path().is_none_or(|v| dir_writable(Path::new(&v)));
@@ -638,23 +649,27 @@ fn succeeded(st: &AppState, headers: &HeaderMap) {
     }
 }
 
-/// A wrong setup code. It spends the caller's small per-IP budget
-/// ([`crate::guard::CODE_IP_LIMIT`], then a cooldown) instead of closing the
-/// window at once, which let anyone who could reach `/login` keep the owner
-/// from ever finishing setup. Only after
-/// [`crate::guard::CODE_WINDOW_LIMIT`] wrong codes in all is the window closed
-/// and the code voided ([`burn_window`]). The code stays single-use and the
-/// window time-limited.
+/// A wrong setup code: spends the caller's per-IP budget, then a cooldown; the window
+/// is closed only after [`crate::guard::CODE_WINDOW_LIMIT`] misses in all, so an
+/// outsider cannot block setup by guessing.
 fn wrong_code(st: &AppState, headers: &HeaderMap) -> Response {
-    let armed_at = cache::arm_window(st).armed_at.unwrap_or(0);
+    let w = cache::arm_window(st);
+    let armed_at = w.armed_at.unwrap_or(0);
+    let what = code_word(w.mode);
     let ip = crate::guard::header_ip(headers)
         .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
     let (wait, close) = st.guard.code_miss(&ip, armed_at);
     if close {
-        return burn_window(st, headers);
+        return burn_window(st, headers, w.mode);
     }
-    act(st, headers, "code_wrong", None, "wrong setup code");
-    tracing::warn!(%ip, "wrong setup code");
+    act(
+        st,
+        headers,
+        "code_wrong",
+        None,
+        &format!("wrong {what} code"),
+    );
+    tracing::warn!(%ip, "wrong {what} code");
     if let Some(wait) = wait {
         act(
             st,
@@ -668,16 +683,28 @@ fn wrong_code(st: &AppState, headers: &HeaderMap) -> Response {
     (
         StatusCode::FORBIDDEN,
         Json(json!({
-            "error": "Wrong setup code. Check the code shown on the server and try again.",
+            "error": format!("That {what} code is not right. Check the code shown on the server and type it again."),
             "burned": false,
         })),
     )
         .into_response()
 }
 
+/// "setup" or "reset", for messages about the window's code.
+fn code_word(mode: Option<memora_state::arm::ArmMode>) -> &'static str {
+    match mode {
+        Some(memora_state::arm::ArmMode::Reset) => "reset",
+        _ => "setup",
+    }
+}
+
 /// Too many wrong codes for this window: void the code and close the window;
-/// the operator has to open a new one (`/web`) on the server.
-fn burn_window(st: &AppState, headers: &HeaderMap) -> Response {
+/// the operator has to open a new one (`memora-cli setup` / `reset-password`).
+fn burn_window(
+    st: &AppState,
+    headers: &HeaderMap,
+    mode: Option<memora_state::arm::ArmMode>,
+) -> Response {
     let ip = crate::guard::header_ip(headers)
         .map(|i| i.to_string())
         .unwrap_or_else(|| "?".into());
@@ -699,7 +726,11 @@ fn burn_window(st: &AppState, headers: &HeaderMap) -> Response {
     (
         StatusCode::FORBIDDEN,
         Json(json!({
-            "error": "Too many wrong setup codes. For safety the code is now void and the window is closed. Open a new one on the server: memora-cli, then /web.",
+            "error": if mode == Some(memora_state::arm::ArmMode::Reset) {
+                "Too many wrong codes, so this reset code no longer works. Run memora-cli reset-password on the server for a new one."
+            } else {
+                "Too many wrong codes, so this setup code no longer works. Run memora-cli setup on the server for a new one."
+            },
             "burned": true,
         })),
     )
@@ -730,10 +761,8 @@ fn code_ok(st: &AppState, b: &Value) -> bool {
     }
 }
 
-/// `POST /api/auth/verify` `{code}` -> `{ok, mode, expires_in, user?}`.
-///
-/// The browser checks the code shown in the server terminal before the setup
-/// or reset form is revealed. The code is checked again on submit.
+/// `POST /api/auth/verify` `{code}` -> `{ok, mode, expires_in, user?}`: checks the code
+/// before the setup or reset form is shown (it is checked again on submit).
 async fn h_auth_verify(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -754,7 +783,7 @@ async fn h_auth_verify(
     }
     let mode = s.mode.map(|m| m.as_str()).unwrap_or("");
     act(&st, &headers, "code_ok", None, mode);
-    let user = rd(&st.cache.owner).as_ref().map(|o| o.username.clone());
+    let user = owner_name(&st);
     Json(json!({
         "ok": true, "mode": mode, "expires_in": s.remaining(memora_state::now()), "user": user,
     }))
@@ -772,7 +801,6 @@ async fn h_auth_me(State(st): State<AppState>, headers: HeaderMap) -> Response {
         Some(u) => u.enabled,
         None => true,
     };
-    // Identity is the username only; display name and role are not exposed.
     Json(json!({
         "authenticated": true,
         "user": sess.user,
@@ -814,10 +842,6 @@ async fn h_auth_events(State(st): State<AppState>, req: Request) -> Response {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Handler - vault (POST)
-// ---------------------------------------------------------------------------
-
 /// `POST /api/save` `{path,content}` -> `{ok:true,path}`
 async fn h_api_save(
     State(st): State<AppState>,
@@ -834,6 +858,7 @@ async fn h_api_save(
     ) else {
         return bad("path and content are required");
     };
+    let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).save_impl(&path, content) {
         Ok(()) => Json(json!({"ok": true, "path": path})).into_response(),
         Err(e) => mem_err(e),
@@ -855,6 +880,7 @@ async fn h_api_create(
     };
     let folder = body_str(&b, "folder").unwrap_or_default();
     let content = b.get("content").and_then(|x| x.as_str());
+    let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).create_impl(&title, &folder, content) {
         Ok(path) => Json(json!({"ok": true, "path": path})).into_response(),
         Err(e) => mem_err(e),
@@ -875,6 +901,7 @@ async fn h_api_rename(
     let (Some(path), Some(name)) = (body_str(&b, "path"), body_str(&b, "name")) else {
         return bad("path and name are required");
     };
+    let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).rename_note(&path, &name) {
         Ok((new_path, links)) => {
             Json(json!({"ok": true, "path": new_path, "links_updated": links})).into_response()
@@ -898,6 +925,7 @@ async fn h_api_move(
         return bad("path is required");
     };
     let folder = body_str(&b, "folder").unwrap_or_default();
+    let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).move_note(&path, &folder) {
         Ok((new_path, links)) => {
             Json(json!({"ok": true, "path": new_path, "links_updated": links})).into_response()
@@ -906,7 +934,24 @@ async fn h_api_move(
     }
 }
 
-/// `POST /api/delete` `{path}` -> `{ok:true}`
+/// The owner's username, if an account exists.
+fn owner_name(st: &AppState) -> Option<String> {
+    rd(&st.cache.owner).as_ref().map(|o| o.username.clone())
+}
+
+/// Who the trash records as deleting a note: the key, or the signed-in owner.
+fn trash_actor(st: &AppState, key: Option<&ApiKeyCaller>) -> memora_core::vault::DeletedBy {
+    match key {
+        Some(k) => memora_core::vault::DeletedBy::set(&k.id, &k.name, "agent"),
+        None => {
+            let name = owner_name(st).unwrap_or_else(|| "owner".into());
+            memora_core::vault::DeletedBy::set(&name, &name, "user")
+        }
+    }
+}
+
+/// `POST /api/delete` `{path, mode?}` -> `{ok:true}`: deletes for good, history included
+/// (keys need `admin`); `mode: "trash"` moves it to `.Trash` -> `{ok, trashed, to}`.
 async fn h_api_delete(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -919,9 +964,242 @@ async fn h_api_delete(
     let Some(path) = body_str(&b, "path") else {
         return bad("path is required");
     };
-    match crate::store_as(&st, key.as_deref()).delete_impl(&path) {
-        Ok(()) => Json(json!({"ok": true})).into_response(),
-        Err(e) => mem_err(e),
+    let _author = web_author(&st, key.as_deref());
+    let store = crate::store_as(&st, key.as_deref());
+    match body_str(&b, "mode").as_deref() {
+        // Irreversible, so a key needs `admin` (as MCP `delete_memory` permanent).
+        None | Some("delete") if key.as_ref().is_some_and(|k| !k.perms.has_scope("admin")) => {
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "deleting for good erases the note and its history and needs an admin key; send mode \"trash\" to move it to the Trash instead",
+                    "required_scope": "admin",
+                })),
+            )
+                .into_response()
+        }
+        None | Some("delete") => match store.delete_impl(&path) {
+            Ok(()) => Json(json!({"ok": true})).into_response(),
+            Err(e) => mem_err(e),
+        },
+        Some("trash") => {
+            let _by = trash_actor(&st, key.as_deref());
+            match store.soft_delete_impl(&path) {
+                Ok(v) => Json(v).into_response(),
+                Err(e) => mem_err(e),
+            }
+        }
+        Some(_) => bad("mode is \"trash\" or \"delete\""),
+    }
+}
+
+/// A trash error: 404 for a name that is not (or no longer) in the trash.
+fn trash_err(e: memora_core::vault::MemoryErr) -> Response {
+    if e.0.starts_with("not in trash") {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": e.0}))).into_response();
+    }
+    mem_err(e)
+}
+
+/// `GET /api/trash` -> `{items: [{name, path, original, deleted, by, title}]}`, newest first.
+async fn h_api_trash(State(st): State<AppState>, key: Option<Extension<ApiKeyCaller>>) -> Response {
+    let key = key.map(|k| k.0);
+    let items =
+        crate::blocking(move || crate::snapshot_as(&st, key.as_ref()).list_trash_impl()).await;
+    Json(json!({ "items": items })).into_response()
+}
+
+/// `POST /api/trash/restore` `{name, into?}` -> `{ok, path, from, renamed?}`.
+async fn h_api_trash_restore(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let Some(name) = body_str(&b, "name") else {
+        return bad("name is required (as GET /api/trash lists it)");
+    };
+    let into = body_str(&b, "into").unwrap_or_default();
+    let _author = web_author(&st, key.as_deref());
+    match crate::store_as(&st, key.as_deref()).restore_trash_with(&name, &into, true) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => trash_err(e),
+    }
+}
+
+/// `POST /api/trash/delete` `{name}` -> `{ok, deleted, name}`: one entry, for good.
+async fn h_api_trash_delete(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let Some(name) = body_str(&b, "name") else {
+        return bad("name is required (as GET /api/trash lists it)");
+    };
+    match crate::store_as(&st, key.as_deref()).delete_trash_impl(&name) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => trash_err(e),
+    }
+}
+
+/// `POST /api/trash/empty` -> `{ok, count, names}`: every visible entry, for good.
+async fn h_api_trash_empty(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    match crate::store_as(&st, key.as_deref()).empty_trash_impl() {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => trash_err(e),
+    }
+}
+
+/// Name the caller (key name or owner) as author of vault commits made by this request.
+fn web_author(st: &AppState, key: Option<&ApiKeyCaller>) -> memora_core::vault::CommitAuthor {
+    match key {
+        Some(k) => memora_core::vault::CommitAuthor::set(&k.name),
+        None => memora_core::vault::CommitAuthor::set(&owner_name(st).unwrap_or_default()),
+    }
+}
+
+/// A versioning error: 409 `{error, history: false}` while history is off, else [`mem_err`].
+fn history_err(e: memora_core::vault::MemoryErr) -> Response {
+    if e.0 == memora_core::vault::HISTORY_OFF {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": e.0, "history": false})),
+        )
+            .into_response();
+    }
+    mem_err(e)
+}
+
+/// Most revisions `/api/history` lists at once.
+const HISTORY_MAX: usize = 500;
+
+/// `GET /api/history?path=X&limit=N` -> `{path, total, versions}`, newest first; each
+/// version also says whether the owner made it (`owner`).
+async fn h_api_history(State(st): State<AppState>, req: Request) -> Response {
+    let path = super::query_value(req.uri(), "path").unwrap_or_default();
+    if path.trim().is_empty() {
+        return bad("path is required");
+    }
+    let limit = match super::query_value(req.uri(), "limit") {
+        None => 100,
+        Some(v) => match v.trim().parse::<usize>() {
+            Ok(n) if n >= 1 => n.min(HISTORY_MAX),
+            _ => return bad("limit must be a whole number of at least 1"),
+        },
+    };
+    let owner = owner_name(&st).map(|o| o.to_lowercase());
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let p = path.trim().to_string();
+    let read = crate::blocking(move || {
+        crate::snapshot_as(&st, key.as_ref()).get_history_impl(&path, limit)
+    });
+    match read.await {
+        Ok(mut versions) => {
+            let total = versions
+                .first()
+                .and_then(|v| v["total"].as_u64())
+                .unwrap_or(0);
+            for v in &mut versions {
+                let by_owner = owner
+                    .as_deref()
+                    .is_some_and(|o| v["author"].as_str().is_some_and(|a| a.to_lowercase() == o));
+                v["owner"] = json!(by_owner);
+            }
+            Json(json!({"path": p, "total": total, "versions": versions})).into_response()
+        }
+        Err(e) => history_err(e),
+    }
+}
+
+/// `GET /api/note-at?path=X&rev=R` -> `{path, rev, content, html}`: the note at one revision.
+async fn h_api_note_at(State(st): State<AppState>, req: Request) -> Response {
+    let path = super::query_value(req.uri(), "path").unwrap_or_default();
+    let rev = super::query_value(req.uri(), "rev").unwrap_or_default();
+    if path.trim().is_empty() || rev.trim().is_empty() {
+        return bad("path and rev are required");
+    }
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let read = crate::blocking(move || {
+        let store = crate::snapshot_as(&st, key.as_ref());
+        let content = store.get_note_at_impl(&path, &rev)?;
+        let html = store.render_note_html(&path, &content);
+        Ok::<_, memora_core::vault::MemoryErr>(json!({
+            "path": path.trim(), "rev": rev.trim(), "content": content, "html": html,
+        }))
+    });
+    match read.await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => history_err(e),
+    }
+}
+
+/// `GET /api/diff?path=X&a=R[&b=R2]` -> `{path, from, to, changed, diff}` (`b` defaults
+/// to the current note).
+async fn h_api_diff(State(st): State<AppState>, req: Request) -> Response {
+    let path = super::query_value(req.uri(), "path").unwrap_or_default();
+    let a = super::query_value(req.uri(), "a").unwrap_or_default();
+    let b = super::query_value(req.uri(), "b").unwrap_or_default();
+    if path.trim().is_empty() || a.trim().is_empty() {
+        return bad("path and a are required");
+    }
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let read =
+        crate::blocking(move || crate::snapshot_as(&st, key.as_ref()).diff_impl(&path, &a, &b));
+    match read.await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => history_err(e),
+    }
+}
+
+/// `POST /api/history/restore` `{path, rev}` -> `{ok, path, rev, changed, version, total}`:
+/// restores `rev` as a new revision; `changed` is false when nothing differed.
+async fn h_api_history_restore(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let (Some(path), Some(rev)) = (body_str(&b, "path"), body_str(&b, "rev")) else {
+        return bad("path and rev are required");
+    };
+    let _author = web_author(&st, key.as_deref());
+    let store = crate::store_as(&st, key.as_deref());
+    let count = |p: &str| {
+        store
+            .get_history_impl(p, 1)
+            .ok()
+            .and_then(|v| v.first().and_then(|e| e["total"].as_u64()))
+            .unwrap_or(0)
+    };
+    let before = count(&path);
+    match store.restore_impl(&path, &rev) {
+        Ok(v) => {
+            let p = v["path"].as_str().unwrap_or(&path).to_string();
+            let total = count(&p);
+            Json(
+                json!({"ok": true, "path": p, "rev": v["rev"], "changed": total > before,
+                        "version": total, "total": total}),
+            )
+            .into_response()
+        }
+        Err(e) => history_err(e),
     }
 }
 
@@ -1004,6 +1282,7 @@ async fn h_api_delete_folder(
     };
     let into = body_str(&b, "into");
     let mode = body_str(&b, "mode");
+    let _by = trash_actor(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).delete_folder_with(
         &folder,
         into.as_deref(),
@@ -1043,10 +1322,6 @@ async fn h_api_folder_meta_set(
         Err(e) => mem_err(e),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Handler - keys (POST)
-// ---------------------------------------------------------------------------
 
 /// Who made a management request, for the activity log: `key:<id>` for an
 /// API key, the session user for a browser.
@@ -1198,9 +1473,8 @@ mod reveal_limit {
     }
 }
 
-/// `POST /api/keys/reveal` `{id, current}` (signed-in owner, current password
-/// again) -> `{key}`: the secret of a key created or rolled from the dashboard.
-/// Keys from before migration 5, from the CLI or from OAuth have none (404).
+/// `POST /api/keys/reveal` `{id, current}` (owner, password again) -> `{key}`; 404 for
+/// keys whose secret is not stored.
 async fn h_api_key_reveal(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -1215,8 +1489,7 @@ async fn h_api_key_reveal(
     let Some(id) = body_str(&b, "id") else {
         return bad("id is required");
     };
-    // Wrong passwords here have their own small limit and never trigger the
-    // login cooldown (that would lock the owner out of signing in).
+    // Own limit, never the login cooldown (that would lock the owner out).
     let Some(rec) = find_user(&st, &sess.user) else {
         return unauthorized();
     };
@@ -1319,8 +1592,7 @@ async fn h_api_key_update(
         Ok(x) => x,
         Err(r) => return *r,
     };
-    // Create treats an empty list as "the defaults"; an update never silently
-    // turns a key into one that can do nothing.
+    // An update never silently turns a key into one that can do nothing.
     if scopes.as_ref().is_some_and(|s| s.is_empty()) {
         return bad("scopes must not be empty");
     }
@@ -1453,10 +1725,6 @@ async fn h_api_key_restore(
     Json(json!({"ok": true, "id": id, "persisted": true})).into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Handler - access rules (POST)
-// ---------------------------------------------------------------------------
-
 fn parse_kind(s: &str) -> Option<RuleKind> {
     match s.trim().to_lowercase().as_str() {
         "ip" => Some(RuleKind::Ip),
@@ -1561,10 +1829,6 @@ async fn h_api_access_rules(
     Json(json!({"ok": true, "count": count, "persisted": true})).into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Handler - auth (POST)
-// ---------------------------------------------------------------------------
-
 /// `POST /api/auth/login` `{username,password}` -> `200` / `401` / `423` locked.
 async fn h_auth_login(
     State(st): State<AppState>,
@@ -1578,7 +1842,7 @@ async fn h_auth_login(
         return (
             StatusCode::LOCKED,
             Json(json!({
-                "error": "instance locked; run memora-cli setup or reset-password on the server",
+                "error": "sign-in is paused on the server; run memora-cli unlock there",
                 "locked": true,
             })),
         )
@@ -1595,14 +1859,12 @@ async fn h_auth_login(
             "invalid credentials",
         );
     }
-    // Slow mode (many failures from several addresses): every attempt waits a
-    // little, which costs a guesser far more than the owner.
+    // Slow mode after distributed failures: costs a guesser far more than the owner.
     if st.guard.account_hot() {
         tokio::time::sleep(crate::guard::HOT_LOGIN_DELAY).await;
     }
     let rec = find_user(&st, &username);
-    // An unknown username still pays for one argon2 verify, so response time
-    // does not reveal whether the account exists.
+    // An unknown username still pays for one argon2 verify (no timing oracle).
     let hash = rec
         .as_ref()
         .filter(|r| !r.password_hash.is_empty())
@@ -1627,8 +1889,6 @@ async fn h_auth_login(
     }
     succeeded(&st, &headers);
     let ttl = session_ttl(&st);
-    // Never keep using a session id the browser arrived with: a fresh id is
-    // issued and any presented one is ended (session fixation).
     let sid = st.db.write(|tx| {
         act_tx(tx, &headers, "login_ok", Some(&rec.username), "")?;
         create_session(tx, &st, &headers)
@@ -1654,7 +1914,7 @@ async fn h_auth_logout(State(st): State<AppState>, headers: HeaderMap) -> Respon
         return csrf_fail();
     }
     if let Some(sid) = super::cookie_value(&headers, cache::SESSION_COOKIE) {
-        let user = rd(&st.cache.owner).as_ref().map(|o| o.username.clone());
+        let user = owner_name(&st);
         let hash = cache::sid_hash(&sid);
         let res = st.db.write(|tx| {
             if memora_state::session::revoke(tx, &hash)? {
@@ -1718,9 +1978,8 @@ async fn h_auth_bootstrap(
     };
     let user = username.to_lowercase();
     let code = body_code_hash(&b);
-    // One transaction: the code is checked again and consumed together with the
-    // owner it creates, so it works at most once; the CLI may have created the
-    // owner while argon2 ran (single owner, never a second account).
+    // One transaction: the code is re-checked and consumed with the owner it creates
+    // (the CLI may have created one while argon2 ran).
     let res = st.db.write(|tx| {
         let now = memora_state::now();
         if memora_state::arm::verify_code(tx, &code, now)? != CodeCheck::Valid {
@@ -1799,9 +2058,8 @@ async fn h_auth_reset(
         )
             .into_response();
     };
-    // Single owner: the reset applies to the one account, and may rename it.
-    // Code check, owner update, sign-out of every device and closing the window
-    // commit together.
+    // Code check, owner update (may rename), sign-out everywhere and closing the
+    // window commit together.
     let user = username.to_lowercase();
     let code = body_code_hash(&b);
     let res = st.db.write(|tx| {
@@ -1840,10 +2098,8 @@ async fn h_auth_reset(
     Json(json!({"ok": true, "user": user, "persisted": true})).into_response()
 }
 
-/// `POST /api/auth/profile` `{display_name?, current?, password?, confirm?}` -> `{ok:true}`.
-///
-/// A password change needs the current password and goes through the same
-/// path as `POST /api/settings/password`.
+/// `POST /api/auth/profile` `{display_name?, current?, password?, confirm?}` -> `{ok:true}`;
+/// a password change goes through [`change_password`].
 async fn h_auth_profile(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -1889,12 +2145,7 @@ async fn h_auth_profile(
     .into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Handler - settings (signed-in browser session only)
-// ---------------------------------------------------------------------------
-
-/// Vault fields for `/api/settings` (signed-in only; `/api/auth/state` shows
-/// just `vault_configured`).
+/// Vault fields for `/api/settings`.
 fn vault_info(st: &AppState) -> serde_json::Map<String, Value> {
     let vault = st.vault_path();
     let mut m = serde_json::Map::new();
@@ -1908,9 +2159,8 @@ fn vault_info(st: &AppState) -> serde_json::Map<String, Value> {
     m
 }
 
-/// Check a folder offered as the vault: an absolute path without `..`, that is
-/// (or, with `create`, becomes) a directory the server can write. Returns the
-/// canonical path, or a message for the user.
+/// Check a folder offered as the vault (absolute, no `..`, writable; created when
+/// `create`). Returns the canonical path and whether it was created.
 pub(crate) fn validate_vault_path(
     raw: &str,
     create: bool,
@@ -2005,9 +2255,7 @@ fn reserved_vault_path(abs: &Path, state_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `p` is `dir` or below it. Windows paths are case-insensitive and
-/// `%SystemRoot%` is often `C:\WINDOWS` while the folder reads `C:\Windows`,
-/// so there each component is compared ignoring case.
+/// Whether `p` is `dir` or below it, optionally ignoring case (Windows).
 fn inside(p: &Path, dir: &Path, ignore_case: bool) -> bool {
     if !ignore_case {
         return p.starts_with(dir);
@@ -2018,8 +2266,7 @@ fn inside(p: &Path, dir: &Path, ignore_case: bool) -> bool {
         .all(|d| pc.next().is_some_and(|c| low(c) == low(d)))
 }
 
-/// Note, link and folder counts of the current vault, computed off the async
-/// runtime (it walks every note).
+/// Note, link and folder counts of the current vault (walks every note, off the runtime).
 async fn vault_stats(st: &AppState) -> Option<Value> {
     st.vault_path()?;
     let store = st.store.clone();
@@ -2056,9 +2303,7 @@ async fn h_settings_get(State(st): State<AppState>, headers: HeaderMap) -> Respo
     Json(Value::Object(out)).into_response()
 }
 
-/// Verify the signed-in owner's current password (`current` in the body).
-/// `Err` carries the response to return: missing, wrong (counted as a failed
-/// attempt) or the hashing pool is busy.
+/// Verify the owner's current password (`current`); `Err` is the response to return.
 async fn check_current(
     st: &AppState,
     headers: &HeaderMap,
@@ -2132,7 +2377,6 @@ async fn change_password(
         )
             .into_response();
     };
-    // Password, sign-out of every other device and the activity row commit together.
     let ip = client_ip(headers);
     let now = memora_state::now();
     let res = st.db.write(|tx| {
@@ -2183,10 +2427,8 @@ async fn h_settings_password(
     change_password(&st, &headers, &sess, &b).await
 }
 
-/// `POST /api/settings/username` `{username, current}` -> `{ok, user}`.
-///
-/// Single owner rename. Sessions follow the account, so this browser (and any
-/// other) stays signed in.
+/// `POST /api/settings/username` `{username, current}` -> `{ok, user}`; every device
+/// stays signed in.
 async fn h_settings_username(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -2213,7 +2455,6 @@ async fn h_settings_username(
     if new == rec.username {
         return Json(json!({"ok": true, "user": new, "changed": false})).into_response();
     }
-    // Sessions belong to the single owner row, so every device stays signed in.
     let res = st.db.write(|tx| {
         memora_state::owner::rename(tx, &new)?;
         act_tx(
@@ -2249,8 +2490,7 @@ fn signed_out_reason(st: &AppState, headers: &HeaderMap) -> Option<String> {
     memora_state::session::revoked_reason(&cache::sid_hash(&raw), memora_state::now())
 }
 
-/// The session whose id (a `sid_hash` prefix from `GET /api/settings/sessions`) is `id`.
-/// `Err` is the response to return: missing, unknown or ambiguous id.
+/// The session whose `sid_hash` starts with `id`; `Err` is the response to return.
 fn find_session(
     st: &AppState,
     id: Option<&str>,
@@ -2282,9 +2522,7 @@ fn find_session(
     }
 }
 
-/// `GET /api/settings/sessions` -> `{sessions:[{id, current, source, alias, ip,
-/// user_agent, created_at, last_seen, expires_in}]}`, newest first. Browser sessions
-/// only; API keys are not sessions and never appear here.
+/// `GET /api/settings/sessions` -> `{sessions:[...]}`: live browser sessions, newest first.
 async fn h_settings_sessions(State(st): State<AppState>, headers: HeaderMap) -> Response {
     let Some(sess) = super::session_of(&st, &headers) else {
         return unauthorized();
@@ -2318,9 +2556,8 @@ async fn h_settings_sessions(State(st): State<AppState>, headers: HeaderMap) -> 
     Json(json!({"sessions": list, "count": list.len()})).into_response()
 }
 
-/// `POST /api/settings/sessions/revoke` `{id}` or `{others: true}` -> `{ok, revoked}`.
-/// Signs other browsers out (they are told why on their next visit). The current
-/// session is ended with `POST /api/auth/logout` instead. API keys are untouched.
+/// `POST /api/settings/sessions/revoke` `{id}` or `{others: true}` -> `{ok, revoked}`:
+/// signs other browsers out (never the current one).
 async fn h_settings_session_revoke(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -2413,9 +2650,8 @@ async fn h_settings_session_rename(
     }
 }
 
-/// `GET /api/settings/sessions/activity?id=` -> `{events:[...], ip, since}`: account
-/// activity recorded from this session's IP address since it signed in (sign-ins,
-/// settings changes, failed attempts). Agent (API key) events are left out. Newest first.
+/// `GET /api/settings/sessions/activity?id=` -> `{events:[...], ip, since}`: non-agent
+/// activity from the session's IP since it signed in, newest first.
 async fn h_settings_session_activity(State(st): State<AppState>, req: Request) -> Response {
     if super::session_of(&st, req.headers()).is_none() {
         return unauthorized();
@@ -2448,11 +2684,8 @@ async fn h_settings_session_activity(State(st): State<AppState>, req: Request) -
     .into_response()
 }
 
-/// `POST /api/settings/vault` `{path, create?}` -> `{ok, vault, created, stats}`.
-///
-/// Validates the folder, stores it in the state database and switches the
-/// running server to it: the store is replaced in place (MCP shares the same
-/// `Arc`) and realtime events are written to the new vault.
+/// `POST /api/settings/vault` `{path, create?}` -> `{ok, vault, created, stats}`:
+/// validates, stores and switches the running server to the folder.
 async fn h_settings_vault(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -2487,7 +2720,7 @@ async fn h_settings_vault(
     if let Err(e) = res {
         return db_err(e, "not found");
     }
-    // Switch first, then reload: the reload then sees the same vault and does nothing.
+    // Switch first, so the reload sees the same vault and does nothing.
     cache::apply_vault(&st, &path);
     cache::reload(&st, Domain::Settings);
     tracing::info!(user = %sess.user, vault = %vault, created, "vault switched");
@@ -2498,10 +2731,6 @@ async fn h_settings_vault(
     .into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Actor names
-// ---------------------------------------------------------------------------
-
 /// The live API key's name for `id`, if the key still exists.
 pub(crate) fn key_name(keys: &[memora_state::keys::ApiKey], id: &str) -> Option<String> {
     keys.iter()
@@ -2510,9 +2739,8 @@ pub(crate) fn key_name(keys: &[memora_state::keys::ApiKey], id: &str) -> Option<
         .filter(|n| !n.trim().is_empty())
 }
 
-/// Display identity of a stored activity actor: `key:<id>` rows (API-key calls) become
-/// `(key name or id, "agent", id)`, anything else `(actor, "user", actor)`; no actor
-/// stays null.
+/// `(name, kind, id)` of a stored activity actor: `key:<id>` is an agent, anything
+/// else a user.
 pub(crate) fn resolve_actor(
     keys: &[memora_state::keys::ApiKey],
     actor: Option<&str>,
@@ -2530,14 +2758,8 @@ pub(crate) fn resolve_actor(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Handler - vault event log
-// ---------------------------------------------------------------------------
-
-/// `GET /api/events?since=<unix>&folder=&actor=&limit=N` -> `{events:[...],count}`:
-/// the vault event log (`.events.jsonl`: `ai_activity` starts and node events), oldest
-/// first, newest `limit` (default 100, max 2000). `actor` is the key NAME for API-key
-/// calls (newer events also carry `actor_kind` and `actor_id`).
+/// `GET /api/events?since=<unix>&folder=&actor=&limit=N` -> `{events:[...],count}`: the
+/// newest `limit` vault events (default 100, max 2000), oldest first.
 async fn h_api_events(State(st): State<AppState>, req: Request) -> Response {
     let q = |k: &str| super::query_value(req.uri(), k).filter(|v| !v.trim().is_empty());
     let since = q("since").and_then(|v| v.trim().parse::<f64>().ok());
@@ -2555,12 +2777,7 @@ async fn h_api_events(State(st): State<AppState>, req: Request) -> Response {
     Json(json!({"events": events, "count": events.len()})).into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Handler - UI layout persistence
-// ---------------------------------------------------------------------------
-
-/// Request body cap for `PUT /api/ui/layout/{name}` (the stored document is capped at
-/// 512 KiB; the rest is the `{"data": ...}` envelope and whitespace).
+/// Request body cap for `PUT /api/ui/layout/{name}` (512 KiB document plus envelope).
 pub(crate) const LAYOUT_BODY_LIMIT: usize = 600 * 1024;
 
 /// Layouts belong to the signed-in browser: API keys are refused (403).
@@ -2595,8 +2812,7 @@ async fn h_ui_layout_get(
     }
 }
 
-/// `PUT /api/ui/layout/{name}` `{data: <json>}` -> `{ok:true, updated_at}`.
-/// Browser session only, same-origin, `data` at most 512 KiB serialized (413).
+/// `PUT /api/ui/layout/{name}` `{data: <json>}` -> `{ok:true, updated_at}` (browser only).
 async fn h_ui_layout_put(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -2640,22 +2856,13 @@ async fn h_ui_layout_put(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
-
-/// Router for the web UI JSON API.
-///
-/// The parent router attaches it with shared state:
-/// ```ignore
-/// Router::new().merge(api::api_router()).with_state(st)
-/// ```
-/// Routes already registered by `build_router()` are not added again, because
-/// merging two handlers for the same method and path panics.
+/// Router for the web UI JSON API; state is attached by the parent router.
 pub fn api_router() -> Router<AppState> {
     Router::new()
-        // GET
         .route("/api/note", get(h_api_note))
+        .route("/api/history", get(h_api_history))
+        .route("/api/note-at", get(h_api_note_at))
+        .route("/api/diff", get(h_api_diff))
         .route("/api/vault/file", get(h_api_vault_file))
         .route("/api/folder-meta", get(h_api_folder_meta))
         .route("/api/actors", get(h_api_actors))
@@ -2664,6 +2871,7 @@ pub fn api_router() -> Router<AppState> {
             "/api/logs/settings",
             get(h_api_log_settings).post(h_api_log_settings_set),
         )
+        .route("/api/settings/server", post(h_api_server_settings_set))
         .route("/api/config", get(h_api_config))
         .route("/api/auth/state", get(h_auth_state))
         .route("/api/auth/me", get(h_auth_me))
@@ -2675,30 +2883,35 @@ pub fn api_router() -> Router<AppState> {
                 .put(h_ui_layout_put)
                 .layer(DefaultBodyLimit::max(LAYOUT_BODY_LIMIT)),
         )
-        // POST - vault
+        // Vault
         .route("/api/save", post(h_api_save))
         .route("/api/create", post(h_api_create))
         .route("/api/rename", post(h_api_rename))
         .route("/api/move", post(h_api_move))
         .route("/api/delete", post(h_api_delete))
+        .route("/api/trash", get(h_api_trash))
+        .route("/api/trash/restore", post(h_api_trash_restore))
+        .route("/api/trash/delete", post(h_api_trash_delete))
+        .route("/api/trash/empty", post(h_api_trash_empty))
+        .route("/api/history/restore", post(h_api_history_restore))
         .route("/api/folder", post(h_api_folder_create))
         .route("/api/folder/rename", post(h_api_folder_op))
         .route("/api/folder/move", post(h_api_folder_op))
         .route("/api/folder/move-contents", post(h_api_folder_op))
         .route("/api/delete-folder", post(h_api_delete_folder))
         .route("/api/folder-meta", post(h_api_folder_meta_set))
-        // POST - keys
+        // Keys
         .route("/api/keys", post(h_api_key_create))
         .route("/api/keys/roll", post(h_api_key_roll))
         .route("/api/keys/reveal", post(h_api_key_reveal))
         .route("/api/keys/update", post(h_api_key_update))
         .route("/api/keys/delete", post(h_api_key_delete))
         .route("/api/keys/restore", post(h_api_key_restore))
-        // Global MCP tool switches (browser session or admin key)
+        // MCP tool switches
         .route("/api/tools", get(h_api_tools).post(h_api_tools_set))
-        // POST - access rules
+        // Access rules
         .route("/api/access/rules", post(h_api_access_rules))
-        // POST - auth
+        // Auth
         .route(
             "/api/auth/login",
             post(h_auth_login).layer(DefaultBodyLimit::max(AUTH_BODY_LIMIT)),
@@ -2723,7 +2936,7 @@ pub fn api_router() -> Router<AppState> {
             "/api/auth/profile",
             post(h_auth_profile).layer(DefaultBodyLimit::max(AUTH_BODY_LIMIT)),
         )
-        // Settings (signed-in browser session)
+        // Settings
         .route("/api/settings", get(h_settings_get))
         .route(
             "/api/settings/password",

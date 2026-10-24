@@ -1,9 +1,5 @@
-//! Sealing of API key secrets, so the owner can show a key again (after
-//! re-entering the password) to fill in connection guides.
-//!
-//! ChaCha20-Poly1305 under a 32-byte master key in `<state>/key-seal.bin`
-//! (created on first use, mode 0600). The database only holds
-//! `base64url(nonce || ciphertext)`: a copy of `memora.db` alone reveals nothing.
+//! Sealed API key secrets, so the owner can show a key again. ChaCha20-Poly1305 under
+//! a master key in `<state>/key-seal.bin` (0600); `memora.db` alone reveals nothing.
 
 use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};

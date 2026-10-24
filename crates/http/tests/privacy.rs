@@ -1,8 +1,5 @@
-//! Per-agent privacy through the router: a folder hidden from key C and a note hidden
-//! from key B stay invisible to them on every agent surface (HTTP API and MCP: read,
-//! search, graph, tree, stats, backlinks, wikilinks, tags, files, events), writes into
-//! or onto hidden paths are refused with the same "not found" as a missing path, the
-//! owner session and other keys see everything, and node rules follow renames and moves.
+//! Per-agent privacy through the router: hidden paths stay invisible on every HTTP and
+//! MCP surface, writes to them read as "not found", and rules follow renames.
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -389,7 +386,11 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
             "/api/rename",
             json!({"path": "Private/plan.md", "name": "x"}),
         ),
-        ("/api/delete", json!({"path": "Private/plan.md"})),
+        // (Deleting for good needs admin, refused before the path is looked at.)
+        (
+            "/api/delete",
+            json!({"path": "Private/plan.md", "mode": "trash"}),
+        ),
         ("/api/folder", json!({"name": "Private/Sub"})),
         (
             "/api/folder/rename",

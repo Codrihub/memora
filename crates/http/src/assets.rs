@@ -1,9 +1,5 @@
-//! Static UI files with validators and gzip, so a reload of the 1 MB bundle
-//! costs a 304 instead of a full download, and a first load sends ~1/3 of it.
-//!
-//! Each file is read once per change (size + mtime) and kept in memory with
-//! its ETag and gzip body. `no-cache` still makes the browser ask every time,
-//! so a redeploy is picked up on the next load.
+//! Static UI files cached in memory with ETag and gzip, so a reload costs a 304.
+//! `no-cache` still revalidates every load, so a redeploy shows up at once.
 
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};

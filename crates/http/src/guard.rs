@@ -1,23 +1,5 @@
-//! Front-door protection: caller IP resolution, rate limiting, failure
-//! cooldowns and bounded password hashing.
-//!
-//! Everything here runs in-process, so the instance stays safe when it is
-//! exposed directly (no CAPTCHA or WAF in front):
-//!   * the caller IP only comes from forwarding headers when the TCP peer is a
-//!     trusted proxy (loopback, e.g. cloudflared, or `MEMORA_TRUSTED_PROXIES`),
-//!     so spoofed `X-Forwarded-For` cannot buy a fresh bucket per request
-//!   * token buckets per IP cap how fast anyone can call the auth endpoints
-//!   * failed attempts (password, setup code, API key) put the IP on a
-//!     cooldown that grows 5 -> 10 -> 15 minutes and is cleared by a successful
-//!     attempt
-//!   * many failures across all IPs never lock the owner out: they switch the
-//!     account into a slow mode (see [`Guard::account_hot`]) where every login
-//!     waits a little and a single failure cools that IP down, while a correct
-//!     password from an IP without failures still signs in
-//!   * wrong setup codes count against a small per-IP budget; only many wrong
-//!     codes from many places close the window
-//!   * argon2 runs on the blocking pool behind a small semaphore, so a login
-//!     flood cannot starve the async runtime that serves agents
+//! Front-door protection: caller IP resolution, per-IP rate limits, failure
+//! cooldowns, an account-wide slow mode (never a lockout) and bounded argon2.
 
 use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
@@ -38,9 +20,7 @@ pub const CLIENT_IP_HEADER: &str = "x-memora-client-ip";
 const FAIL_WINDOW: Duration = Duration::from_secs(15 * 60);
 /// Failures per IP before a cooldown.
 const IP_FAIL_LIMIT: u32 = 5;
-/// Failures across all IPs (in [`FAIL_WINDOW`]) before the account goes into
-/// slow mode. Slow mode delays logins and cuts the per-IP budget to one
-/// failure; it never refuses a correct password from an IP without failures.
+/// Failures across all IPs (in [`FAIL_WINDOW`]) before the account goes into slow mode.
 const ACCOUNT_FAIL_LIMIT: u32 = 20;
 /// Per-IP failures allowed while the account is in slow mode.
 const HOT_IP_FAIL_LIMIT: u32 = 1;
@@ -48,9 +28,8 @@ const HOT_IP_FAIL_LIMIT: u32 = 1;
 pub const HOT_LOGIN_DELAY: Duration = Duration::from_secs(1);
 /// Wrong setup codes one IP may send before it cools down.
 pub const CODE_IP_LIMIT: u32 = 3;
-/// Wrong setup codes (from all IPs) one window survives; past this the window
-/// is closed. 50 guesses at an 8-character code from a 31-letter alphabet
-/// (about 8.5e11 codes) leave no real chance of a hit.
+/// Wrong setup codes (from all IPs) one window survives; 50 guesses at ~8.5e11
+/// possible codes leave no real chance of a hit.
 pub const CODE_WINDOW_LIMIT: u32 = 50;
 /// Cooldown per strike: 5, 10, then 15 minutes at most.
 const COOLDOWN_STEP: Duration = Duration::from_secs(5 * 60);
@@ -60,9 +39,8 @@ const STRIKE_DECAY: Duration = Duration::from_secs(60 * 60);
 /// Hard upper bound on tracked keys per map, so a flood of addresses cannot
 /// exhaust memory.
 const MAX_ENTRIES: usize = 50_000;
-/// A full map is swept at most this often; between sweeps, new keys are
-/// refused (buckets) or not tracked (failures), so no request pays for an
-/// O(n) sweep more than once per interval.
+/// A full map is swept at most this often; between sweeps new keys are refused
+/// or not tracked.
 const SWEEP_EVERY: Duration = Duration::from_secs(10);
 /// Concurrent argon2 operations.
 const HASH_PERMITS: usize = 2;
@@ -78,8 +56,7 @@ pub enum Bucket {
     AuthRead,
     /// Every request from one IP.
     Global,
-    /// OAuth client registration (and client metadata fetches): each one
-    /// creates a client row, so one address may only add a few.
+    /// OAuth client registration: each one creates a client row.
     Register,
 }
 
@@ -155,8 +132,6 @@ impl Guard {
         }
     }
 
-    // -- caller IP ------------------------------------------------------------
-
     /// Whether the TCP peer is a proxy whose forwarding headers we believe
     /// (loopback, e.g. cloudflared, or `MEMORA_TRUSTED_PROXIES`).
     pub fn trusted_peer(&self, peer: SocketAddr) -> bool {
@@ -169,16 +144,10 @@ impl Guard {
         p.is_loopback() || self.trusted.contains(&p)
     }
 
-    /// The caller IP. Forwarding headers are honoured only from a trusted proxy.
-    ///
-    /// `X-Forwarded-For` comes first, read from the right past every hop that is
-    /// itself a trusted proxy: nginx (`$proxy_add_x_forwarded_for`), Caddy and
-    /// Cloudflare all append the address they saw, so that entry cannot be chosen
-    /// by the client. `CF-Connecting-IP` and `X-Real-IP` are only a fallback when
-    /// there is no such entry: a proxy that does not set them passes a
-    /// client-sent value straight through. A header never yields a loopback or
-    /// unspecified address, so no outside caller can claim to be local (and skip
-    /// the rate limits that local callers skip).
+    /// The caller IP; forwarding headers count only from a trusted proxy.
+    /// `X-Forwarded-For` is read from the right past trusted hops (proxies append
+    /// what they saw); `CF-Connecting-IP` / `X-Real-IP` are only a fallback. A
+    /// header never yields a local address, so nobody can skip the local exemption.
     pub fn client_ip(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
         let p = peer.ip();
         if !self.trusted_peer(peer) {
@@ -216,8 +185,6 @@ impl Guard {
             .unwrap_or(p)
     }
 
-    // -- token buckets ----------------------------------------------------------
-
     /// Take one token; `Err(seconds)` says how long until the next one.
     pub fn take(&self, bucket: Bucket, ip: &IpAddr) -> Result<(), u64> {
         let (cap, per_min) = bucket.rate();
@@ -252,10 +219,7 @@ impl Guard {
         }
     }
 
-    // -- failure cooldowns --------------------------------------------------------
-
-    /// Forget every failure, cooldown and rate bucket (`memora-cli` limiter reset,
-    /// delivered as a `limiter_reset` control request).
+    /// Forget every failure, cooldown and rate bucket (`memora-cli` limiter reset).
     pub fn reset(&self) {
         self.failures.lock().unwrap().clear();
         self.buckets.lock().unwrap().clear();
@@ -277,10 +241,8 @@ impl Guard {
         a.max(b)
     }
 
-    /// Slow mode: at least [`ACCOUNT_FAIL_LIMIT`] failed logins from any IPs in
-    /// the last [`FAIL_WINDOW`] (kept up while failures continue). A hard
-    /// account-wide cooldown would let anyone lock the owner out with a few
-    /// addresses; slow mode only makes guessing costlier.
+    /// Slow mode: at least [`ACCOUNT_FAIL_LIMIT`] failed logins in the last
+    /// [`FAIL_WINDOW`]. Unlike a hard lockout, it only makes guessing costlier.
     pub fn account_hot(&self) -> bool {
         let map = self.failures.lock().unwrap();
         map.get(ACCOUNT_KEY)
@@ -387,8 +349,6 @@ impl Guard {
         map.remove(&code_key(ip));
         map.remove(ACCOUNT_KEY);
     }
-
-    // -- argon2 -----------------------------------------------------------------
 
     /// Verify on the blocking pool. `None` means every hashing slot is busy.
     pub async fn verify_password(&self, pw: String, hash: String) -> Option<bool> {
@@ -550,10 +510,8 @@ mod tests {
         assert_eq!(g.client_ip(proxy, &h).to_string(), "5.6.7.8");
     }
 
-    /// Behind a proxy that passes client headers through (nginx and Caddy do
-    /// for `CF-Connecting-IP`, Caddy for `X-Real-IP`), an outside caller must
-    /// not pick its own address, least of all a loopback one: local callers
-    /// skip every rate limit, so that would allow unlimited password guessing.
+    /// Behind a proxy that passes client headers through, an outside caller must not
+    /// pick its own address, least of all a loopback one (local callers skip limits).
     #[test]
     fn spoofed_forwarding_headers_cannot_choose_the_caller_ip() {
         let g = guard();
@@ -692,9 +650,7 @@ mod tests {
         assert_eq!(g.failures.lock().unwrap().len(), MAX_ENTRIES);
     }
 
-    /// Failures from many addresses must not lock the owner out: a correct
-    /// password from an IP without failures still gets through, while the
-    /// attackers' addresses cool down after a single miss in slow mode.
+    /// Failures from many addresses never lock the owner out.
     #[test]
     fn many_failures_slow_down_but_never_lock_out_the_owner() {
         let g = guard();

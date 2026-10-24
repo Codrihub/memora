@@ -1,18 +1,10 @@
-//! `/api/pins`: the owner's pinned notes and folders (`memora_state::pins`), saved on the
-//! server so every browser and device shows the same "Pinned" list. Signed-in browser
-//! session only (API keys are refused like the UI layouts; agents use the MCP tools
-//! `list_pins`, `pin`, `unpin`); writes are same-origin checked.
+//! `/api/pins`: the owner's pinned notes and folders, shared across devices. Browser
+//! session only (agents use the MCP pin tools); every change publishes `pins_changed`.
 //!
-//! * `GET /api/pins` -> `{count, pins:[{kind:"note"|"folder", path, position, missing}]}`
-//!   in display order; `missing` is true when the path no longer exists.
-//! * `PUT /api/pins` `{pins:[{kind, path}]}` -> replaces the whole ordered list
-//!   (reorder, remove, first upload); paths need not exist. Same answer as GET.
-//! * `POST /api/pins/pin` `{kind, path, position?}` -> pins an existing note or folder at
-//!   `position` (default: the end) or moves it there. Same answer as GET.
-//! * `POST /api/pins/unpin` `{kind, path}` -> removes it; same answer plus `removed`.
-//!
-//! Every change publishes `pins_changed` (no paths; MCP changes name their actor) so open
-//! browsers reload the list.
+//! * `GET /api/pins` -> `{count, pins:[{kind, path, position, missing}]}` in display order
+//! * `PUT /api/pins` `{pins:[{kind, path}]}` -> replaces the ordered list; same answer
+//! * `POST /api/pins/pin` `{kind, path, position?}` -> pins or moves an existing item
+//! * `POST /api/pins/unpin` `{kind, path}` -> same answer plus `removed`
 
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -27,8 +19,7 @@ use serde_json::{json, Map, Value};
 use crate::api::{bad, csrf_fail, csrf_ok, db_err};
 use crate::{ApiKeyCaller, AppState};
 
-/// Body cap for `PUT /api/pins`: [`MAX_PINS`] pins of the longest path, with room for
-/// the JSON around them.
+/// Body cap for `PUT /api/pins`: [`MAX_PINS`] pins of the longest path plus JSON.
 const LIST_BODY_LIMIT: usize = 256 * 1024;
 /// Body cap for one pin or unpin.
 const ONE_BODY_LIMIT: usize = 8 * 1024;
@@ -155,8 +146,7 @@ async fn h_pin(
             None => return bad("position must be a whole number from 0"),
         },
     };
-    // The store stays locked while the pin is written: no rename can slip in between
-    // the existence check and the row.
+    // Keep the store locked so no rename slips between the existence check and the row.
     let store = crate::store_as(&st, None);
     match memora_mcp::pins::pin(&st.db, &store, kind, &path, position, None) {
         Ok(v) => Json(v).into_response(),

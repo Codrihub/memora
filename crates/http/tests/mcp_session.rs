@@ -1,9 +1,5 @@
-//! MCP Streamable HTTP sessions: `initialize` issues `Mcp-Session-Id` =
-//! `<catalog epoch>.<random>` and advertises `tools.listChanged`. Ids are never
-//! refused. When the caller's catalog moved on (a tool switched, the server upgraded,
-//! the key's grant changed), the session's next request that accepts event streams is
-//! answered as SSE with `notifications/tools/list_changed` ahead of the response, once
-//! per change. JSON-only clients, malformed ids and no id get plain JSON.
+//! MCP Streamable HTTP sessions: ids are never refused, and an SSE-capable session
+//! hears `notifications/tools/list_changed` once per catalog change.
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -423,7 +419,7 @@ async fn unknown_and_malformed_ids_are_harmless() {
     let (key, _) = new_key(&mut e, &sid, "agent1", &["read", "write", "mcp"]).await;
     let good = initialize(&mut e, &key, None).await;
     let rand = good.split_once('.').unwrap().1.to_string();
-    // An id from another epoch (an older server version, before a restart): it is told.
+    // An id from another epoch (older server, before a restart): it is told.
     let other = format!("0123456789abcdef.{rand}");
     let (_, changed) = tools_list(&mut e, &key, Some(&other)).await;
     assert!(changed);

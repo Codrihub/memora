@@ -1,6 +1,4 @@
-//! `POST /_stop`: the graceful stop `memora-cli stop` uses on this machine.
-//! Only a loopback caller, not forwarded by a proxy, with the token from
-//! `<state>/stop.token` is accepted; everything else gets 403.
+//! `POST /_stop`: accepted only from loopback, not proxied, with the stop token.
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;

@@ -1,13 +1,6 @@
-//! Glue between the server and the `memora-state` database (docs/DATABASE.md):
-//! in-memory caches of the hot tables, cross-process change detection, browser
-//! sessions, type conversions to the `memora-gateway` types, and the background tasks
-//! (change watcher, control requests, buffered writes, retention).
-//!
-//! Caches are loaded once at startup and reloaded per domain when
-//! [`memora_state::Db::changed_domains`] reports a change (checked on every request in
-//! `mw_access` and by a 1 s ticker), and directly after the server's own writes.
-//! Sessions are not cached: every request looks its `sid_hash` up in the database, so a
-//! sign-out by `memora-cli` (a deleted row) takes effect on the next request.
+//! State-database glue: caches of the hot tables (reloaded per changed domain),
+//! browser sessions (never cached, so a CLI sign-out applies at once), type
+//! conversions to `memora-gateway`, and the background tasks.
 
 use crate::AppState;
 use axum::http::HeaderMap;
@@ -62,10 +55,6 @@ impl Caches {
         })
     }
 }
-
-// ---------------------------------------------------------------------------
-// Reloading
-// ---------------------------------------------------------------------------
 
 /// Reload the cache of one domain from the database. Errors keep the old cache.
 pub fn reload(st: &AppState, domain: Domain) {
@@ -140,18 +129,18 @@ pub fn apply_vault(st: &AppState, path: &Path) {
         .publish(serde_json::json!({"type": "vault_changed", "vault": vault}));
 }
 
-// ---------------------------------------------------------------------------
-// Arm window
-// ---------------------------------------------------------------------------
-
-/// The arm window. An armed window whose time ran out is locked in the database
-/// (conditional update) and reported as locked.
+/// The arm window. An expired window (or a lock taken on expiry by an older
+/// version) is reset to idle, so an unused code never locks the instance.
 pub fn arm_window(st: &AppState) -> ArmWindow {
     let now = memora_state::now();
     let w = rd(&st.cache.arm).clone();
-    let expired =
-        w.status == ArmStatus::Armed && w.armed_at.unwrap_or(0) + w.ttl.unwrap_or(0) < now;
-    if !expired {
+    let end = w.armed_at.zip(w.ttl).map(|(at, ttl)| at + ttl);
+    let stale = match (w.status, end) {
+        (ArmStatus::Armed, Some(end)) => end < now,
+        (ArmStatus::Locked, Some(end)) => w.locked_at.is_some_and(|l| l > end),
+        _ => false,
+    };
+    if !stale {
         return w;
     }
     match st.db.write(|tx| memora_state::arm::state(tx, now)) {
@@ -160,9 +149,11 @@ pub fn arm_window(st: &AppState) -> ArmWindow {
             fresh
         }
         Err(e) => {
-            tracing::error!("could not lock the expired window: {e}");
+            // Fail closed for the code (no window), never with a lock.
+            tracing::error!("could not close the expired window: {e}");
             ArmWindow {
-                status: ArmStatus::Locked,
+                status: ArmStatus::Idle,
+                locked_at: None,
                 ..w
             }
         }
@@ -179,10 +170,6 @@ pub fn code_hash(code: &str) -> String {
         memora_gateway::hash_api_key(&n)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Sessions
-// ---------------------------------------------------------------------------
 
 /// A signed-in browser.
 #[derive(Debug, Clone)]
@@ -248,10 +235,6 @@ pub fn session_of(st: &AppState, headers: &HeaderMap) -> Option<WebSession> {
         created_at: sess.created_at,
     })
 }
-
-// ---------------------------------------------------------------------------
-// Conversions to the memora-gateway types
-// ---------------------------------------------------------------------------
 
 /// Evaluation form of a stored access stack.
 pub fn access_from_db(s: memora_state::access::AccessStack) -> memora_gateway::AccessStack {
@@ -366,10 +349,6 @@ pub fn find_key(st: &AppState, key: &str) -> Option<ApiKey> {
         })
         .cloned()
 }
-
-// ---------------------------------------------------------------------------
-// Background tasks
-// ---------------------------------------------------------------------------
 
 /// How often the change watcher runs when no request triggers a check.
 const WATCH_EVERY: Duration = Duration::from_secs(1);

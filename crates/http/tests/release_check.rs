@@ -1,6 +1,4 @@
-//! `MEMORA_UPDATE_CHECK=false`: `/api/config` reports the release check as
-//! disabled and no network check is started. Own test binary, since it sets a
-//! process-wide environment variable.
+//! `MEMORA_UPDATE_CHECK=false` disables the release check (own binary: sets the env).
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;

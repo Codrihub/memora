@@ -1,20 +1,9 @@
-//! `memora` - HTTP and MCP server entry point for the Memora memory vault.
+//! `memora`: HTTP and MCP server entry point.
 //!
-//! Env:
-//!   MEMORA_VAULT   suggested vault folder only (in Docker: the mounted volume). The
-//!                  vault itself is `settings.vault_path` in the state database, chosen
-//!                  in the web UI or with memora-cli; until then vault routes answer 409.
-//!   MEMORA_STATE   (default state) - holds `memora.db` (docs/DATABASE.md)
-//!   MEMORA_PORT    (default 8400)
-//!   MEMORA_BIND    (default 127.0.0.1) - single entry point: bind loopback and let the proxy expose it
-//!   MEMORA_ARM_TTL (default 300)
-//!   MEMORA_TRUSTED_PROXIES (comma separated IPs whose forwarding headers are
-//!                  trusted; loopback is always trusted)
-//!   MEMORA_BASE_URL, MEMORA_DOMAIN, MEMORA_ADMIN_USER, MEMORA_ADMIN_PASSWORD[_FILE],
-//!   MEMORA_API_KEY[_FILE], MEMORA_VAULT_AUTO - see `memora_gateway::EnvConfig`
-//!
-//! Every setting except the two secrets can also be stored in the database
-//! (`memora-cli config`); a stored value wins over the process environment.
+//! Env: `MEMORA_STATE` (holds `memora.db`), `MEMORA_PORT` (8400), `MEMORA_BIND`
+//! (127.0.0.1), `MEMORA_ARM_TTL` (300), `MEMORA_TRUSTED_PROXIES`, `MEMORA_VAULT`
+//! (suggested vault only), plus those in `memora_gateway::EnvConfig`. Values stored
+//! with `memora-cli config` win over the environment, except the two secrets.
 
 use memora_core::MemoryStore;
 use memora_http::guard::Guard;
@@ -27,9 +16,8 @@ fn env_or(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
 }
 
-/// Resolve the UI asset directory: `MEMORA_ASSETS`, then an `assets` folder next
-/// to the executable (an unpacked release zip or tarball), then `<crate>/assets`,
-/// then `memora/crates/http/assets` relative to the working directory.
+/// Resolve the UI asset directory: `MEMORA_ASSETS`, then `assets` next to the
+/// executable, then `<crate>/assets`, then relative to the working directory.
 fn find_assets(explicit: &str) -> String {
     if !explicit.is_empty() && Path::new(explicit).is_dir() {
         return explicit.to_string();
@@ -53,9 +41,8 @@ fn find_assets(explicit: &str) -> String {
     candidates[0].to_string()
 }
 
-/// Startup work done before the async runtime exists (it changes the process
-/// environment, which must happen before any other thread runs). Returns the open
-/// database and the lines to log once tracing is set up.
+/// Startup work before the runtime exists (it changes the process environment, which
+/// must happen single-threaded). Returns the database and lines to log later.
 fn open_state(state: &Path) -> anyhow::Result<(Db, Vec<String>)> {
     let mut log = Vec::new();
     let db = Db::open(state).map_err(|e| {
@@ -229,10 +216,8 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(serve(state, db))
 }
 
-/// Open files the server asks for: every connection and realtime client holds a socket,
-/// and the request limit (1024 at once) plus the database, logs and git need more than
-/// the usual soft limit of 1024. Past it, accept fails ("Too many open files") and the
-/// server stops answering until clients give up.
+/// Open files the server asks for: 1024 concurrent requests plus sockets, database,
+/// logs and git exceed the usual soft limit, and past it accept fails.
 #[cfg_attr(not(unix), allow(dead_code))]
 const WANT_OPEN_FILES: u64 = 16_384;
 
@@ -303,13 +288,10 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     let domains = memora_gateway::env_config().domains;
     let vault = db.read(memora_state::settings::configured_vault)?;
 
-    // Without a configured vault the store points nowhere; the vault gate keeps
-    // every route that would read it closed until a folder is chosen, and the
-    // store is then replaced in place (MCP shares this same Arc).
+    // Without a vault the store points nowhere; the vault gate keeps its routes closed.
     let store = Arc::new(Mutex::new(MemoryStore::new(vault.as_deref().unwrap_or(""))));
     if vault.is_some() {
-        // Warm the note index in the background so the first search is quick (it
-        // would build it itself otherwise).
+        // Warm the note index so the first search is quick.
         let warm = store.clone();
         std::thread::spawn(move || {
             let _ = warm.lock().unwrap_or_else(|e| e.into_inner()).reindex();

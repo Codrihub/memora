@@ -1,7 +1,5 @@
-//! The server on the SQLite state database (docs/DATABASE.md), driven through the
-//! router: setup window with a one-try code, single owner, sessions stored as sha256,
-//! CSRF on cookie writes, API keys with scopes, MCP filtering, CLI sign-out and limiter
-//! reset through the database, and nothing but `memora.db*` in the state folder.
+//! The server on the SQLite state database, through the router: setup window, owner,
+//! sessions, CSRF, key scopes, CLI sign-out and limiter reset, state folder contents.
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -189,9 +187,7 @@ async fn setup_login_keys_mcp_and_cli_signout() {
     assert_eq!(r.body["armed"], true);
     assert_eq!(r.body["mode"], "bootstrap");
 
-    // A wrong code no longer closes the window at once (anyone who can reach
-    // /login could keep the owner from finishing setup): it spends a small
-    // per-IP budget, then that IP cools down.
+    // A wrong code spends a small per-IP budget, then that IP cools down.
     let r = bootstrap(&mut e, "WRON-GCOD").await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     assert_eq!(r.body["burned"], false);
@@ -467,8 +463,7 @@ async fn setup_login_keys_mcp_and_cli_signout() {
         assert!(events.iter().any(|x| x == ev), "{ev} missing in {events:?}");
     }
 
-    // The server wrote nothing but the database (and the key-sealing master key)
-    // into the state folder.
+    // Only the database and the key-sealing master key are in the state folder.
     cache::flush_all(&e.st);
     let mut files: Vec<String> = std::fs::read_dir(e.st.db.state_dir())
         .unwrap()
@@ -650,14 +645,38 @@ async fn password_change_reset_and_limiter_reset() {
 }
 
 #[tokio::test]
-async fn expired_window_locks_the_instance() {
+async fn expired_window_never_locks_the_instance() {
     let mut e = env("lock");
     let other = cli(&e);
-    let hash = cache::code_hash("ABCD-EFGH");
-    // Armed long ago with the minimum ttl: expired.
+    arm(&other, ArmMode::Bootstrap, "ABCD-EFGH");
+    let r = bootstrap(&mut e, "ABCD-EFGH").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let sid = r.cookie();
+    let r = call(
+        &mut e,
+        Method::POST,
+        "/api/keys",
+        Some(json!({"name": "agent", "scopes": ["mcp", "read"]})),
+        Opts {
+            cookie: Some(&sid),
+            same_origin: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let raw = r.body["key"].as_str().unwrap().to_string();
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let agent = || Opts {
+        key: Some(&raw),
+        ..Default::default()
+    };
+
+    // A reset window armed long ago with the minimum ttl: expired, never used.
+    let hash = cache::code_hash("JKMN-PQRS");
     other
         .write(|tx| {
-            memora_state::arm::arm(tx, ArmMode::Bootstrap, 30, &hash, memora_state::now() - 100)
+            memora_state::arm::arm(tx, ArmMode::Reset, 30, &hash, memora_state::now() - 100)
         })
         .unwrap();
     let r = call(
@@ -668,8 +687,53 @@ async fn expired_window_locks_the_instance() {
         Opts::default(),
     )
     .await;
-    assert_eq!(r.body["locked"], true);
+    assert_eq!(r.body["locked"], false);
     assert_eq!(r.body["armed"], false);
+    assert_eq!(r.body["expired"], "reset");
+    let r = call(&mut e, Method::POST, "/mcp", Some(list.clone()), agent()).await;
+    assert_eq!(r.status, StatusCode::OK, "agents keep working");
+    let me = Opts {
+        cookie: Some(&sid),
+        ..Default::default()
+    };
+    let r = call(&mut e, Method::GET, "/api/auth/me", None, me).await;
+    assert_eq!(r.status, StatusCode::OK, "the owner stays signed in");
+    let w = other.read(memora_state::arm::get).unwrap();
+    assert_eq!(
+        w.status,
+        memora_state::arm::ArmStatus::Idle,
+        "stored as idle"
+    );
+
+    // A lock an older version took when a window ran out is lifted.
+    other
+        .write(|tx| {
+            tx.execute(
+                "UPDATE arm_state SET state = 'locked', mode = 'bootstrap', armed_at = 1000,
+                   ttl = 300, locked_at = 1400 WHERE id = 1",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let r = call(&mut e, Method::POST, "/mcp", Some(list.clone()), agent()).await;
+    assert_eq!(r.status, StatusCode::OK, "old expiry lock lifted");
+    let r = call(
+        &mut e,
+        Method::GET,
+        "/api/auth/state",
+        None,
+        Opts::default(),
+    )
+    .await;
+    assert_eq!(r.body["locked"], false);
+
+    // Only an explicit lock stops agents and the UI.
+    other
+        .write(|tx| memora_state::arm::lock(tx, memora_state::now()))
+        .unwrap();
+    let r = call(&mut e, Method::POST, "/mcp", Some(list.clone()), agent()).await;
+    assert_eq!(r.status, StatusCode::LOCKED);
     let r = call(&mut e, Method::GET, "/api/stats", None, Opts::default()).await;
     assert_eq!(r.status, StatusCode::LOCKED);
     // Machine endpoints answer JSON, never a redirect to the lock screen.
@@ -681,12 +745,9 @@ async fn expired_window_locks_the_instance() {
         assert_eq!(r.status, StatusCode::LOCKED, "{path}");
         assert_eq!(r.body["locked"], true, "{path}");
     }
-    let w = other.read(memora_state::arm::get).unwrap();
-    assert_eq!(
-        w.status,
-        memora_state::arm::ArmStatus::Locked,
-        "the lock is stored"
-    );
+    // Pages go to plain /login (no extra query).
+    let r = call(&mut e, Method::GET, "/brain", None, Opts::default()).await;
+    assert_eq!(r.headers[header::LOCATION], "/login");
     other.write(memora_state::arm::unlock).unwrap();
     let r = call(
         &mut e,
@@ -697,12 +758,11 @@ async fn expired_window_locks_the_instance() {
     )
     .await;
     assert_eq!(r.body["locked"], false);
+    let r = call(&mut e, Method::POST, "/mcp", Some(list), agent()).await;
+    assert_eq!(r.status, StatusCode::OK);
 }
 
-/// Failed logins from many addresses used to put the whole account on a
-/// cooldown, so anyone with a few IPs could lock the owner out. Now they only
-/// switch on slow mode: a correct password from an address without failures
-/// still signs in, while an attacking address cools down after one miss.
+/// Failed logins from many addresses only switch on slow mode; the owner still gets in.
 #[tokio::test]
 async fn failed_logins_from_many_ips_do_not_lock_out_the_owner() {
     let mut e = env("lockout");
@@ -754,8 +814,7 @@ async fn failed_logins_from_many_ips_do_not_lock_out_the_owner() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
 }
 
-/// Dynamic client registration is open to anyone, so one address may only add
-/// a few clients (each is a row under the 500-client cap).
+/// One address may register only a few OAuth clients.
 #[tokio::test]
 async fn client_registration_is_limited_per_ip() {
     let mut e = env("dcr");

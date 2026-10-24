@@ -1,16 +1,11 @@
-//! `/api/privacy`: manage the per-agent privacy rules of notes and folders
-//! (`memora_state::privacy`). Signed-in owner session or an API key with the `admin`
-//! scope (enforced by `required_scope`); writes are CSRF-checked for cookie sessions and
-//! written to the activity log.
+//! `/api/privacy`: per-agent privacy rules of notes and folders (owner session or an
+//! `admin` key); writes are CSRF-checked and logged.
 //!
-//! * `GET /api/privacy` -> `{count, rules:[{id,kind,path,mode,keys:[{id,name,color}],..}],
-//!   agents:[{id,name,color,enabled}]}`
-//! * `GET /api/privacy/path?path=&kind=` -> the path's own rule, inherited folder rules and
-//!   per-agent visibility (`memora_mcp::privacy::describe`). `kind` (`node` | `folder`)
-//!   defaults to what the path is on disk.
-//! * `PUT /api/privacy/path` `{path, kind, mode: "deny"|"allow_only", keys:[key id]}` ->
-//!   replaces the rule; same answer as GET. `deny` with no keys removes it.
-//! * `DELETE /api/privacy/path?path=&kind=` -> removes the rule; same answer as GET.
+//! * `GET /api/privacy` -> `{count, rules, agents}`
+//! * `GET /api/privacy/path?path=&kind=` -> the path's rule, inherited rules and visibility
+//! * `PUT /api/privacy/path` `{path, kind, mode, keys}` -> replaces the rule (`deny` with
+//!   no keys removes it); same answer as GET
+//! * `DELETE /api/privacy/path?path=&kind=` -> removes the rule; same answer as GET
 
 use axum::{
     extract::{Request, State},

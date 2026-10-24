@@ -1,17 +1,6 @@
-//! Shutting the server down from the signed-in browser (Settings).
-//!
-//! `POST /api/server/shutdown` answers first, then asks the server to stop
-//! gracefully, the same way Ctrl-C or SIGTERM does, so it exits with status 0.
-//! A supervisor that restarts a cleanly exited process (systemd `Restart=always`,
-//! Docker `--restart unless-stopped`) starts it again; `GET` tells the browser
-//! so the confirmation can say how to stop it for good.
-//!
-//! `POST /_stop` is the same graceful stop for `memora-cli stop` on this
-//! machine. Windows has no SIGTERM, and `taskkill` without `/F` cannot close a
-//! server started without a console, so the CLI asks over HTTP first. Only a
-//! loopback caller that is not behind a proxy and sends the token from
-//! `<state>/stop.token` (written at startup, readable by the server user only)
-//! is accepted.
+//! Graceful shutdown from the browser (`POST /api/server/shutdown`, exit status 0;
+//! `GET` says whether a supervisor restarts it) and from `memora-cli stop`
+//! (`POST /_stop`, loopback plus the token in `<state>/stop.token`; Windows has no SIGTERM).
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -46,9 +35,8 @@ pub fn set_stop_token(token: Option<String>) {
     *stop_token().lock().unwrap_or_else(|e| e.into_inner()) = token;
 }
 
-/// Create a fresh token, write it to `<state>/stop.token` (mode 0600) and
-/// accept it on `POST /_stop`. Called once the port is bound, so a second
-/// server that fails to start never replaces the running one's token.
+/// Create a fresh token in `<state>/stop.token` (0600) and accept it. Called once
+/// the port is bound, so a second server that fails to start keeps the first one's token.
 pub fn publish_stop_token(state_dir: &Path) -> std::io::Result<()> {
     use std::io::Write;
     let token = memora_gateway::random_token("stop");
@@ -93,9 +81,7 @@ pub fn router() -> Router<AppState> {
         .route("/_stop", post(h_stop))
 }
 
-/// `POST /_stop`: graceful stop for `memora-cli stop` on this machine (see the
-/// module docs). Refused with 403 unless the caller is loopback, not
-/// forwarded by a proxy, and sends the current stop token.
+/// `POST /_stop`: 403 unless the caller is loopback, not proxied, and sends the token.
 async fn h_stop(
     State(st): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
