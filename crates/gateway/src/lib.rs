@@ -1,14 +1,5 @@
-//! Gateway: stateless auth primitives and access rules.
-//!
-//! All persistent state (owner, sessions, API keys, arm window, settings) lives
-//! in `memora-state`. This crate only provides:
-//!   * password hashing (argon2id) and API key / setup code hashing (sha256),
-//!     compared in constant time
-//!   * key and setup code generation
-//!   * the access control STACK (IP / range / CIDR / domain rules, first match wins)
-//!   * per-key permissions (scopes + tool grants) and tool access checks
-//!   * environment config (`MEMORA_*`) and the Host allow-list
-//!   * small filesystem helpers shared by the server and CLI
+//! Gateway: stateless auth primitives and access rules (hashing, key generation, access
+//! stack, per-key permissions, environment config). Persistent state is in `memora-state`.
 
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
@@ -131,12 +122,8 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// Verify an API key against its stored hash.
-///
-/// * sha256 hex: hash the raw key and compare in constant time
-/// * argon2id: verify with argon2
-///
-/// Any other hash format fails closed.
+/// Verify an API key against its stored hash (sha256 hex or argon2id); any other format
+/// fails closed.
 pub fn verify_key(plain: &str, stored_hash: &str) -> bool {
     if plain.is_empty() || stored_hash.is_empty() {
         return false;
@@ -308,10 +295,8 @@ fn domain_matches(pattern: &str, domain: &str) -> bool {
 // LOCKED state: routes that stay reachable
 // ---------------------------------------------------------------------------
 
-/// Paths that remain reachable while the instance is LOCKED.
-///
-/// Only the recovery routes and the health check stay open; the tool catalog,
-/// discovery, API and MCP are all blocked until setup/reset completes.
+/// Paths that remain reachable while the instance is LOCKED: recovery routes and the
+/// health check only.
 pub const LOCK_ALLOWED: &[&str] = &[
     "/login",
     "/logout",
@@ -401,23 +386,19 @@ pub fn dir_writable(dir: &Path) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Settings read from the environment. Every one is optional.
-///
-/// * `MEMORA_BASE_URL`: public URL, e.g. `https://memory.example.com`; its host
-///   is also an allowed domain
-/// * `MEMORA_DOMAIN`: comma separated hostnames that may reach the server
-///   (`*.example.com` allowed); any other Host gets 404
-/// * `MEMORA_ADMIN_USER` / `MEMORA_ADMIN_PASSWORD[_FILE]`: create the owner at
-///   startup when none exists
-/// * `MEMORA_API_KEY[_FILE]`: a default API key for agents (MCP)
-/// * `MEMORA_VAULT_AUTO`: `true` uses `MEMORA_VAULT` as the vault without the
-///   browser step
 #[derive(Debug, Clone, Default)]
 pub struct EnvConfig {
+    /// `MEMORA_BASE_URL`: public URL; its host is also an allowed domain.
     pub base_url: Option<String>,
+    /// `MEMORA_DOMAIN`: comma-separated allowed hostnames (`*.example.com` allowed).
     pub domains: Vec<String>,
+    /// `MEMORA_ADMIN_USER`: owner created at startup when none exists.
     pub admin_user: String,
+    /// `MEMORA_ADMIN_PASSWORD[_FILE]`.
     pub admin_password: Option<String>,
+    /// `MEMORA_API_KEY[_FILE]`: a default API key for agents.
     pub api_key: Option<String>,
+    /// `MEMORA_VAULT_AUTO`: use `MEMORA_VAULT` without the browser step.
     pub vault_auto: bool,
 }
 
@@ -487,9 +468,8 @@ pub fn env_config() -> EnvConfig {
     }
 }
 
-/// Whether a request for `host` (Host header, port allowed) may be served.
-/// No configured domains means every host is allowed; loopback names always are,
-/// so local agents and health checks keep working.
+/// Whether a request for `host` (Host header, port allowed) may be served. No configured
+/// domains allows every host; loopback names are always allowed.
 pub fn host_allowed(domains: &[String], host: &str) -> bool {
     if domains.is_empty() {
         return true;
@@ -615,10 +595,8 @@ impl ToolDenial {
     }
 }
 
-/// Effective MCP access to tool `name`: key enabled AND "mcp" in scopes AND
-/// not globally disabled AND (tools == "*" OR name in tools).
-/// `perms == None` is a full-access caller (browser session, local stdio);
-/// global switches still apply to it.
+/// Effective MCP access to tool `name`: key enabled, `mcp` scope, not globally disabled,
+/// and granted. `perms == None` is a full-access caller (global switches still apply).
 pub fn tool_access(
     perms: Option<&KeyPermissions>,
     disabled: &BTreeSet<String>,
