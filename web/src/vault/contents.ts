@@ -1,4 +1,4 @@
-// The reader's Contents panel (outline, links, mentions, details): a side column on wide screens, a sheet otherwise.
+// The reader's side panel: Contents (outline, links, mentions) or Details; a side column on wide screens, a sheet otherwise.
 
 import { attr, el, esc } from '../dom';
 import { closePanel, openPanel } from './panel';
@@ -27,8 +27,10 @@ interface ContentsActions {
   tag: (tag: string) => void;
 }
 
-type Tab = 'toc' | 'out' | 'back' | 'info';
+type Tab = 'toc' | 'out' | 'back';
+type Main = 'contents' | 'details';
 let last: Tab = 'toc';
+let lastMain: Main = 'contents';
 
 const LS_OPEN = 'memora.reader.contents';
 
@@ -51,15 +53,23 @@ export function setContentsOpen(open: boolean): void {
 
 const JUMP = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h10"/><path d="M18 9v8M15 14l3 3 3-3"/></svg>`;
 
-/** The panel body: tabs, then the list. `inSheet` closes the sheet after a jump. */
+/**
+ * The panel body. Its first child, `.vx-ct-main` (Contents or Details), may be moved into a header by the caller.
+ * `inSheet` closes the sheet after a jump.
+ */
 export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boolean): HTMLElement {
   const body = el('div', 'vx-ct');
   const tabs: { k: Tab; label: string; n: number }[] = [
     { k: 'toc', label: 'Outline', n: d.heads.length },
     { k: 'out', label: 'Links', n: d.outs.length },
     { k: 'back', label: 'Mentions', n: d.backlinks.length },
-    { k: 'info', label: 'Details', n: -1 },
   ];
+  let main: Main = lastMain;
+  const mainSeg = el('div', 'vx-ct-main');
+  mainSeg.setAttribute('role', 'tablist');
+  mainSeg.setAttribute('aria-label', 'Panel');
+  const inner = el('div', 'vx-ct-inner');
+  body.append(mainSeg, inner);
   // Open on the last tab used when it has something, else the first that does.
   let tab: Tab = tabs.find((t) => t.k === last && t.n)?.k || tabs.find((t) => t.n > 0)?.k || 'toc';
   // Each link's places in the text, so its jump button walks through them.
@@ -74,7 +84,6 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
     `<i style="--fc:${attr(folderColor(dirOf(path)))}"></i><span><b>${esc(noteTitle(path))}</b><small>${esc(dirOf(path) || ROOT_LABEL)}</small></span>`;
 
   const list = (): string => {
-    if (tab === 'info') return `<div class="vx-ct-info">${d.details}</div>`;
     if (tab === 'toc')
       return d.heads.length
         ? `<nav class="vx-ct-toc" aria-label="Outline">${d.heads
@@ -111,8 +120,23 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       : '<p class="vx-ct-none">This note does not link to other notes yet.</p>';
   };
 
+  const paintMain = (): void => {
+    mainSeg.innerHTML = (['contents', 'details'] as const)
+      .map(
+        (m) =>
+          `<button type="button" role="tab" data-main="${m}" aria-selected="${m === main}" tabindex="${m === main ? 0 : -1}">${
+            m === 'contents' ? 'Contents' : 'Details'
+          }</button>`,
+      )
+      .join('');
+  };
   const paint = (): void => {
-    body.innerHTML = `<div class="vx-ct-seg" role="tablist" aria-label="Contents">${tabs
+    if (main === 'details') {
+      inner.innerHTML = `<div class="vx-ct-list" role="tabpanel"><div class="vx-ct-info">${d.details}</div></div>`;
+      fadeScroll(inner.querySelector<HTMLElement>('.vx-ct-list')!);
+      return;
+    }
+    inner.innerHTML = `<div class="vx-ct-seg" role="tablist" aria-label="Contents">${tabs
       .map(
         (t) =>
           `<button type="button" role="tab" data-tab="${t.k}" aria-selected="${t.k === tab}" tabindex="${t.k === tab ? 0 : -1}">${t.label}${
@@ -120,15 +144,32 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
           }</button>`,
       )
       .join('')}</div><div class="vx-ct-list" role="tabpanel">${list()}</div>`;
-    const lst = body.querySelector<HTMLElement>('.vx-ct-list')!;
-    fadeScroll(lst);
-    if (tab === 'toc') markHead(body, act.current(), true);
+    fadeScroll(inner.querySelector<HTMLElement>('.vx-ct-list')!);
+    if (tab === 'toc') markHead(inner, act.current(), true);
   };
+  paintMain();
   paint();
+
+  const pickMain = (m: Main): void => {
+    main = lastMain = m;
+    paintMain();
+    paint();
+    mainSeg.querySelector<HTMLElement>(`[data-main=${m}]`)?.focus();
+  };
+  mainSeg.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-main]');
+    if (b) pickMain(b.dataset.main as Main);
+  };
+  mainSeg.onkeydown = (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    pickMain(main === 'contents' ? 'details' : 'contents');
+  };
 
   body.onclick = (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button');
     if (!b) return;
+    if (b.dataset.main) return;
     if (b.dataset.tab) {
       tab = last = b.dataset.tab as Tab;
       paint();
@@ -165,7 +206,7 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
   };
   body.onkeydown = (e) => {
     // Arrow keys move between tabs.
-    const t = (e.target as HTMLElement).closest<HTMLElement>('[role=tab]');
+    const t = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
     if (!t || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
     e.preventDefault();
     const i = tabs.findIndex((x) => x.k === t.dataset.tab);
@@ -200,5 +241,5 @@ export function markHead(root: HTMLElement, i: number, reveal: boolean): void {
 
 /** Phones and tablets: Contents as a bottom sheet, opened only by its button. */
 export function openContentsSheet(anchor: HTMLElement, d: ContentsData, act: ContentsActions): void {
-  openPanel(anchor, 'Contents', contentsBody(d, act, true), 'vx-pop-ct', true);
+  openPanel(anchor, 'This note', contentsBody(d, act, true), 'vx-pop-ct', true);
 }

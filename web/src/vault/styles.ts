@@ -450,7 +450,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-sk{display:flex;flex-direction:column;height:100%}
 .vx-sk .vx-icard{display:flex;flex-direction:column}
 .vx-note-scroll{--paper:var(--surface-1);flex:1;overflow:auto;outline:none;background:var(--bg);color:var(--fg);transition:background .2s,color .2s}
-.vx-note-scroll[data-rtone]{--paper:var(--bg);background:color-mix(in srgb,var(--bg) 93%,var(--fg))}
+.vx-note-scroll[data-rtone]{--paper:var(--bg);background:color-mix(in srgb,var(--bg) 96%,var(--fg))}
 .vx-save{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);margin-right:6px;white-space:nowrap}
 .vx-save i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .vx-save[data-state=dirty] i{background:var(--warn)}
@@ -477,25 +477,26 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-tag i{width:6px;height:6px;border-radius:50%;background:var(--tc)}
 .vx-tag:hover{background:var(--hover);color:var(--fg);border-color:var(--line-strong)}
 
-.vx-prose{margin-top:32px;font-family:var(--font);font-size:var(--rsize,16px);line-height:1.72;color:var(--fg)}
-[data-rfont=serif] .vx-prose{font-family:ui-serif,"Iowan Old Style","Charter","Georgia","Cambria",serif;line-height:1.75}
-[data-rfont=mono] .vx-prose{font-family:var(--mono);font-size:calc(var(--rsize,16px) * .92);line-height:1.75}
-[data-rfont=serif] .vx-prose :is(h1,h2,h3,h4){font-family:ui-serif,"Iowan Old Style","Charter","Georgia",serif;letter-spacing:0}
-[data-rfont=rounded] .vx-prose{font-family:ui-rounded,"SF Pro Rounded","Nunito","Varela Round","Quicksand",var(--font)}
-[data-rfont=legible] .vx-prose{font-family:"Atkinson Hyperlegible","Verdana","Tahoma",var(--font);letter-spacing:.01em;word-spacing:.04em}
-[data-rlead=compact] .vx-prose{line-height:1.5}
-[data-rlead=relaxed] .vx-prose{line-height:2}
-[data-ralign=justify] .vx-prose :is(p,li,blockquote){text-align:justify;hyphens:auto;-webkit-hyphens:auto}
+.vx-prose{margin-top:36px;font-family:var(--font);font-size:var(--rsize,16px);line-height:1.7;color:var(--fg);letter-spacing:-.003em;
+  font-feature-settings:"kern","liga","calt";-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+[data-rfont=serif] .vx-prose{font-family:"Iowan Old Style","Charter","Source Serif 4","Source Serif Pro","Georgia",ui-serif,serif;
+  font-size:calc(var(--rsize,16px) * 1.06);letter-spacing:0}
+[data-rfont=mono] .vx-prose{font-family:var(--mono);font-size:calc(var(--rsize,16px) * .9);letter-spacing:0}
+[data-rlead=compact] .vx-prose{line-height:1.55}
+[data-rlead=relaxed] .vx-prose{line-height:1.88}
 .vx-prose>:first-child{margin-top:0}
-.vx-prose p{margin:0 0 1em;text-wrap:pretty}
-.vx-prose li{text-wrap:pretty;margin:.3em 0}
-.vx-prose ul,.vx-prose ol{margin:0 0 1em;padding-left:1.5em}
-.vx-prose li::marker{color:var(--muted)}
-.vx-prose h1,.vx-prose h2,.vx-prose h3,.vx-prose h4{color:var(--fg);font-weight:680;letter-spacing:-.25px;line-height:1.3}
-.vx-prose h1{font-size:1.55em;border-bottom:0;padding:0;margin:1.8em 0 .5em}
-.vx-prose h2{font-size:1.3em;margin:1.9em 0 .5em}
-.vx-prose h3{font-size:1.07em;margin:1.6em 0 .4em}
-.vx-prose h4{font-size:.95em;margin:1.4em 0 .4em;color:var(--text-2)}
+.vx-prose p{margin:0 0 1.05em;text-wrap:pretty}
+.vx-prose ul,.vx-prose ol{margin:0 0 1.15em;padding-left:1.35em}
+.vx-prose li{margin:.4em 0;padding-left:.2em;text-wrap:pretty}
+.vx-prose li>:is(ul,ol){margin:.35em 0 .5em}
+.vx-prose li::marker{color:var(--text-3)}
+.vx-prose ol>li::marker{font-variant-numeric:tabular-nums;font-size:.92em}
+.vx-prose :is(h1,h2,h3,h4){color:var(--fg);font-family:var(--font);font-weight:650;letter-spacing:-.015em;line-height:1.28;text-wrap:balance}
+.vx-prose h1{font-size:1.6em;margin:1.9em 0 .55em}
+.vx-prose h2{font-size:1.32em;margin:2em 0 .6em}
+.vx-prose h3{font-size:1.1em;margin:1.7em 0 .45em}
+.vx-prose h4{font-size:.8em;margin:1.6em 0 .5em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.vx-prose :is(h1,h2,h3,h4)+:is(h2,h3,h4){margin-top:.4em}
 .vx-prose :is(h1,h2,h3,h4){scroll-margin-top:24px}
 .vx-prose a{color:var(--accent-2);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent-2) 40%,transparent);text-underline-offset:3px}
 /* Wikilinks. The position…opacity reset keeps the welcome tour's own ".wl" class off links. */
@@ -512,20 +513,28 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-hit{animation:vxHit 1.6s var(--ease)}
 @keyframes vxHit{0%,30%{background:color-mix(in srgb,var(--accent) 22%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}100%{background:transparent;box-shadow:none}}
 @media (prefers-reduced-motion:reduce){.vx-hit{animation:none;outline:2px solid var(--accent)}}
-.vx-prose strong{font-weight:650}
-.vx-prose blockquote{margin:1.2em 0;padding:2px 0 2px 16px;border-left:3px solid var(--line-strong);border-radius:0;background:none;color:var(--text-2);font-style:normal}
+.vx-prose strong{font-weight:650;color:var(--fg)}
+.vx-prose em{font-style:italic}
+.vx-prose blockquote{margin:1.3em 0;padding:.15em 0 .15em 1.05em;border-left:2px solid var(--accent-line,var(--line-strong));border-radius:0;background:none;color:var(--text-2)}
 .vx-prose blockquote p:last-child{margin-bottom:0}
-.vx-prose code{font-family:var(--mono);font-size:.86em;padding:.12em .4em;border-radius:var(--r-xs);border:0;background:var(--panel-2)}
-.vx-prose pre{font-size:13px;line-height:1.65;padding:16px;margin:0 0 1.2em;border-radius:var(--r);overflow:auto}
-.vx-prose pre code{font-size:13px;padding:0;background:none}
-.vx-prose table{margin:0 0 1.2em;font-size:.875em;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:var(--r)}
-.vx-prose th,.vx-prose td{border:0;border-bottom:1px solid var(--line);padding:10px 14px;text-align:left;vertical-align:top}
+.vx-prose code{font-family:var(--mono);font-size:.84em;padding:.14em .38em;border-radius:5px;background:color-mix(in srgb,var(--fg) 6%,transparent);
+  color:var(--fg);border:0;overflow-wrap:anywhere}
+.vx-prose pre{font-size:13px;line-height:1.65;padding:14px 16px;margin:1.2em 0;border-radius:10px;border:1px solid var(--line);overflow:auto;
+  background:color-mix(in srgb,var(--fg) 3.5%,transparent)}
+.vx-prose pre code{font-size:13px;padding:0;background:none;border-radius:0;line-height:inherit;overflow-wrap:normal}
+.vx-prose table{display:block;max-width:100%;overflow-x:auto;margin:1.2em 0;font-size:.9em;border-collapse:collapse;border-spacing:0}
+.vx-prose th,.vx-prose td{min-width:0;border:0;border-bottom:1px solid var(--line);padding:9px 20px 9px 0;text-align:left;vertical-align:top}
+.vx-prose th{font-size:.86em;font-weight:600;color:var(--muted);background:none;border-bottom-color:var(--line-strong);white-space:nowrap}
 .vx-prose tr:last-child td{border-bottom:0}
-.vx-prose th{background:var(--panel-2);font-size:12.5px;font-weight:600;color:var(--text-2)}
-.vx-prose hr{border:0;border-top:1px solid var(--line);margin:2em 0}
-.vx-prose .task,.vx-prose li:has(>input[type=checkbox]){list-style:none;margin-left:-1.4em}
-.vx-prose input[type=checkbox]{accent-color:var(--accent);margin:0 8px 0 0;vertical-align:-2px}
+.vx-prose hr{border:0;height:1px;background:var(--line);margin:2.2em 0}
+.vx-prose img{max-width:100%;border-radius:10px}
+.vx-prose .task,.vx-prose li:has(>input[type=checkbox]){list-style:none;position:relative;margin-left:-1.35em;padding-left:1.75em}
+.vx-prose input[type=checkbox]{appearance:none;-webkit-appearance:none;position:absolute;left:0;top:calc(.5lh - 8px);width:16px;height:16px;margin:0;
+  border:1.5px solid var(--line-strong);border-radius:5px;background:transparent;opacity:1;cursor:default}
+.vx-prose input[type=checkbox]:checked{border-color:var(--accent);background:var(--accent) no-repeat center/11px
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.6l4.5-5'/%3E%3C/svg%3E")}
 .vx-prose li.task.done{color:var(--muted)}
+.vx-prose li.task.done :is(strong,a.wl,code){color:inherit}
 .vx-empty-doc{font-size:15px}
 .vx-linkbtn{border:0;background:none;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .vx-flash{animation:vxFlash 1.4s var(--ease)}
@@ -547,8 +556,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-itags .vx-tag{height:24px;padding:0 8px;font-size:12px}
 .vx-icard .vx-muted{font-size:12.5px;margin:0}
 .vx-toc{padding:12px 10px 10px 16px}
-.vx-toc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px}
-.vx-toc-head h3{margin:0}
+.vx-toc-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:0 0 6px}
 .vx-toc-head .vx-icon-btn{width:28px;height:28px;border-radius:7px}
 .vx-toc-head .vx-icon-btn .vx-i{width:14px;height:14px}
 .vx-toc .vx-ct-list{max-height:min(54vh,480px);margin:10px -6px 0 0;padding:0 6px 0 0}
@@ -593,7 +601,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 @container vxnote (min-width:820px) and (max-width:1079px){
   .vx-page.toc-open:not(.editing){grid-template-columns:256px minmax(0,1fr);gap:20px;padding:24px 24px 120px}
   .vx-toc{padding:10px 8px 8px 12px}
-  .vx-toc .vx-ct-seg button{padding:0 6px;font-size:12px}
+  .vx-toc .vx-ct-seg button{padding:0 4px;font-size:12px}
 }
 .vx-ct-info{padding:2px 8px 4px 2px}
 .vx-ct-info .vx-info dt{line-height:34px}
@@ -604,7 +612,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-note-scroll[data-rtone=sepia]{--bg:#1d1913;--fg:#eadcc4;--text-2:#d6c6aa;--muted:#a8977b;--text-3:#7f705a;--line:rgba(234,220,196,.13);
   --line-strong:rgba(234,220,196,.22);--panel:#241f17;--panel-2:#2c261c;--hover:rgba(234,220,196,.07);--accent:#e3b46c;--accent-2:#d7a15d;
   --accent-line:rgba(227,180,108,.45);--accent-soft:rgba(227,180,108,.13)}
-:root[data-theme=light] .vx-note-scroll[data-rtone=sepia]{--bg:#f6efdf;--fg:#3b2f21;--text-2:#55452f;--muted:#7a6a52;--text-3:#a2927a;
+:root[data-theme=light] .vx-note-scroll[data-rtone=sepia]{--bg:#f8f2e5;--fg:#362b1f;--text-2:#55452f;--muted:#7a6a52;--text-3:#a2927a;
   --line:rgba(59,47,33,.13);--line-strong:rgba(59,47,33,.22);--panel:#efe6d1;--panel-2:#e8dcc2;--hover:rgba(59,47,33,.06);--accent:#9a5b12;
   --accent-2:#8a4f12;--accent-line:rgba(154,91,18,.4);--accent-soft:rgba(154,91,18,.1)}
 .vx-note-scroll[data-rtone=contrast]{--bg:#000;--fg:#fff;--text-2:#f1f3f6;--muted:#d4d9e2;--text-3:#aab2bf;--line:rgba(255,255,255,.32);
@@ -613,27 +621,8 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 :root[data-theme=light] .vx-note-scroll[data-rtone=contrast]{--bg:#fff;--fg:#000;--text-2:#111;--muted:#2c3038;--text-3:#4b515c;
   --line:rgba(0,0,0,.38);--line-strong:rgba(0,0,0,.6);--panel:#fff;--panel-2:#eceef2;--hover:rgba(0,0,0,.07);--accent:#00594f;
   --accent-2:#2b1fb8;--accent-line:rgba(0,89,79,.7);--accent-soft:rgba(0,89,79,.1)}
-.vx-note-scroll[data-rtone=night]{--bg:#111111;--fg:#cfcfcf;--text-2:#bdbdbd;--muted:#8a8a8a;--text-3:#666;--line:rgba(255,255,255,.08);
-  --line-strong:rgba(255,255,255,.15);--panel:#181818;--panel-2:#202020;--hover:rgba(255,255,255,.05);--accent:#d8a657;--accent-2:#c79647;
-  --accent-line:rgba(216,166,87,.4);--accent-soft:rgba(216,166,87,.1)}
-:root[data-theme=light] .vx-note-scroll[data-rtone=night]{--bg:#e9e7e3;--fg:#2a2826;--text-2:#3d3a36;--muted:#6d6862;--text-3:#8e8881;
-  --line:rgba(0,0,0,.1);--line-strong:rgba(0,0,0,.18);--panel:#e2dfda;--panel-2:#d8d4ce;--hover:rgba(0,0,0,.05);--accent:#8a5a12;
-  --accent-2:#7a4f10;--accent-line:rgba(138,90,18,.4);--accent-soft:rgba(138,90,18,.1)}
-.vx-note-scroll[data-rtone=paper]{--bg:#f5f1e8;--fg:#2b2620;--text-2:#433c33;--muted:#6f675c;--text-3:#978f83;--line:rgba(43,38,32,.12);
-  --line-strong:rgba(43,38,32,.2);--panel:#efeadf;--panel-2:#e6e0d3;--hover:rgba(43,38,32,.05);--accent:#0f766e;--accent-2:#115e59;
-  --accent-line:rgba(15,118,110,.4);--accent-soft:rgba(15,118,110,.1)}
-.vx-note-scroll[data-rtone=mint]{--bg:#0c1916;--fg:#d6efe8;--text-2:#bfe2d8;--muted:#86ab9f;--text-3:#5f8278;--line:rgba(214,239,232,.1);
-  --line-strong:rgba(214,239,232,.18);--panel:#10211d;--panel-2:#152a25;--hover:rgba(214,239,232,.06);--accent:#5eead4;--accent-2:#2dd4bf;
-  --accent-line:rgba(94,234,212,.45);--accent-soft:rgba(94,234,212,.12)}
-:root[data-theme=light] .vx-note-scroll[data-rtone=mint]{--bg:#eaf7f3;--fg:#123029;--text-2:#1f4239;--muted:#4b6f65;--text-3:#73958b;
-  --line:rgba(18,48,41,.12);--line-strong:rgba(18,48,41,.2);--panel:#e0f2ec;--panel-2:#d3ebe3;--hover:rgba(18,48,41,.05);--accent:#0f766e;
-  --accent-2:#115e59;--accent-line:rgba(15,118,110,.4);--accent-soft:rgba(15,118,110,.1)}
 .vx-note-scroll[data-rtone=contrast] .vx-prose a{text-decoration-thickness:2px}
 .vx-note-scroll[data-rtone=contrast] .vx-prose a.wl{text-decoration-thickness:2px}
-/* Code takes the reading colour's palette, never the app theme's. */
-:root .vx-note-scroll[data-rtone] .vx-prose code{color:var(--fg);background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--line)}
-:root .vx-note-scroll[data-rtone] .vx-prose pre{color:var(--fg);background:color-mix(in srgb,var(--panel-2) 70%,var(--bg));border-color:var(--line-strong)}
-:root .vx-note-scroll[data-rtone] .vx-prose pre code{background:none;box-shadow:none}
 
 /* floating panels: popover (wide) and bottom sheet (phones) */
 .vx-pop{position:fixed;inset:0;z-index:190;pointer-events:none}
@@ -675,39 +664,43 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-seg3 button:hover{color:var(--fg);border-color:var(--line-strong)}
 .vx-seg3 button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
 .vx-seg3 b{font-size:18px;font-weight:600;color:var(--fg)}
-.vx-seg3 .ff-serif b{font-family:ui-serif,Georgia,serif}
+.vx-seg3 .ff-serif b{font-family:"Iowan Old Style","Charter","Georgia",ui-serif,serif}
 .vx-seg3 .ff-mono b{font-family:var(--mono);font-size:16px}
 .vx-seg3 .sw{width:22px;height:22px;border-radius:50%;border:1px solid var(--line-strong)}
 .sw-default{background:var(--bg)}
-.sw-sepia{background:#f3e9d2;box-shadow:none}
+.sw-sepia{background:#f3e7cf;box-shadow:none}
 .sw-contrast{background:#fff;box-shadow:none}
-.sw-night{background:#cfcfcf;box-shadow:none}
-.sw-paper{background:#f5f1e8;box-shadow:none}
-.sw-mint{background:#d6efe8;box-shadow:none}
-.vx-seg3.two{grid-template-columns:repeat(2,1fr)}
-.vx-seg3 .ff-rounded b{font-family:ui-rounded,"SF Pro Rounded","Nunito",var(--font)}
-.vx-seg3 .ff-legible b{font-family:"Atkinson Hyperlegible","Verdana",var(--font)}
-/* little pictures for line spacing, width and alignment */
-.vx-seg3 :is(.lh,.wd,.al){display:flex;flex-direction:column;justify-content:center;width:26px;height:22px}
-.vx-seg3 :is(.lh,.wd,.al) b{display:block;height:2px;border-radius:1px;background:currentColor;font-size:0}
+/* little pictures for line spacing and width */
+.vx-seg3 :is(.lh,.wd){display:flex;flex-direction:column;justify-content:center;width:26px;height:22px}
+.vx-seg3 :is(.lh,.wd) b{display:block;height:2px;border-radius:1px;background:currentColor;font-size:0}
 .vx-seg3 .lh-compact{gap:2px}.vx-seg3 .lh-normal{gap:4px}.vx-seg3 .lh-relaxed{gap:6px}
 .vx-seg3 .wd{align-items:center;border-left:2px solid currentColor;border-right:2px solid currentColor;padding:0 2px}
 .vx-seg3 .wd b{height:10px;opacity:.5}
 .vx-seg3 .wd-narrow b{width:8px}.vx-seg3 .wd-wide b{width:14px}.vx-seg3 .wd-full b{width:100%}
-.vx-seg3 .al{gap:3px}
-.vx-seg3 .al-left b:nth-child(2){width:70%}.vx-seg3 .al-left b:nth-child(3){width:85%}
 .vx-aa-reset{align-self:flex-start;border:0;background:none;color:var(--accent);font:inherit;font-size:12.5px;padding:4px 0;cursor:pointer}
 .vx-aa-reset:disabled{color:var(--text-3);cursor:default}
 .vx-aa button:focus-visible,.vx-ct button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* contents: tabs, then the outline / links / mentions */
 .vx-ct{display:flex;flex-direction:column;min-height:0}
-.vx-ct-seg{display:flex;gap:2px;height:32px;padding:3px;border-radius:9px;background:var(--seg-track,var(--surface-2));box-sizing:border-box;flex:none}
-.vx-ct-seg button{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:0;padding:0 8px;border:0;border-radius:6px;
-  background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:550;white-space:nowrap;cursor:pointer;transition:color .15s,background .15s}
+.vx-ct-main{display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:1;min-width:0;height:34px;padding:3px;border-radius:10px;box-sizing:border-box;
+  background:var(--seg-track,var(--surface-2))}
+.vx-ct-main button{border:0;border-radius:7px;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+  white-space:nowrap;transition:color .15s,background .15s}
+.vx-ct-main button:hover{color:var(--fg)}
+.vx-ct-main button[aria-selected=true]{background:var(--seg-thumb,var(--surface-1));color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08),0 0 0 1px var(--line)}
+.vx-ct-main button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.vx-ct>.vx-ct-main{flex:none;margin-bottom:12px}
+.vx-ct-inner{display:flex;flex-direction:column;min-height:0}
+.vx-ct-seg{display:flex;gap:2px;height:36px;margin:0 -2px;border-bottom:1px solid var(--line);box-sizing:border-box;flex:none;overflow-x:auto;scrollbar-width:none}
+.vx-ct-seg::-webkit-scrollbar{display:none}
+.vx-ct-seg button{position:relative;flex:1 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 6px;border:0;border-radius:7px 7px 0 0;
+  background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:550;white-space:nowrap;cursor:pointer;transition:color .15s}
 .vx-ct-seg button b{font-size:11px;font-weight:500;color:var(--text-3);font-variant-numeric:tabular-nums}
+.vx-ct-seg button::after{content:"";position:absolute;left:6px;right:6px;bottom:-1px;height:2px;border-radius:2px;background:transparent;transition:background .15s}
 .vx-ct-seg button:hover{color:var(--fg)}
-.vx-ct-seg button[aria-selected=true]{background:var(--seg-thumb,var(--surface-1));color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.vx-ct-seg button[aria-selected=true]{color:var(--fg)}
+.vx-ct-seg button[aria-selected=true]::after{background:var(--accent)}
 .vx-ct-seg button[aria-selected=true] b{color:var(--muted)}
 .vx-ct-list{overflow:auto;min-height:0;scrollbar-width:none;overscroll-behavior:contain}
 .vx-ct-list::-webkit-scrollbar{display:none}
@@ -747,8 +740,10 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-sheet.vx-pop-hist .vx-sheet-grab{display:none}
 }
 .vx-sheet.vx-pop-ct .vx-pop-body{display:flex;flex-direction:column;overflow:hidden;padding:4px 16px 0}
-.vx-sheet .vx-ct-seg{height:40px;border-radius:11px}
-.vx-sheet .vx-ct-seg button{font-size:14px;border-radius:8px}
+.vx-sheet .vx-ct-seg{height:42px}
+.vx-sheet .vx-ct-main{height:42px;border-radius:12px}
+.vx-sheet .vx-ct-main button{font-size:14.5px;border-radius:9px}
+.vx-sheet .vx-ct-seg button{font-size:14px}
 .vx-sheet .vx-ct-seg button b{font-size:12px}
 .vx-sheet .vx-ct-list{flex:1 1 auto;margin:10px -16px 0;padding:0 16px calc(16px + var(--safe-b,0px))}
 .vx-sheet .vx-ct-h{font-size:15px;line-height:1.4;padding:10px 10px 10px calc(14px + var(--lv,0) * 16px);min-height:44px}
@@ -919,7 +914,6 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-toolbar button{flex:none;width:36px;height:36px}
   .vx-tsep{margin:0 2px}
   .vx-doc-title{font-size:28px;letter-spacing:-.5px}
-  .vx-prose{line-height:1.7}
   .vx-edit-hint{display:none}
   .vx-editor.note-editor{padding:16px 0}
   .vx-toolbar{top:8px}
@@ -949,7 +943,6 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 :root[data-theme=light] :is(.vx-tile-ico,.vx-bico:not(.brand)){color:color-mix(in srgb,var(--fc) 72%,#0f172a)}
 :root[data-theme=light] .vx-agent{color:color-mix(in srgb,var(--ac) 55%,#111)}
 :root[data-theme=light] .vx-ghost{color:#fff}
-:root[data-theme=light] .vx-prose pre{background:var(--surface-2)}
 :root[data-theme=light] .vx-rows,:root[data-theme=light] .vx-tile{box-shadow:none}
 
 /* Overlays: frosted where blur is supported, solid when less transparency is asked for. */

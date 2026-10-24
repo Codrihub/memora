@@ -3,11 +3,10 @@
 import { el } from '../dom';
 import { openPanel } from './panel';
 
-type ReadFont = 'sans' | 'serif' | 'mono' | 'rounded' | 'legible';
-type ReadTone = 'default' | 'sepia' | 'contrast' | 'night' | 'paper' | 'mint';
+type ReadFont = 'sans' | 'serif' | 'mono';
+type ReadTone = 'default' | 'sepia' | 'contrast';
 type ReadLeading = 'compact' | 'normal' | 'relaxed';
 type ReadWidth = 'narrow' | 'wide' | 'full';
-type ReadAlign = 'left' | 'justify';
 
 interface ReadPrefs {
   size: number;
@@ -15,14 +14,13 @@ interface ReadPrefs {
   tone: ReadTone;
   leading: ReadLeading;
   width: ReadWidth;
-  align: ReadAlign;
 }
 
 const LS = 'memora.reader.v2';
 const LS_OLD = 'memora.reader.v1';
 /** Body text sizes in px; index 2 is the default. */
 const SIZES = [13, 14.5, 16, 17.5, 19, 21, 24];
-const DEFAULTS: ReadPrefs = { size: 2, font: 'sans', tone: 'default', leading: 'normal', width: 'wide', align: 'left' };
+const DEFAULTS: ReadPrefs = { size: 2, font: 'sans', tone: 'default', leading: 'normal', width: 'wide' };
 /** The text column's widest line for each width choice. */
 const WIDTHS: Record<ReadWidth, string> = { narrow: '640px', wide: '760px', full: '100%' };
 
@@ -30,18 +28,16 @@ const FONTS: { k: ReadFont; label: string }[] = [
   { k: 'sans', label: 'Sans' },
   { k: 'serif', label: 'Serif' },
   { k: 'mono', label: 'Mono' },
-  { k: 'rounded', label: 'Rounded' },
-  { k: 'legible', label: 'Legible' },
 ];
 
 const TONES: { k: ReadTone; label: string }[] = [
   { k: 'default', label: 'Default' },
   { k: 'sepia', label: 'Sepia' },
   { k: 'contrast', label: 'High contrast' },
-  { k: 'night', label: 'Night' },
-  { k: 'paper', label: 'Paper' },
-  { k: 'mint', label: 'Mint' },
 ];
+
+/** Colours from before 2.0.1, mapped to the nearest one kept. */
+const OLD_TONES: Record<string, ReadTone> = { paper: 'sepia', night: 'default', mint: 'default' };
 
 const LEADINGS: { k: ReadLeading; label: string }[] = [
   { k: 'compact', label: 'Compact' },
@@ -53,11 +49,6 @@ const WIDTH_OPTS: { k: ReadWidth; label: string }[] = [
   { k: 'narrow', label: 'Narrow' },
   { k: 'wide', label: 'Wide' },
   { k: 'full', label: 'Full' },
-];
-
-const ALIGNS: { k: ReadAlign; label: string }[] = [
-  { k: 'left', label: 'Left' },
-  { k: 'justify', label: 'Justify' },
 ];
 
 function load(): ReadPrefs {
@@ -72,9 +63,9 @@ function load(): ReadPrefs {
     if (typeof v.size === 'number' && v.size >= 0 && v.size < SIZES.length) d.size = Math.round(v.size);
     if (FONTS.some((f) => f.k === v!.font)) d.font = v.font as ReadFont;
     if (TONES.some((t) => t.k === v!.tone)) d.tone = v.tone as ReadTone;
+    else if (typeof v.tone === 'string' && OLD_TONES[v.tone]) d.tone = OLD_TONES[v.tone];
     if (LEADINGS.some((t) => t.k === v!.leading)) d.leading = v.leading as ReadLeading;
     if (WIDTH_OPTS.some((t) => t.k === v!.width)) d.width = v.width as ReadWidth;
-    if (ALIGNS.some((t) => t.k === v!.align)) d.align = v.align as ReadAlign;
   } catch {
     /* defaults */
   }
@@ -95,7 +86,6 @@ function save(): void {
 export function applyReading(area: HTMLElement, editing: boolean): void {
   area.dataset.rfont = reading.font;
   area.dataset.rlead = reading.leading;
-  area.dataset.ralign = reading.align;
   area.style.setProperty('--rsize', SIZES[reading.size] + 'px');
   area.style.setProperty('--rw', WIDTHS[reading.width]);
   if (editing || reading.tone === 'default') delete area.dataset.rtone;
@@ -126,9 +116,6 @@ export function openReadingPanel(anchor: HTMLElement, changed: () => void): void
       <div class="vx-aa-row"><span class="vx-label">Width</span><div class="vx-seg3" role="group" aria-label="Text width">${WIDTH_OPTS.map(
         (t) => `<button data-width="${t.k}" aria-pressed="${reading.width === t.k}"><i class="wd wd-${t.k}"><b></b></i><span>${t.label}</span></button>`,
       ).join('')}</div></div>
-      <div class="vx-aa-row"><span class="vx-label">Alignment</span><div class="vx-seg3 two" role="group" aria-label="Text alignment">${ALIGNS.map(
-        (t) => `<button data-align="${t.k}" aria-pressed="${reading.align === t.k}"><i class="al al-${t.k}"><b></b><b></b><b></b></i><span>${t.label}</span></button>`,
-      ).join('')}</div></div>
       <div class="vx-aa-row"><span class="vx-label">Colour</span><div class="vx-seg3" role="group" aria-label="Reading colour">${TONES.map(
         (t) => `<button data-tone="${t.k}" aria-pressed="${reading.tone === t.k}"><i class="sw sw-${t.k}"></i><span>${t.label}</span></button>`,
       ).join('')}</div></div>
@@ -143,13 +130,12 @@ export function openReadingPanel(anchor: HTMLElement, changed: () => void): void
     else if (b.dataset.tone) reading.tone = b.dataset.tone as ReadTone;
     else if (b.dataset.lead) reading.leading = b.dataset.lead as ReadLeading;
     else if (b.dataset.width) reading.width = b.dataset.width as ReadWidth;
-    else if (b.dataset.align) reading.align = b.dataset.align as ReadAlign;
     else if (b.dataset.reset !== undefined) Object.assign(reading, DEFAULTS);
     else return;
     save();
     const key = b.dataset.size
       ? `[data-size="${b.dataset.size}"]`
-      : (['font', 'tone', 'lead', 'width', 'align'] as const).map((k) => (b.dataset[k] ? `[data-${k}=${b.dataset[k]}]` : '')).find(Boolean) || '';
+      : (['font', 'tone', 'lead', 'width'] as const).map((k) => (b.dataset[k] ? `[data-${k}=${b.dataset[k]}]` : '')).find(Boolean) || '';
     paint();
     ((key && body.querySelector<HTMLElement>(key + ':not(:disabled)')) || body.querySelector<HTMLElement>('button:not(:disabled)'))?.focus();
     changed();

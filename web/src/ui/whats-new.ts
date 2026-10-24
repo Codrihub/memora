@@ -26,6 +26,21 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.0.1',
+    title: 'A calmer reader',
+    lead: 'Notes now read like a clean page, whatever reading settings you pick.',
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'note', title: 'Cleaner note text', text: 'Clearer headings, even lists, quieter code and tables, and real check boxes for tasks.' },
+          { icon: 'menu', title: 'Contents and Details', text: 'The panel beside a note has two tabs. Contents holds the outline, links and mentions.' },
+          { icon: 'settings', title: 'Simpler reading settings', text: 'The fonts and colours that look right everywhere stay. A choice that was removed moves to the nearest one.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.0.0',
     title: 'A calmer, clearer Memora',
     lead: 'Every page was redesigned around one quiet look, and the places you use most got new tools: version history, tag patterns, a summary of what your AIs do, and a cleaner way to read.',

@@ -420,8 +420,10 @@ function draw(): void {
   if (ctBtn && !state.editing) {
     const card = el('section', 'vx-icard vx-toc');
     card.setAttribute('aria-label', 'Contents');
-    card.innerHTML = `<header class="vx-toc-head"><h3>Contents</h3><button type="button" class="vx-icon-btn" data-toc-x aria-label="Close contents" title="Close">${I.close}</button></header>`;
-    card.appendChild(contentsBody(cdata, cact, false));
+    card.innerHTML = `<header class="vx-toc-head"><button type="button" class="vx-icon-btn" data-toc-x aria-label="Close the panel" title="Close">${I.close}</button></header>`;
+    const ctBody = contentsBody(cdata, cact, false);
+    card.querySelector('.vx-toc-head')!.prepend(ctBody.querySelector('.vx-ct-main')!);
+    card.appendChild(ctBody);
     side.prepend(card);
     const wide = (): boolean => c.clientWidth >= WIDE_READER;
     const sync = (): void => {
