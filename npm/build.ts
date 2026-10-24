@@ -23,7 +23,7 @@ const root = join(here, '..');
 const BINARIES: Binary[] = ['memora', 'memora-cli'];
 
 const common = {
-  license: 'MIT',
+  license: 'AGPL-3.0-or-later',
   author: 'Codrihub',
   homepage: 'https://github.com/Codrihub/memora#readme',
   bugs: { url: 'https://github.com/Codrihub/memora/issues' },
@@ -81,6 +81,7 @@ for (const [key, dir] of bins) {
     }
   }
   copyFileSync(join(root, 'LICENSE'), join(dest, 'LICENSE'));
+  copyFileSync(join(root, 'NOTICE'), join(dest, 'NOTICE'));
   writeFileSync(
     join(dest, 'README.md'),
     `# ${pkg}\n\nThe ${os} ${cpu} binaries (\`memora\`, \`memora-cli\`) of Memora ${version}.\n\n` +
@@ -93,7 +94,7 @@ for (const [key, dir] of bins) {
     ...common,
     os: [os],
     cpu: [cpu],
-    files: ['bin'],
+    files: ['bin', 'NOTICE'],
     preferUnplugged: true,
   });
   console.log(`${pkg}@${version} -> ${dest}`);
@@ -112,6 +113,7 @@ for (const name of BINARIES) {
 }
 cpSync(assets, join(wrapper, 'assets'), { recursive: true });
 copyFileSync(join(root, 'LICENSE'), join(wrapper, 'LICENSE'));
+copyFileSync(join(root, 'NOTICE'), join(wrapper, 'NOTICE'));
 copyFileSync(join(here, 'README.md'), join(wrapper, 'README.md'));
 writeJson(join(wrapper, 'package.json'), {
   name: '@codrihub/memora',
@@ -121,7 +123,7 @@ writeJson(join(wrapper, 'package.json'), {
   ...common,
   type: 'module',
   bin: Object.fromEntries(BINARIES.map((name) => [name, `bin/${name}.js`])),
-  files: ['bin', 'lib', 'assets'],
+  files: ['bin', 'lib', 'assets', 'NOTICE'],
   engines: { node: '>=22' },
   optionalDependencies: Object.fromEntries(Object.values(PLATFORMS).map((p) => [p.pkg, version])),
 });

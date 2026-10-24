@@ -92,5 +92,14 @@ Use the issue templates. For bugs, include the version, your deployment method
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the MIT
-License, as described in [LICENSE](LICENSE).
+By contributing, you agree that your contributions are licensed under the GNU
+Affero General Public License v3.0 or later, as described in [LICENSE](LICENSE)
+and [NOTICE](NOTICE).
+
+## Forks and improvements
+
+Forks are welcome. If you fix a bug, close a security hole or improve something
+in your fork, please send it back here as a pull request or an issue so every
+user gets it. Security reports go through [SECURITY.md](SECURITY.md). If you
+publish a modified version, give it your own name and keep the attribution
+described in [NOTICE](NOTICE) and [TRADEMARK.md](TRADEMARK.md).

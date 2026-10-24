@@ -72,6 +72,7 @@ WORKDIR /app
 
 COPY --from=builder /build/target/release/memora     /usr/local/bin/memora
 COPY --from=builder /build/target/release/memora-cli /usr/local/bin/memora-cli
+COPY LICENSE NOTICE /usr/share/doc/memora/
 COPY crates/http/assets /app/assets
 COPY docker/entrypoint.sh    /usr/local/bin/entrypoint.sh
 COPY docker/setup-wrapper.sh /usr/local/bin/setup

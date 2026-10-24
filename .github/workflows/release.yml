@@ -167,7 +167,7 @@ jobs:
           install -m 0755 "$bin/memora" "$bin/memora-cli" "dist/bin/${{ matrix.docker }}/"
           cp -R assets "dist/$name/assets"
           install -m 0755 scripts/install.sh "dist/$name/install.sh"
-          cp LICENSE README.md "dist/$name/"
+          cp LICENSE NOTICE README.md "dist/$name/"
           printf '%s\n' "$VERSION" > "dist/$name/VERSION"
           file "dist/$name/memora"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
