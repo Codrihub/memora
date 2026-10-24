@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-24
+
+A redesign of every page around one calm look, with new tools where people
+spend their time: version history for notes, tag patterns, an Activity summary
+and a cleaner way to read. The license changes to the GNU AGPL. The state
+database needs no migration: a 1.3 install updates in place and can roll back
+by swapping the binary.
+
+### Added
+
+- Version history for every note: browse versions with who made them, preview
+  one, compare it with the current text and restore it. Restoring adds a new
+  version, so nothing is lost. Over HTTP: `GET /api/history`,
+  `GET /api/note-at`, `GET /api/diff` and `POST /api/history/restore`; the MCP
+  tool `get_history` now also returns `version` and `total`.
+- A Trash page at `/trash`: restoring asks where the note goes (its folder,
+  another folder or the top level), and deleting for good asks you to type
+  DELETE (DELETE ALL to empty the Trash).
+- Tags: pick or tick tags to see their notes at once, preview a note in the
+  map's card, merge, rename or remove tags in bulk, and find notes by a
+  pattern of tags joined with and, or and not.
+- Activity is a summary page (numbers, actions over time, what agents do most,
+  problems, most touched notes, agents) with every action on its own
+  Timeline tab at `/activity/timeline`. An agent's activity lives on its own
+  page at `/agents/<id>/activity`.
+- Reading: Contents (outline, links, mentions and details) beside the note,
+  and a fold-away toolbar (F) for a clean page.
+- Maps: a clean view that hides every control (C), a dot grid switch, note
+  titles on the maps, and a first-setup guide while the vault is empty.
+- Settings: edit the server name and how long browsers stay signed in
+  (`POST /api/settings/server`, admin); the folder switch says what moves
+  with each notes folder.
+- What's new: the notes of each release, shown once after an update and from
+  the profile menu or Settings, Version, with a quiet link to star the project.
+- New notes keep their title as the file name, spaces included, and the web
+  app shows display titles (front matter title or first heading).
+- Refused MCP calls are logged, so Activity and the Overview can show what an
+  agent tried and was not allowed to do.
+
+### Changed
+
+- **License: GNU AGPL v3.0 or later** (was MIT). You may use, modify and share
+  Memora, including commercially; a modified version that you distribute or
+  run as a service must publish its source and keep the attribution in
+  `NOTICE` ("Based on Memora by Codrihub Tech"). The name and logo are covered
+  by `TRADEMARK.md`. Versions 1.3.8 and earlier stay MIT.
+- Every page is redesigned: Overview, Brain, Graph and Canvas, Notes and the
+  reader, Tags, Activity, Agents, Trash, Settings, Docs, sign-in, welcome and
+  setup, with layouts for tablets and phones and the Geist typeface.
+- Deleting a note for good also erases it from the vault's version history,
+  so no one, agents included, can read it again. Other notes keep their
+  versions; their revision ids change.
+- Deleting a note for good over HTTP (`POST /api/delete` without
+  `mode: "trash"`) needs an admin key, like MCP `delete_memory` with
+  `permanent`. Moving to the Trash is unchanged.
+- Notes saved from the web app are committed with the signed-in user as the
+  author, so version history can tell people from agents.
+- The theme follows the device by default, sign-in and setup included.
+- The release check also reads the repository's star count (off with
+  `MEMORA_UPDATE_CHECK`, like the release check itself).
+
+### Fixed
+
+- An unused setup or reset code that ran out locked the instance; it now goes
+  back to idle, and locks older versions took on expiry are lifted.
+- Activity summarised only the newest 800 events whatever range was chosen.
+- The update offer appeared when nothing had changed; it now follows a
+  content hash of the built app.
+- Pins are checked again right after the notes folder is switched.
+
+### Performance
+
+- Signed-in `GET` answers under `/api/` are gzip-compressed (pages, writes,
+  sign-in and `/mcp` are not), about a twelfth of the size for activity pages.
+- Activity shows the newest page at once, fills the range behind it and
+  remembers each range.
+- The boot splash is plain HTML that paints at once and leaves as soon as the
+  app is ready.
+
+
 ## [1.3.8] - 2026-10-21
 
 A security and reliability pass: dependencies checked against published
@@ -566,6 +646,7 @@ First public release.
 - Docker image, Docker Compose file and an installer script with checksum
   verification.
 
+[2.0.0]: https://github.com/Codrihub/memora/releases/tag/v2.0.0
 [1.3.8]: https://github.com/Codrihub/memora/releases/tag/v1.3.8
 [1.3.7]: https://github.com/Codrihub/memora/releases/tag/v1.3.7
 [1.3.6]: https://github.com/Codrihub/memora/releases/tag/v1.3.6

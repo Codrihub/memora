@@ -10,9 +10,9 @@ members = [
 ]
 
 [workspace.package]
-version = "1.3.8"
+version = "2.0.0"
 edition = "2021"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 authors = ["Codrihub Tech"]
 description = "Long-term memory for AI agents: a git-backed markdown vault served over MCP and a single HTTP front door."
 repository = "https://github.com/Codrihub/memora"
