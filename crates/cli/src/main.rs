@@ -1,8 +1,5 @@
-//! `memora-cli`: owner and setup-window tool for the memora server.
-//!
-//! Every command reads and writes the state database `state/memora.db`
-//! (`store.rs`). Run as root, database work happens as the owner of the state
-//! dir (`db.rs`), so no root-owned `memora.db*` files appear.
+//! `memora-cli`: owner and setup-window tool for the memora server, working on the state
+//! database (as the state dir owner when run as root).
 
 mod db;
 mod install;
@@ -113,8 +110,8 @@ Examples:
   memora-cli docs agent-instructions  print the prompt to give your agents
 
 In the browser, open http://<host>:<port>/login, enter the one-time code and
-fill in the form before the window closes. If it expires unfinished, the
-instance is LOCKED until `memora-cli unlock`, `setup` or `reset-password`.
+fill in the form before the window closes. If it expires unfinished, nothing
+changes: run `setup` or `reset-password` again for a new code.
 ";
 
 // ---------------------------------------------------------------------------
@@ -491,7 +488,7 @@ pub(crate) fn open_window(ctx: &Ctx, mode: ArmMode, ttl: i64) -> anyhow::Result<
     println!("  3. Fill in the form ({form})");
     println!();
     println!("The code is shown only here and only once. If the window expires");
-    println!("before you finish, the instance is LOCKED (run `memora-cli unlock`).");
+    println!("before you finish, nothing changes: run this command again.");
     Ok(())
 }
 

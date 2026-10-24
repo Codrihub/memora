@@ -1,10 +1,5 @@
-//! `memora-cli update` and `/update`: check GitHub Releases for a newer
-//! version and upgrade a native install through the installer it came with.
-//!
-//! The installer (`install.sh`) does the real work: download, sha256 check,
-//! atomic binary swap and service restart. Other installs (npm, Docker, a
-//! release folder, a source build) cannot update themselves, so for them this
-//! prints the commands for that install ([`manual_steps`]).
+//! `memora-cli update` and `/update`: check GitHub Releases and upgrade a native install
+//! through `install.sh`; other installs get the commands to run ([`manual_steps`]).
 
 use crate::install::Origin;
 use crate::ok;
@@ -78,9 +73,8 @@ pub(crate) fn manual_steps(origin: Origin) -> Option<Vec<String>> {
     Some(lines)
 }
 
-/// `(major, minor, patch)` of a plain semantic version; pre-releases sort
-/// below their release. Anything but `[0-9A-Za-z.-]` after an optional `v` is
-/// rejected, since the version comes from the network and is handed to the installer.
+/// `(major, minor, patch, is_release)` of a plain semantic version, so pre-releases sort
+/// below their release. Anything but `[0-9A-Za-z.-]` after an optional `v` is rejected.
 fn parse(v: &str) -> Option<(u64, u64, u64, bool)> {
     let v = v.trim().trim_start_matches('v');
     if v.is_empty()

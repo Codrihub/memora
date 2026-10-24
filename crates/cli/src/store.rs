@@ -1,10 +1,6 @@
-//! Typed access to the state database for the console and the subcommands.
-//!
-//! Every call goes through [`crate::db::with_state_db`]: run as root, the work
-//! happens in a forked child running as the state dir owner, and the result
-//! comes back as JSON. That is why the closures return small serde types
-//! ([`Snapshot`], [`KeyView`], ...). Never prompt inside them: read, ask in
-//! the parent, then write.
+//! Typed access to the state database for the console and the subcommands. Closures run
+//! as the state dir owner (possibly in a forked child) and return serde types; never
+//! prompt inside them.
 
 use crate::Ctx;
 use anyhow::Result;
@@ -99,8 +95,7 @@ pub(crate) struct Snapshot {
     pub vault_configured: Option<String>,
     /// Stored `server_config` rows.
     pub config: BTreeMap<String, String>,
-    /// `config::effective` for every known key (stored row, else this process's
-    /// environment, else the built-in default).
+    /// `config::effective` for every known key (stored row, environment, default).
     pub effective: BTreeMap<String, String>,
     pub arm: ArmView,
 }

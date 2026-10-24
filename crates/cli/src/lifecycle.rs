@@ -1,17 +1,5 @@
-//! Run and remove the server: `start`, `stop`, `restart` and `uninstall`, and
-//! the console's /start, /shutdown (/stop), /restart and /uninstall.
-//!
-//! What they do depends on how this install runs ([`Kind`], from [`detect`]):
-//! * a systemd service is driven with `systemctl` (root only);
-//! * inside a Docker container nothing can start, stop or remove its own
-//!   container, so the host commands are printed instead;
-//! * anything else (npm, a release zip, Windows, a source build) is a plain
-//!   process: `start` launches the `memora` next to this binary in the
-//!   background, with `<state>/memora.pid` and `<state>/memora.log`, and
-//!   `stop` asks that process to end and waits for it.
-//!
-//! `uninstall` removes the program parts of the install kind and keeps the
-//! state folder and the vault unless the operator selects them ([`build_plan`]).
+//! Run and remove the server: `start`, `stop`, `restart` and `uninstall`, and their
+//! console commands. Behaviour depends on the install [`Kind`] (systemd, Docker, process).
 
 use crate::install::{Origin, NPM_PACKAGE};
 use crate::{ok, Ctx};
@@ -30,8 +18,7 @@ use std::time::{Duration, Instant};
 const PID_FILE: &str = "memora.pid";
 /// That server's stdout and stderr, in the state dir.
 const LOG_FILE: &str = "memora.log";
-/// Past this size, `start` moves the log to `memora.log.1` (replacing an older one) and
-/// begins a new file, so a server restarted now and then never fills the disk.
+/// Log size past which `start` rotates it to `memora.log.1`.
 const LOG_ROTATE_BYTES: u64 = 16 * 1024 * 1024;
 /// The running server's token for `POST /_stop`, in the state dir
 /// (`memora_http::shutdown::STOP_TOKEN_FILE`).
@@ -86,10 +73,8 @@ pub(crate) struct Probe {
     pub installer: Option<PathBuf>,
 }
 
-/// The install kind. Docker first (a container never drives systemd), then a
-/// running unit, then install.sh's unit when it serves this state dir (or no
-/// state dir was named, as with a stopped service and plain `sudo memora-cli`)
-/// and this copy is not an npm or source one.
+/// The install kind: Docker first, then a running unit, then install.sh's unit when it
+/// serves this state dir and this copy is not an npm or source one.
 pub(crate) fn detect(p: &Probe) -> Kind {
     let npm = p.origin == Origin::Npm;
     if p.origin == Origin::Docker {
@@ -144,12 +129,8 @@ pub(crate) enum Guard {
     Refuse(String),
 }
 
-/// The decision behind [`checked_kind`]. `adopted` means neither `--state`
-/// nor `MEMORA_STATE` was given and the state folder came from a running
-/// server. A systemd service or a container found that way is only driven
-/// when this binary is the same kind of install (a native install for a
-/// service, the image for a container); an npm, source or release copy that
-/// merely sees a service on the machine must not restart or remove it.
+/// The decision behind [`checked_kind`]. When the state folder was `adopted` from a running
+/// server, a service or container is only driven by the same kind of install.
 pub(crate) fn guard(adopted: bool, kind: &Kind, origin: Origin, state: &Path) -> Guard {
     if !adopted {
         return Guard::Go;
@@ -506,9 +487,8 @@ fn read_pid(state: &Path) -> Option<u32> {
         .filter(|p| *p > 0)
 }
 
-/// Whether `pid` is a live `memora` process (not a reused pid). Reaps it
-/// first when it is an exited child of this process (the console starts the
-/// server as its child, and a zombie would still look alive).
+/// Whether `pid` is a live `memora` process (not a reused pid). Reaps an exited child
+/// first, since a zombie would still look alive.
 #[cfg(unix)]
 fn is_memora(pid: u32) -> bool {
     let Ok(p) = libc::pid_t::try_from(pid) else {
@@ -556,9 +536,8 @@ fn terminate(pid: u32, hard: bool) -> Result<()> {
     Ok(())
 }
 
-/// Windows: `taskkill /PID <pid>` asks the process to close; `hard` adds /F
-/// (TerminateProcess). The server started by `start` has no window, so
-/// Windows may refuse the polite request; `--force` is then the way.
+/// Windows: `taskkill /PID <pid>`; `hard` adds /F. A windowless server may ignore the
+/// polite request.
 #[cfg(windows)]
 fn terminate(pid: u32, hard: bool) -> Result<()> {
     let mut cmd = Command::new("taskkill");
@@ -608,12 +587,8 @@ fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
     cmd.spawn()
 }
 
-/// Windows: a child inherits every inheritable handle of this process,
-/// including the stdin/stdout/stderr this console got from its caller. The
-/// server would then hold the caller's pipe open for as long as it runs, so a
-/// script, wrapper or CI step reading `memora-cli start` would wait until the
-/// server exits. Those three handles are made non-inheritable for the spawn
-/// (the server gets its log file and NUL explicitly) and restored afterwards.
+/// Windows: spawns with this console's std handles made non-inheritable, so the server
+/// does not keep the caller's pipes open while it runs.
 #[cfg(windows)]
 fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
     use std::ffi::c_void;
@@ -675,9 +650,8 @@ fn server_binary() -> Result<PathBuf> {
     Ok(bin)
 }
 
-/// The web app of the npm package: `node_modules/@codrihub/memora/assets`,
-/// next to the platform package (hoisted) or above it (nested). The npm
-/// launcher sets MEMORA_ASSETS the same way when it starts `memora`.
+/// The web app of the npm package (`node_modules/@codrihub/memora/assets`), next to or
+/// above the platform package.
 fn npm_assets(bin: &Path) -> Option<PathBuf> {
     let pkg = bin.parent()?.parent()?;
     let scope = pkg.parent()?;
@@ -688,9 +662,7 @@ fn npm_assets(bin: &Path) -> Option<PathBuf> {
         .find(|d| d.join("index.html").is_file())
 }
 
-/// Where the server listens, as an address to connect to: settings as the
-/// server sees them (stored row, environment, default 127.0.0.1:8400), with
-/// 0.0.0.0 / :: replaced by loopback.
+/// Where the server listens, as a connectable address (0.0.0.0 / :: become loopback).
 fn listen_addr(ctx: &Ctx) -> SocketAddr {
     let snap = ctx
         .state
@@ -732,10 +704,8 @@ fn health(addr: SocketAddr) -> Option<u16> {
     parse_status(&buf[..n])
 }
 
-/// Ask the server on `addr` to stop gracefully: `POST /_stop` with the token
-/// the server wrote to `<state>/stop.token` (see `memora_http::shutdown`).
-/// True when it accepted. Works the same on every OS; on Windows it is the
-/// only polite way, since a server without a console ignores `taskkill`.
+/// Ask the server to stop gracefully via `POST /_stop` with the token in
+/// `<state>/stop.token`. True when it accepted.
 fn ask_stop(state: &Path, addr: SocketAddr) -> bool {
     let Ok(token) = std::fs::read_to_string(state.join(STOP_TOKEN_FILE)) else {
         return false;
@@ -802,7 +772,6 @@ fn proc_start(ctx: &Ctx, npm: bool) -> Result<i32> {
         }
         let _ = std::fs::remove_file(state.join(PID_FILE));
     }
-    // ctx.server was found when this command (or the console) started
     if let Some(s) = ctx.server.as_ref().filter(|s| is_memora(s.pid)) {
         println!(
             "A memora server already runs on this state dir (pid {}); not starting another.",
@@ -1460,9 +1429,8 @@ fn summary(plan: &Plan) {
     println!();
 }
 
-/// Copy the state database out of the folders being deleted: a fresh backup
-/// (`db backup`, consistent while the server runs), copied to the current
-/// folder or else the home folder.
+/// Copy a fresh `db backup` of the state database out of the folders being deleted, to
+/// the current folder or else the home folder.
 fn final_backup(ctx: &Ctx, plan: &Plan, home: Option<&Path>) -> Result<PathBuf> {
     let gone: Vec<&PathBuf> = plan.delete.iter().chain(plan.purge.iter()).collect();
     let dest = [

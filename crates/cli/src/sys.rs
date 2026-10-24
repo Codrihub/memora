@@ -1,8 +1,5 @@
-//! The few OS calls the CLI makes, with Windows stand-ins.
-//!
-//! On Windows there is no root and no uid/gid: the CLI always runs as the
-//! user who owns the state dir, so ownership checks pass, privilege drops are
-//! skipped and Unix modes are reported as private (700 / 600).
+//! The few OS calls the CLI makes, with Windows stand-ins (no root, no uid/gid; modes
+//! reported as private).
 
 #[cfg(unix)]
 pub(crate) use std::os::unix::fs::{MetadataExt, OpenOptionsExt};

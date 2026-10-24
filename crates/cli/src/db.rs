@@ -1,17 +1,7 @@
-//! `memora-cli db ...` and the console's `/backup` and `/db`: operations on
-//! the state database `<state>/memora.db` (docs/DATABASE.md), plus the
-//! privilege drop that every database access from this CLI goes through.
+//! `memora-cli db ...`, `/backup` and `/db`: operations on the state database.
 //!
-//! # Privilege drop
-//!
-//! SQLite creates `memora.db`, `-wal` and `-shm` with the uid of the opening
-//! process, so a root-owned file would lock the server user out. When root
-//! runs the CLI and the state dir belongs to another user, the work runs in a
-//! forked child ([`as_owner`]) that drops to the dir owner (no supplementary
-//! groups, umask 077) and sends its result back as JSON over a pipe. The
-//! parent keeps root for `/proc`, reading backups and `systemctl`. `fork()` is
-//! sound because the CLI is single-threaded. `db shell` drops privileges
-//! in-process instead, right before it `exec`s `sqlite3`.
+//! As root, database work runs in a forked child dropped to the state dir owner
+//! ([`as_owner`]), so SQLite never creates root-owned files; the CLI is single-threaded.
 
 use crate::sys::{self, MetadataExt, OpenOptionsExt};
 use crate::{fmt_secs, mark, store, Ctx};
@@ -196,10 +186,8 @@ pub(crate) fn with_db_as_owner(
     as_owner(&state.clone(), move || f(&open_existing(&state)?))
 }
 
-/// Open the state database as the state dir owner, then run `f` on it. Creates
-/// and migrates the database if needed (and imports old JSON state once), so
-/// `setup` and the console work before the server's first start. As root, the
-/// state dir must already exist: its owner decides who the work runs as.
+/// Open (creating and migrating if needed) the state database as the state dir owner,
+/// then run `f` on it. As root, the state dir must already exist.
 pub(crate) fn with_state_db(state: &Path, f: impl FnOnce(&Db) -> Result<Value>) -> Result<Value> {
     if sys::is_root() && !state.is_dir() {
         bail!(
@@ -363,9 +351,7 @@ fn create_private(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Windows has no /proc: the server `memora-cli start` launched (its pid
-/// file). A server started another way still holds the file locked, which
-/// the restore reports when it cannot replace it.
+/// Windows has no /proc: the pid of the server `memora-cli start` launched.
 #[cfg(windows)]
 fn db_holders(db: &Path) -> Vec<u32> {
     db.parent()
@@ -426,7 +412,6 @@ pub(crate) fn backup(ctx: &Ctx, to: Option<&Path>, keep: usize) -> Result<Value>
 }
 
 fn backup_inner(state: &Path, to: Option<&Path>, keep: usize) -> Result<Value> {
-    // Db::open checks that the file is a current Memora database
     let db = open_existing(state)?;
     let src = db.path().to_path_buf();
     drop(db);
@@ -726,7 +711,7 @@ fn restore_inner(state: &Path, src: &str, bytes: &[u8]) -> Result<Value> {
     }
     let _ = std::fs::remove_file(with_suffix(&tmp, "-journal"));
     fsync_dir(state);
-    // migrate if the backup is older, and record the restore
+    // Db::open migrates an older backup.
     let opened = Db::open(state).context("opening the restored database")?;
     let detail: String = format!("restored from {src}").chars().take(2000).collect();
     opened.write(|tx| store::log(tx, "state_restored", &detail))?;

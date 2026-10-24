@@ -1,18 +1,6 @@
-//! How this copy of Memora was installed ([`Origin`]), shared by `update`,
-//! `uninstall`, `start` / `stop` / `restart` and the console.
-//!
-//! The answer comes from, in order:
-//! 1. `MEMORA_INSTALL` (`npm`, `docker`, `native`, `zip`, `source`). The npm
-//!    launcher sets `npm` for both binaries and the Docker image sets
-//!    `docker`, so these installs never depend on path guessing;
-//! 2. `/.dockerenv`;
-//! 3. the binary's path (`node_modules/@codrihub/memora-<platform>/bin`) or
-//!    the npm platform package's `package.json` next to it;
-//! 4. a `cargo build` output folder (`target/release`, `target/debug`) inside
-//!    a checkout;
-//! 5. install.sh's saved copy (the native installer);
-//! 6. anything else: a plain folder of program files (an older release zip,
-//!    or copied by hand).
+//! How this copy of Memora was installed ([`Origin`]): from `MEMORA_INSTALL`, then
+//! `/.dockerenv`, the binary's path (npm package, cargo build), install.sh's saved copy,
+//! else a plain folder of program files.
 
 use std::path::{Path, PathBuf};
 
@@ -121,8 +109,8 @@ pub(crate) fn source_checkout(exe: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// This binary's path, as given and canonicalized (either one may be the one
-/// that shows the npm folder: a junction or 8.3 short name hides it in one).
+/// This binary's path, as given and canonicalized (a junction or 8.3 name can hide the
+/// npm folder in either one).
 fn exe_paths() -> Vec<PathBuf> {
     let Ok(exe) = std::env::current_exe() else {
         return Vec::new();

@@ -1,8 +1,5 @@
-//! Console commands for access control: API keys, tool switches, signed-in
-//! devices, the security activity log and the MCP connection guide.
-//!
-//! Changes go straight to the state database (`store.rs`), logged in the same
-//! transaction. The running server picks them up on its next request.
+//! Console commands for access control: API keys, tool switches, signed-in devices, the
+//! security activity log and the MCP connection guide.
 
 use crate::store::{self, KeyView, SessionView};
 use crate::{fmt_secs, ok, Ctx};
