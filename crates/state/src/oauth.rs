@@ -169,15 +169,12 @@ pub fn connections(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(rows)
 }
 
-/// How long a dynamic or metadata client may wait to complete its first
-/// authorization before it is removed. A real client finishes within minutes
-/// (and registers again if it comes back later), so registrations that never
-/// lead anywhere cannot fill [`MAX_CLIENTS`] for long.
+/// How long a dynamic or metadata client may wait to complete its first authorization
+/// before it is removed, so stale registrations cannot fill [`MAX_CLIENTS`].
 pub const UNUSED_CLIENT_TTL: i64 = 3600;
 
-/// Drop expired codes, and dynamic or metadata clients older than
-/// [`UNUSED_CLIENT_TTL`] that have no grant and no pending code. Returns rows
-/// removed.
+/// Drop expired codes, and dynamic or metadata clients older than [`UNUSED_CLIENT_TTL`]
+/// with no grant and no pending code. Returns rows removed.
 pub fn prune(tx: &Transaction<'_>, now: i64) -> Result<usize> {
     let codes = tx.execute("DELETE FROM oauth_code WHERE expires_at <= ?1", [now])?;
     let clients = tx.execute(
@@ -206,9 +203,7 @@ mod tests {
         }
     }
 
-    /// Clients that never complete an authorization (dynamic registrations and
-    /// cached metadata documents, both reachable without signing in) are
-    /// removed after an hour, so the client cap cannot be held full for long.
+    /// Clients that never complete an authorization are removed after an hour.
     #[test]
     fn prune_drops_stale_metadata_clients_too() {
         let db = Db::open_temp().unwrap();

@@ -73,12 +73,12 @@ fn create_and_move_folders() {
     let r = call(
         &srv,
         "create_memory",
-        json!({"title": "Rocket 🚀", "folder": "Notes"}),
+        json!({"title": "Rocket: 🚀?", "folder": "Notes"}),
     )
     .unwrap();
-    assert_eq!(r["path"], "Notes/Rocket.md");
-    assert_eq!(r["renamed_from"], "Rocket 🚀");
-    assert!(r["note"].as_str().unwrap().contains("Notes/Rocket.md"));
+    assert_eq!(r["path"], "Notes/Rocket 🚀.md");
+    assert_eq!(r["renamed_from"], "Rocket: 🚀?");
+    assert!(r["note"].as_str().unwrap().contains("Notes/Rocket 🚀.md"));
     let e = call(
         &srv,
         "move_memory",
@@ -139,11 +139,11 @@ fn template_create_reports_renamed_titles() {
     let r = call(
         &srv,
         "template_create",
-        json!({"template": "Day", "title": "Mon ✨"}),
+        json!({"template": "Day", "title": "Mon | ✨"}),
     )
     .unwrap();
-    assert_eq!(r["path"], "Mon.md");
-    assert_eq!(r["renamed_from"], "Mon ✨");
+    assert_eq!(r["path"], "Mon ✨.md");
+    assert_eq!(r["renamed_from"], "Mon | ✨");
     std::fs::remove_dir_all(&dir).ok();
 }
 

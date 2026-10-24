@@ -1,8 +1,5 @@
-//! Saved UI layouts (table `ui_layout`, migration 2): one JSON document per layout name,
-//! e.g. `canvas` (card positions / frames) or `graph` (pinned node positions).
-//!
-//! The schema is the backstop (name shape, `json_valid`, size); [`put`] validates first so
-//! callers get a readable [`Error::Invalid`].
+//! Saved UI layouts (`ui_layout`): one JSON document per layout name, e.g. `canvas` or
+//! `graph`.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};

@@ -1,9 +1,5 @@
-//! Schema migrations on `PRAGMA user_version` (docs/DATABASE.md section 4).
-//!
-//! Migrations are embedded SQL files. Each is applied in its own `BEGIN IMMEDIATE`
-//! transaction together with the `user_version` bump, so a crash leaves either the old or
-//! the new schema, and two processes opening a fresh file at once apply it exactly once
-//! (the second re-reads `user_version` after acquiring the write lock).
+//! Schema migrations on `PRAGMA user_version`: embedded SQL files, each applied with its
+//! version bump in one `BEGIN IMMEDIATE` transaction, so concurrent openers apply it once.
 
 use crate::{Domain, Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
@@ -27,9 +23,8 @@ pub const MIGRATIONS: &[&str] = &[
 /// The schema version this binary writes (`user_version` after all migrations).
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
-/// Tables whose changes bump a [`Domain`] revision (one trigger per INSERT / UPDATE /
-/// DELETE, named `<table>_rev_{i,u,d}`). Must match the triggers in the SQL files; a test
-/// checks it.
+/// Tables whose changes bump a [`Domain`] revision (triggers `<table>_rev_{i,u,d}`). Must
+/// match the SQL files; a test checks it.
 pub const REVISION_TRIGGERS: &[(&str, Domain)] = &[
     ("owner", Domain::Auth),
     ("api_key", Domain::Keys),

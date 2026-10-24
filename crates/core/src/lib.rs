@@ -1,11 +1,4 @@
-//! Memora core: markdown vault model, search index, and vault store.
-//!
-//! Semantics:
-//!   * `folder_of`    -> first path segment, else "Root"
-//!   * `walk`         -> skip dot-entries (`.git`, `.Trash`, ...), only `*.md`
-//!   * `link_targets` -> strip `{{placeholder}}` and code spans, then take `[[...]]`
-//!   * `search`       -> word-based, rank (phrase, -hits, -name_hits, len(name)), over the
-//!     in-memory note cache (no on-disk index; always matches the files on disk)
+//! Memora core: markdown vault model, in-memory search index and vault store.
 
 pub mod events;
 pub mod privacy;
@@ -77,6 +70,10 @@ pub struct NoteRef {
     pub name: String,
     pub folder: String,
     pub mtime: i64,
+    /// Frontmatter `title` > first heading > file name with `_` as spaces; only
+    /// filled by [`MemoryStore::titled_tree`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -167,10 +164,8 @@ pub fn color_of(rel_path: &str) -> String {
 #[derive(Clone)]
 pub struct MemoryStore {
     root: PathBuf,
-    /// Parsed facts per note ([`NoteMeta`]), validated by (mtime, size). Rebuilt
-    /// from the current walk on every use, so deleted notes drop out and the
-    /// map never outgrows the vault. This is the search index too. Shared by
-    /// [`MemoryStore::snapshot`] copies.
+    /// Parsed facts per note ([`NoteMeta`]), validated by (mtime, size) and pruned to the
+    /// current walk; also the search index. Shared by [`MemoryStore::snapshot`] copies.
     link_cache: Arc<std::sync::Mutex<HashMap<PathBuf, LinkCacheEntry>>>,
     /// Paths the current caller may see (`None` = the owner, everything). Set only for
     /// the length of one locked call by [`privacy::lock_as`].
@@ -217,11 +212,8 @@ impl MemoryStore {
         all
     }
 
-    /// Walk every note, hidden or not (index maintenance only; never shown to a caller).
-    ///
-    /// Entries are returned in filesystem walk order (top-down, unsorted) so
-    /// consumers that depend on first-found order (e.g. `get_hubs` tie-breaking
-    /// equal degrees, `search_by_tag`) stay stable.
+    /// Walk every note, hidden or not (index maintenance only; never shown to a caller),
+    /// in filesystem walk order, which first-found tie-breaks (`get_hubs`) rely on.
     fn walk_all(&self) -> Vec<(String, String, PathBuf)> {
         let mut out = Vec::new();
         for entry in WalkDir::new(&self.root)
@@ -307,13 +299,8 @@ impl MemoryStore {
         fs::read_to_string(p).ok()
     }
 
-    /// Parsed facts for every walked note (same order as `files`).
-    ///
-    /// Only notes whose mtime or size changed since the last call are read and
-    /// parsed again; the rest costs one `stat`. Every read-only tool (graph,
-    /// search, query, similarity, todos) goes through here, so notes changed
-    /// outside Memora (Obsidian, git pull, a copied file) show up on the next
-    /// call and nothing re-reads the whole vault per request.
+    /// Parsed facts for every walked note (same order as `files`). Only notes whose
+    /// mtime or size changed are parsed again, so outside edits show up on the next call.
     pub(crate) fn scan(&self, files: &[(String, String, PathBuf)]) -> Vec<Arc<NoteMeta>> {
         // `stat` every file before taking the cache lock, so concurrent readers
         // (snapshots, agent calls) only queue for the short bookkeeping below.
@@ -420,6 +407,7 @@ impl MemoryStore {
             body,
             words,
             todos,
+            title: crate::vault::content_title(content),
         }
     }
 
@@ -516,20 +504,43 @@ impl MemoryStore {
 
     /// Notes grouped by folder; each folder is sorted by mtime descending.
     pub fn tree(&self) -> BTreeMap<String, Vec<NoteRef>> {
+        self.tree_of(&self.walk(), None)
+    }
+
+    /// [`Self::tree`] with each note's display `title` (from the parse cache).
+    pub fn titled_tree(&self) -> BTreeMap<String, Vec<NoteRef>> {
+        let files = self.walk();
+        let metas = self.scan(&files);
+        self.tree_of(&files, Some(&metas))
+    }
+
+    fn tree_of(
+        &self,
+        files: &[(String, String, PathBuf)],
+        metas: Option<&[Arc<NoteMeta>]>,
+    ) -> BTreeMap<String, Vec<NoteRef>> {
         let mut t: BTreeMap<String, Vec<NoteRef>> = BTreeMap::new();
-        for (rel, name, fp) in self.walk() {
-            let mtime = fs::metadata(&fp)
+        for (i, (rel, name, fp)) in files.iter().enumerate() {
+            let mtime = fs::metadata(fp)
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            let fld = folder_of(&rel);
+            let title = match metas.and_then(|m| m.get(i)) {
+                Some(m) => m
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| crate::vault::stem_title(name)),
+                None => String::new(),
+            };
+            let fld = folder_of(rel);
             t.entry(fld.clone()).or_default().push(NoteRef {
-                path: rel,
-                name,
+                path: rel.clone(),
+                name: name.clone(),
                 folder: fld,
                 mtime,
+                title,
             });
         }
         for v in t.values_mut() {
@@ -712,14 +723,12 @@ impl MemoryStore {
         scored.into_iter().take(limit).map(|(_, h)| h).collect()
     }
 
-    /// Refresh the in-memory index of every note (also those hidden from the current
-    /// caller) and return how many notes it holds. Search and the graph tools refresh
-    /// it themselves on every call (one `stat` per unchanged note), so this is only
-    /// a warm-up; it never needs to run for results to be correct.
+    /// Refresh the in-memory index of every note (hidden ones too) and return its size.
+    /// Only a warm-up: every read refreshes the index itself.
     pub fn reindex(&self) -> anyhow::Result<usize> {
         let files = self.walk_all();
         let metas = self.scan(&files);
-        // Older versions kept a copy of every note in `.fts.db`; it is no longer read.
+        // Remove the obsolete on-disk search index.
         for f in [".fts.db", ".fts.db-wal", ".fts.db-shm"] {
             let p = self.root.join(f);
             if p.is_file() {
@@ -747,14 +756,13 @@ pub(crate) struct NoteMeta {
     pub words: BTreeSet<String>,
     /// Checklist items: `(line, done, text)`.
     pub todos: Vec<(usize, bool, String)>,
+    /// Frontmatter `title`, else the first heading ([`crate::vault::content_title`]).
+    pub title: Option<String>,
 }
 
-/// Wikilinks between notes, the one definition every graph tool uses: a link is a
-/// `[[target]]` that resolves (by note name, exact case first, then ignoring case)
-/// to a note other than the one it is written in, counted once per pair of notes
-/// and direction. Self-links do not count; targets that resolve to no note are
-/// `broken`. A note's degree is the number of distinct notes it links to or is
-/// linked from.
+/// Wikilinks between notes, as every graph tool counts them: a `[[target]]` resolving
+/// (by name, exact case first) to another note, once per pair and direction. Unresolved
+/// targets are `broken`; degree = distinct notes linked to or from.
 #[derive(Debug, Default)]
 pub struct LinkIndex {
     /// Note name -> relative path (the last one walked when names repeat).
@@ -1298,8 +1306,8 @@ mod resource_tests {
         let s = MemoryStore::new(&d);
         let g = s.graph();
         assert_eq!(g.nodes.len(), 2);
-        assert_eq!(g.links.len(), 2); // a->b, b->a (c does not exist)
-                                      // The broken link to c does not count (see `LinkIndex`).
+        // a->b and b->a; the broken link to c does not count.
+        assert_eq!(g.links.len(), 2);
         assert_eq!(s.stats().links, 2);
         assert_eq!(s.link_cache.lock().unwrap().len(), 2);
 
@@ -1390,7 +1398,7 @@ mod resource_tests {
         assert!(s.rename_tag_impl("", "x").is_err());
         assert!(s.rename_tag_impl("old", " ").is_err());
         assert_eq!(fs::read_to_string(d.join("a.md")).unwrap(), src);
-        // `$1` is not a valid tag (it used to be a regex replacement trap).
+        // `$1` is not a valid tag.
         assert!(s.rename_tag_impl("old", "n$1").is_err());
         s.rename_tag_impl("#old", "n1").unwrap();
         assert_eq!(

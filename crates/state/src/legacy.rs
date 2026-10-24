@@ -1,40 +1,8 @@
-//! One-shot import of the legacy JSON state directory and the rollback export
-//! (docs/DATABASE.md section 4).
+//! One-shot import of the legacy JSON state directory, and the rollback export.
 //!
-//! Legacy state files: `gateway.json`, `config.json`, `memora.env`, `tools.json`,
-//! `access_stack.json`, `sessions.json`, `signout.json`, `arm.json`, `lock.json`,
-//! `arm-burned.json`, `key-usage.json`, `limiter.reset`, `activity.jsonl(.1)`. Fixtures
-//! live in `crates/state/tests/fixtures/legacy/`.
-//!
-//! [`import_legacy`] runs at server start and in every CLI command that opens the DB
-//! (whichever comes first; the write lock makes it single-run). Strict for auth data
-//! (owner, keys, arm, settings, server config: any violation aborts the whole import),
-//! lenient for logs, sessions and access rules (skip and count; rules are checked with
-//! `access::validate_rule`). A legacy key `grace_until` is dropped (keys have one hash).
-//! Session ids are stored as sha256 hex.
-//!
-//! Tool names: the server syncs the catalog (`tools::sync_catalog`) before importing, but
-//! a CLI command may get here first with an empty `tool` table. A tool name from
-//! `tools.json` or a per-key list that is not in `tool` yet is inserted as `retired = 1`
-//! (counted in `skipped["tools_unknown_added_retired"]`), so nothing is lost:
-//! `sync_catalog` revives it when the catalog has it and keeps it retired otherwise.
-//! Names that cannot be tool names at all (fail the `tool.name` shape) are skipped and
-//! counted.
-//!
-//! Archive: after the commit the legacy files are moved (never deleted) into
-//! `state/legacy-json-<unix time>/` (0700). Only files whose sha256 still matches the one
-//! recorded in `meta('legacy_import')` are moved, so a file rewritten after the import
-//! (e.g. by an old binary during a rollback) is left in place and counted in
-//! `skipped["archive_changed_since_import"]`. A `memora.env` outside the state dir
-//! (`MEMORA_ENV_FILE`) is imported but not moved.
-//!
-//! Not imported (by design): `gateway.json` keys other than `users`, `api_keys`,
-//! `api_keys_deleted`, `settings` (e.g. `routes`, `version` of the old gateway), settings
-//! other than `realm`, `session_ttl`, `session_max_age`, `min_password_len` (counted in
-//! `skipped["gateway_settings_ignored"]`), `signout.json` / `limiter.reset` (pending
-//! requests: a pending sign-out is applied to the imported sessions, a limiter reset is moot
-//! after a restart). `access.jsonl` and `internal.token` are not legacy files of this
-//! design and are left untouched.
+//! The import is strict for auth data (any violation aborts it) and lenient for logs,
+//! sessions and access rules (skipped and counted). Imported files whose sha256 still
+//! matches are then moved into `state/legacy-json-<unix time>/`, never deleted.
 
 use crate::{Db, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -43,8 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// `meta` key recording the import (`'<unix time> <sha256 per file>'` or `'none'`).
-/// Format of the value: `<unix time> <file>=<sha256 hex> <file>=<sha256 hex> ...`.
+/// `meta` key recording the import: `<unix time> <file>=<sha256 hex> ...`, or `'none'`.
 pub const META_LEGACY_IMPORT: &str = "legacy_import";
 
 /// Legacy files read by the importer and archived afterwards, relative to the state dir.
@@ -1465,13 +1432,8 @@ fn gateway_base(dir: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// Write the current DB back into the legacy formats in `state_dir` for rollback
-/// (`memora-cli db export-json`). Returns the files written.
-///
-/// Session ids cannot be recovered (only their sha256 is stored), so `sessions.json` is
-/// written empty: everyone signs in again after a rollback. Arm files that describe a state
-/// the DB no longer has (`arm.json`, `lock.json`, `arm-burned.json`) are removed from
-/// `state_dir`; nothing else is removed.
+/// Write the current DB back into the legacy formats in `state_dir` for rollback. Returns
+/// the files written; `sessions.json` is written empty (only session hashes are stored).
 pub fn export_json(db: &Db, state_dir: &Path) -> Result<Vec<PathBuf>> {
     let snap = db.read(snapshot)?;
     if !state_dir.is_dir() {

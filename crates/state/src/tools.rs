@@ -1,16 +1,6 @@
-//! MCP tool catalog mirror and global switches, tables `tool`, `tool_disabled`.
-//!
-//! The catalog is synced from `memora_mcp::catalog()` at server start ([`sync_catalog`])
-//! so `tool_disabled` and `api_key_tool` can reference it.
-//!
-//! Tools that disappear from the catalog are marked `retired`, never deleted: the FKs from
-//! `api_key_tool` / `tool_disabled` stay valid and nothing is cascaded away. A retired
-//! tool is not in [`catalog`] / [`disabled`], cannot be granted or switched, and is hidden
-//! from `keys::ApiKey::tools` (its grants are dormant). If it returns to the catalog it is
-//! revived with its old grants and switch.
-//!
-//! Note: the `tool` table has no revision trigger; [`sync_catalog`] runs at server start,
-//! before the caches load, so no change notification is needed for it.
+//! MCP tool catalog mirror and global switches (`tool`, `tool_disabled`). Tools gone from
+//! the catalog are marked `retired`, never deleted, and revived with their grants if they
+//! return.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -50,9 +40,8 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_')
 }
 
-/// Make `tool` match `names`: insert new names, retire missing ones, un-retire returning
-/// ones. Writes only rows that change. An invalid name fails the whole sync
-/// (`Error::Invalid`) before anything is written. Lists in the result are sorted.
+/// Make `tool` match `names`: insert new names, retire missing ones, revive returning
+/// ones. An invalid name fails the whole sync before anything is written.
 pub fn sync_catalog(tx: &Transaction<'_>, names: &[&str]) -> Result<CatalogSync> {
     if let Some(bad) = names.iter().find(|n| !valid_name(n)) {
         return Err(Error::invalid("tool", format!("bad catalog name: {bad:?}")));
@@ -116,9 +105,8 @@ pub fn disabled(conn: &Connection) -> Result<BTreeSet<String>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Enable or disable one tool globally. Unknown or retired names -> `Error::NotFound`.
-/// Idempotent: no row changes (and no `tools` revision bump) when the switch is already in
-/// the requested position; re-disabling keeps the original `disabled_at`.
+/// Enable or disable one tool globally (idempotent; re-disabling keeps `disabled_at`).
+/// Unknown or retired names are `Error::NotFound`.
 pub fn set_enabled(tx: &Transaction<'_>, name: &str, enabled: bool, now: i64) -> Result<()> {
     let retired: Option<bool> = tx
         .query_row("SELECT retired FROM tool WHERE name = ?1", [name], |r| {

@@ -1,7 +1,5 @@
-//! MCP integration tests against a real vault (read-only): they prove an
-//! agent can drive the MCP tools end to end.
-//!
-//! Run with: cargo test --release --test mcp_live -- --nocapture
+//! MCP integration tests against a real or scratch vault (read-only), driving the tools
+//! end to end. Run with: cargo test --release --test mcp_live -- --nocapture
 
 use memora_core::MemoryStore;
 use memora_mcp::{catalog, detect_client, discovery_card, ClientKind, McpServer, RpcRequest};

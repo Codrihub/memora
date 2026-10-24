@@ -1,9 +1,5 @@
-//! The ordered IP / domain access stack, tables `access_policy` (one row) and
-//! `access_rule`.
-//!
-//! Evaluation (`AccessStack::evaluate`, `would_lock_out`, CIDR / range / domain matching)
-//! lives in `memora-gateway`, which converts from these row types. CIDR, range and domain
-//! syntax are validated here before writing (SQL cannot check them).
+//! The ordered IP / domain access stack (`access_policy`, `access_rule`). Evaluation lives
+//! in `memora-gateway`; rule syntax is validated here before writing.
 use crate::{Error, Result};
 use rusqlite::{params, Connection, Transaction};
 use std::collections::HashSet;
@@ -99,13 +95,8 @@ impl Default for AccessStack {
     }
 }
 
-/// Validate one rule the way `memora-gateway` will match it:
-/// * `ip`: an IPv4 / IPv6 address (compared as text, so no surrounding spaces);
-/// * `cidr`: `addr/bits`, bits <= 32 (IPv4) or <= 128 (IPv6);
-/// * `range`: `a.b.c.d-e.f.g.h` (IPv4 only; spaces around `-` allowed);
-/// * `domain`: a hostname or `*.suffix` (letters, digits, `-`, `.`; matched
-///   case-insensitively);
-/// * `all`: any value (legacy stacks use `*`), at most 255 chars.
+/// Validate one rule the way `memora-gateway` will match it: `ip`, `cidr` (`addr/bits`),
+/// `range` (IPv4 `a.b.c.d-e.f.g.h`), `domain` (hostname or `*.suffix`) or `all`.
 pub fn validate_rule(r: &AccessRule) -> Result<()> {
     let n = r.id.chars().count();
     if n == 0 || n > 40 {

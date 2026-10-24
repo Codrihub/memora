@@ -1,8 +1,5 @@
-//! The single owner account, table `owner`.
-//!
-//! The schema allows at most one row (`id = 1`). Sessions reference `owner_id`, so a
-//! rename needs no session update. Passwords arrive as argon2id PHC strings
-//! (`$argon2id$...`); hashing stays in `memora-gateway`.
+//! The single owner account (`owner`, at most one row). Passwords arrive as argon2id PHC
+//! strings; hashing stays in `memora-gateway`.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -89,10 +86,8 @@ pub fn owner_name(conn: &Connection) -> Result<Option<String>> {
         .optional()?)
 }
 
-/// Make `username` (lowercased) the one and only account with `password_hash`. Creates the
-/// row or replaces username + hash of the existing one; sets `enabled = 1`. Validates with
-/// [`valid_username`] first (`Error::Invalid`). When the hash changes, revokes every
-/// session (in this same transaction) and records `password_changed_at = now`.
+/// Make `username` (lowercased) the one and only account with `password_hash`, creating
+/// or replacing the row. A changed hash revokes every session in the same transaction.
 pub fn set_owner(
     tx: &Transaction<'_>,
     username: &str,
@@ -125,9 +120,8 @@ pub fn set_owner(
     Ok(())
 }
 
-/// Password change from the browser: update the hash, delete every session except
-/// `keep_sid_hash`, log `password_changed`, all in `tx`. Returns sessions revoked.
-/// `Error::NotFound` when there is no owner.
+/// Password change from the browser: update the hash, revoke every other session and log
+/// it, all in `tx`. Returns sessions revoked; `Error::NotFound` when there is no owner.
 pub fn change_password(
     tx: &Transaction<'_>,
     password_hash: &str,

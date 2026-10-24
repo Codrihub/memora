@@ -1,14 +1,5 @@
-//! MCP server: tool catalog and JSON-RPC 2.0 transport for the MCP spec.
-//!
-//! Implements:
-//!   * `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`
-//!   * a tool catalog with name, description (what it does and when to use it),
-//!     category, and input schema
-//!   * a discovery card served at `/.well-known/mcp.json`
-//!   * MCP client detection from the JSON-RPC body, headers, or user-agent
-//!
-//! Every tool maps onto `memora_core::MemoryStore`, so anything the UI can do
-//! an agent can do over MCP.
+//! MCP server: tool catalog, JSON-RPC 2.0 transport, discovery card and client detection.
+//! Every tool maps onto `memora_core::MemoryStore`.
 
 use memora_core::privacy::PathView;
 use memora_core::MemoryStore;
@@ -51,12 +42,8 @@ pub struct ToolSpec {
 /// Argument names a tool accepts besides its schema: `(tool, alias, canonical)`.
 const ARG_ALIASES: &[(&str, &str, &str)] = &[("search_memory", "query", "q")];
 
-/// Check a `tools/call` against the tool's `inputSchema` before it runs: the
-/// arguments are an object, every one is a name the tool takes, every required
-/// one is present (not null), and each has the JSON type (and enum value) the
-/// schema names. A wrong name used to be ignored without a word, so a
-/// `move_memory` without `folder` moved the note to the top level and the
-/// agent never learned its call did something else.
+/// Check a `tools/call` against the tool's `inputSchema`: an object of known argument
+/// names, required ones present (not null), and matching JSON types and enum values.
 pub fn check_args(tool: &str, schema: &Value, args: &Value) -> Result<(), String> {
     let usage = || usage_line(tool, schema);
     let Some(given) = args.as_object() else {
@@ -252,7 +239,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "create_memory",
             category: "note",
-            description: "Create a new note in a folder. The title is also the file name: a trailing '.md' is dropped, '/' and '\\' are refused, other characters than letters, digits, spaces, '_' and '-' are removed and names are cut at 80 characters (the reply then has `renamed_from` and a `note`). Refused when a note of the same name exists, compared without case.",
+            description: "Create a new note in a folder. The title is also the file name: a trailing '.md' is dropped, '/' and '\\' are refused, spaces are kept, the characters : * ? \" < > | # ^ [ ] and a leading dot are removed and names are cut at 80 characters (the reply then has `renamed_from` and a `note`). Refused when a note of the same name exists, compared without case.",
             when: "To store new information.",
             input_schema: obj(
                 j!({
@@ -286,9 +273,12 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "delete_memory",
             category: "note",
-            description: "Delete a note permanently. Use soft_delete instead to move it to .Trash, where restore_trash can bring it back. Only when the vault is a git repository can a deleted note be recovered from its history.",
+            description: "Delete a note: it moves to the Trash (.Trash), where list_trash shows it and restore_trash brings it back to where it was. `permanent: true` deletes it for good instead and needs an admin key: with version history on, every earlier version is erased from the history too (under every name the note had), so no one, agents included, can read it again.",
             when: "To discard a note you no longer need.",
-            input_schema: obj(j!({"path": {"type":"string"}}), &["path"]),
+            input_schema: obj(
+                j!({"path": {"type":"string"}, "permanent": {"type":"boolean","description":"Delete for good, erasing its earlier versions from the history too, instead of moving to the Trash (admin keys only; default false)"}}),
+                &["path"],
+            ),
         },
         ToolSpec {
             name: "move_memory",
@@ -398,7 +388,6 @@ pub fn base_catalog() -> Vec<ToolSpec> {
 /// Discovery card served at `/.well-known/mcp.json`.
 /// `disabled` are the globally switched-off tools ([`McpServer::disabled_tools`]).
 pub fn discovery_card(endpoint: &str, disabled: &BTreeSet<String>) -> Value {
-    // Full catalog, with globally disabled tools marked `enabled: false`.
     let tools = tools_status(disabled)["tools"].clone();
     json!({
         "name": SERVER_NAME,
@@ -569,14 +558,11 @@ impl Fnv64 {
 /// Who is calling the MCP server, and with which permissions.
 #[derive(Debug, Clone)]
 pub struct Caller {
-    /// Actor id for activity tracking and the activity log
-    /// (the key id for API keys, the user name for browser sessions).
+    /// Actor id for activity tracking (key id for API keys, user name for browser sessions).
     pub id: String,
-    /// Display name: the API key's name (see [`Caller::named`]). `None` for browser
-    /// sessions and local use, where `id` already is the user name.
+    /// Display name: the API key's name. `None` for browser sessions and local use.
     pub name: Option<String>,
-    /// `None` = full access (browser session, local stdio). Global tool
-    /// switches still apply.
+    /// `None` = full access (browser session, local stdio). Global tool switches still apply.
     pub perms: Option<KeyPermissions>,
     /// Caller IP, for the activity log.
     pub ip: Option<String>,
@@ -644,9 +630,8 @@ impl Caller {
     }
 }
 
-/// The key scope catalog tool `name` needs besides `mcp`: `write` for every tool that
-/// is not read-only (fail closed, so a new tool needs `write` until it is listed as
-/// read-only), none for read-only tools.
+/// The key scope catalog tool `name` needs besides `mcp`: `write` for every tool not
+/// listed as read-only (fail closed).
 pub fn required_scope(name: &str) -> Option<&'static str> {
     (!activity::is_read_only(name)).then_some("write")
 }
@@ -658,9 +643,8 @@ fn missing_scope(caller: &Caller, name: &str) -> Option<&'static str> {
     required_scope(name).filter(|s| !p.has_scope(s))
 }
 
-/// Admin tools: only listed and callable for keys with the `admin` scope.
-/// They are not part of `catalog()`, so they cannot be switched off
-/// globally or granted through a key's `tools` list.
+/// Admin tools: only listed and callable for keys with the `admin` scope. Not part of
+/// `catalog()`, so they cannot be switched off or granted per key.
 pub fn admin_catalog() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
@@ -738,18 +722,15 @@ pub fn is_catalog_tool(name: &str) -> bool {
     catalog().iter().any(|t| t.name == name)
 }
 
-/// Mirror the MCP catalog into the state database (table `tool`), so global switches and
-/// per-key tool grants can reference it. Run once at server start, before the caches
-/// load and before the legacy import (whose per-key tool lists need the catalog).
+/// Mirror the MCP catalog into the state database (table `tool`). Run once at server
+/// start, before the caches load and before the legacy import.
 pub fn sync_catalog(db: &Db) -> memora_state::Result<memora_state::tools::CatalogSync> {
     let names: Vec<&'static str> = catalog().iter().map(|t| t.name).collect();
     db.write(|tx| memora_state::tools::sync_catalog(tx, &names))
 }
 
-/// The store's path hook: privacy rules ([`privacy::apply_event`]) and pins
-/// ([`pins::apply_event`]) follow every rename, move and delete in one transaction. A
-/// failed write is retried; the store lock is held meanwhile, so no other vault change
-/// can interleave. Browsers hear `pins_changed` when a pin moved or went.
+/// The store's path hook: privacy rules and pins follow every rename, move and delete in
+/// one transaction; browsers hear `pins_changed` when a pin moved or went.
 pub fn path_hook(db: Db) -> memora_core::privacy::PathHook {
     Arc::new(move |ev: &memora_core::privacy::PathEvent| {
         for attempt in 0..3 {
@@ -776,13 +757,10 @@ pub struct McpServer {
     store: Arc<Mutex<MemoryStore>>,
     aliases: Arc<Mutex<Vec<AliasRecord>>>,
     db: Db,
-    /// Globally disabled tools (table `tool_disabled`). Loaded at construction and
-    /// refreshed by [`McpServer::reload_tools`], which the HTTP server calls when the
-    /// `tools` domain changes (another process, e.g. `memora-cli`, switched a tool).
+    /// Globally disabled tools (table `tool_disabled`), refreshed by [`McpServer::reload_tools`].
     disabled: RwLock<BTreeSet<String>>,
-    /// Streamable HTTP sessions whose client was told of a newer catalog: session id
-    /// -> (epoch last sent, last use). In memory and bounded ([`SEEN_MAX`]); a session
-    /// not listed last saw the epoch its id carries. See [`McpServer::list_changed_due`].
+    /// Sessions told of a newer catalog: session id -> (epoch last sent, last use). Bounded
+    /// by [`SEEN_MAX`]; an unlisted session last saw the epoch its id carries.
     seen: Mutex<HashMap<String, (String, u64)>>,
 }
 
@@ -801,8 +779,6 @@ impl McpServer {
             disabled: RwLock::new(BTreeSet::new()),
             seen: Mutex::new(HashMap::new()),
         };
-        // Privacy rules and pins follow notes and folders through renames, moves and
-        // deletes.
         srv.store
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -893,11 +869,8 @@ impl McpServer {
         v
     }
 
-    /// The caller's catalog epoch: 16 hex digits of an FNV-1a hash over the server
-    /// version and the names of the tools [`McpServer::visible_tools`] returns for
-    /// `caller`. It changes when the server is upgraded, a tool is switched on or off
-    /// globally, or the key's scopes or tool grant change, and is stable across
-    /// restarts, so no session state is stored.
+    /// The caller's catalog epoch: 16 hex digits of an FNV-1a hash over the server version
+    /// and the caller's visible tool names. Stable across restarts.
     pub fn catalog_epoch(&self, caller: &Caller) -> String {
         let mut h = Fnv64::new();
         h.write(SERVER_VERSION.as_bytes());
@@ -924,10 +897,8 @@ impl McpServer {
         (hex(epoch) && hex(rand)).then_some(epoch)
     }
 
-    /// The caller's current epoch when the client behind `session_id` last saw another
-    /// one (so it should hear `notifications/tools/list_changed`), else `None`.
-    /// Malformed ids never are. Call [`McpServer::mark_seen`] once the notification is
-    /// on its way.
+    /// The caller's current epoch when the client behind `session_id` last saw another one
+    /// (so it should hear `notifications/tools/list_changed`), else `None`.
     pub fn list_changed_due(&self, caller: &Caller, session_id: &str) -> Option<String> {
         let issued = Self::session_epoch(session_id)?;
         let current = self.catalog_epoch(caller);
@@ -1097,8 +1068,7 @@ impl McpServer {
                     _ => Vec::new(),
                 };
                 let named = agents.iter().any(|a| !a.trim().is_empty());
-                // A deny rule without agents hides nothing: setting one used to remove
-                // the existing rule without a word, so a typo could expose a folder.
+                // A deny rule without agents would hide nothing; refuse rather than drop it.
                 if mode == Mode::Deny && !named {
                     anyhow::bail!(
                         "agents is empty: name the agents to hide {path} from (key names or ids); use privacy_clear to remove the rule"
@@ -1211,9 +1181,8 @@ impl McpServer {
         self.handle_as(req, &Caller::full("local"))
     }
 
-    /// Handle a single MCP JSON-RPC request on behalf of `caller`:
-    /// `tools/list` is filtered and `tools/call` refused (`-32003`) by the
-    /// caller's permissions and the global tool switches.
+    /// Handle a single MCP JSON-RPC request on behalf of `caller`, applying its permissions
+    /// and the global tool switches.
     pub fn handle_as(&self, req: &RpcRequest, caller: &Caller) -> RpcResponse {
         let id = req.id.clone().unwrap_or(Value::Null);
         match req.method.as_str() {
@@ -1222,9 +1191,7 @@ impl McpServer {
                 if caller.perms.is_some() {
                     self.register_alias_named(caller.actor(), &caller.id, caller.name.as_deref());
                 }
-                // `listChanged`: a client whose session saw an older catalog hears
-                // `notifications/tools/list_changed` ahead of its next answer (the HTTP
-                // server streams it, see `list_changed_due`).
+                // Clients that saw an older catalog hear `notifications/tools/list_changed`.
                 ok(
                     id,
                     json!({
@@ -1258,6 +1225,7 @@ impl McpServer {
                     .unwrap_or("");
                 let args = req.params.get("arguments").cloned().unwrap_or(json!({}));
                 if let Some(msg) = self.refusal(caller, name) {
+                    activity::refused(caller, name, &args, activity_label(name, &args), &msg);
                     return err(id, -32003, msg);
                 }
                 let admin = admin_catalog();
@@ -1297,8 +1265,7 @@ impl McpServer {
                         json!({"content":[{"type":"text","text": v.to_string()}],"isError":false}),
                     ),
                     Err(e) => {
-                        // Every tool error names the tool, so an agent reading a batch of
-                        // results can tell which call failed.
+                        // Every tool error names the tool, so batched results show which failed.
                         let raw = format!("{e:#}");
                         let msg = if raw.starts_with(&format!("{name}:")) {
                             raw
@@ -1365,11 +1332,8 @@ impl McpServer {
         }
     }
 
-    /// Execute a tool on behalf of `caller`. Every call is published to the
-    /// realtime stream as an `ai_activity` `start` / `end` pair (see [`activity`]),
-    /// named by [`Caller::actor`]; node events carry the same actor. This single
-    /// hook covers all tools, including read-only ones, so no call escapes the
-    /// activity log. Permissions are NOT checked here (see `handle_as`).
+    /// Execute a tool on behalf of `caller`, publishing an `ai_activity` start/end pair for
+    /// every call. Permissions are NOT checked here (see `handle_as`).
     pub fn call_tool_by(&self, name: &str, args: &Value, caller: &Caller) -> anyhow::Result<Value> {
         activity::traced(caller, name, args, activity_label(name, args), || {
             if name == "set_my_color" {
@@ -1491,9 +1455,10 @@ impl McpServer {
         let actor = caller.actor();
         // Locked for this caller: an agent's view hides its private paths everywhere.
         let store = memora_core::privacy::lock_as(&self.store, self.view_for(caller));
-        // Soft locks bind agents: a write to a note another holder locked is refused
-        // (checked under the store lock, so the lock cannot change in between). The
-        // owner (browser session, local use) is not held up by agents' locks.
+        // Notes this call moves to the trash remember who deleted them.
+        let _by = memora_core::vault::DeletedBy::set(&caller.id, actor, caller.actor_kind());
+        // Agents may not write notes another holder locked (checked under the store lock);
+        // the owner is not held up by agents' locks.
         if caller.perms.is_some() {
             if let Some(why) = lock_conflict(&store, name, args, caller) {
                 anyhow::bail!("{why}");
@@ -1528,9 +1493,8 @@ impl McpServer {
             }
             "get_stats" => serde_json::to_value(store.stats())?,
             "list_memory" => {
-                // Shape: {folder: [{path, name, folder, mtime}, ...]}, keyed by the
-                // full parent folder (`Projects/Atlas`); `Root` is the top level.
-                // (The web UI's /api/tree still groups by top-level folder.)
+                // Shape: {folder: [{path, name, folder, mtime}, ...]}, keyed by full parent folder;
+                // `Root` is the top level.
                 let mut groups: std::collections::BTreeMap<String, Vec<Value>> = Default::default();
                 for n in store.tree().into_values().flatten() {
                     let folder = match memora_core::vault::parent_folder(&n.path) {
@@ -1574,15 +1538,30 @@ impl McpServer {
                 json!({"ok": true, "path": path})
             }
             "delete_memory" => {
-                let path = s("path");
-                store.delete_impl(&path)?;
-                memora_core::events::hub().publish(json!({
-                    "type": "node_deleted", "actor": actor,
-                    "id": std::path::Path::new(&path)
-                        .file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
-                    "path": path,
-                }));
-                json!({"ok": true, "path": path})
+                let path = memora_core::vault::norm_note_path(&s("path"));
+                let id = std::path::Path::new(&path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if args.get("permanent").and_then(|v| v.as_bool()) == Some(true) {
+                    if !caller.is_admin() {
+                        anyhow::bail!(
+                            "permanent delete needs an admin key; without `permanent` the note moves to the Trash, where restore_trash can bring it back"
+                        );
+                    }
+                    store.delete_impl(&path)?;
+                    memora_core::events::hub().publish(json!({
+                        "type": "node_deleted", "actor": actor, "id": id, "path": path,
+                    }));
+                    json!({"ok": true, "path": path, "permanent": true})
+                } else {
+                    let r = store.soft_delete_impl(&path)?;
+                    memora_core::events::hub().publish(json!({
+                        "type": "node_deleted", "actor": actor, "id": id, "path": path,
+                        "trashed": true, "to": r["to"],
+                    }));
+                    json!({"ok": true, "path": path, "trashed": true, "to": r["to"]})
+                }
             }
             "move_memory" => {
                 let from = memora_core::vault::norm_note_path(&s("path"));
@@ -1721,8 +1700,7 @@ fn own_lock_name(caller: &Caller, args: &Value) -> anyhow::Result<()> {
 }
 
 /// Why `caller` may not run write tool `name` now: a note it would change is locked by
-/// another holder. Notes come from the path arguments; folder-wide tools check every
-/// lock inside their folder (`bulk_replace` without a folder: the whole vault).
+/// another holder (folder-wide tools check every lock inside their folder).
 fn lock_conflict(store: &MemoryStore, name: &str, args: &Value, caller: &Caller) -> Option<String> {
     if activity::is_read_only(name) || matches!(name, "lock_node" | "release_lock") {
         return None;
@@ -1774,9 +1752,7 @@ fn pick<'a>(args: &'a Value, keys: &[&str]) -> &'a str {
     ""
 }
 
-/// Short label for the `ai_activity` event, taken from the most relevant
-/// tool argument (title for create, query for search, folder for folder
-/// operations, and so on).
+/// Short label for the `ai_activity` event, taken from the most relevant tool argument.
 fn activity_label<'a>(name: &str, args: &'a Value) -> &'a str {
     match name {
         "search_memory" | "query_memory" | "search_by_tag" | "search_logs" | "find_similar"
@@ -1797,10 +1773,8 @@ fn activity_label<'a>(name: &str, args: &'a Value) -> &'a str {
     }
 }
 
-/// Publish a node event (`node_created` / `node_updated`) to the realtime hub.
-///
-/// Called after a successful mutation, carrying the node payload clients
-/// expect, so a UI can insert the node without reloading the whole graph.
+/// Publish a node event (`node_created` / `node_updated`) to the realtime hub, with the
+/// node payload so a UI can insert it without reloading the graph.
 pub(crate) fn publish_node(ty: &str, actor: &str, store: &MemoryStore, path: &str) {
     if path.is_empty() {
         return;

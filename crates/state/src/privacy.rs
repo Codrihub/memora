@@ -1,31 +1,8 @@
-//! Per-agent privacy rules, tables `privacy_rule` and `privacy_rule_key` (migration 6).
+//! Per-agent privacy rules (`privacy_rule`, `privacy_rule_key`): each rule hides a folder or
+//! note from API keys, by deny list or allow-only list; rules add up.
 //!
-//! A rule hides one vault path from agents (API keys; every OAuth connection is a key):
-//! * [`Kind::Folder`]: the folder itself and everything below it.
-//! * [`Kind::Node`]: one note (path with its `.md`).
-//!
-//! and has a [`Mode`]:
-//! * [`Mode::Deny`]: hidden from the listed keys (the usual case: "agent C cannot see").
-//! * [`Mode::AllowOnly`]: hidden from every key that is not listed, including keys
-//!   created later.
-//!
-//! Rules add up: a path is hidden from a key when ANY rule covering it hides it (its own
-//! node rule, or a folder rule on the folder or any parent). The signed-in owner is never
-//! filtered; this module only answers for keys.
-//!
-//! Paths are vault-relative, normalized by [`normalize_path`] (`\` -> `/`, empty and `.`
-//! segments dropped, `..` and control characters refused) and matched
-//! case-insensitively, always by full path, never by bare note name. A node rule matches
-//! with or without the `.md` suffix (`Notes/x` and `Notes/x.md` are the same node).
-//!
-//! Rename / move / delete of notes and folders keep rules in step: [`rename_path`]
-//! (node rules follow their node, folder renames rewrite every rule below), [`carry`]
-//! (a note leaving a protected folder implicitly, e.g. into the trash, keeps the folder's
-//! protection as node rules) and [`forget`] (hard delete).
-//!
-//! Enforcement lives with the callers: [`view_for`] compiles the rules that hide paths from
-//! one key into a [`KeyView`] (fast `visible(path)` checks); any error building it must be
-//! treated as [`KeyView::deny_all`] (fail closed).
+//! Paths are matched case-insensitively by full path. Callers must treat an error from
+//! [`view_for`] as [`KeyView::deny_all`] (fail closed).
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -112,8 +89,7 @@ pub struct Rule {
     pub keys: BTreeSet<String>,
     pub created_at: i64,
     pub updated_at: i64,
-    /// Former paths (before renames and moves), newest last. Only events and log lines
-    /// naming them are kept from the hidden agents; files there now are not hidden.
+    /// Former paths (before renames and moves), newest last; only text naming them is hidden.
     pub trail: Vec<String>,
 }
 
@@ -256,9 +232,8 @@ impl KeyView {
         !self.deny_all && self.hidden.is_empty()
     }
 
-    /// Whether this key may see `path` (a note, folder or file; vault-relative, any
-    /// spelling). The vault root is visible unless everything is hidden; an invalid path
-    /// (`..`, control characters) is not.
+    /// Whether this key may see `path` (vault-relative, any spelling). An invalid path is
+    /// never visible.
     pub fn visible(&self, path: &str) -> bool {
         if self.deny_all {
             return false;
@@ -276,9 +251,7 @@ impl KeyView {
         !self.hidden.iter().any(|(k, p)| covers_lower(*k, p, &q))
     }
 
-    /// Whether free text (an event label, a log line, a commit message) names a hidden
-    /// path: a hidden folder path or note path (without `.md`) at word boundaries,
-    /// case-insensitive.
+    /// Whether free text names a hidden path at word boundaries (case-insensitive).
     pub fn mentions_hidden(&self, text: &str) -> bool {
         if self.deny_all {
             return true;
@@ -409,9 +382,8 @@ fn same_path(kind: Kind, a: &str, b: &str) -> bool {
     }
 }
 
-/// Whether a rule on `rule` (lower-cased) names the item a vault event reports at `event`
-/// (lower-cased, as the store gives it: notes with `.md`, folders without). A node rule
-/// written without `.md` still follows its note, but never a folder that shares the name.
+/// Whether a rule on `rule` names the item a vault event reports at `event` (both
+/// lower-cased); a node rule never matches a folder of the same name.
 fn names_event_path(kind: Kind, rule: &str, event: &str) -> bool {
     match kind {
         Kind::Node if !event.ends_with(".md") => rule == event,
@@ -514,9 +486,8 @@ pub fn delete(tx: &Transaction<'_>, kind: Kind, path: &str) -> Result<usize> {
     Ok(ids.len())
 }
 
-/// `old` was renamed or moved to `new` (a note, or a folder with everything in it):
-/// rules on `old` and below it follow. Returns how many rules changed. Paths that are
-/// not valid vault paths change nothing.
+/// `old` was renamed or moved to `new`: rules on `old` and below it follow. Returns how
+/// many rules changed.
 pub fn rename_path(tx: &Transaction<'_>, old: &str, new: &str, now: i64) -> Result<usize> {
     let (Some(o), Ok(n)) = (canon(old), normalize_path(new)) else {
         return Ok(0);
@@ -552,10 +523,8 @@ pub fn rename_path(tx: &Transaction<'_>, old: &str, new: &str, now: i64) -> Resu
     Ok(changed)
 }
 
-/// A note moves from `from` to `to` without the user choosing to take it out of its
-/// folder (into the trash, or out of a deleted folder): every folder rule that covers
-/// `from` but not `to` is copied onto `to` as a node rule, so the note stays hidden from
-/// the same agents. Call before [`rename_path`]. Returns how many rules were added.
+/// Copy every folder rule covering `from` but not `to` onto `to` as a node rule, for a note
+/// moved implicitly (e.g. into the trash). Call before [`rename_path`]; returns the count.
 pub fn carry(tx: &Transaction<'_>, from: &str, to: &str, now: i64) -> Result<usize> {
     let (Ok(f), Ok(t)) = (normalize_path(from), normalize_path(to)) else {
         return Ok(0);

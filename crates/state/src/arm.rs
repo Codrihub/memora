@@ -1,11 +1,5 @@
-//! Setup / reset window, LOCKED state and the last burned window, table `arm_state` (one
-//! row, always present).
-//!
-//! Expiry is one conditional `UPDATE` ([`expire`], docs/DATABASE.md section 3.6), and code
-//! checks read `code_hash` inside the transaction that consumes or burns it.
-//!
-//! Setup codes arrive as sha256 hex of the normalised code (`hash_api_key(normalize_code(..))`
-//! in `memora-gateway`); the plaintext code never reaches the DB.
+//! Setup / reset window, LOCKED state and the last burned window (`arm_state`, one row).
+//! Setup codes arrive as sha256 hex; an expired window only closes, never locks.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -50,7 +44,8 @@ pub enum ArmStatus {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArmWindow {
     pub status: ArmStatus,
-    /// Set while armed (and kept after expiry for display).
+    /// Set while armed, and kept after the window expired unused (see
+    /// [`ArmWindow::expired`]) until the next window, disarm or burn.
     pub mode: Option<ArmMode>,
     pub armed_at: Option<i64>,
     pub ttl: Option<i64>,
@@ -66,6 +61,15 @@ impl ArmWindow {
         match (self.status, self.armed_at, self.ttl) {
             (ArmStatus::Armed, Some(at), Some(ttl)) => (at + ttl - now).max(0),
             _ => 0,
+        }
+    }
+
+    /// The mode of a window that expired before it was used, while no other window is
+    /// open (the instance is idle). Display only: nothing is locked.
+    pub fn expired(&self) -> Option<ArmMode> {
+        match (self.status, self.armed_at, self.ttl) {
+            (ArmStatus::Idle, Some(_), Some(_)) => self.mode,
+            _ => None,
         }
     }
 }
@@ -138,13 +142,14 @@ pub fn get(conn: &Connection) -> Result<ArmWindow> {
     )?)
 }
 
-/// Lock an expired window: `UPDATE arm_state SET state='locked', locked_at=now,
-/// code_hash=NULL WHERE state='armed' AND armed_at+ttl < now`. Returns true if it locked.
-/// Mode, `armed_at` and `ttl` are kept for display.
+/// Close an expired window: back to idle with the code dropped; mode, `armed_at` and `ttl`
+/// stay for display. Also lifts a legacy expiry lock. Returns true if a row changed.
 pub fn expire(tx: &Transaction<'_>, now: i64) -> Result<bool> {
     let n = tx.execute(
-        "UPDATE arm_state SET state = 'locked', locked_at = ?1, code_hash = NULL
-         WHERE id = 1 AND state = 'armed' AND armed_at + ttl < ?1",
+        "UPDATE arm_state SET state = 'idle', locked_at = NULL, code_hash = NULL
+         WHERE id = 1 AND armed_at IS NOT NULL AND ttl IS NOT NULL AND (
+           (state = 'armed' AND armed_at + ttl < ?1)
+           OR (state = 'locked' AND locked_at > armed_at + ttl))",
         [now],
     )?;
     Ok(n > 0)
@@ -161,9 +166,8 @@ fn is_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Open a window with `code_hash` (sha256 hex) for `ttl` seconds (30..=86400); clears the
-/// lock and the last burn (the caller generates the code). Arming while a window is open
-/// replaces it (the old code stops working).
+/// Open a window with `code_hash` (sha256 hex) for `ttl` seconds, clearing the lock and the
+/// last burn. Replaces an open window.
 pub fn arm(tx: &Transaction<'_>, mode: ArmMode, ttl: i64, code_hash: &str, now: i64) -> Result<()> {
     if !TTL_RANGE.contains(&ttl) {
         return Err(Error::invalid("ttl", "30-86400 seconds"));
@@ -181,9 +185,8 @@ pub fn arm(tx: &Transaction<'_>, mode: ArmMode, ttl: i64, code_hash: &str, now: 
     Ok(())
 }
 
-/// Compare `code_hash` with the open window in constant time ([`crate::constant_time_eq`]),
-/// after [`expire`]. On [`CodeCheck::Valid`] the caller completes setup and calls
-/// [`disarm`] in the same `tx`, so a code is usable at most once.
+/// Compare `code_hash` with the open window in constant time, after [`expire`]. On
+/// [`CodeCheck::Valid`] the caller calls [`disarm`] in the same `tx` (single use).
 pub fn verify_code(tx: &Transaction<'_>, code_hash: &str, now: i64) -> Result<CodeCheck> {
     expire(tx, now)?;
     let (state, stored): (String, Option<String>) = tx.query_row(
@@ -201,41 +204,45 @@ pub fn verify_code(tx: &Transaction<'_>, code_hash: &str, now: i64) -> Result<Co
     }
 }
 
-/// A wrong code: close the window without locking and record when / from where. The burn
-/// records the mode of the window (if any); a LOCKED instance stays locked. An expired
-/// window is locked first.
+/// A wrong code: close the window without locking and record when and from where. A
+/// LOCKED instance stays locked.
 pub fn burn(tx: &Transaction<'_>, ip: &str, now: i64) -> Result<()> {
     expire(tx, now)?;
     tx.execute(
         "UPDATE arm_state SET
            burned_at = ?1, burned_ip = ?2, burned_mode = mode, code_hash = NULL,
            state    = CASE WHEN state = 'armed' THEN 'idle' ELSE state END,
-           mode     = CASE WHEN state = 'armed' THEN NULL ELSE mode END,
-           armed_at = CASE WHEN state = 'armed' THEN NULL ELSE armed_at END,
-           ttl      = CASE WHEN state = 'armed' THEN NULL ELSE ttl END
+           mode     = CASE WHEN state = 'locked' THEN mode ELSE NULL END,
+           armed_at = CASE WHEN state = 'locked' THEN armed_at ELSE NULL END,
+           ttl      = CASE WHEN state = 'locked' THEN ttl ELSE NULL END
          WHERE id = 1",
         params![now, ip],
     )?;
     Ok(())
 }
 
-/// Close the window (back to idle, code dropped). No-op unless armed: a LOCKED
+/// Close the window (back to idle, code dropped; an expiry notice goes too). A LOCKED
 /// instance stays locked (use [`unlock`]).
 pub fn disarm(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         "UPDATE arm_state SET state = 'idle', mode = NULL, armed_at = NULL, ttl = NULL,
            code_hash = NULL
-         WHERE id = 1 AND state = 'armed'",
+         WHERE id = 1 AND state <> 'locked'",
         [],
     )?;
     Ok(())
 }
 
-/// Enter LOCKED. An open window is closed (its code dropped); its mode / `armed_at` / `ttl`
-/// stay for display. Locking again refreshes `locked_at`.
+/// Enter LOCKED (the only way in). An open window is closed; its mode, `armed_at` and
+/// `ttl` stay for display. Locking again refreshes `locked_at`.
 pub fn lock(tx: &Transaction<'_>, now: i64) -> Result<()> {
+    expire(tx, now)?;
     tx.execute(
-        "UPDATE arm_state SET state = 'locked', locked_at = ?1, code_hash = NULL WHERE id = 1",
+        "UPDATE arm_state SET state = 'locked', locked_at = ?1, code_hash = NULL,
+           mode     = CASE WHEN state = 'armed' THEN mode ELSE NULL END,
+           armed_at = CASE WHEN state = 'armed' THEN armed_at ELSE NULL END,
+           ttl      = CASE WHEN state = 'armed' THEN ttl ELSE NULL END
+         WHERE id = 1",
         [now],
     )?;
     Ok(())

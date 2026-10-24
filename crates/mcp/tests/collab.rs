@@ -1,7 +1,5 @@
-//! Collaboration and admin tools as agents see them: soft locks bind other agents,
-//! lock paths are validated and normalized, mentions cannot inject lines, event / log
-//! arguments are validated, display names cannot impersonate, and the admin / privacy
-//! tools refuse calls that would silently do something else.
+//! Collaboration and admin tools as agents see them: soft locks, lock path normalization,
+//! mention and log argument checks, display names, and admin / privacy tool refusals.
 
 use memora_core::MemoryStore;
 use memora_gateway::{KeyPermissions, ToolGrant};

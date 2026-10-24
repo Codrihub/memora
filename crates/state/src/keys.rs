@@ -1,22 +1,6 @@
-//! API keys, tables `api_key`, `api_key_scope`, `api_key_tool`. Implements
-//! `docs/contracts/tools-permissions.md`: per-key tool lists are FKs into `tool`, so
-//! unknown names are impossible.
-//!
-//! Keys arrive hashed (sha256 hex of the raw key, or a legacy argon2id string); the raw
-//! key never reaches the DB.
-//!
-//! Rolling a key replaces its hash immediately (no grace period: the old key stops working
-//! at commit). `api_key.grace_until` is kept in the schema but always written as NULL.
-//!
-//! Retired tools (gone from the MCP catalog, see [`crate::tools::sync_catalog`]): their
-//! `api_key_tool` rows stay (the FK stays valid, nothing is deleted) but are *dormant*:
-//! [`ApiKey::tools`] lists only live catalog tools, so a retired tool is neither shown nor
-//! granted. If the tool comes back in a later release, the old grant applies again.
-//! Replacing a key's tool list ([`update`] with `tools`) drops dormant grants.
-//!
-//! Errors: input is validated in Rust first ([`Error::Invalid`] naming the field); a
-//! constraint the DB still rejects is mapped too: UNIQUE / PRIMARY KEY (duplicate id or
-//! hash) -> [`Error::Conflict`], CHECK / FK / NOT NULL / trigger -> [`Error::Invalid`].
+//! API keys (`api_key`, `api_key_scope`, `api_key_tool`). Keys arrive hashed; rolling
+//! replaces the hash at once. Grants of retired tools stay dormant until the tool returns.
+//! Constraint errors map to [`Error::Conflict`] (duplicates) or [`Error::Invalid`].
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -156,11 +140,8 @@ impl ToolDenial {
     }
 }
 
-/// Effective MCP access to tool `name`: key enabled AND "mcp" in scopes AND not globally
-/// disabled AND (tools == "*" OR name in tools). `key == None` is a full-access caller
-/// (browser session, local stdio); global switches still apply to it. `disabled` is
-/// [`crate::tools::disabled`]. Identical to `memora_gateway::tool_access`, including the
-/// order of checks (a disabled key gets `NotAllowed` even for a globally disabled tool).
+/// Effective MCP access to tool `name`, identical to `memora_gateway::tool_access`
+/// (including check order). `key == None` is a full-access caller.
 pub fn tool_access(
     key: Option<&ApiKey>,
     disabled: &BTreeSet<String>,
@@ -271,9 +252,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<ApiKey>> {
     Ok(query_keys(conn, "WHERE id = ?1", &[&id])?.pop())
 }
 
-/// The live key with this hash (index `api_key_live`). Authentication of sha256 keys;
-/// legacy argon2id keys are verified by the caller against [`list`].
-/// Three cached-statement index lookups; no writes.
+/// The live key with this hash (sha256 keys; legacy argon2id keys are verified by the
+/// caller against [`list`]). Read-only.
 pub fn find_by_hash(conn: &Connection, hash: &str) -> Result<Option<ApiKey>> {
     let mut st = conn.prepare_cached(&format!(
         "SELECT {KEY_COLS} FROM api_key WHERE hash = ?1 AND deleted_at IS NULL"
@@ -476,9 +456,8 @@ pub fn set_color(tx: &Transaction<'_>, id: &str, color: Option<&str>) -> Result<
     get_live(tx, id)
 }
 
-/// New key material for the same id: replace hash + prefix and re-enable. The old hash
-/// stops authenticating at commit (no grace period; `grace_until` stays NULL).
-/// `Error::NotFound` for unknown or trashed ids; the same hash again is `Error::Invalid`.
+/// New key material for the same id: replace hash + prefix and re-enable; the old hash
+/// stops working at commit. The same hash again is `Error::Invalid`.
 pub fn roll(tx: &Transaction<'_>, id: &str, hash: &str, prefix: &str) -> Result<ApiKey> {
     validate_hash(hash)?;
     validate_prefix(prefix)?;
@@ -496,9 +475,8 @@ pub fn roll(tx: &Transaction<'_>, id: &str, hash: &str, prefix: &str) -> Result<
     get_live(tx, id)
 }
 
-/// Move to the trash (`deleted_at = now`, clamped to `created_at` against clock skew).
-/// The key stops authenticating; scopes, tools, usage and events are kept for
-/// [`restore`]. `Error::NotFound` for unknown or already trashed ids.
+/// Move to the trash (`deleted_at = now`, clamped to `created_at`); the key stops
+/// authenticating. `Error::NotFound` for unknown or already trashed ids.
 pub fn trash(tx: &Transaction<'_>, id: &str, now: i64) -> Result<()> {
     let n = tx.execute(
         "UPDATE api_key SET deleted_at = max(?2, created_at) WHERE id = ?1 AND deleted_at IS NULL",

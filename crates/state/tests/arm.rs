@@ -134,20 +134,22 @@ fn rearm_replaces_code() {
 }
 
 #[test]
-fn expired_window_locks() {
+fn expired_window_closes_without_locking() {
     let db = Db::open_temp().unwrap();
     db.write(|tx| arm::arm(tx, ArmMode::Bootstrap, 60, CODE, 1000))
         .unwrap();
     assert!(!db.write(|tx| arm::expire(tx, 1060)).unwrap());
+    assert_eq!(db.read(arm::get).unwrap().expired(), None, "still open");
     assert!(db.write(|tx| arm::expire(tx, 1061)).unwrap());
     assert!(!db.write(|tx| arm::expire(tx, 1062)).unwrap(), "only once");
     let w = db.read(arm::get).unwrap();
-    assert_eq!(w.status, ArmStatus::Locked);
-    assert_eq!(w.locked_at, Some(1061));
+    assert_eq!(w.status, ArmStatus::Idle, "an unused code never locks");
+    assert_eq!(w.locked_at, None);
     assert_eq!(
         (w.mode, w.armed_at, w.ttl),
         (Some(ArmMode::Bootstrap), Some(1000), Some(60))
     );
+    assert_eq!(w.expired(), Some(ArmMode::Bootstrap));
     assert_eq!(w.remaining(1061), 0);
     assert_eq!(code_hash(&db), None, "code dies with the window");
 
@@ -160,7 +162,9 @@ fn expired_window_locks() {
         ArmStatus::Armed,
         "get applies no expiry"
     );
-    assert_eq!(state(&db, 2000).status, ArmStatus::Locked);
+    let w = state(&db, 2000);
+    assert_eq!(w.status, ArmStatus::Idle);
+    assert_eq!(w.expired(), Some(ArmMode::Reset));
     let db = Db::open_temp().unwrap();
     db.write(|tx| arm::arm(tx, ArmMode::Reset, 60, CODE, 1000))
         .unwrap();
@@ -168,7 +172,58 @@ fn expired_window_locks() {
         db.write(|tx| arm::verify_code(tx, CODE, 2000)).unwrap(),
         CodeCheck::NoWindow
     );
-    assert_eq!(db.read(arm::get).unwrap().status, ArmStatus::Locked);
+    assert_eq!(db.read(arm::get).unwrap().status, ArmStatus::Idle);
+
+    // the next window or a disarm clears the notice
+    db.write(|tx| arm::arm(tx, ArmMode::Reset, 60, CODE, 3000))
+        .unwrap();
+    assert_eq!(state(&db, 3001).expired(), None);
+    assert_eq!(state(&db, 4000).expired(), Some(ArmMode::Reset));
+    db.write(arm::disarm).unwrap();
+    let w = db.read(arm::get).unwrap();
+    assert_eq!(
+        (w.status, w.expired(), w.mode),
+        (ArmStatus::Idle, None, None)
+    );
+}
+
+#[test]
+fn old_expiry_lock_is_lifted() {
+    // A legacy expiry lock: locked after the window's end.
+    let db = Db::open_temp().unwrap();
+    db.write(|tx| {
+        tx.execute(
+            "UPDATE arm_state SET state = 'locked', mode = 'bootstrap', armed_at = 1000,
+               ttl = 300, locked_at = 1400 WHERE id = 1",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let w = state(&db, 5000);
+    assert_eq!(w.status, ArmStatus::Idle);
+    assert_eq!((w.locked_at, w.expired()), (None, Some(ArmMode::Bootstrap)));
+
+    // An explicit lock stays, whether taken from idle, during a window, or after one expired.
+    let db = Db::open_temp().unwrap();
+    db.write(|tx| arm::lock(tx, 50)).unwrap();
+    assert_eq!(state(&db, 9000).status, ArmStatus::Locked);
+    let db = Db::open_temp().unwrap();
+    db.write(|tx| arm::arm(tx, ArmMode::Reset, 300, CODE, 1000))
+        .unwrap();
+    db.write(|tx| arm::lock(tx, 1100)).unwrap();
+    let w = state(&db, 9000);
+    assert_eq!(w.status, ArmStatus::Locked);
+    assert_eq!(w.mode, Some(ArmMode::Reset), "kept for display");
+    let db = Db::open_temp().unwrap();
+    db.write(|tx| arm::arm(tx, ArmMode::Reset, 300, CODE, 1000))
+        .unwrap();
+    db.write(|tx| arm::lock(tx, 2000)).unwrap();
+    let w = state(&db, 9000);
+    assert_eq!(w.status, ArmStatus::Locked);
+    assert_eq!((w.mode, w.armed_at, w.ttl), (None, None, None));
+    db.write(|tx| arm::lock(tx, 9500)).unwrap();
+    assert_eq!(state(&db, 9600).status, ArmStatus::Locked, "relock stays");
 }
 
 #[test]
@@ -226,13 +281,14 @@ fn burn_while_idle_or_locked() {
     assert_eq!(w.status, ArmStatus::Locked, "burn does not unlock");
     assert_eq!(w.last_burn.unwrap().at, 11);
 
-    // burning an expired window locks it first
+    // burning an expired window closes it first and replaces the expiry notice
     let db = Db::open_temp().unwrap();
     db.write(|tx| arm::arm(tx, ArmMode::Bootstrap, 30, CODE, 100))
         .unwrap();
     db.write(|tx| arm::burn(tx, "9.9.9.9", 500)).unwrap();
     let w = db.read(arm::get).unwrap();
-    assert_eq!(w.status, ArmStatus::Locked);
+    assert_eq!(w.status, ArmStatus::Idle);
+    assert_eq!(w.expired(), None);
     assert_eq!(w.last_burn.unwrap().mode, Some(ArmMode::Bootstrap));
 }
 

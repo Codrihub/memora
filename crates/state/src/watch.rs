@@ -1,14 +1,5 @@
-//! Change detection across processes (docs/DATABASE.md section 3.3).
-//!
-//! `PRAGMA data_version` on the read connection changes whenever any *other* connection
-//! (another process, or this process's own write connection) commits. Only then is the
-//! small `revision` table read and compared with the revisions seen last time. Triggers
-//! bump the counters, so no write path can forget to signal a change.
-//!
-//! Usage in the server: load caches right after [`Db::open`], then call
-//! [`Db::changed_domains`] at most once a second (lazily on requests plus a 1 s ticker)
-//! and reload only the domains it returns. The server's own writes are reported too,
-//! which is harmless (a reload of what it just wrote).
+//! Change detection across processes: `PRAGMA data_version` signals a commit, then the
+//! trigger-maintained `revision` table says which [`Domain`]s changed.
 
 use crate::{Db, Domain, Result};
 use rusqlite::Connection;
@@ -48,9 +39,8 @@ pub fn revisions(conn: &Connection) -> Result<BTreeMap<Domain, i64>> {
 }
 
 impl Db {
-    /// Domains whose data changed since the previous call (or since [`Db::open`] for the
-    /// first call), in [`Domain::ALL`] order. Costs one pragma when nothing was committed;
-    /// safe to call often.
+    /// Domains whose data changed since the previous call (or since [`Db::open`]), in
+    /// [`Domain::ALL`] order. Cheap when nothing was committed.
     pub fn changed_domains(&self) -> Result<Vec<Domain>> {
         let mut reader = self.reader();
         let dv = data_version(&reader.conn)?;

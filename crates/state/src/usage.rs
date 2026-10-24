@@ -1,16 +1,5 @@
-//! Per-key usage counters and events, tables `api_key_usage`, `api_key_event`.
-//!
-//! Hot-path writes are buffered in a [`UsageBuffer`] and flushed periodically (the server:
-//! every ~30 s and on shutdown) in one transaction. Events are kept 30 days (see
-//! [`crate::retention`]).
-//!
-//! Server pattern (keeps the `AppState` mutex out of the DB write):
-//! ```ignore
-//! let mut batch = state.usage.lock().unwrap().take();
-//! if batch.flush(&db).is_err() {
-//!     state.usage.lock().unwrap().merge(batch); // retried on the next tick
-//! }
-//! ```
+//! Per-key usage counters and events (`api_key_usage`, `api_key_event`), buffered in a
+//! [`UsageBuffer`] and flushed periodically in one transaction.
 
 use crate::{Db, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -47,10 +36,8 @@ pub struct KeyEvent {
     pub path: Option<String>,
 }
 
-/// In-memory buffer of uses not yet written. Wrap in a `Mutex` in `AppState`.
-/// Memory is bounded by [`MAX_PENDING_EVENTS`] and [`MAX_PENDING_KEYS`]; strings are cut
-/// to the column limits on [`record`](Self::record), so one odd request can never make a
-/// whole flush fail on a CHECK constraint.
+/// In-memory buffer of uses not yet written, bounded by [`MAX_PENDING_EVENTS`] and
+/// [`MAX_PENDING_KEYS`]; strings are cut to the column limits on record.
 #[derive(Debug, Default)]
 pub struct UsageBuffer {
     /// Per key: uses since the last flush (`use_count` is the delta), last time and IP.
@@ -169,10 +156,8 @@ impl UsageBuffer {
         self.pending_events = other.pending_events;
     }
 
-    /// Write everything buffered in one transaction and clear the buffer. Usage rows are
-    /// upserted (`use_count += n`); usage and events of keys purged meanwhile are dropped
-    /// (trashed keys still count). Returns rows written. On error the buffer is left
-    /// unchanged, so a later flush retries.
+    /// Write everything buffered in one transaction and clear the buffer; on error the buffer
+    /// is left unchanged. Usage of purged keys is dropped. Returns rows written.
     pub fn flush(&mut self, db: &Db) -> Result<usize> {
         if self.is_empty() {
             return Ok(0);
@@ -184,9 +169,8 @@ impl UsageBuffer {
     }
 }
 
-/// Upsert usage deltas and insert events (the body of [`UsageBuffer::flush`]). Rows of
-/// key ids that do not exist are skipped (no FK error); strings are cut to the column
-/// limits.
+/// Upsert usage deltas and insert events (the body of [`UsageBuffer::flush`]), skipping
+/// unknown key ids.
 pub fn write_batch(
     tx: &Transaction<'_>,
     usage: &BTreeMap<String, KeyUsage>,
@@ -271,9 +255,7 @@ pub fn events_for_key(conn: &Connection, key_id: &str, limit: usize) -> Result<V
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Anomaly flag: the key has stored events with an IP, none from `ip`. Both probes are
-/// range lookups on index `api_key_event_key_ip` (`ip >= ''` matches every non-NULL TEXT
-/// ip).
+/// Anomaly flag: the key has stored events with an IP, none from `ip`.
 pub fn is_new_ip(conn: &Connection, key_id: &str, ip: &str) -> Result<bool> {
     let (any, seen): (bool, bool) = conn
         .prepare_cached(

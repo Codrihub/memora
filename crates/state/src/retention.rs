@@ -111,11 +111,8 @@ fn prune_log(
 
 const DAY: i64 = 86_400;
 
-/// One bounded pass (at most `policy.batch` rows per table) in `tx`. Sessions use the
-/// `session_ttl` / `session_max_age` from `settings`.
-///
-/// Trashed keys are hard-deleted through [`keys::purge`] (which cascades their scopes,
-/// tools, usage and events), at most `batch` keys per pass.
+/// One bounded pass (at most `policy.batch` rows per table) in `tx`. Trashed keys are
+/// hard-deleted through [`keys::purge`].
 pub fn prune_batch(
     tx: &Transaction<'_>,
     policy: &RetentionPolicy,
@@ -184,9 +181,7 @@ pub fn prune_batch(
     Ok(rep)
 }
 
-/// Repeat [`prune_batch`], one short transaction each, until nothing is left to prune
-/// (a pass in which no table reached `policy.batch`). Other writers get the lock between
-/// passes.
+/// Repeat [`prune_batch`], one short transaction each, until nothing is left to prune.
 pub fn prune(db: &Db, policy: &RetentionPolicy, now: i64) -> Result<PruneReport> {
     let batch = usize::try_from(policy.batch.max(1)).unwrap_or(usize::MAX);
     let mut total = PruneReport::default();

@@ -1,13 +1,5 @@
-//! Per-caller path visibility and path-change hooks for [`MemoryStore`].
-//!
-//! * A [`PathView`] hides vault paths from the current caller (an agent). While a view
-//!   is set ([`lock_as`]), every listing of the store skips hidden notes (`walk`, search,
-//!   images, events, logs, locks, folder metadata), every path the caller names is
-//!   resolved as "not found" when hidden (reads and write targets alike), and folder
-//!   operations that would carry hidden items along are refused. The owner (no view)
-//!   sees everything.
-//! * A [`PathHook`] hears about every rename, move and delete the store performs, so the
-//!   server can keep privacy rules attached to the notes and folders they protect.
+//! Per-caller path visibility ([`PathView`], set via [`lock_as`]: hidden paths are left
+//! out of listings and answer "not found") and path-change hooks ([`PathHook`]).
 
 use crate::MemoryStore;
 use serde_json::Value;

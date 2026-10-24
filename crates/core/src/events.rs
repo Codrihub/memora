@@ -1,24 +1,6 @@
-//! Realtime event hub: persists notable events, keeps a ring buffer for replay,
-//! and fans out to WebSocket subscribers without blocking the caller.
-//!
-//!   * events arrive through `publish()` / `try_publish()`
-//!   * types worth storing are appended to `<vault>/.events.jsonl` with a `_ts` stamp
-//!   * the last 40 events are kept in a ring buffer and replayed to new clients
-//!   * fan-out to every subscriber (WebSocket) never blocks the publisher
-//!
-//! Resource bounds (everything here lives for the whole process):
-//!   * an event larger than `MAX_EVENT_BYTES` once serialized is rejected, so
-//!     neither the ring, the broadcast slots nor the log can be inflated by one
-//!     oversized event
-//!   * events are serialized once and broadcast as a shared `Arc<str>`; the
-//!     channel holds at most `CHAN` of them, a lagging client skips ahead
-//!   * `.events.jsonl` is compacted to its newest events once it passes the
-//!     configured byte limit (default `LOG_DEFAULT_BYTES`) or `LOG_MAX_LINES`
-//!     lines; events older than the configured day limit are pruned hourly
-//!
-//! The hub is a process-global (`OnceLock`) rather than part of an `AppState`:
-//! `MemoryStore` lives behind an `Arc<Mutex<..>>` shared across crates, and the
-//! hub must be identical from every entry point (MCP tool, HTTP handler, intake).
+//! Realtime event hub: persists notable events to `.events.jsonl` (size- and
+//! age-bounded), keeps a replay ring and broadcasts to WebSocket clients without
+//! blocking. A process-global so every entry point (MCP, HTTP, intake) shares it.
 
 use serde_json::{json, Value};
 use std::collections::VecDeque;

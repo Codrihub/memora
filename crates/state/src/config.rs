@@ -1,15 +1,11 @@
-//! Server configuration (table `server_config`) and environment provisioning.
-//!
-//! Precedence: DB row > process env > default. Provisioning secrets
-//! (`MEMORA_ADMIN_PASSWORD`, `MEMORA_API_KEY`) are not storable (schema CHECK); they are
-//! consumed into hashes by [`provision`].
+//! Server configuration (`server_config`; DB row > process env > default) and environment
+//! provisioning. Provisioning secrets are never stored, only consumed into hashes.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
-/// Keys `server_config` accepts, in display order, with the help text shown by the CLI.
-/// Mirrors the CHECK in the DDL (`MEMORA_ADMIN_PASSWORD` and `MEMORA_API_KEY` are absent
-/// on purpose).
+/// Keys `server_config` accepts, in display order, with the CLI help text. Mirrors the
+/// schema CHECK (provisioning secrets are absent on purpose).
 pub const CONFIG_KEYS: &[(&str, &str)] = &[
     ("MEMORA_PORT", "HTTP port (API, MCP, web UI and realtime share it)"),
     ("MEMORA_BIND", "Bind address: 0.0.0.0 for every interface, 127.0.0.1 behind a local proxy"),
@@ -55,8 +51,7 @@ pub fn default_value(key: &str) -> Option<&'static str> {
     }
 }
 
-/// Validate and normalise `value` for `key` (trimmed; `MEMORA_VAULT_AUTO` accepts
-/// 1/true/yes/on and 0/false/no/off and is stored as `true` / `false`).
+/// Validate and normalise `value` for `key` (trimmed; booleans stored as `true` / `false`).
 /// `Error::Invalid` for unknown keys, provisioning secrets and bad values.
 pub fn validate(key: &str, value: &str) -> Result<String> {
     check_key(key)?;
@@ -147,9 +142,8 @@ pub fn list(conn: &Connection) -> Result<Vec<ConfigEntry>> {
     Ok(rows)
 }
 
-/// Set `key` to `value`, or delete the row with `None` / empty. Unknown keys and the
-/// secrets in [`SECRET_ENV_KEYS`] -> `Error::Invalid`; values are checked and normalised by
-/// [`validate`].
+/// Set `key` to `value`, or delete the row with `None` / empty. Unknown keys and secrets
+/// are `Error::Invalid`; values go through [`validate`].
 pub fn set(tx: &Transaction<'_>, key: &str, value: Option<&str>, now: i64) -> Result<()> {
     let value = value.map(str::trim).filter(|v| !v.is_empty());
     // The key is checked even when deleting, so typos are reported.
@@ -179,9 +173,8 @@ pub fn effective(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(default_value(key).map(str::to_string))
 }
 
-/// Export every stored row into the process environment. Call before any thread starts
-/// (`std::env::set_var`). Returns the keys applied. A row with an empty value (possible
-/// only from an import) removes the variable.
+/// Export every stored row into the process environment; call before any thread starts.
+/// An empty value removes the variable. Returns the keys applied.
 pub fn apply_to_env(conn: &Connection) -> Result<Vec<String>> {
     let mut applied = Vec::new();
     for e in list(conn)? {
@@ -198,15 +191,13 @@ pub fn apply_to_env(conn: &Connection) -> Result<Vec<String>> {
     Ok(applied)
 }
 
-/// Inputs for [`provision`], already validated and hashed by the caller (hashing and
-/// `EnvConfig` parsing stay in `memora-gateway`). Fields are `None` when the env var is
-/// unset or was rejected (too short, invalid name).
+/// Inputs for [`provision`], already validated and hashed by the caller. Fields are `None`
+/// when the env var is unset or was rejected.
 #[derive(Debug, Clone, Default)]
 pub struct Provision {
     /// `MEMORA_ADMIN_USER` + argon2id hash of `MEMORA_ADMIN_PASSWORD`.
     pub owner: Option<(String, String)>,
-    /// sha256 hex + display prefix of `MEMORA_API_KEY`; stored as key
-    /// [`ENV_KEY_ID`].
+    /// sha256 hex + display prefix of `MEMORA_API_KEY`; stored as key [`ENV_KEY_ID`].
     pub api_key: Option<ProvisionKey>,
     /// `MEMORA_VAULT` when `MEMORA_VAULT_AUTO=true` and the folder is writable.
     pub vault_auto: Option<String>,
@@ -221,9 +212,8 @@ pub struct ProvisionKey {
 /// Id of the API key installed from `MEMORA_API_KEY`.
 pub const ENV_KEY_ID: &str = "k_env";
 
-/// Apply environment defaults in one transaction. Never overwrites an existing owner or a
-/// configured vault; replaces the [`ENV_KEY_ID`] key only when its hash differs. Returns
-/// lines for the startup log.
+/// Apply environment defaults in one transaction, never overwriting an existing owner or
+/// vault. Returns lines for the startup log.
 pub fn provision(tx: &Transaction<'_>, input: &Provision, now: i64) -> Result<Vec<String>> {
     let mut done = Vec::new();
     if let Some((user, hash)) = &input.owner {
@@ -261,9 +251,8 @@ pub fn provision(tx: &Transaction<'_>, input: &Provision, now: i64) -> Result<Ve
     Ok(done)
 }
 
-/// Install or replace the [`ENV_KEY_ID`] key. Returns false when a live key with the
-/// same hash is already there. A replaced or trashed key is reset to the defaults
-/// (enabled, all tools, scopes mcp/read/write), keeping its usage history.
+/// Install or replace the [`ENV_KEY_ID`] key (reset to defaults, usage kept). Returns false
+/// when a live key with the same hash is already there.
 fn provision_key(tx: &Transaction<'_>, key: &ProvisionKey, now: i64) -> Result<bool> {
     let hash = key.hash.trim().to_ascii_lowercase();
     if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {

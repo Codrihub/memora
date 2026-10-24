@@ -189,6 +189,38 @@ fn history_revisions_are_checked() {
 }
 
 #[test]
+fn history_numbers_versions_from_the_oldest() {
+    let d = vault("numbers", true);
+    let s = MemoryStore::new(&d);
+    for v in ["v1", "v2", "v3"] {
+        s.save_impl("Notes/a.md", v).unwrap();
+    }
+    let h = s.get_history_impl("Notes/a.md", 20).unwrap();
+    let nums: Vec<u64> = h.iter().map(|e| e["version"].as_u64().unwrap()).collect();
+    assert_eq!(nums, [3, 2, 1]);
+    assert!(h.iter().all(|e| e["total"] == 3));
+    // A short list keeps the numbers of the full history.
+    let top = s.get_history_impl("Notes/a.md", 1).unwrap();
+    assert_eq!(
+        (top.len(), &top[0]["version"], &top[0]["total"]),
+        (1, &json!(3), &json!(3))
+    );
+    // Restoring version 1 is version 4, and version 3 stays readable.
+    let first = h[2]["rev"].as_str().unwrap().to_string();
+    s.restore_impl("Notes/a.md", &first).unwrap();
+    let h = s.get_history_impl("Notes/a.md", 20).unwrap();
+    assert_eq!((h.len(), &h[0]["version"]), (4, &json!(4)));
+    assert_eq!(fs::read_to_string(d.join("Notes/a.md")).unwrap(), "v1");
+    let third = h[1]["rev"].as_str().unwrap();
+    assert_eq!(s.get_note_at_impl("Notes/a.md", third).unwrap(), "v3");
+    // Rendered like the reader shows the current note.
+    assert!(s
+        .render_note_html("Notes/a.md", "# Old\n**bold**")
+        .contains("<strong>bold</strong>"));
+    fs::remove_dir_all(&d).ok();
+}
+
+#[test]
 fn history_follows_renames() {
     let d = vault("rename", true);
     let s = MemoryStore::new(&d);

@@ -1,12 +1,6 @@
-//! Per-agent privacy (see `memora_state::privacy`) on the MCP side:
-//!
-//! * [`view_for_key`]: the [`PathView`] an API-key caller works under. Any error reading
-//!   the rules yields a view that hides everything (fail closed).
-//! * [`apply_event`]: keeps rules attached to their notes and folders when the store
-//!   renames, moves or deletes them (run by [`crate::path_hook`], installed by
-//!   [`crate::McpServer::new`]).
-//! * The JSON shapes shared by the admin tools (`privacy_list`, `privacy_set`,
-//!   `privacy_clear`) and the HTTP management API (`/api/privacy`).
+//! Per-agent privacy on the MCP side: the [`PathView`] an API-key caller works under
+//! (fail closed), rule upkeep on store path events, and the JSON shapes shared by the
+//! admin tools and `/api/privacy`.
 
 use memora_core::privacy::{PathEvent, PathView};
 use memora_state::keys::ApiKey;
@@ -134,8 +128,7 @@ pub fn describe(conn: &Connection, path: &str, kind: Kind) -> memora_state::Resu
             })
         })
         .collect();
-    // The rule as the panel edits it: the first own rule (several only after a rename
-    // onto a protected path; saving replaces them all).
+    // The rule as the panel edits it: the first own rule (saving replaces them all).
     let editable = own
         .first()
         .map(|r| json!({"mode": r.mode, "keys": r.keys.iter().collect::<Vec<_>>()}));

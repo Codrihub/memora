@@ -1,9 +1,5 @@
-//! Vault store: note/folder CRUD, tags and frontmatter, markdown rendering,
-//! git-backed history, zip export/import, soft locks, activity log, actor
-//! aliases, trash, and retagging.
-//!
-//! Implemented as inherent `impl` blocks on [`MemoryStore`], split across files;
-//! `MemoryStore` remains a single type.
+//! Vault operations on [`MemoryStore`]: notes, folders, tags, rendering, git history,
+//! trash, locks, activity log and zip export/import.
 
 use crate::privacy::PathEvent;
 use crate::{folder_of, re_tag, re_wikilink, MemoryStore};
@@ -19,6 +15,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+mod purge;
+
 /// A regex compiled once per call site (the renderer runs per line; compiling its
 /// patterns on every call dominated the cost of rendering a note).
 macro_rules! static_re {
@@ -28,10 +26,7 @@ macro_rules! static_re {
     }};
 }
 
-// ---------------------------------------------------------------------------
-// Expected errors (user-facing, not bugs)
-// ---------------------------------------------------------------------------
-
+/// An expected, user-facing error (not a bug).
 #[derive(Debug)]
 pub struct MemoryErr(pub String);
 
@@ -47,10 +42,6 @@ pub type MResult<T> = Result<T, MemoryErr>;
 pub fn err<T>(m: impl Into<String>) -> MResult<T> {
     Err(MemoryErr(m.into()))
 }
-
-// ---------------------------------------------------------------------------
-// Util
-// ---------------------------------------------------------------------------
 
 /// Frontmatter `status` values that `follow_ups` reports (still awaiting action).
 pub const FOLLOW_UP_STATUSES: &[&str] = &[
@@ -97,10 +88,8 @@ pub fn now_secs() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Open one of the store's own files (`.events.jsonl`, `.locks.json`, ...)
-/// owner-only (0600 on Unix): they hold agent names, labels, search text and
-/// paths, which other local users should not read even when the notes
-/// themselves are shared. An existing file with a wider mode is tightened.
+/// Open one of the store's own files (`.events.jsonl`, `.locks.json`, ...) owner-only
+/// (0600 on Unix), tightening a wider existing mode: they hold agent names and paths.
 pub fn open_private(path: &Path, append: bool) -> std::io::Result<fs::File> {
     let mut o = fs::OpenOptions::new();
     o.create(true);
@@ -314,15 +303,101 @@ pub fn clean_folder_path(path: &str) -> MResult<String> {
     Ok(segs.join("/"))
 }
 
-/// Turn a note title into a filesystem-safe filename (at most 80 characters).
+/// Characters a note file name never keeps: path separators, characters
+/// Windows refuses in names, and `#`, `^`, `[`, `]` and `|`, which would break a
+/// `[[wikilink]]` to the note.
+const UNSAFE_NAME_CHARS: &[char] = &[
+    '/', '\\', ':', '*', '?', '"', '<', '>', '|', '#', '^', '[', ']',
+];
+
+/// Turn a note title into a filesystem-safe filename: [`UNSAFE_NAME_CHARS`] and control
+/// characters dropped, whitespace collapsed, no leading dot, at most 80 chars / 200 bytes.
 pub fn safe_filename(title: &str) -> MResult<String> {
-    let re = static_re!(r"[^\w\s-]");
-    let name = re.replace_all(title, "").trim().replace(' ', "_");
-    if name.is_empty() {
+    let kept: String = title
+        .chars()
+        .map(|c| {
+            if c.is_control() || UNSAFE_NAME_CHARS.contains(&c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let name = kept.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = name.trim_start_matches(['.', ' ']);
+    let mut out = String::new();
+    for c in name.chars().take(80) {
+        if out.len() + c.len_utf8() > 200 {
+            break;
+        }
+        out.push(c);
+    }
+    // Windows drops trailing dots and spaces from names.
+    let out = out.trim_end_matches(['.', ' ']).to_string();
+    if out.is_empty() {
         return err("title produces an empty filename");
     }
-    let out: String = name.chars().take(80).collect();
     Ok(out)
+}
+
+/// The title a note shows from its text: frontmatter `title`, else the first
+/// `# heading` outside code fences. A template placeholder (`{{title}}`) is no
+/// title. See [`display_title`].
+pub fn content_title(content: &str) -> Option<String> {
+    let (fm_text, body) = split_frontmatter(content);
+    let real = |t: &str| !t.is_empty() && !t.contains("{{");
+    if content.starts_with("---") {
+        for (k, v) in parse_frontmatter(&fm_text) {
+            if k.eq_ignore_ascii_case("title") {
+                if let Some(t) = v.as_str().map(str::trim).filter(|t| real(t)) {
+                    return Some(t.to_string());
+                }
+            }
+        }
+    }
+    let mut fence: Option<&str> = None;
+    for line in body.lines() {
+        let t = line.trim_start();
+        let indent = line.len() - t.len();
+        if indent <= 3 {
+            for f in ["```", "~~~"] {
+                if t.starts_with(f) {
+                    fence = match fence {
+                        Some(open) if open == f => None,
+                        None => Some(f),
+                        other => other,
+                    };
+                }
+            }
+        }
+        if fence.is_some() || indent > 3 {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix('#') {
+            if rest.is_empty() || rest.starts_with([' ', '\t']) {
+                let h = rest.trim().trim_end_matches('#').trim();
+                if !h.is_empty() {
+                    return real(h).then(|| h.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// A file stem as a title: `_` shown as spaces (`My_Plan` -> `My Plan`).
+pub fn stem_title(stem: &str) -> String {
+    let t = stem.replace('_', " ");
+    match t.trim() {
+        "" => stem.to_string(),
+        t => t.to_string(),
+    }
+}
+
+/// The title the UI shows for a note: frontmatter `title` > first `# heading` >
+/// the file name with `_` shown as spaces. `file_stem` is the name without `.md`.
+pub fn display_title(content: &str, file_stem: &str) -> String {
+    content_title(content).unwrap_or_else(|| stem_title(file_stem))
 }
 
 /// The file name a note title makes (see [`note_filename`]).
@@ -336,9 +411,9 @@ pub struct NoteName {
 
 impl NoteName {
     /// Whether characters were removed or the name was cut to make the file name
-    /// (spaces becoming `_` does not count).
+    /// (repeated whitespace becoming one space does not count).
     pub fn changed(&self) -> bool {
-        self.file != self.title.replace(' ', "_")
+        self.file != self.title.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 }
 
@@ -375,7 +450,7 @@ pub fn title_notice(title: &str, path: &str) -> Option<(String, String)> {
         (
             title.to_string(),
             format!(
-                "the title was changed to make a safe file name (at most 80 letters, digits, `_` and `-`; spaces become `_`); the note is `{path}`"
+                "the title was changed to make a safe file name (at most 80 characters, without / \\ : * ? \" < > | # ^ [ ] or a leading dot); the note is `{path}`"
             ),
         )
     })
@@ -592,18 +667,12 @@ pub fn inline_tags(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Byte ranges of the names (after the `#`) of every inline `#tag` in `body`,
-/// in order, repeats included. The one tag scanner behind note tags, the
-/// search cache and tag renames.
+/// Byte ranges of the names (after the `#`) of every inline `#tag` in `body`, in
+/// order, repeats included: the one tag scanner behind note tags, search and renames.
 ///
-/// A tag is `#` + a letter/digit/`_` + letters, digits, `_`, `-`, `/` (a
-/// trailing `/` is not part of it). The `#` must start a line or follow a
-/// space or punctuation such as `(` `,` `*` `"`; it never counts after a
-/// letter, digit or one of `_ / \ # & = + @ . - : ) ] } % $ ^`. `# Heading`
-/// is no tag. Nothing inside fenced code blocks (```` ``` ```` / `~~~`), inline
-/// code spans, markdown link targets, `<autolinks>`, bare URLs or
-/// `[[wikilinks]]` counts, so `[[Note#Heading]]` and `https://x.y/#frag` give
-/// no tag.
+/// A tag is `#` + letters, digits, `_`, `-`, `/` (not ending in `/`), at a line start
+/// or after a space or punctuation such as `(` `,` `*` `"`. Code, link targets,
+/// autolinks, bare URLs and `[[wikilinks]]` hold no tags.
 pub fn inline_tag_spans(body: &str) -> Vec<std::ops::Range<usize>> {
     let masked = tag_scan_mask(body);
     let mut out = Vec::new();
@@ -1304,10 +1373,8 @@ fn inline_md(s: &str, ctx: &RenderCtx) -> String {
     out
 }
 
-/// Emit `<em>...</em>` for single-asterisk emphasis.
-///
-/// Implemented as a manual scan because Rust's regex crate has no look-around,
-/// so the `(?<![\*\w])\*(?!\*)([^*\n]+?)\*(?!\*)` pattern cannot be expressed directly.
+/// Emit `<em>...</em>` for single-asterisk emphasis (a manual scan: the regex crate
+/// has no look-around).
 fn emphasize(s: &str) -> String {
     let b: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -1569,15 +1636,10 @@ fn render_body(text: &str, ctx: &RenderCtx) -> String {
     out.join("\n")
 }
 
-/// Refuse a regex replacement naming a group the pattern does not define (the
-/// regex crate would expand it to nothing). `$$` is a literal `$`; `$1a` names
-/// the group `1a`, so `${1}a` is needed there.
-/// Largest note a replacement (`bulk_replace`, patch `replace`, template
-/// variables) may produce, and the most all edits of one `bulk_replace` may
-/// hold in memory together. Without a bound, a one-character `find` with a
-/// long replacement multiplies across every match and runs the server out of
-/// memory (which aborts the process).
+/// Largest note a replacement (`bulk_replace`, patch `replace`, template variables)
+/// may produce, so a short `find` with a long replacement cannot exhaust memory.
 pub const MAX_REPLACED_NOTE: usize = 16 * 1024 * 1024;
+/// Most all edits of one `bulk_replace` may hold in memory together.
 const MAX_REPLACED_TOTAL: usize = 256 * 1024 * 1024;
 
 /// Length of `text` with every `find` replaced by `with`, without building it.
@@ -1614,6 +1676,8 @@ fn replaced_size_ok(len: usize, rel: &str) -> MResult<()> {
     Ok(())
 }
 
+/// Refuse a regex replacement naming a group the pattern does not define (the regex
+/// crate would expand it to nothing). `$$` is a literal `$`; `$1a` names group `1a`.
 fn replace_groups_ok(pat: &Regex, replace: &str) -> MResult<()> {
     let names: HashSet<&str> = pat.capture_names().flatten().collect();
     let groups = pat.captures_len();
@@ -1771,12 +1835,9 @@ fn rewrite_links_in(content: &str, mut f: impl FnMut(&str) -> Option<String>) ->
     Some(out)
 }
 
-/// The new target text for wikilink target `raw` (written in a note that was in
-/// folder `old_dir` and is now in `new_dir`) after the notes in `moves` (old path ->
-/// new path) moved, or `None` when it still names the note it named before. A link
-/// keeps its form where it can: a bare name stays bare (renamed when its note was)
-/// unless that would name another note; otherwise it becomes the full path. `#heading`
-/// and a written `.md` are kept.
+/// The new text for wikilink target `raw` (in a note moved from `old_dir` to `new_dir`)
+/// after `moves` (old path -> new path), or `None` when it still names the same note.
+/// A bare name stays bare unless that would name another note; `#heading` and `.md` stay.
 fn relinked_target(
     raw: &str,
     old: &LinkIndex,
@@ -2779,27 +2840,10 @@ impl MemoryStore {
         let content = self
             .read_raw(&ap)
             .ok_or_else(|| MemoryErr(format!("permission denied: {path}")))?;
-        let note_dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
         // One walk for the whole view: links resolve against it, backlinks come
         // from the note cache (no file is read again unless it changed).
         let files = self.walk();
-        let links = LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
-        // Links resolve from this note's folder first (same names elsewhere).
-        let resolver = |t: &str| links.resolve(t, note_dir);
-        let images: std::cell::OnceCell<Vec<String>> = std::cell::OnceCell::new();
-        let file = |cand: &str, by_name: bool| -> Option<String> {
-            if !by_name {
-                return self.vault_image_file(cand).ok().map(|_| cand.to_string());
-            }
-            let list = images.get_or_init(|| self.image_files());
-            find_image_by_name(list, cand)
-        };
-        let ctx = RenderCtx {
-            note: &resolver,
-            file: &file,
-            note_dir,
-        };
-        let (html, tags, fm) = render_markdown_ctx(&content, &ctx);
+        let (html, tags, fm) = self.render_in(path, &content, &files);
         let name = Self::base_name(path);
         let name_l = name.to_lowercase();
         // A note links here when a wikilink target (minus folder, `.md` and
@@ -2834,6 +2878,41 @@ impl MemoryStore {
         }))
     }
 
+    /// Render `content` as the note at `path` would be shown: wikilinks and
+    /// images resolve against the vault as it is now (`files` from one walk).
+    fn render_in(
+        &self,
+        path: &str,
+        content: &str,
+        files: &[(String, String, PathBuf)],
+    ) -> (String, Vec<String>, Value) {
+        let note_dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+        let links = LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
+        // Links resolve from this note's folder first (same names elsewhere).
+        let resolver = |t: &str| links.resolve(t, note_dir);
+        let images: std::cell::OnceCell<Vec<String>> = std::cell::OnceCell::new();
+        let file = |cand: &str, by_name: bool| -> Option<String> {
+            if !by_name {
+                return self.vault_image_file(cand).ok().map(|_| cand.to_string());
+            }
+            let list = images.get_or_init(|| self.image_files());
+            find_image_by_name(list, cand)
+        };
+        let ctx = RenderCtx {
+            note: &resolver,
+            file: &file,
+            note_dir,
+        };
+        render_markdown_ctx(content, &ctx)
+    }
+
+    /// Rendered HTML of an older version of the note at `path` (as the reader
+    /// shows the current one).
+    pub fn render_note_html(&self, path: &str, content: &str) -> String {
+        let files = self.walk();
+        self.render_in(&norm_note_path(path), content, &files).0
+    }
+
     /// Apply a flat list of patch operations.
     pub fn patch_memory_impl(&self, path: &str, ops: &[Value]) -> MResult<Value> {
         let ap = self.resolve(path)?;
@@ -2851,9 +2930,8 @@ impl MemoryStore {
                 .to_string();
         }
         let mut fm = FmLines::parse(&fm_text);
-        // A field an op cannot do without: a missing one is an error, never an
-        // empty string (a `replace` without its replacement used to delete
-        // the matched text). Ops apply all at once, so nothing is saved.
+        // A missing required field is an error, never an empty string; ops apply
+        // all or none, so nothing is saved.
         let need = |v: &Value, k: &str, t: &str| -> MResult<String> {
             match v.get(k).and_then(|x| x.as_str()) {
                 Some(x) => Ok(x.to_string()),
@@ -3061,12 +3139,9 @@ impl MemoryStore {
         self.walk_all().into_iter().map(|(rel, _, _)| rel).collect()
     }
 
-    /// After the notes in `moves` (old path -> new path) moved, rewrite every wikilink
-    /// in the vault that named one of them (or that now names another note because the
-    /// linking note itself moved) so it names the same note as before. `before`: every
-    /// note path before the move ([`MemoryStore::all_note_paths`]). Notes hidden from
-    /// the caller are rewritten too, so links stay correct for everyone, but only the
-    /// notes the caller may see are counted. Returns that count.
+    /// After `moves` (old path -> new path), rewrite every wikilink so it names the same
+    /// note as before (`before`: [`MemoryStore::all_note_paths`] taken before the move).
+    /// Hidden notes are rewritten too; returns how many visible notes changed.
     fn rewrite_moved_links(&self, before: &[String], moves: &HashMap<String, String>) -> usize {
         if moves.iter().all(|(a, b)| a == b) {
             return 0;
@@ -3216,17 +3291,24 @@ impl MemoryStore {
         Ok((dest, links))
     }
 
+    /// Delete a note for good (no trash). With version history on, every earlier
+    /// version is erased from the history too (see [`Self::delete_trash_impl`]).
     pub fn delete_impl(&self, rel_path: &str) -> MResult<()> {
         let ap = self.resolve(rel_path)?;
         if !ap.is_file() {
             return err(format!("not found: {rel_path}"));
         }
+        let rel = self.rel_of(&ap);
         fs::remove_file(&ap).map_err(|e| MemoryErr(e.to_string()))?;
         self.path_event(PathEvent::Deleted {
             path: rel_path.to_string(),
         });
         let _ = self.reindex();
-        self.git_commit(&format!("delete: {rel_path}"));
+        if self.history_enabled() {
+            self.git_commit("delete forever (1 note)");
+            self.purge_history(std::slice::from_ref(&rel), &[])
+                .map_err(|e| erase_failed(&rel, e))?;
+        }
         Ok(())
     }
 
@@ -3237,11 +3319,9 @@ impl MemoryStore {
             .map(|v| v["folder"].as_str().unwrap_or("").to_string())
     }
 
-    /// [`MemoryStore::create_folder_impl`] with the details: `{folder, existed, note?}`.
-    /// A new folder gets an `Index.md` note titled after it (so it shows in the tree);
-    /// an existing folder is left untouched (`existed: true`), whether or not the
-    /// caller may see it, so the answer never tells a hidden folder from a visible one. `note` says how the
-    /// name was cleaned when that changed it.
+    /// [`MemoryStore::create_folder_impl`] with details: `{folder, existed, note?}`. A new
+    /// folder gets an `Index.md`; an existing one (hidden or not) is left untouched and
+    /// answers `existed: true`. `note` says how the name was cleaned, if it was.
     pub fn create_folder(&self, name: &str) -> MResult<Value> {
         let asked = folder_arg(name)?;
         if asked.is_empty() {
@@ -3586,12 +3666,9 @@ impl MemoryStore {
         self.delete_folder_with(folder, None, None)
     }
 
-    /// [`MemoryStore::delete_folder_impl`] with options. `into` moves the notes into
-    /// that existing folder instead of the parent (`Root` = top level), still keeping
-    /// the sub folder structure below the deleted folder. `trash` moves every note to
-    /// `.Trash` instead (recorded in `.Trash/.index.json`, so `restore_trash` brings
-    /// each back to where it was); `into` cannot be combined with it. `mode` is
-    /// `move` (the default when `None` or empty) or `trash`.
+    /// [`MemoryStore::delete_folder_impl`] with options: `into` moves the notes into that
+    /// existing folder instead of the parent; `mode` is `move` (default) or `trash`
+    /// (every note goes to `.Trash`, restorable), which cannot be combined with `into`.
     pub fn delete_folder_with(
         &self,
         folder: &str,
@@ -4339,8 +4416,8 @@ impl MemoryStore {
     }
 
     // ---- trash ----
-    /// `.Trash/.index.json`: trash file name -> `{path, deleted}` (where the note
-    /// lived and when it was trashed), so a restore puts it back where it was.
+    /// `.Trash/.index.json`: trash file name -> `{path, deleted, by?}`, so a restore puts
+    /// the note back where it was.
     fn trash_index_path(&self) -> PathBuf {
         self.root().join(".Trash").join(".index.json")
     }
@@ -4414,7 +4491,11 @@ impl MemoryStore {
         });
         let mut index = self.trash_index();
         let name = to.trim_start_matches(".Trash/").to_string();
-        index.insert(name, json!({"path": rel, "deleted": now_iso()}));
+        let mut entry = json!({"path": rel, "deleted": now_iso()});
+        if let Some(by) = DeletedBy::current() {
+            entry["by"] = by;
+        }
+        index.insert(name, entry);
         self.save_trash_index(&index);
         Ok(to)
     }
@@ -4434,9 +4515,8 @@ impl MemoryStore {
         Ok(json!({"ok": true, "trashed": path, "to": to}))
     }
 
-    /// Notes in `.Trash` the caller may see: `{name, path, original, deleted}`,
-    /// newest first. `original` / `deleted` are null for notes trashed before the
-    /// trash remembered them.
+    /// Notes in `.Trash` the caller may see, newest first: `{name, path, original,
+    /// deleted, by, title}`; `original`, `deleted` and `by` (`{id, name, kind}`) may be null.
     pub fn list_trash_impl(&self) -> Vec<Value> {
         let index = self.trash_index();
         let mut out: Vec<Value> = Vec::new();
@@ -4455,8 +4535,15 @@ impl MemoryStore {
                 continue;
             }
             let deleted = meta.and_then(|m| m.get("deleted")).cloned();
+            let by = meta.and_then(|m| m.get("by")).cloned();
+            let stem = original
+                .and_then(|o| o.rsplit('/').next())
+                .unwrap_or(&name)
+                .trim_end_matches(".md");
+            let title = display_title(&self.read(&entry.path()).unwrap_or_default(), stem);
             out.push(json!({"name": name, "path": path, "original": original,
-                            "deleted": deleted.unwrap_or(Value::Null)}));
+                            "deleted": deleted.unwrap_or(Value::Null),
+                            "by": by.unwrap_or(Value::Null), "title": title}));
         }
         out.sort_by(|a, b| {
             let d = |v: &Value| v["deleted"].as_str().unwrap_or("").to_string();
@@ -4466,9 +4553,10 @@ impl MemoryStore {
         out
     }
 
-    /// Bring a note back from `.Trash`: to the path it was trashed from (under its
-    /// original name), or into the folder `into` (`Root` = the top level).
-    pub fn restore_trash_impl(&self, name: &str, into: &str) -> MResult<Value> {
+    /// The file of the trash entry `name` (as list_trash shows it, `.Trash/` and
+    /// `.md` optional) and its name in the trash. A hidden entry answers exactly
+    /// like a missing one.
+    fn trash_entry(&self, name: &str) -> MResult<(PathBuf, String)> {
         let raw = name.trim().replace('\\', "/");
         let raw = raw.trim_start_matches('/');
         let base = raw.strip_prefix(".Trash/").unwrap_or(raw);
@@ -4477,22 +4565,9 @@ impl MemoryStore {
                 "give the name of a note in the trash as list_trash shows it (e.g. Plan.md), not {name}"
             ));
         }
-        let not_in = || {
-            err(format!(
-                "not in trash: {base} (list_trash shows what is there)"
-            ))
-        };
-        // `.md` may be left out.
-        let mut base = base.to_string();
-        let mut found = None;
-        for cand in [base.clone(), format!("{base}.md")] {
-            // A hidden trash entry answers exactly like a missing one.
+        for cand in [base.to_string(), format!("{base}.md")] {
             match self.resolve(&format!(".Trash/{cand}")) {
-                Ok(p) if p.is_file() => {
-                    found = Some(p);
-                    base = cand;
-                    break;
-                }
+                Ok(p) if p.is_file() => return Ok((p, cand)),
                 Ok(_) => {}
                 Err(e) if e.0.starts_with("not found") => {}
                 Err(e) => return Err(e),
@@ -4501,7 +4576,90 @@ impl MemoryStore {
                 break;
             }
         }
-        let Some(tap) = found else { return not_in() };
+        err(format!(
+            "not in trash: {base} (list_trash shows what is there)"
+        ))
+    }
+
+    /// Delete one trash entry for good, erasing it from the version history when that is
+    /// on. Returns `{ok, deleted, name, history?}` (`history` = `{erased, ms, commits}`).
+    pub fn delete_trash_impl(&self, name: &str) -> MResult<Value> {
+        let (_, base) = self.trash_entry(name)?;
+        let (_, hist) = self.remove_trash_entries(std::slice::from_ref(&base), "delete forever")?;
+        let mut v = json!({"ok": true, "deleted": format!(".Trash/{base}"), "name": base});
+        if let Some(h) = hist {
+            v["history"] = h;
+        }
+        Ok(v)
+    }
+
+    /// Delete every trash entry the caller may see, for good. Returns
+    /// `{ok, count, names}`.
+    pub fn empty_trash_impl(&self) -> MResult<Value> {
+        let names: Vec<String> = self
+            .list_trash_impl()
+            .iter()
+            .filter_map(|v| v["name"].as_str().map(String::from))
+            .collect();
+        let (gone, hist) = self.remove_trash_entries(&names, "empty trash")?;
+        let mut v = json!({"ok": true, "count": gone.len(), "names": gone});
+        if let Some(h) = hist {
+            v["history"] = h;
+        }
+        Ok(v)
+    }
+
+    /// Remove trash entries (checked names) and their index records in one commit,
+    /// then (history on) erase them from the history in one rewrite.
+    fn remove_trash_entries(
+        &self,
+        names: &[String],
+        why: &str,
+    ) -> MResult<(Vec<String>, Option<Value>)> {
+        let mut index = self.trash_index();
+        let mut gone = Vec::new();
+        for n in names {
+            let ap = self.resolve(&format!(".Trash/{n}"))?;
+            if !ap.is_file() {
+                continue;
+            }
+            fs::remove_file(&ap).map_err(|e| MemoryErr(e.to_string()))?;
+            self.path_event(PathEvent::Deleted {
+                path: format!(".Trash/{n}"),
+            });
+            index.remove(n);
+            gone.push(n.clone());
+        }
+        let mut hist = None;
+        if !gone.is_empty() {
+            self.save_trash_index(&index);
+            // The message names no note: it stays in the history.
+            self.git_commit(&match gone.len() {
+                1 => format!("{why} (1 note)"),
+                n => format!("{why} ({n} notes)"),
+            });
+            if self.history_enabled() {
+                let paths: Vec<String> = gone.iter().map(|n| format!(".Trash/{n}")).collect();
+                hist = Some(
+                    self.purge_history(&paths, &gone)
+                        .map_err(|e| erase_failed(&gone.join(", "), e))?,
+                );
+            }
+        }
+        Ok((gone, hist))
+    }
+
+    /// Bring a note back from `.Trash`: to the path it was trashed from (under its
+    /// original name), or into the folder `into` (`Root` = the top level).
+    pub fn restore_trash_impl(&self, name: &str, into: &str) -> MResult<Value> {
+        self.restore_trash_with(name, into, false)
+    }
+
+    /// [`Self::restore_trash_impl`]; with `free_name` a taken target path is not
+    /// refused: the note gets the first free name (`Plan-1.md` ...) and the reply
+    /// says `renamed: true`.
+    pub fn restore_trash_with(&self, name: &str, into: &str, free_name: bool) -> MResult<Value> {
+        let (tap, base) = self.trash_entry(name)?;
         let rel = format!(".Trash/{base}");
         let mut index = self.trash_index();
         let original = index
@@ -4522,13 +4680,34 @@ impl MemoryStore {
         } else {
             Some(self.move_target(into)?.map(|(f, _)| f).unwrap_or_default())
         };
-        let dest = match (folder, &original) {
+        let mut dest = match (folder, &original) {
             (None, Some(o)) => o.clone(),
             (None, None) => file,
             (Some(f), _) if f.is_empty() => file,
             (Some(f), _) => format!("{f}/{file}"),
         };
-        let dap = self.resolve(&dest)?;
+        let mut dap = self.resolve(&dest)?;
+        let mut renamed = false;
+        if free_name && dap.exists() {
+            let (dir, file) = match dest.rsplit_once('/') {
+                Some((d, f)) => (format!("{d}/"), f.to_string()),
+                None => (String::new(), dest.clone()),
+            };
+            let (stem, ext) = match file.rsplit_once('.') {
+                Some((s, e)) => (s.to_string(), format!(".{e}")),
+                None => (file.clone(), String::new()),
+            };
+            for i in 1..1000 {
+                let cand = format!("{dir}{stem}-{i}{ext}");
+                // A hidden name counts as taken.
+                if let Ok(p) = self.resolve(&cand) {
+                    if !p.exists() {
+                        (dest, dap, renamed) = (cand, p, true);
+                        break;
+                    }
+                }
+            }
+        }
         if dap.exists() {
             return err(if into.is_empty() {
                 format!("already exists: {dest}; pass `into` to restore it into another folder")
@@ -4550,7 +4729,51 @@ impl MemoryStore {
         }
         let _ = self.reindex();
         self.git_commit(&format!("restore from trash: {rel} -> {dest}"));
-        Ok(json!({"ok": true, "restored": dest, "path": dest, "from": rel}))
+        let mut out = json!({"ok": true, "restored": dest, "path": dest, "from": rel});
+        if renamed {
+            out["renamed"] = json!(true);
+        }
+        Ok(out)
+    }
+}
+
+/// Error for a delete forever whose history rewrite failed (files gone, history unchanged).
+fn erase_failed(what: &str, e: MemoryErr) -> MemoryErr {
+    MemoryErr(format!(
+        "{what} was deleted, but its earlier versions could not be erased from the version history ({}); the history was left unchanged",
+        e.0
+    ))
+}
+
+thread_local! {
+    static DELETED_BY: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Guard: while alive, notes trashed on this thread record `{id, name, kind}` (kind
+/// `agent` or `user`) as `by` in the trash index; the previous value returns on drop.
+pub struct DeletedBy(Option<Value>);
+
+impl DeletedBy {
+    pub fn set(id: &str, name: &str, kind: &str) -> Self {
+        let clip = |v: &str| {
+            v.chars()
+                .filter(|c| !c.is_control())
+                .take(80)
+                .collect::<String>()
+        };
+        let by = json!({"id": clip(id), "name": clip(name), "kind": clip(kind)});
+        DeletedBy(DELETED_BY.with(|a| a.replace(Some(by))))
+    }
+
+    fn current() -> Option<Value> {
+        DELETED_BY.with(|a| a.borrow().clone())
+    }
+}
+
+impl Drop for DeletedBy {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        DELETED_BY.with(|a| *a.borrow_mut() = prev);
     }
 }
 
@@ -4648,26 +4871,28 @@ struct LogEntry {
 }
 
 impl MemoryStore {
-    /// Run git in the vault, returning `(success, stdout, stderr)`. Only a vault that is its own
-    /// repository (has `.git`) is versioned: git must never climb into an enclosing repository.
+    /// A git command in the vault that never climbs into an enclosing repository.
+    fn git_cmd(&self) -> Command {
+        let mut cmd = Command::new("git");
+        if let Some(parent) = self.root().parent() {
+            cmd.env("GIT_CEILING_DIRECTORIES", parent);
+        }
+        cmd.args(["-c", "core.quotePath=false"])
+            .current_dir(self.root());
+        cmd
+    }
+
+    /// Run git in the vault, returning `(success, stdout, stderr)`; only a vault that is
+    /// its own repository (has `.git`) is versioned.
     fn git_run(&self, args: &[&str], envs: &[(&str, String)]) -> (bool, String, String) {
-        let root = self.root();
         if !self.history_enabled() {
             return (false, String::new(), String::new());
         }
-        let mut cmd = Command::new("git");
-        if let Some(parent) = root.parent() {
-            cmd.env("GIT_CEILING_DIRECTORIES", parent);
-        }
+        let mut cmd = self.git_cmd();
         for (k, v) in envs {
             cmd.env(k, v);
         }
-        match cmd
-            .args(["-c", "core.quotePath=false"])
-            .args(args)
-            .current_dir(root)
-            .output()
-        {
+        match cmd.args(args).output() {
             Ok(o) => (
                 o.status.success(),
                 String::from_utf8_lossy(&o.stdout).to_string(),
@@ -4696,11 +4921,8 @@ impl MemoryStore {
         }
     }
 
-    /// Keep the store's own scratch files ([`UNVERSIONED`]) out of the vault history:
-    /// list them in the repository's `info/exclude` (local, never committed) and stop
-    /// tracking them once if an earlier commit picked them up. Without this every write
-    /// committed the whole event log again, so `.git` grew by megabytes per edit and
-    /// agent activity ended up in the note history.
+    /// Keep the store's own scratch files ([`UNVERSIONED`]) out of the vault history: list
+    /// them in `info/exclude` and untrack them if an earlier commit picked them up.
     fn exclude_unversioned(&self) {
         let root = self.root();
         let dot_git = root.join(".git");
@@ -4868,23 +5090,30 @@ impl MemoryStore {
             .collect()
     }
 
+    /// A note's revisions, newest first: `{rev, date, author, message, version,
+    /// total}` (+ `path` under an earlier name). `version` counts from the oldest
+    /// revision (1) to the newest (`total`), so the same revision keeps its number
+    /// however many are listed.
     pub fn get_history_impl(&self, path: &str, limit: usize) -> MResult<Vec<Value>> {
         if limit < 1 {
             return err("limit must be at least 1");
         }
         let p = self.history_target(path)?;
-        Ok(self
-            .note_log(&p, Some(limit))
+        let log = self.note_log(&p, None);
+        let total = log.len();
+        Ok(log
             .into_iter()
-            .map(|e| {
+            .take(limit)
+            .enumerate()
+            .map(|(i, e)| {
                 // Commit messages name paths; hide those naming hidden ones.
                 let msg = if self.mentions_hidden(&e.subject) {
                     "(hidden)"
                 } else {
                     e.subject.as_str()
                 };
-                let mut v =
-                    json!({"rev": e.short, "date": e.date, "author": e.author, "message": msg});
+                let mut v = json!({"rev": e.short, "date": e.date, "author": e.author,
+                                   "message": msg, "version": total - i, "total": total});
                 if e.path != p && self.visible(&e.path) {
                     v["path"] = json!(e.path);
                 }
@@ -5249,12 +5478,9 @@ impl MemoryStore {
         } else {
             format!("{p}.md")
         };
-        // The note as spelled on disk: an exact match first, then one that differs
-        // only in case. (On Windows and macOS `is_file` is true for any spelling,
-        // so the lookup goes through the vault listing.)
-        // `.` and empty segments are spelling only (`Notes/./a.md`, `Notes//a.md`
-        // open `Notes/a.md`): drop them, or another spelling would slip past a
-        // lock. A symlink is matched by the note it leads to.
+        // Match the note as spelled on disk via the vault listing (`is_file` ignores case
+        // on Windows/macOS). `.` and empty segments are dropped and symlinks followed,
+        // so no other spelling slips past a lock.
         let typed = with_md.replace('\\', "/");
         let mut want = typed
             .split('/')
@@ -5481,9 +5707,7 @@ impl MemoryStore {
         let Ok(raw) = fs::read_to_string(&p) else {
             return Vec::new();
         };
-        // Only the newest 2000 lines are considered. The file itself is
-        // compacted by the event hub (its single writer); rewriting it here
-        // raced with concurrent appends and could drop events.
+        // Only the newest 2000 lines; the event hub, its single writer, compacts the file.
         let lines: Vec<&str> = raw.lines().collect();
         let from = lines.len().saturating_sub(2000);
         lines[from..]
@@ -6576,9 +6800,8 @@ mod image_render_tests {
         );
     }
 
-    /// Code spans inside image/embed syntax used to panic the renderer (a
-    /// re-match after restoring the code text failed); with `panic = "abort"`
-    /// one such note took the whole server down on every view.
+    /// Code spans inside image/embed syntax must not panic the renderer (with
+    /// `panic = "abort"` that takes the whole server down).
     #[test]
     fn code_spans_inside_embeds_never_panic() {
         let pieces = [
@@ -6990,6 +7213,149 @@ mod note_ops_tests {
     }
 
     #[test]
+    fn note_file_names_keep_spaces_and_drop_only_unsafe_characters() {
+        for (title, file) in [
+            ("My Plan", "My Plan"),
+            ("Sprint retro 2027", "Sprint retro 2027"),
+            ("Ideas (draft), v2 & more!", "Ideas (draft), v2 & more!"),
+            ("Café ünïcode 🚀", "Café ünïcode 🚀"),
+            ("snake_case stays", "snake_case stays"),
+            ("Plan: v2?", "Plan v2"),
+            ("a*b\"c<d>e|f", "a b c d e f"),
+            ("[[Link]] #tag ^block", "Link tag block"),
+            ("  lots \t of   space  ", "lots of space"),
+            (".hidden", "hidden"),
+            ("Ends with dots...", "Ends with dots"),
+            ("tab\u{7}bell", "tab bell"),
+        ] {
+            assert_eq!(safe_filename(title).unwrap(), file, "{title:?}");
+        }
+        for bad in ["", "   ", "???", "...", "#[]"] {
+            assert!(safe_filename(bad).is_err(), "{bad:?} accepted");
+        }
+        // At most 80 characters and 200 bytes (four-byte emoji stop at 50).
+        assert_eq!(safe_filename(&"x".repeat(300)).unwrap().chars().count(), 80);
+        assert_eq!(safe_filename(&"🚀".repeat(80)).unwrap().chars().count(), 50);
+        // A cut never leaves a trailing space.
+        let cut = safe_filename(&format!("{} tail", "y".repeat(79))).unwrap();
+        assert_eq!(cut, "y".repeat(79));
+    }
+
+    #[test]
+    fn created_notes_keep_spaces_in_their_file_names() {
+        let (d, s) = vault("spaced");
+        assert_eq!(
+            s.create_impl("Toast demo note", "Notes", None).unwrap(),
+            "Notes/Toast demo note.md"
+        );
+        let stub = fs::read_to_string(d.join("Notes/Toast demo note.md")).unwrap();
+        assert!(stub.contains("# Toast demo note"), "{stub}");
+        assert_eq!(
+            s.resolve_wikilink("Toast demo note").as_deref(),
+            Some("Notes/Toast demo note.md")
+        );
+        // Existing underscored files are left as they are.
+        fs::write(d.join("Notes/Old_name.md"), "# Old\n").unwrap();
+        s.reindex().unwrap();
+        assert_eq!(
+            s.create_impl("Old name", "Notes", None).unwrap(),
+            "Notes/Old name.md"
+        );
+        assert!(d.join("Notes/Old_name.md").is_file());
+        let (to, _) = s
+            .rename_note("Notes/Old name.md", "Brand new name")
+            .unwrap();
+        assert_eq!(to, "Notes/Brand new name.md");
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn display_titles_prefer_frontmatter_then_heading_then_the_spaced_file_name() {
+        assert_eq!(
+            display_title("---\ntitle: Launch plan\n---\n# Other\n", "x"),
+            "Launch plan"
+        );
+        assert_eq!(display_title("intro\n\n# Goals #\nbody", "x"), "Goals");
+        // Only a top heading names the note.
+        assert_eq!(display_title("## Section\nbody", "My_note"), "My note");
+        assert_eq!(
+            display_title("```\n# not a title\n```\nplain", "Sprint_retro"),
+            "Sprint retro"
+        );
+        assert_eq!(display_title("#tag only", "Perf_findings"), "Perf findings");
+        assert_eq!(display_title("", "___"), "___");
+        assert_eq!(
+            display_title("# {{title}} on {{date}}", "Meeting_notes"),
+            "Meeting notes"
+        );
+        let (d, s) = vault("titles");
+        fs::write(d.join("Notes/Agent_toast_note.md"), "no heading").unwrap();
+        let tree = s.titled_tree();
+        let title = |p: &str| {
+            tree.values()
+                .flatten()
+                .find(|n| n.path == p)
+                .map(|n| n.title.clone())
+                .unwrap()
+        };
+        assert_eq!(title("Notes/Agent_toast_note.md"), "Agent toast note");
+        assert_eq!(title("Notes/Ideas.md"), "Ideas");
+        // The plain tree (MCP listings) carries no title.
+        assert!(s.tree().values().flatten().all(|n| n.title.is_empty()));
+        fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn trash_records_who_deleted_and_can_be_emptied_or_restored_beside_a_taken_name() {
+        let (d, s) = vault("trash-ops");
+        fs::write(d.join("Notes/Plan.md"), "# Launch plan\n").unwrap();
+        fs::write(d.join("Notes/b.md"), "b").unwrap();
+        fs::write(d.join("c.md"), "c").unwrap();
+        {
+            let _by = DeletedBy::set("k1", "Claude", "agent");
+            s.soft_delete_impl("Notes/Plan.md").unwrap();
+        }
+        s.soft_delete_impl("Notes/b.md").unwrap();
+        s.soft_delete_impl("c.md").unwrap();
+        let list = s.list_trash_impl();
+        let plan = list.iter().find(|t| t["name"] == "Plan.md").unwrap();
+        assert_eq!(
+            plan["by"],
+            json!({"id": "k1", "name": "Claude", "kind": "agent"})
+        );
+        assert_eq!(plan["title"], "Launch plan");
+        assert_eq!(plan["original"], "Notes/Plan.md");
+        let b = list.iter().find(|t| t["name"] == "b.md").unwrap();
+        assert!(b["by"].is_null(), "the guard is gone: {b}");
+        // A taken path: refused by default, a free name on request.
+        fs::write(d.join("Notes/Plan.md"), "new").unwrap();
+        assert!(s.restore_trash_impl("Plan", "").is_err());
+        let r = s.restore_trash_with("Plan", "", true).unwrap();
+        assert_eq!(r["path"], "Notes/Plan-1.md");
+        assert_eq!(r["renamed"], true);
+        assert_eq!(read_file(&d, "Notes/Plan.md"), "new");
+        // One entry for good; a second time it is gone.
+        let v = s.delete_trash_impl("b").unwrap();
+        assert_eq!(v["name"], "b.md");
+        assert!(!d.join(".Trash/b.md").exists());
+        assert!(s.trash_original(".Trash/b.md").is_none());
+        assert!(s.delete_trash_impl("b.md").is_err());
+        for bad in ["", "../c.md", ".index.json", "x/y.md"] {
+            assert!(s.delete_trash_impl(bad).is_err(), "{bad:?}");
+        }
+        let v = s.empty_trash_impl().unwrap();
+        assert_eq!(v["count"], 1);
+        assert!(s.list_trash_impl().is_empty());
+        assert!(d.join(".Trash/.index.json").is_file());
+        assert_eq!(s.empty_trash_impl().unwrap()["count"], 0);
+        fs::remove_dir_all(&d).ok();
+    }
+
+    fn read_file(d: &Path, rel: &str) -> String {
+        fs::read_to_string(d.join(rel)).unwrap()
+    }
+
+    #[test]
     fn create_refuses_unsafe_folders_and_titles() {
         let (d, s) = vault("create");
         for f in ["/etc", "\\etc", "C:/x"] {
@@ -7017,8 +7383,10 @@ mod note_ops_tests {
             assert!(s.create_impl(t, "Notes", None).is_err(), "{t:?} accepted");
         }
         assert!(title_notice("Plan", "Notes/Plan.md").is_none());
-        assert!(title_notice("My Plan", "Notes/My_Plan.md").is_none());
-        assert!(title_notice("Plan 🚀", "Notes/Plan.md").is_some());
+        assert!(title_notice("My Plan", "Notes/My Plan.md").is_none());
+        assert!(title_notice("My   Plan", "Notes/My Plan.md").is_none());
+        assert!(title_notice("Plan 🚀", "Notes/Plan 🚀.md").is_none());
+        assert!(title_notice("Plan: v2?", "Notes/Plan v2.md").is_some());
         assert!(title_notice(&"x".repeat(300), "x").is_some());
         // Names differing only in case are one name.
         let e = msg(s.create_impl("ideas", "Notes", None));
@@ -7110,14 +7478,15 @@ mod note_ops_tests {
                 json!({"title": "Good"}),
                 json!({"title": "Two", "folder": "Notes", "content": "c"}),
                 json!({"title": "ideas", "folder": "Notes"}),
-                json!({"title": "Bad 🚀"}),
+                json!({"title": "Bad: 🚀?"}),
             ])
             .unwrap();
         assert_eq!(r[0]["path"], "Memory/Good.md");
         assert_eq!(r[1]["path"], "Notes/Two.md");
         assert_eq!(r[2]["ok"], false);
         assert_eq!(r[2]["item"], 3);
-        assert_eq!(r[3]["renamed_from"], "Bad 🚀");
+        assert_eq!(r[3]["renamed_from"], "Bad: 🚀?");
+        assert_eq!(r[3]["path"], "Memory/Bad 🚀.md");
         fs::remove_dir_all(&d).ok();
     }
 

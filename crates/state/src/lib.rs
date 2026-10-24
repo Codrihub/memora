@@ -1,26 +1,6 @@
-//! `memora-state`: the SQLite state database behind the Memora server and CLI.
-//!
-//! Design and contract: `docs/DATABASE.md`. One file, `<MEMORA_STATE>/memora.db`, in WAL
-//! mode, opened directly by both the server and `memora-cli`. No SQL lives outside this
-//! crate: other crates call the typed repository modules below.
-//!
-//! Layout:
-//! * [`db`]: [`Db`] open / pragmas / permissions, [`Db::write`] (`BEGIN IMMEDIATE`),
-//!   [`Db::read`].
-//! * [`migrate`]: `PRAGMA user_version` migration runner.
-//! * [`watch`]: cross-process change detection ([`Db::changed_domains`]).
-//! * Repositories, one module per table group. Write functions take a
-//!   `&rusqlite::Transaction` so they can only run inside [`Db::write`] and compose into one
-//!   atomic transaction; read functions take a `&rusqlite::Connection` (a transaction
-//!   derefs to one, so reads also work inside a write).
-//!
-//! Secrets never reach this crate in plaintext: callers pass sha256 / argon2id hashes
-//! (session ids, API keys, setup codes, passwords). The only hashing done here is sha256
-//! in the [`legacy`] import (legacy session ids, file fingerprints).
-//!
-//! Threading: [`Db`] is `Clone + Send + Sync` (connections behind mutexes). Calls block for
-//! microseconds up to `busy_timeout` (5 s) when another process holds the write lock, so
-//! async code should call it from `tokio::task::spawn_blocking`.
+//! `memora-state`: the SQLite state database behind the Memora server and CLI. All SQL
+//! lives here; write functions take a `Transaction` so they compose inside [`Db::write`].
+//! Calls may block up to the busy timeout, so async code should use `spawn_blocking`.
 
 pub mod db;
 pub mod migrate;
@@ -176,9 +156,7 @@ pub fn is_absolute_path(p: &str) -> bool {
     p.starts_with('/') || std::path::Path::new(p).is_absolute()
 }
 
-/// `canonicalize`, but on Windows without the `\\?\` prefix it adds to local
-/// drive paths, so stored and printed paths stay readable and usable by other
-/// tools (git). UNC paths keep their verbatim form.
+/// `canonicalize`, without the `\\?\` prefix Windows adds to local drive paths.
 pub fn canonical_path(p: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     let c = p.canonicalize()?;
     #[cfg(windows)]

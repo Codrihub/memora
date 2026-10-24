@@ -1,6 +1,5 @@
 //! Instance settings (realm, session lifetimes, password policy, vault), table `settings`
-//! (one row, always present). `suggested_vault` stays env-only (it reads `MEMORA_VAULT`,
-//! see [`crate::config::effective`]).
+//! (one row, always present).
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -58,8 +57,7 @@ pub fn get(conn: &Connection) -> Result<Settings> {
     )?)
 }
 
-/// Apply `patch` (bumps the `settings` revision); returns the new row. Every field is
-/// validated against the merged result (`session_max_age` is 0 or >= `session_ttl`);
+/// Apply `patch` and return the new row. Fields are validated against the merged result;
 /// nothing is written when any field is invalid.
 pub fn update(tx: &Transaction<'_>, patch: &SettingsPatch, now: i64) -> Result<Settings> {
     let mut s = get(tx)?;

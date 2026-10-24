@@ -1,13 +1,6 @@
-//! The owner's pinned notes and folders (see `memora_state::pins`) on the MCP side:
-//!
-//! * [`apply_event`]: keeps pins on their notes and folders when the store renames, moves,
-//!   trashes or deletes them (run by the path hook, [`crate::path_hook`], in the same
-//!   transaction as the privacy rules).
-//! * [`list_json`], [`pin`], [`unpin`]: the shapes and checks shared by the MCP tools
-//!   (`list_pins`, `pin`, `unpin`) and the HTTP API (`/api/pins`).
-//!
-//! Every function that reads the vault takes the store as the caller sees it: an agent
-//! whose privacy rules hide a path never sees, adds or removes a pin on it.
+//! The owner's pins on the MCP side: [`apply_event`] keeps them on renamed or moved items,
+//! and [`pin`], [`unpin`] and friends are shared by the MCP tools and `/api/pins`. Vault
+//! reads use the caller's privacy view, so hidden paths are never seen or changed.
 
 use memora_core::privacy::PathEvent;
 use memora_core::MemoryStore;
@@ -30,9 +23,8 @@ pub fn publish_changed() {
     publish_changed_by(None);
 }
 
-/// [`publish_changed`] naming who changed the pins over MCP (`by`): the actor's display
-/// name, id and kind, as the `ai_activity` events of the same call already carry, so the
-/// web UI can say "agent1 pinned Plan". Still no paths.
+/// [`publish_changed`] naming who changed the pins over MCP (`by`), so the web UI can say
+/// who pinned what. Still no paths.
 pub fn publish_changed_by(by: Option<&crate::Caller>) {
     let ev = match by {
         Some(c) => json!({
@@ -55,8 +47,7 @@ fn exists(store: &MemoryStore, kind: Kind, path: &str) -> bool {
 }
 
 /// `{count, pins:[{kind, path, position, missing}]}` for the pins `store`'s caller may
-/// see, in order. `missing`: the path no longer exists (renamed or deleted outside
-/// Memora).
+/// see, in order; `missing` means the path no longer exists.
 pub fn pins_json(store: &MemoryStore, all: &[Pin]) -> Value {
     let shown: Vec<Value> = all
         .iter()
@@ -115,9 +106,8 @@ fn not_found(kind: Kind, path: &str) -> memora_state::Error {
     memora_state::Error::NotFound(format!("{} {path}", kind.as_str()))
 }
 
-/// Pin an existing note or folder at `position` (among the pins the caller sees; default:
-/// the end), or move it there. `by`: the MCP caller (named in `pins_changed`), `None`
-/// for the browser. Returns [`pins_json`].
+/// Pin an existing note or folder at `position` among the visible pins (default: the
+/// end), or move it there. `by`: the MCP caller, `None` for the browser.
 pub fn pin(
     db: &Db,
     store: &MemoryStore,
@@ -135,8 +125,7 @@ pub fn pin(
         let cur = pins::list(tx)?;
         let existing = cur.iter().position(|p| p.kind == kind && p.path == path);
         already = existing.is_some();
-        // A position counts the pins the caller sees: it maps to the slot of the visible
-        // pin there, so a restricted caller can neither see nor count hidden ones.
+        // A position counts only the pins the caller sees, so hidden ones stay uncounted.
         let at = match position {
             // Pinning again without a position keeps the pin where it is.
             None => existing,
@@ -182,9 +171,8 @@ pub fn pin_item(
     )))
 }
 
-/// [`unpin`] for an item the caller names ([`resolve_item`]). Without `kind`, a path
-/// that no longer exists (renamed outside Memora, so the pin is `missing`) matches a
-/// pin on that path of either kind.
+/// [`unpin`] for an item the caller names ([`resolve_item`]). Without `kind`, a missing
+/// path matches a pin on that path of either kind.
 pub fn unpin_item(
     db: &Db,
     store: &MemoryStore,
@@ -233,9 +221,8 @@ pub fn unpin(
     Ok(v)
 }
 
-/// Replace every pin with `items` (reorder, remove, first upload). Owner only (no
-/// view): paths need not exist, so a missing pin can be kept or removed. Returns
-/// [`pins_json`].
+/// Replace every pin with `items` (reorder, remove, first upload). Owner only; paths need
+/// not exist. Returns [`pins_json`].
 pub fn replace(
     db: &Db,
     store: &MemoryStore,
@@ -317,8 +304,7 @@ mod tests {
             ]
         );
 
-        // Trash and delete drop pins; deleting a folder drops the folder pins under it,
-        // while a note inside moves up to the parent folder and its pin follows.
+        // Trash and delete drop pins; a note inside a deleted folder moves up and keeps its pin.
         s.soft_delete_impl("top.md").unwrap();
         s.delete_impl("Archive/Projects/Roadmap.md").unwrap();
         s.delete_folder_impl("Archive/Projects/Sub").unwrap();

@@ -1,15 +1,5 @@
-//! Browser sessions, table `session`.
-//!
-//! There is no in-memory session map: each request does a PK lookup ([`lookup`]).
-//! `last_seen` updates are buffered ([`LastSeenBuffer`]) and written at most once a minute
-//! per session.
-//!
-//! The cookie value never reaches the DB: callers pass `sid_hash = sha256(sid)` hex.
-//!
-//! Server flow per request: `lookup` (read connection) -> `LastSeenBuffer::note`; every
-//! 5 s `LastSeenBuffer::flush`. Because the stored `last_seen` lags the real one by at
-//! most `LAST_SEEN_EVERY` + the flush interval, the idle timeout is exact to about a
-//! minute.
+//! Browser sessions (`session`), keyed by `sha256(sid)` hex. Each request does a PK
+//! [`lookup`]; `last_seen` writes are buffered ([`LastSeenBuffer`]) to once a minute.
 
 use crate::{Db, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
@@ -95,10 +85,8 @@ fn truncate(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
-/// Insert a session for the owner; prunes expired sessions and enforces
-/// [`MAX_SESSIONS`] in the same transaction. Fails (FK) when there is no owner.
-/// `Error::Invalid` for a malformed hash, a source outside 1-32 chars or an ip over 45
-/// chars; the user agent is truncated to 300 chars.
+/// Insert a session for the owner, pruning expired ones and enforcing [`MAX_SESSIONS`].
+/// `Error::Invalid` for malformed input; the user agent is truncated to 300 chars.
 pub fn create(
     tx: &Transaction<'_>,
     new: &NewSession,
@@ -162,9 +150,8 @@ pub fn create(
     Ok(session)
 }
 
-/// The live session with this hash, if any (no write; expired rows are left for
-/// [`prune`]). Combine with [`LastSeenBuffer`] for the sliding window.
-/// One primary-key probe; a malformed hash simply finds nothing.
+/// The live session with this hash, if any (no write; a malformed hash finds nothing).
+/// Combine with [`LastSeenBuffer`] for the sliding window.
 pub fn lookup(
     conn: &Connection,
     sid_hash: &str,
@@ -255,10 +242,8 @@ pub fn revoke_others(tx: &Transaction<'_>, keep_sid_hash: &str) -> Result<usize>
     Ok(tx.execute("DELETE FROM session WHERE sid_hash <> ?1", [keep_sid_hash])?)
 }
 
-/// CLI sign-out by `sid_hash` prefix. Prefix: [`MIN_PREFIX_LEN`]..=64 lowercase hex
-/// (surrounding whitespace ignored, uppercase accepted), else `Error::Invalid`. A prefix
-/// matching more than one session is refused with `Error::Conflict` and nothing is deleted.
-/// Returns how many ended: 1, or 0 when nothing matches (already gone).
+/// CLI sign-out by `sid_hash` prefix ([`MIN_PREFIX_LEN`]..=64 hex). An ambiguous prefix
+/// is `Error::Conflict`. Returns how many ended (1 or 0).
 pub fn revoke_prefix(tx: &Transaction<'_>, prefix: &str) -> Result<usize> {
     let prefix = prefix.trim().to_ascii_lowercase();
     if prefix.len() < MIN_PREFIX_LEN || prefix.len() > HASH_LEN || !is_lower_hex(&prefix) {
@@ -351,18 +336,15 @@ pub fn revoked_reason(sid_hash: &str, now: i64) -> Option<String> {
         .map(|(r, _)| r.clone())
 }
 
-/// Pending `last_seen` updates (sid_hash -> time), flushed with the 5 s ticker.
-/// Holds at most [`MAX_SESSIONS`] entries (the store cannot hold more live sessions);
-/// beyond that, new sessions are not buffered until the next flush.
+/// Pending `last_seen` updates (sid_hash -> time), at most [`MAX_SESSIONS`] entries.
 #[derive(Debug, Default)]
 pub struct LastSeenBuffer {
     pub pending: BTreeMap<String, i64>,
 }
 
 impl LastSeenBuffer {
-    /// Note a request on `session`; buffers an update when the stored `last_seen` is at
-    /// least [`LAST_SEEN_EVERY`] seconds old. Returns true if buffered. A session already
-    /// buffered has its time advanced (no extra memory).
+    /// Note a request on `session`; buffers an update when the stored `last_seen` is at least
+    /// [`LAST_SEEN_EVERY`] seconds old. Returns true if buffered.
     pub fn note(&mut self, session: &Session, now: i64) -> bool {
         if let Some(at) = self.pending.get_mut(&session.sid_hash) {
             *at = (*at).max(now);

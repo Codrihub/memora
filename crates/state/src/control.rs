@@ -1,12 +1,5 @@
-//! Requests from `memora-cli` to the running server for state that lives only in server
-//! memory, table `control_request` (docs/DATABASE.md section 3.5).
-//!
-//! The CLI inserts a request and polls [`wait_for_ack`]; the server sees `data_version`
-//! change, handles [`pending`] requests and calls [`complete`].
-//!
-//! A request nobody answered within the CLI's timeout is marked done with result
-//! [`EXPIRED`] by [`wait_for_ack`], so a server started later does not act on a stale
-//! request the operator was already told had no effect.
+//! Requests from `memora-cli` to the running server for server-memory state
+//! (`control_request`). Unanswered requests are marked [`EXPIRED`] so they never run late.
 
 use crate::{Db, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
@@ -125,8 +118,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<ControlRequest>> {
 }
 
 /// Mark done with a short result (server side; truncated to 500 chars). The first
-/// completion wins: completing a request that is already done (e.g. expired by the CLI)
-/// changes nothing. `Error::NotFound` for an unknown id.
+/// completion wins. `Error::NotFound` for an unknown id.
 pub fn complete(tx: &Transaction<'_>, id: i64, result: &str, now: i64) -> Result<()> {
     let result: String = result.chars().take(MAX_RESULT).collect();
     let n = tx.execute(
@@ -146,10 +138,8 @@ pub fn complete(tx: &Transaction<'_>, id: i64, result: &str, now: i64) -> Result
     Ok(())
 }
 
-/// Poll request `id` until done or `timeout` (CLI side, e.g. 3 s). `None` = no server
-/// answered ("server not running; nothing to clear"); the request is then marked done
-/// with result [`EXPIRED`] so it is not acted on later. `Error::NotFound` for an unknown
-/// id.
+/// Poll request `id` until done or `timeout` (CLI side). `None` = no server answered; the
+/// request is then marked [`EXPIRED`]. `Error::NotFound` for an unknown id.
 pub fn wait_for_ack(db: &Db, id: i64, timeout: Duration) -> Result<Option<ControlRequest>> {
     let deadline = Instant::now() + timeout;
     loop {
@@ -165,8 +155,7 @@ pub fn wait_for_ack(db: &Db, id: i64, timeout: Duration) -> Result<Option<Contro
         }
         std::thread::sleep(left.min(POLL_EVERY));
     }
-    // Expire it, unless the server completed it in the meantime (checked in the same
-    // write transaction, so exactly one of the two outcomes is recorded).
+    // Expire it unless the server completed it meanwhile (same transaction, one outcome).
     db.write(|tx| {
         complete(tx, id, EXPIRED, crate::now())?;
         let req = get(tx, id)?.ok_or_else(|| Error::NotFound(format!("control request {id}")))?;

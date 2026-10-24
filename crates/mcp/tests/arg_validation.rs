@@ -1,7 +1,5 @@
-//! `tools/call` arguments are checked against each tool's `inputSchema`
-//! before the tool runs: unknown names, missing required arguments and wrong
-//! JSON types are refused with a message that names the problem and lists the
-//! tool's arguments, and nothing in the vault changes.
+//! `tools/call` arguments are checked against each tool's `inputSchema` before the tool
+//! runs; refusals name the problem and list the arguments, and the vault is unchanged.
 
 use memora_core::MemoryStore;
 use memora_mcp::{admin_catalog, catalog, Caller, McpServer, RpcRequest};
@@ -196,7 +194,7 @@ fn the_reported_mistakes_are_refused_and_change_nothing() {
     let dir = scratch("reported");
     let srv = server(&dir);
 
-    // move_memory without the required folder used to move the note to the top level.
+    // move_memory with a wrong or missing `folder` must not move the note.
     let (is_err, text) = call(
         &srv,
         "move_memory",
@@ -215,7 +213,7 @@ fn the_reported_mistakes_are_refused_and_change_nothing() {
     );
     assert!(dir.join("vault/Plan/Index.md").exists());
 
-    // create_memory with a path used to land in Memory/ under the title.
+    // create_memory takes no `path`.
     let (is_err, text) = call(
         &srv,
         "create_memory",
@@ -291,7 +289,7 @@ fn documented_aliases_nulls_and_empty_arguments_still_work() {
     let r = serde_json::to_value(srv.handle_as(&req, &Caller::full("owner"))).unwrap();
     assert_eq!(r["result"]["isError"], false, "{r}");
 
-    // get_tags with a path, search_by_tag with a limit: both were read but undocumented.
+    // get_tags with a path, search_by_tag with a limit are accepted.
     let (is_err, text) = call(&srv, "get_tags", json!({"path": "Plan/Index.md"}));
     assert!(!is_err, "{text}");
     let (is_err, text) = call(&srv, "search_by_tag", json!({"tag": "tech", "limit": 5}));

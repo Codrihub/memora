@@ -1,8 +1,4 @@
-//! `tools`: the remaining MCP tools, mapping onto `memora_core` vault operations.
-//!
-//! Kept separate from `lib.rs` so the base catalog stays readable. Every tool
-//! here calls a `*_impl` helper in `crates/core/src/vault.rs`, so it behaves
-//! exactly like the UI and HTTP surfaces.
+//! The remaining MCP tools, each mapping onto a `*_impl` vault operation in `memora_core`.
 
 use crate::ToolSpec;
 use memora_core::MemoryStore;
@@ -151,7 +147,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_history",
             "version",
-            "Git revision history of a note, newest first, as an array of {rev, date, author, message} (plus `path` for commits made under an earlier name: the history follows renames). `author` is the agent or user whose call made the change; changes made outside Memora show the vault's git user. Needs version history on (the vault is a git repository); otherwise it says how to turn it on.",
+            "Git revision history of a note, newest first, as an array of {rev, date, author, message, version, total} (plus `path` for commits made under an earlier name: the history follows renames). `version` numbers the revisions from 1 (the oldest) to `total` (the current one), whatever `limit` is. `author` is the agent or user whose call made the change; changes made outside Memora show the vault's git user. Needs version history on (the vault is a git repository); otherwise it says how to turn it on.",
             "Before restoring or comparing an older version.",
             json!({"path":{"type":"string"},"limit":{"type":"integer","default":20,"minimum":1}}),
             &["path"],
@@ -192,7 +188,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             "soft_delete",
             "version",
             "Move a note to .Trash (still recoverable with restore_trash; list_trash shows the trash). The trash remembers where the note came from. A name already taken in the trash gets a suffix (Plan-1.md).",
-            "When you are not ready to delete permanently.",
+            "Same as delete_memory without `permanent`.",
             json!({"path":{"type":"string"}}),
             &["path"],
         ),
@@ -207,7 +203,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "list_trash",
             "version",
-            "Notes in .Trash, newest first: {name, path, original, deleted}. `name` is what restore_trash takes, `original` the path it was deleted from, `deleted` when (both null for notes trashed by older versions).",
+            "Notes in .Trash, newest first: {name, path, original, deleted, by, title}. `name` is what restore_trash takes, `original` the path it was deleted from, `deleted` when (both null for notes trashed by older versions), `by` who deleted it ({id, name, kind}; null when unknown).",
             "Before restore_trash, to find a deleted note.",
             json!({}),
             &[],
@@ -917,11 +913,8 @@ pub fn extra_names() -> Vec<&'static str> {
     extra_specs().iter().map(|t| t.name).collect()
 }
 
-/// The full path of `name` in `dir`, the exchange folder where `export_memory`
-/// writes and `import_memory` reads zips (`<state>/exchange`: one per Memora
-/// instance, created private). Only plain names (`[A-Za-z0-9._-]`, ending in
-/// `.zip`, no leading dot) are accepted, so a tool call can never read or write
-/// anywhere else on the server.
+/// The full path of `name` in the exchange folder `dir`. Only plain `.zip` names
+/// (`[A-Za-z0-9._-]`, no leading dot) are accepted, so no other path can be reached.
 fn exchange_file(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
     let ok = !name.is_empty()
         && name.len() <= 120

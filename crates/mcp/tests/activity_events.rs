@@ -91,8 +91,7 @@ fn key_call_carries_name_paths_and_end_event() {
     assert!(s["call_id"].as_str().is_some_and(|c| !c.is_empty()));
     assert_eq!(e["ok"], true);
     assert!(e["ms"].as_u64().is_some());
-    // A read-only call's start is published after it ran (it is the row the log
-    // keeps), so it already carries the outcome: no reader shows it as running.
+    // A read-only call's start is published after it ran, so it already has the outcome.
     assert_eq!(s["ok"], true);
     assert!(s["ms"].as_u64().is_some());
 
@@ -233,5 +232,57 @@ fn initialize_registers_the_key_name_as_alias() {
     assert_eq!(list[0].key_id, "k_actals1");
     assert_eq!(list[0].key_name.as_deref(), Some("alias-bot"));
     assert_eq!(list[0].connections, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn refused_calls_are_logged_as_failed_attempts() {
+    let dir = scratch("refused");
+    let srv = server(&dir);
+    let mut rx = memora_core::events::hub().subscribe();
+    let ro = Caller::key(
+        "k_actref1",
+        KeyPermissions {
+            enabled: true,
+            scopes: ["mcp", "read"].iter().map(|s| s.to_string()).collect(),
+            tools: memora_gateway::ToolGrant::All,
+        },
+        None,
+    )
+    .named("reader-bot");
+
+    let r = call(
+        &srv,
+        &ro,
+        "patch_memory",
+        json!({"path": "Plan/Index.md", "find": "a", "replace": "b"}),
+    );
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    let evs = drain(&mut rx, "reader-bot");
+    let act = activity(&evs);
+    assert_eq!(act.len(), 2, "{evs:?}");
+    let (s, e) = (act[0], act[1]);
+    assert_eq!(
+        (s["phase"].as_str(), e["phase"].as_str()),
+        (Some("start"), Some("end"))
+    );
+    assert_eq!(s["call_id"], e["call_id"]);
+    for v in [s, e] {
+        assert_eq!(v["action"], "patch_memory");
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["refused"], true);
+        assert_eq!(v["paths"], json!(["Plan/Index.md"]));
+        assert_eq!(
+            v["error"],
+            "API key lacks the 'write' scope for tool: patch_memory"
+        );
+    }
+
+    // A search's start says how many results it found.
+    call(&srv, &ro, "search_memory", json!({"query": "zebra"}));
+    let evs = drain(&mut rx, "reader-bot");
+    let act = activity(&evs);
+    assert_eq!(act[0]["count"], 2, "{evs:?}");
+    assert!(act[0].get("refused").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

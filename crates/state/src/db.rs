@@ -1,10 +1,5 @@
-//! Opening the state database, connection pragmas, file permissions, and the
-//! transaction helpers [`Db::write`] / [`Db::read`].
-//!
-//! Connection model (docs/DATABASE.md section 3.2): one write connection behind a mutex,
-//! one read connection behind a mutex. Operations take microseconds, so no pool is needed.
-//! Other processes (`memora-cli`) open their own [`Db`] on the same file; WAL gives them
-//! concurrent readers and `BEGIN IMMEDIATE` + `busy_timeout` serialise writers.
+//! Opening the state database, connection pragmas, file permissions, and the transaction
+//! helpers [`Db::write`] / [`Db::read`] (one write and one read connection, WAL mode).
 
 use crate::watch::WatchState;
 use crate::{migrate, Error, Result};
@@ -52,16 +47,8 @@ impl std::fmt::Debug for Db {
 }
 
 impl Db {
-    /// Open (or create) `<state_dir>/memora.db` and bring the schema up to date.
-    ///
-    /// * creates `state_dir` (mode 0700) when it does not exist;
-    /// * creates the database file with mode 0600, and tightens `memora.db`, `-wal`,
-    ///   `-shm` to 0600 (SQLite creates `-wal`/`-shm` with the database file's mode);
-    /// * refuses foreign SQLite files ([`Error::ForeignFile`]) and schemas newer than this
-    ///   binary ([`Error::TooNew`]);
-    /// * runs pending migrations, each in its own `BEGIN IMMEDIATE` transaction.
-    ///
-    /// The database must be on a local filesystem (WAL needs shared memory).
+    /// Open (or create) `<state_dir>/memora.db` owner-only and run pending migrations.
+    /// Fails on foreign SQLite files and newer schemas. Needs a local filesystem (WAL).
     pub fn open(state_dir: &Path) -> Result<Db> {
         Self::open_in(state_dir, None)
     }
@@ -113,12 +100,8 @@ impl Db {
         self.inner.path.parent().unwrap_or_else(|| Path::new("."))
     }
 
-    /// Run `f` in one write transaction started with `BEGIN IMMEDIATE` (the write lock is
-    /// taken up front, so there is no read-to-write upgrade deadlock; a concurrent writer
-    /// in another process makes this wait up to [`BUSY_TIMEOUT`]).
-    ///
-    /// Commits when `f` returns `Ok`, rolls back when it returns `Err`. Compose several
-    /// repository calls inside one closure to make a multi-step operation atomic.
+    /// Run `f` in one `BEGIN IMMEDIATE` write transaction (waits up to [`BUSY_TIMEOUT`] for
+    /// another writer). Commits on `Ok`, rolls back on `Err`.
     pub fn write<T>(&self, f: impl FnOnce(&Transaction<'_>) -> Result<T>) -> Result<T> {
         let mut conn = lock(&self.inner.writer);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -178,10 +161,8 @@ fn enable_wal(conn: &Connection, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create the state folder owner-only (0700), or tighten an existing one that
-/// others can read or enter: it holds the database and the key that unseals
-/// stored secrets. Tightening is best effort (a folder owned by another user,
-/// e.g. a container volume, is left as it is; the CLI's `db check` reports it).
+/// Create the state folder owner-only (0700), or tighten an existing one (best effort:
+/// a folder owned by another user is left as it is).
 fn ensure_private_dir(dir: &Path) -> Result<()> {
     if dir.is_dir() {
         #[cfg(unix)]

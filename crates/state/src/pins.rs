@@ -1,15 +1,6 @@
-//! The owner's pinned notes and folders, table `pin` (migration 7): an ordered list shown
-//! as "Pinned" in the web UI sidebar and shared by every browser of the instance. One
-//! owner per instance (like [`crate::ui_layout`]), so rows carry no owner.
-//!
-//! Paths are vault-relative, exactly as the store names them: notes with `.md`, folders
-//! without a trailing `/`. [`check_path`] refuses anything else (absolute, `..`, hidden
-//! segments, control characters, over-long), so a pin can only name a vault item.
-//!
-//! The server keeps pins on their items: [`rename_path`] (a note, or a folder with
-//! everything below it, renamed or moved) and [`forget`] (deleted, or moved into the
-//! trash) run in the same transaction as the path hook of the store operation. A path
-//! changed outside Memora is left alone and reported as missing by the caller.
+//! The owner's pinned notes and folders (`pin`): an ordered list shared by every browser.
+//! Paths are vault-relative (notes with `.md`); [`rename_path`] and [`forget`] keep pins
+//! on their items when the store renames, moves or deletes them.
 
 use crate::{Error, Result};
 use rusqlite::{params, Connection, Transaction};
@@ -59,9 +50,8 @@ pub struct Pin {
     pub created_at: i64,
 }
 
-/// `path` if it is a valid vault path for a pin of `kind`: relative, `/`-separated, no
-/// empty, `.`, `..` or hidden (`.x`) segment, no control character or `\`, at most
-/// [`MAX_PATH`] characters; a note path ends in `.md`.
+/// `path` if it is a valid vault path for a pin of `kind`: relative, no empty, `.`, `..`
+/// or hidden segment, no control character or `\`, at most [`MAX_PATH`] chars; notes end in `.md`.
 pub fn check_path(kind: Kind, path: &str) -> Result<()> {
     let bad = |reason: &str| Err(Error::invalid("path", reason));
     if path.is_empty() {
@@ -225,9 +215,8 @@ fn under(path: &str, base: &str) -> bool {
             && path[base.len()..].starts_with('/'))
 }
 
-/// `old` (a note, or a folder with everything in it) is now at `new`: pins on `old` and
-/// below it follow. A `new` that cannot be pinned (the trash, a hidden folder) drops them
-/// instead ([`forget`]). Returns how many pins changed.
+/// `old` (a note, or a folder with everything in it) is now at `new`: pins follow, or are
+/// dropped when `new` cannot be pinned (trash, hidden folder). Returns how many changed.
 pub fn rename_path(tx: &Transaction<'_>, old: &str, new: &str) -> Result<usize> {
     if old.is_empty() || old == new {
         return Ok(0);

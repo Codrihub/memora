@@ -120,9 +120,8 @@ pub fn log(tx: &Transaction<'_>, ev: &NewActivity<'_>, now: i64) -> Result<i64> 
     Ok(tx.last_insert_rowid())
 }
 
-/// Standalone append in its own short transaction. Never fails the caller: a bad event
-/// name, or a write lock held by another process past the busy timeout, drops the event
-/// silently (this crate has no logging dependency).
+/// Standalone append in its own short transaction. Never fails the caller: errors drop
+/// the event silently.
 pub fn log_activity(db: &Db, event: &str, ip: Option<&str>, actor: Option<&str>, detail: &str) {
     let ev = NewActivity {
         event,

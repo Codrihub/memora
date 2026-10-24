@@ -1,23 +1,7 @@
-//! `ai_activity` realtime events for MCP tool calls.
-//!
-//! Every tool call publishes two events sharing one `call_id`:
-//!
-//! ```json
-//! {"type":"ai_activity","phase":"start","call_id":"…","actor":"my-agent","actor_kind":"agent",
-//!  "actor_id":"k_1a2b3c4d","action":"read_memory","label":"Plan/Index.md","paths":["Plan/Index.md"]}
-//! {"type":"ai_activity","phase":"end","call_id":"…","actor":"my-agent","actor_kind":"agent",
-//!  "actor_id":"k_1a2b3c4d","action":"read_memory","label":"Plan/Index.md","paths":["Plan/Index.md"],
-//!  "ok":true,"ms":3}
-//! ```
-//!
-//! * `paths`: vault-relative note paths from the arguments (`path`, `paths`, `from`, `to`,
-//!   ...) plus, when cheap, paths found in the result (search hits, the created / moved
-//!   note). At most [`MAX_PATHS`], each at most [`MAX_PATH_LEN`] bytes.
-//! * Read-only tools run first and then publish `start` (with the result paths) and `end`
-//!   back to back; mutating tools publish `start` before running, so a UI sees the write
-//!   coming, and `end` (with the result paths) after.
-//! * `end` events are realtime only: the hub does not persist them to `.events.jsonl` or
-//!   the replay ring (see `memora_core::events`).
+//! `ai_activity` realtime events for MCP tool calls: a `start` and an `end` event sharing
+//! one `call_id`, with `actor`, `action`, `label` and up to [`MAX_PATHS`] note `paths`;
+//! `end` adds `ok` and `ms`. Read-only tools publish both after running; mutating tools
+//! publish `start` first. `end` events are realtime only (not persisted).
 
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -177,10 +161,8 @@ pub fn arg_paths(tool: &str, args: &Value) -> Paths {
     out
 }
 
-/// Folders named by the tool arguments (`folder`, `into`, and `folder` of each
-/// `batch_create` note). They ride along on the stored `start` event so the
-/// privacy filter on logs and events sees them: the label of `create_memory`
-/// is the new note's title, which must stay hidden when the folder is.
+/// Folders named by the tool arguments (`folder`, `into`, `batch_create` folders), carried
+/// on the stored `start` event so the privacy filter can hide labels inside them.
 pub fn arg_folders(args: &Value) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut add = |v: Option<&Value>| {
@@ -344,11 +326,13 @@ pub fn traced(
     }
     let err = res.as_ref().err().map(|e| e.to_string());
     if read_only {
-        // Published after the call, so the stored row (the log keeps only starts)
-        // already says how it went: readers never show a finished call as running.
+        // Published after the call, so the stored start row already says how it went.
         let mut v = with_folders(start_event(caller, &call_id, tool, label, paths.as_slice()));
         v["ok"] = json!(err.is_none());
         v["ms"] = json!(ms);
+        if let Some(n) = res.as_ref().ok().and_then(result_count) {
+            v["count"] = json!(n);
+        }
         hub.publish(v);
     }
     hub.publish(end_event(
@@ -361,6 +345,50 @@ pub fn traced(
         err.as_deref(),
     ));
     res
+}
+
+/// How many results a read-only call returned (search hits, listed notes), when its
+/// result is a list or holds one.
+fn result_count(v: &Value) -> Option<usize> {
+    if let Some(a) = v.as_array() {
+        return Some(a.len());
+    }
+    for k in ["results", "hits", "items", "notes", "matches"] {
+        if let Some(a) = v.get(k).and_then(|x| x.as_array()) {
+            return Some(a.len());
+        }
+    }
+    None
+}
+
+/// Publish a refused `tools/call` as a failed call marked `refused`, so Activity shows
+/// the attempt.
+pub fn refused(caller: &Caller, tool: &str, args: &Value, label: &str, msg: &str) {
+    let hub = memora_core::events::hub();
+    let call_id = new_call_id();
+    let paths = arg_paths(tool, args);
+    let folders = arg_folders(args);
+    let mut start = start_event(caller, &call_id, tool, label, paths.as_slice());
+    start["ok"] = json!(false);
+    start["ms"] = json!(0);
+    start["error"] = json!(clip(msg, MAX_ERROR));
+    let mut end = end_event(
+        caller,
+        &call_id,
+        tool,
+        label,
+        paths.as_slice(),
+        0,
+        Some(msg),
+    );
+    for v in [&mut start, &mut end] {
+        v["refused"] = json!(true);
+        if !folders.is_empty() {
+            v["folders"] = json!(folders);
+        }
+    }
+    hub.publish(start);
+    hub.publish(end);
 }
 
 #[cfg(test)]
@@ -471,6 +499,13 @@ mod tests {
         // Label is clipped.
         let l = start_event(&c, "c3", "search_memory", &"q".repeat(1000), &[]);
         assert_eq!(l["label"].as_str().unwrap().chars().count(), MAX_LABEL);
+    }
+
+    #[test]
+    fn result_counts() {
+        assert_eq!(result_count(&json!([1, 2, 3])), Some(3));
+        assert_eq!(result_count(&json!({"results": [1], "total": 9})), Some(1));
+        assert_eq!(result_count(&json!({"path": "a.md"})), None);
     }
 
     #[test]
