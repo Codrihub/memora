@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-16
+
+Mnemo asks before it guesses, works on its own when you let it, and takes
+messages while it works.
+
+### Added
+
+- Mnemo can ask you a question with options to tap (and Other for your own
+  answer); its reply ends there and your answer goes on. In the console the
+  options are a pick list.
+- Permission: **Ask first** (the default: Mnemo reads freely, but a change to
+  your notes waits until you approve it through one of its questions) or
+  **Auto** (changes go ahead without asking and long jobs keep going, up to 40
+  steps a reply). Switch it from the chip in the composer, Settings, Mnemo,
+  or `/auto` and `/ask` in the console. Requests written with `@mnemo:` in a
+  note count as approved.
+- A queue: what you send while Mnemo is answering waits above the prompt,
+  can be reordered (arrows or drag) or removed, and goes out by itself when
+  the reply ends (not after Stop). Ctrl/Cmd+Enter, or the arrow on a queued
+  message, steers the running reply instead: Mnemo reads it before its next
+  step, and it shows inside the reply.
+
+### Changed
+
+- Mnemo's replies sit on a frosted card that stays readable over any chat
+  background; the chat scrolls without a scrollbar (the timeline and the
+  edge fades show where you are).
+- Thinking, steps and every other detail start closed; an open section keeps
+  its header in view while you scroll through it, so it closes from anywhere.
+- A reply without approval runs up to 25 steps before it pauses (was 10).
+
+### Fixed
+
+- A long note path no longer runs over the step's title and result.
+- The ⋯ on each chat in the list works on touch screens (iOS spent the first
+  tap on a hover), and All chats opens a folded chat list.
+
 ## [2.1.0] - 2026-11-16
 
 Mnemo, a notes agent built into Memora, and images that live beside their
