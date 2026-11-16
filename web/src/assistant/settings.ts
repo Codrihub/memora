@@ -177,6 +177,10 @@ function behaviourCard(s: A.MnemoState): string {
   const p = s.prefs;
   return `<form class="st-card mns-beh" id="mnsBeh" novalidate autocomplete="off"><div class="st-ch"><h3>How ${A.MNEMO} works</h3><p>Applies to every chat.</p></div>
     <div class="st-row"><div class="st-l"><b>Default model</b><small>Used by new chats; each chat can switch.</small></div><div class="st-c"><span id="mnsDef"></span></div></div>
+    <div class="st-row"><div class="st-l"><b>Permission</b><small>Ask first: ${A.MNEMO} reads freely but asks before it changes notes. Auto: it goes ahead and keeps working until the job is done. Saved at once.</small></div>
+      <div class="st-c"><div class="mns-seg" role="radiogroup" aria-label="Permission">${(['ask', 'auto'] as const)
+        .map((v) => `<label><input type="radio" name="mnsPerm" value="${v}"${(p.permission === 'auto' ? 'auto' : 'ask') === v ? ' checked' : ''}><span>${v === 'ask' ? 'Ask first' : 'Auto'}</span></label>`)
+        .join('')}</div></div></div>
     <div class="st-row full"><div class="st-l"><b>Your instructions</b><small>Tell ${A.MNEMO} how you like things, in your own words: the language to answer in, how to name notes, folders to leave alone…</small></div>
       <div class="st-c"><textarea class="ui-input mns-instr" name="system_prompt" rows="3" maxlength="4000" placeholder="e.g. Answer in Indonesian. Keep meeting notes in Meetings/YYYY.">${esc(p.system_prompt || '')}</textarea></div></div>
     <div class="st-row sw"><div class="st-l"><b>Floating button</b><small>The ${A.MNEMO} button on every page (Ctrl+J). Saved at once. You can also hide or show it from More, or hide it by dragging it onto the X.</small></div><div class="st-c end">${switchHTML('mnsLauncher', hooks.mnemoButton(), 'Floating button')}</div></div>
@@ -440,6 +444,13 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
     });
     slot.append(defaultSel.el);
     const launcher = beh.querySelector<HTMLElement>('#mnsLauncher')!;
+    beh.querySelectorAll<HTMLInputElement>('[name=mnsPerm]').forEach((r) => {
+      r.onchange = () => {
+        void A.savePrefs({ permission: r.value as 'ask' | 'auto' })
+          .then(() => toast(r.value === 'auto' ? `Auto: ${A.MNEMO} goes ahead without asking` : `Ask first: ${A.MNEMO} asks before changes`, 'ok'))
+          .catch(fail);
+      };
+    });
     // Takes effect at once (no Save): off hides it everywhere, on brings it back here too.
     launcher.onclick = async () => {
       const on = launcher.getAttribute('aria-checked') !== 'true';

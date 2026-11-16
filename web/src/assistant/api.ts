@@ -40,6 +40,27 @@ export interface Prefs {
   context_tokens?: number | null;
   max_steps?: number | null;
   launcher?: boolean | null;
+  /** "ask": changes wait for the owner's OK; "auto": Mnemo goes ahead. */
+  permission?: 'ask' | 'auto' | null;
+}
+
+/** A question Mnemo asks with options to tap. */
+export interface AskOption {
+  label: string;
+  description?: string | null;
+  approve?: boolean;
+}
+export interface Ask {
+  id: string;
+  question: string;
+  options: AskOption[];
+  allow_other: boolean;
+}
+/** The owner's answer to a question, sent with the message. */
+export interface Answer {
+  to: string;
+  approve?: boolean;
+  other?: boolean;
 }
 
 export interface MnemoState {
@@ -124,7 +145,9 @@ export interface ChatContext {
 
 export type ChatEvent =
   | { type: 'start'; model: string; context?: ChatContext }
+  | ({ type: 'ask' } & Ask)
   | { type: 'compacting' }
+  | { type: 'steered'; text: string }
   | { type: 'compacted'; messages: number; tokens: number }
   | { type: 'notice'; text: string }
   | { type: 'text'; delta: string }
@@ -234,6 +257,7 @@ export function streamChat(
   attach: Attach[],
   signal: AbortSignal,
   onEvent: (e: ChatEvent) => void,
+  answer?: Answer,
 ): Promise<void> {
   // The device's time zone goes along, so Mnemo can tell the owner's local time.
   let tz = '';
@@ -247,6 +271,7 @@ export function streamChat(
     ...(model ? { model } : {}),
     ...(attach.length ? { attach: attach.map((a) => ({ kind: a.kind, path: a.path })) } : {}),
     ...(tz ? { tz } : {}),
+    ...(answer ? { answer } : {}),
     tz_offset: -new Date().getTimezoneOffset(),
   };
   return streamPost(`/api/assistant/sessions/${encodeURIComponent(id)}/chat`, body, signal, onEvent);
@@ -254,6 +279,9 @@ export function streamChat(
 
 /** Address of a chat as a Markdown file (`GET` downloads it). */
 export const exportUrl = (id: string): string => `/api/assistant/sessions/${encodeURIComponent(id)}/export`;
+
+/** Give the reply running in chat `id` a message it reads before its next step. */
+export const steerChat = (id: string, text: string): Promise<{ ok: boolean }> => apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/steer`, { text });
 
 /** Stop the reply running in chat `id` (leaving a chat does not stop it). */
 export const stopChat = (id: string): Promise<{ stopped: boolean }> => apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/stop`, {});

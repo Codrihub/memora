@@ -310,6 +310,20 @@ fn chat(link: &Link, theme: &ColorfulTheme) -> Result<()> {
                 ));
                 continue;
             }
+            "/auto" | "/ask" => {
+                let auto = text == "/auto";
+                link.post(
+                    "/api/assistant/prefs",
+                    json!({ "permission": if auto { "auto" } else { "ask" } }),
+                )?;
+                state = link.get("/api/assistant/state").unwrap_or(state);
+                ok(if auto {
+                    "Auto: Mnemo makes changes without asking and keeps going until done."
+                } else {
+                    "Ask first: Mnemo asks before it changes your notes."
+                });
+                continue;
+            }
             "/pin" | "/default" | "/unpin" => {
                 let model = if c.model.is_empty() {
                     default_model(&state)
@@ -528,7 +542,7 @@ fn chat(link: &Link, theme: &ColorfulTheme) -> Result<()> {
             }
             t if t.starts_with('/') => {
                 println!(
-                    "{} in a chat: /attach, /image, /detach, /model, /pin, /memory, /compact, /activity, /search, /retry, /export, /new, /chats, /setup, /help, /exit.",
+                    "{} in a chat: /attach, /image, /detach, /model, /pin, /memory, /compact, /activity, /search, /retry, /export, /auto, /ask, /new, /chats, /setup, /help, /exit.",
                     style("?").yellow().bold()
                 );
                 continue;
@@ -547,6 +561,7 @@ fn chat(link: &Link, theme: &ColorfulTheme) -> Result<()> {
                 .ok_or_else(|| anyhow!("the chat could not be started"))?;
         let att = std::mem::take(&mut c.attach);
         send(link, &id, text, &c.model, &att)?;
+        answer_asks(link, theme, &id, &c.model)?;
         if c.title == "New chat" {
             c.title = text.chars().take(60).collect();
         }
@@ -599,6 +614,10 @@ fn chat_help() {
         ("/compact", "fold the older messages into a summary now"),
         ("/activity", "what Mnemo did lately, and who it was for"),
         ("/search", "find words in any earlier chat and open it"),
+        (
+            "/auto",
+            "let Mnemo change notes without asking; /ask asks first again",
+        ),
         (
             "/retry",
             "run your last message again (a new reply replaces the old one)",
@@ -885,6 +904,61 @@ fn urlenc(s: &str) -> String {
         .collect()
 }
 
+/// The question Mnemo asked in the last reply (answered right after it).
+fn last_ask() -> &'static std::sync::Mutex<Option<Value>> {
+    static ASK: std::sync::OnceLock<std::sync::Mutex<Option<Value>>> = std::sync::OnceLock::new();
+    ASK.get_or_init(Default::default)
+}
+
+/// Mnemo asked something: pick an option (or type another answer) and send it, as often as
+/// it asks again.
+fn answer_asks(link: &Link, theme: &ColorfulTheme, id: &str, model: &str) -> Result<()> {
+    loop {
+        let Some(q) = last_ask().lock().ok().and_then(|mut a| a.take()) else {
+            return Ok(());
+        };
+        let opts: Vec<&Value> = q["options"].as_array().into_iter().flatten().collect();
+        let mut items: Vec<String> = opts
+            .iter()
+            .map(|o| {
+                let label = o["label"].as_str().unwrap_or("");
+                match o["description"].as_str() {
+                    Some(d) if !d.is_empty() => format!("{label}  {}", style(d).dim()),
+                    _ => label.to_string(),
+                }
+            })
+            .collect();
+        if q["allow_other"] != false {
+            items.push("Other (type your answer)".into());
+        }
+        let Some(i) = Select::with_theme(theme)
+            .with_prompt(q["question"].as_str().unwrap_or("Mnemo asks"))
+            .items(&items)
+            .default(0)
+            .interact_opt()?
+        else {
+            return Ok(());
+        };
+        let to = q["id"].as_str().unwrap_or("");
+        let (text, answer) = if i < opts.len() {
+            (
+                opts[i]["label"].as_str().unwrap_or("").to_string(),
+                json!({"to": to, "approve": opts[i]["approve"] == true}),
+            )
+        } else {
+            let t: String = Input::with_theme(theme)
+                .with_prompt("your answer")
+                .interact_text()?;
+            (t, json!({"to": to, "other": true}))
+        };
+        let mut body = json!({"text": text, "answer": answer});
+        if !model.is_empty() {
+            body["model"] = json!(model);
+        }
+        stream_reply(link, &format!("/api/assistant/sessions/{id}/chat"), body)?;
+    }
+}
+
 fn send(link: &Link, id: &str, text: &str, model: &str, attach: &[Value]) -> Result<()> {
     let mut body = json!({ "text": text });
     if !model.is_empty() {
@@ -999,6 +1073,33 @@ fn stream_reply(link: &Link, path: &str, body: Value) -> Result<()> {
                 style("✗").red()
             };
             let _ = writeln!(out, "  {mark} {}", style(format!("{line} · {ms} ms")).dim());
+            at_line_start = true;
+        }
+        "ask" => {
+            if !at_line_start {
+                let _ = writeln!(out);
+            }
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                style("?").cyan().bold(),
+                style(ev["question"].as_str().unwrap_or("")).bold()
+            );
+            if let Ok(mut a) = last_ask().lock() {
+                *a = Some(ev.clone());
+            }
+            at_line_start = true;
+        }
+        "steered" => {
+            if !at_line_start {
+                let _ = writeln!(out);
+            }
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                style("↪ you").cyan(),
+                ev["text"].as_str().unwrap_or("")
+            );
             at_line_start = true;
         }
         "compacting" | "compacted" => {

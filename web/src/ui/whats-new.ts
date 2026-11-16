@@ -26,6 +26,27 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.1',
+    title: 'Mnemo asks first, or just gets on with it',
+    lead: 'Pick how much Mnemo may do on its own, answer its questions with a tap, and keep typing while it works.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'help', title: 'It asks instead of guessing', text: 'When a choice is yours, Mnemo shows the options as buttons, plus Other for your own answer.' },
+          { icon: 'shield', title: 'Ask first, or Auto', text: 'Ask first: Mnemo looks freely but waits for your OK before changing notes. Auto: it goes ahead and keeps working until the job is done. Switch from the chip next to the model.' },
+          { icon: 'chat', title: 'Type while it works', text: 'Messages you send mid-reply wait in a queue you can reorder; they go out one by one. Ctrl+Enter steers the reply that is running instead.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'eye', title: 'Easier to read', text: 'Replies sit on a frosted card, details start closed and keep their header in view, and the chat scrolls without a bar.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.0',
     title: 'Meet Mnemo, your notes have a helper now',
     lead: 'Ask in plain words and Mnemo finds, writes, tidies and links your notes for you, with the AI key you already have. And your notes can finally hold pictures.',

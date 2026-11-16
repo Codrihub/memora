@@ -364,6 +364,8 @@ fn ask(
     let meta = json!({
         "system": system,
         "mention": {"path": path, "line": p.line + 1, "by": by},
+        // Written in a note on purpose: Mnemo may change notes for it in either mode.
+        "approved": true,
         "attach": [{"kind": "note", "path": path, "title": name}],
     });
     let text = p.request.clone();

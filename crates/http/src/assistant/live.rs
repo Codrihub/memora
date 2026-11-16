@@ -34,6 +34,29 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Messages the owner sent to a running reply ("steer"), waiting for its next step.
+fn steers() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static S: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// Hand a message to the reply running in chat `id`. `false` when none is running.
+pub fn steer(id: &str, text: &str) -> bool {
+    if !running(id) {
+        return false;
+    }
+    lock(steers())
+        .entry(id.to_string())
+        .or_default()
+        .push(text.to_string());
+    true
+}
+
+/// The steering messages waiting for chat `id` (taken).
+pub fn take_steers(id: &str) -> Vec<String> {
+    lock(steers()).remove(id).unwrap_or_default()
+}
+
 /// Whether chat `id` has a reply running now.
 pub fn running(id: &str) -> bool {
     lock(runs()).contains_key(id)

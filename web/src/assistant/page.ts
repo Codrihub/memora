@@ -659,7 +659,15 @@ function headMenu(at: HTMLElement): void {
       ...exportItems(s),
       { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: !!s, disabled: !s, run: () => s && askDelete(s) },
       { sep: true, label: '' },
-      { label: 'All chats', icon: icon('chat', 'vx-i'), run: () => root?.classList.add('side-open') },
+      {
+        label: 'All chats',
+        icon: icon('chat', 'vx-i'),
+        run: () => {
+          if (isNarrow()) root?.classList.add('side-open');
+          else setPane('side', true);
+          root?.querySelector<HTMLInputElement>('#mnpQ')?.focus();
+        },
+      },
       { label: `${A.MNEMO} activity`, icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
       { label: 'Chat background', icon: icon('image', 'vx-i'), run: () => bgMenu(at) },
       { label: `${A.MNEMO} settings: models and keys`, icon: icon('settings', 'vx-i'), run: () => openMnemoSettings() },
@@ -923,6 +931,8 @@ const PAGE_CSS = `
 .mnp-row-t b{font-size:13.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-more{opacity:0}.mnp-row:hover .mnp-row-more,.mnp-row.on .mnp-row-more,.mnp-row-more:focus-visible{opacity:1}
+/* Touch screens have no hover: the ⋯ is always there (iOS would spend the first tap on a hover). */
+@media (hover:none){.mnp-row-more{opacity:.7}}
 .mnp-none{margin:0;padding:18px 10px;font-size:13px;color:var(--muted);line-height:1.5}
 .mnp-sfoot{padding:8px 10px 12px;border-top:1px solid var(--line)}
 .mnp-set{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:10px;background:none;color:var(--text-2,var(--fg));font:inherit;font-size:13.5px;cursor:pointer;

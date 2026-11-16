@@ -99,7 +99,9 @@ const TOOLS: &[&str] = &[
 /// Defaults when the owner chose nothing.
 const DEFAULT_CONTEXT: i64 = 32_000;
 const DEFAULT_MAX_OUTPUT: u64 = 4096;
-const DEFAULT_STEPS: usize = 10;
+const DEFAULT_STEPS: usize = 25;
+/// Steps per reply in Auto mode: long jobs finish without "continue".
+const AUTO_STEPS: usize = 40;
 /// A tool result is cut here before it goes back to the model.
 const TOOL_RESULT_MAX: usize = 16_000;
 
@@ -164,6 +166,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/assistant/sessions/{id}/rerun", post(h_rerun))
         .route("/api/assistant/sessions/{id}/live", get(h_live))
         .route("/api/assistant/sessions/{id}/stop", post(h_stop))
+        .route("/api/assistant/sessions/{id}/steer", post(h_steer))
         .route("/api/assistant/sessions/{id}/export", get(h_export))
         .merge(uploads::router())
 }
@@ -622,7 +625,8 @@ async fn h_prefs(
             "context_tokens" => {
                 v.is_null() || v.as_i64().is_some_and(|x| (2_000..=2_000_000).contains(&x))
             }
-            "max_steps" => v.is_null() || v.as_i64().is_some_and(|x| (1..=30).contains(&x)),
+            "max_steps" => v.is_null() || v.as_i64().is_some_and(|x| (1..=60).contains(&x)),
+            "permission" => v.is_null() || v.as_str().is_some_and(|x| x == "ask" || x == "auto"),
             "launcher" => v.is_null() || v.is_boolean(),
             other => return bad(&format!("unknown preference: {other}")),
         };
@@ -1035,6 +1039,76 @@ fn show_items(st: &AppState, args: &Value) -> Result<Value, String> {
         return Err(format!("none of these exist: {}", missing.join(", ")));
     }
     Ok(json!({"shown": shown, "missing": missing}))
+}
+
+/// Mnemo asks the owner something with options to tap (and room for another answer).
+const ASK_OWNER: &str = "ask_owner";
+
+fn ask_owner_def() -> ToolDef {
+    ToolDef {
+        name: ASK_OWNER.into(),
+        description: "Ask the owner a question with 2 to 5 short options to tap (they can also type another \
+answer). Use it when a choice is theirs, when something is unclear, and in Ask first mode before changing notes \
+(mark the option that approves the change with approve: true). Your reply ends here; their answer is the next \
+message."
+            .into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "A few words"},
+                            "description": {"type": "string"},
+                            "approve": {"type": "boolean", "description": "Choosing this lets you make the changes you described"}
+                        },
+                        "required": ["label"],
+                        "additionalProperties": false
+                    }
+                },
+                "allow_other": {"type": "boolean", "description": "Offer \"Other\" for a typed answer (default true)"}
+            },
+            "required": ["question", "options"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+/// The question as the chat shows it, or why it cannot be asked.
+fn ask_check(args: &Value) -> Result<Value, String> {
+    let q = args["question"].as_str().unwrap_or("").trim();
+    if q.is_empty() {
+        return Err("question is required".into());
+    }
+    let opts: Vec<Value> = args["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|o| {
+            let label: String = o["label"].as_str()?.trim().chars().take(80).collect();
+            (!label.is_empty()).then(|| {
+                json!({
+                    "label": label,
+                    "description": o["description"].as_str().map(|d| d.trim().chars().take(200).collect::<String>()),
+                    "approve": o["approve"] == true,
+                })
+            })
+        })
+        .take(5)
+        .collect();
+    if opts.len() < 2 {
+        return Err("give at least two options".into());
+    }
+    Ok(json!({
+        "question": q.chars().take(500).collect::<String>(),
+        "options": opts,
+        "allow_other": args["allow_other"] != false,
+    }))
 }
 
 /// Mnemo's clock: the time now where the owner is (their browser says its zone).
@@ -1578,6 +1652,7 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
     defs.extend(chat_tool_defs());
     defs.push(show_items_def());
     defs.push(current_time_def());
+    defs.push(ask_owner_def());
     defs.extend(docs::defs());
     defs
 }
@@ -1585,8 +1660,8 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 4]";
-const FEATURES: &str = "[Mnemo features 4] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 5]";
+const FEATURES: &str = "[Mnemo features 5] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
 A few seconds after the note is saved you run the request in a chat of its own titled \"@mnemo · <note>: <request>\"; \
 when you are done the request is struck through (~~@mnemo: ...~~) and your reply is quoted right under it in the \
@@ -1599,6 +1674,8 @@ summary (the memory ring in the composer shows how full it is).\n\
 - Every chat can be searched (the chat list's search box), and you can look back with search_chats and \
 read_chat. A chat can be downloaded or saved as a Markdown note from its menu.\n\
 - show_items puts notes, folders, images or the vault in your reply as cards that open on a tap.\n\
+- ask_owner asks the owner a question with options to tap (and Other); there are two permission modes, \
+Ask first (changes wait for an approving answer) and Auto (changes go ahead, long jobs keep going).\n\
 - current_time tells the date, time, weekday and the owner's time zone; search_docs and read_docs read \
 Memora's own documentation (link the page you used).\n\
 - Your tool calls show in Activity under your name, marked with who you worked for (chat, console or a note \
@@ -1845,6 +1922,11 @@ read_memory gives the current text):\n{ctx}\n\n{}",
                     ),
                     None => m.content.clone(),
                 };
+                match m.meta.as_ref().and_then(|v| v["mode"].as_str()) {
+                    Some("auto") => text.push_str("\n\n(Mode: Auto. Go ahead with changes without asking, and keep going until the job is done; report what you changed.)"),
+                    Some("ask") => text.push_str("\n\n(Mode: Ask first. Read and look freely, but before changing notes ask me with ask_owner and an option marked approve.)"),
+                    _ => {}
+                }
                 if let Some(mn) = m
                     .meta
                     .as_ref()
@@ -2160,6 +2242,28 @@ async fn h_chat(
             Err(e) => return bad(&e),
         }
     };
+    // An answer to one of Mnemo's questions (a tapped option or "Other").
+    if let Some(a) = b.get("answer").filter(|a| a.is_object()) {
+        let m = meta.get_or_insert_with(|| json!({}));
+        m["answer"] = json!({
+            "to": a["to"].as_str().map(|t| t.chars().take(80).collect::<String>()),
+            "approve": a["approve"] == true,
+            "other": a["other"] == true,
+        });
+    }
+    // The permission mode this message was sent in (Mnemo is told with it).
+    let mode = if store
+        .prefs()
+        .unwrap_or_default()
+        .get("permission")
+        .and_then(Value::as_str)
+        == Some("auto")
+    {
+        "auto"
+    } else {
+        "ask"
+    };
+    meta.get_or_insert_with(|| json!({}))["mode"] = json!(mode);
     // The owner's time zone (from the browser), for current_time.
     let tz = s(&b, "tz").filter(|t| {
         t.len() <= 64
@@ -2282,6 +2386,34 @@ async fn h_live(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<Strin
         return r;
     }
     live::sse(&id).unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
+}
+
+/// `POST /api/assistant/sessions/{id}/steer` `{text}`: give the running reply a message it
+/// reads before its next step. `409` when no reply is running (send it as a message then).
+async fn h_steer(
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let Some(text) = s(&b, "text").filter(|t| !t.is_empty()) else {
+        return bad("text is required");
+    };
+    let text: String = text.chars().take(8000).collect();
+    if live::steer(&id, &text) {
+        Json(json!({"ok": true})).into_response()
+    } else {
+        fail(
+            StatusCode::CONFLICT,
+            "Mnemo is not answering in this chat now; send it as a message",
+        )
+    }
 }
 
 /// `POST /api/assistant/sessions/{id}/stop`: end the reply running in this chat.
@@ -2622,10 +2754,24 @@ fn run_agent(
         max_output: Some(stp.max_out),
         think: true,
     };
+    let auto = prefs.get("permission").and_then(Value::as_str) == Some("auto");
     let steps = prefs
         .get("max_steps")
         .and_then(Value::as_u64)
-        .map_or(DEFAULT_STEPS, |n| n as usize);
+        .map_or(if auto { AUTO_STEPS } else { DEFAULT_STEPS }, |n| {
+            n as usize
+        });
+    // Ask first: changes wait for the owner's OK, given by answering an ask_owner question
+    // with an option marked approve; that OK holds for this reply.
+    let approved = auto
+        || store
+            .messages(id)
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .and_then(|m| m.meta.as_ref())
+            .is_some_and(|v| v["answer"]["approve"] == true || v["approved"] == true);
     let (system, tools, budget) = (&stp.system, &stp.tools, stp.budget);
     // Near full: fold the older turns into a summary before this turn (the whole chat stays
     // in memory, just shorter). If that fails, the oldest turns are left out instead.
@@ -2654,7 +2800,26 @@ fn run_agent(
     if !send(tx, start) {
         return;
     }
+    // Messages the owner sent to this reply while it runs go in before the next step.
+    let steer_in = |tx: &tokio::sync::mpsc::UnboundedSender<String>| -> bool {
+        let got = live::take_steers(id);
+        for t in &got {
+            let _ = store.append(
+                id,
+                &NewMessage {
+                    role: "user".into(),
+                    content: t.clone(),
+                    meta: Some(json!({"steer": true, "approved": approved})),
+                    ..Default::default()
+                },
+                memora_state::now(),
+            );
+            send(tx, json!({"type": "steered", "text": t}));
+        }
+        !got.is_empty()
+    };
     for step in 0..steps {
+        steer_in(tx);
         let stored = store.messages(id).unwrap_or_default();
         let (mut history, trimmed) = history_within(&stored, budget);
         fill_images(st, &mut history);
@@ -2746,8 +2911,13 @@ fn run_agent(
             memora_state::now(),
         );
         if turn.calls.is_empty() {
+            // A message that came in while it wrote: answer that too, in this reply.
+            if steer_in(tx) {
+                continue;
+            }
             break;
         }
+        let mut asked = false;
         for c in &turn.calls {
             if !send(
                 tx,
@@ -2758,7 +2928,30 @@ fn run_agent(
             let started = Instant::now();
             let off = st.mcp.disabled_tools();
             let allowed = TOOLS.contains(&c.name.as_str()) && !off.contains(&c.name);
-            let res = if c.name == PLACE_IMAGE && !off.contains("upload_image") {
+            let writes = c.name == PLACE_IMAGE
+                || (TOOLS.contains(&c.name.as_str())
+                    && !memora_mcp::activity::is_read_only(&c.name));
+            let res = if writes && !approved {
+                Err(format!(
+                    "Not done: {NAME} is in Ask first mode, so changes wait for the owner's OK. Ask with ask_owner \
+(say what you will change; give an option with approve: true such as \"Yes, go ahead\"), then make the change \
+after they approve."
+                ))
+            } else if c.name == ASK_OWNER {
+                match ask_check(&c.arguments) {
+                    Ok(q) => {
+                        asked = true;
+                        let mut ev = q.clone();
+                        ev["type"] = json!("ask");
+                        ev["id"] = json!(c.id);
+                        send(tx, ev);
+                        Ok(
+                            json!({"asked": true, "note": "The owner's answer comes as their next message."}),
+                        )
+                    }
+                    Err(e) => Err(e),
+                }
+            } else if c.name == PLACE_IMAGE && !off.contains("upload_image") {
                 place_image(st, &who, &c.arguments)
             } else if c.name == SHOW_ITEMS {
                 show_items(st, &c.arguments)
@@ -2811,6 +3004,10 @@ fn run_agent(
             if !send(tx, end) {
                 return;
             }
+        }
+        // A question for the owner ends the reply: their answer is the next message.
+        if asked {
+            break;
         }
         if step + 1 == steps {
             send(
@@ -3060,6 +3257,23 @@ mod tests {
         );
         assert_eq!(clock(t + 7 * 3600).2, "13:45");
         assert_eq!(clock(0).0, "Thursday");
+    }
+
+    #[test]
+    fn questions_need_text_and_two_options() {
+        assert!(
+            ask_check(&json!({"question": "", "options": [{"label": "a"}, {"label": "b"}]}))
+                .is_err()
+        );
+        assert!(ask_check(&json!({"question": "Which?", "options": [{"label": "a"}]})).is_err());
+        let q = ask_check(&json!({"question": "Merge these tags?", "options": [{"label": "Yes, merge", "approve": true}, {"label": "No"}, {"label": "  "}]})).unwrap();
+        assert_eq!(
+            q["options"].as_array().unwrap().len(),
+            2,
+            "blank options are dropped"
+        );
+        assert_eq!(q["options"][0]["approve"], true);
+        assert_eq!(q["allow_other"], true);
     }
 
     #[test]

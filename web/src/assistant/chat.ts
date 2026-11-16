@@ -172,6 +172,13 @@ export class ChatView {
   readonly el: HTMLElement;
   session: A.Session | null = null;
   private messages: A.Message[] = [];
+  /** Messages typed while Mnemo works: sent one by one when each reply ends. */
+  private queue: { id: number; text: string; attach: A.Attach[] }[] = [];
+  private qid = 0;
+  /** The owner pressed Stop: the queue waits instead of going out. */
+  private halted = false;
+  /** The question an "Other" answer goes to (set by tapping Other). */
+  private answering: string | null = null;
   /** Bumped by every reply watched and every detach, so a left reply cannot touch this view. */
   private run = 0;
   /** The model chosen for this chat ('' = the default). */
@@ -206,11 +213,13 @@ export class ChatView {
       <nav class="mn-rail" aria-label="Jump to a message" hidden></nav>
       <form class="mn-comp" autocomplete="off">
         <div class="mn-comp-box">
+          <div class="mn-queue" hidden></div>
           <div class="mn-att" aria-live="polite"><div class="mn-att-in"></div></div>
           <textarea rows="1" maxlength="40000" placeholder="Ask ${A.MNEMO} about your notes…" aria-label="Message to ${A.MNEMO}"></textarea>
           <div class="mn-comp-bar">
             <button type="button" class="mn-plus" aria-label="Attach notes or folders from your vault" title="Attach notes or folders from your vault">${icon('plus')}</button>
             <span class="mn-model-slot"></span>
+            <button type="button" class="mn-perm" hidden></button>
             <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
             <span class="mn-grow"></span>
             <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
@@ -228,6 +237,14 @@ export class ChatView {
     this.modelSlot = this.el.querySelector('.mn-model-slot')!;
     this.pinBtn = this.el.querySelector('.mn-pin')!;
     this.pinBtn.onclick = () => void this.togglePin();
+    const perm = this.el.querySelector<HTMLButtonElement>('.mn-perm')!;
+    perm.onclick = () => {
+      const s = A.mnemoState();
+      const next = s?.prefs.permission === 'auto' ? 'ask' : 'auto';
+      void A.savePrefs({ permission: next })
+        .then(() => toast(next === 'auto' ? `Auto: ${A.MNEMO} makes changes without asking and keeps going until done` : `Ask first: ${A.MNEMO} asks before it changes your notes`, 'ok'))
+        .catch((e) => toast((e as Error).message, 'err'));
+    };
     this.rail = this.el.querySelector('.mn-rail')!;
     this.wireRail();
     this.log.addEventListener('scroll', () => {
@@ -243,6 +260,9 @@ export class ChatView {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         if (!this.busy) void this.send(this.input.value);
+        // While Mnemo works: Enter queues the message, Ctrl/Cmd+Enter steers the reply now.
+        else if (e.ctrlKey || e.metaKey) void this.steerNow(this.input.value);
+        else this.enqueue();
       }
     });
     this.input.addEventListener('input', () => {
@@ -296,6 +316,42 @@ export class ChatView {
       }
     });
     this.plusEl.onclick = () => this.pickAttach();
+    const qbox = this.el.querySelector<HTMLElement>('.mn-queue')!;
+    qbox.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-qa]');
+      const row = b?.closest<HTMLElement>('[data-q]');
+      if (!b || !row) return;
+      const id = Number(row.dataset.q);
+      const i = this.queue.findIndex((q) => q.id === id);
+      if (i < 0) return;
+      const act = b.dataset.qa;
+      if (act === 'del') this.queue.splice(i, 1);
+      else if (act === 'up' && i > 0) [this.queue[i - 1], this.queue[i]] = [this.queue[i], this.queue[i - 1]];
+      else if (act === 'down' && i < this.queue.length - 1) [this.queue[i + 1], this.queue[i]] = [this.queue[i], this.queue[i + 1]];
+      else if (act === 'steer') {
+        void this.steerNow(this.queue[i].text, id);
+        return;
+      }
+      this.paintQueue();
+    });
+    // Drag a queued message onto another to reorder.
+    let dragQ = 0;
+    qbox.addEventListener('dragstart', (e) => {
+      dragQ = Number((e.target as HTMLElement).closest<HTMLElement>('[data-q]')?.dataset.q || 0);
+    });
+    qbox.addEventListener('dragover', (e) => {
+      if (dragQ) e.preventDefault();
+    });
+    qbox.addEventListener('drop', (e) => {
+      const to = Number((e.target as HTMLElement).closest<HTMLElement>('[data-q]')?.dataset.q || 0);
+      if (!dragQ || !to || to === dragQ) return;
+      e.preventDefault();
+      const from = this.queue.findIndex((q) => q.id === dragQ);
+      const item = this.queue.splice(from, 1)[0];
+      this.queue.splice(this.queue.findIndex((q) => q.id === to), 0, item);
+      dragQ = 0;
+      this.paintQueue();
+    });
     this.attEl.addEventListener('click', (e) => {
       const arrow = (e.target as HTMLElement).closest<HTMLElement>('[data-car]');
       if (arrow) {
@@ -360,6 +416,67 @@ export class ChatView {
   /** Everything this chat attached, used, changed or showed (the artifacts panel). */
   artifacts(): Artifact[] {
     return artifactsOf(this.messages);
+  }
+
+  /** Put what is typed in the queue (Mnemo is busy). */
+  private enqueue(): void {
+    const text = this.input.value.trim();
+    if (!text) return;
+    this.queue.push({ id: ++this.qid, text, attach: this.attach.slice() });
+    this.input.value = '';
+    this.attach = [];
+    this.paintAtt();
+    this.grow();
+    this.paintQueue();
+  }
+
+  private sendQueued(): void {
+    if (this.busy) return;
+    const next = this.queue.shift();
+    this.paintQueue();
+    if (!next) return;
+    this.attach = next.attach;
+    this.paintAtt();
+    void this.send(next.text);
+  }
+
+  /** Give the running reply a message it reads before its next step. */
+  private async steerNow(raw: string, fromQueue?: number): Promise<void> {
+    const text = raw.trim();
+    if (!text || !this.session) return;
+    try {
+      await A.steerChat(this.session.id, text);
+      if (fromQueue) this.queue = this.queue.filter((q) => q.id !== fromQueue);
+      else {
+        this.input.value = '';
+        this.grow();
+      }
+      this.paintQueue();
+    } catch (e) {
+      toast(`${(e as Error).message}`, 'warn');
+      if (!fromQueue) this.enqueue();
+    }
+  }
+
+  /** The queue above the prompt: reorder, steer now, or drop each message. */
+  private paintQueue(): void {
+    const box = this.el.querySelector<HTMLElement>('.mn-queue')!;
+    box.hidden = !this.queue.length;
+    if (!this.queue.length) {
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = `<div class="mn-queue-h">${icon('chat')}<span>Queued: goes out when ${A.MNEMO} finishes</span></div>${this.queue
+      .map(
+        (q, i) => `<div class="mn-q-i" data-q="${q.id}" draggable="true"><span class="mn-q-n">${i + 1}</span><span class="mn-q-t" title="${attr(q.text)}">${esc(q.text)}${
+          q.attach.length ? ` <small>+${q.attach.length}</small>` : ''
+        }</span><span class="mn-q-a">${
+          this.busy ? `<button type="button" class="mn-ibtn" data-qa="steer" title="Steer this reply now: Mnemo reads it before its next step" aria-label="Steer now">${icon('send')}</button>` : ''
+        }<button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
+          i === this.queue.length - 1 ? ' disabled' : ''
+        }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="Remove" aria-label="Remove">${icon('close')}</button></span></div>`,
+      )
+      .join('')}`;
   }
 
   /** A reply is streaming. */
@@ -549,6 +666,21 @@ export class ChatView {
     } catch (e) {
       toast((e as Error).message, 'err');
     }
+  }
+
+  /** The permission chip: Ask first (changes wait for an OK) or Auto. */
+  private paintPerm(): void {
+    const b = this.el.querySelector<HTMLButtonElement>('.mn-perm');
+    const s = A.mnemoState();
+    if (!b) return;
+    b.hidden = !s || !A.usableModels(s).length;
+    if (b.hidden || !s) return;
+    const auto = s.prefs.permission === 'auto';
+    b.classList.toggle('auto', auto);
+    b.innerHTML = `${icon(auto ? 'bolt' : 'shield')}<span>${auto ? 'Auto' : 'Ask first'}</span>`;
+    const t = auto ? 'Auto: changes go ahead without asking. Tap for Ask first.' : 'Ask first: changes wait for your OK. Tap for Auto.';
+    b.title = t;
+    b.setAttribute('aria-label', t);
   }
 
   private paintPin(): void {
@@ -850,6 +982,7 @@ export class ChatView {
       this.modelSlot.append(this.select.el);
     } else this.select.setOptions(opts, value);
     this.paintPin();
+    this.paintPerm();
     if (!this.session && !this.ctx) this.paintMeter(0, this.contextWindow());
   }
 
@@ -919,6 +1052,10 @@ export class ChatView {
       tokens = { in: 0, out: 0, model: '' };
     };
     for (const m of this.messages) {
+      if (m.role === 'user' && m.meta?.steer === true && turn) {
+        turn.querySelector<HTMLElement>('.mn-tb')!.append(el('div', 'mn-steer', `${icon('send')}<span>${esc(m.content)}</span>`));
+        continue;
+      }
       if (m.role === 'user') {
         finishTurn();
         turn = null;
@@ -958,7 +1095,12 @@ export class ChatView {
           md.dataset.mid = String(m.id);
           body.append(md);
         }
-        for (const c of m.tool_calls || []) if (c.name !== SHOW) this.toolCard(body, c.id, c.name, c.arguments);
+        for (const c of m.tool_calls || []) {
+          if (c.name === ASK) body.append(askEl({ id: c.id, ...(askOf(c.arguments) || { question: '', options: [], allow_other: true }) }, answerTo(this.messages, c.id)));
+          else if (c.name !== SHOW) this.toolCard(body, c.id, c.name, c.arguments);
+        }
+      } else if (m.role === 'tool' && m.tool_name === ASK) {
+        /* the question card stands for it */
       } else if (m.role === 'tool' && m.tool_name === SHOW) {
         try {
           const shown = (JSON.parse(m.content) as { shown?: A.Shown[] }).shown || [];
@@ -1035,7 +1177,7 @@ export class ChatView {
     let a = body.querySelector<HTMLElement>(':scope > .mn-act');
     if (!a) {
       a = el('details', 'mn-act live');
-      a.setAttribute('open', '');
+      // Closed unless the owner opens it: the title says what is happening meanwhile.
       a.innerHTML = `<summary><span class="mn-act-ic"><i class="mn-spin"></i></span><span class="mn-act-t"><b>Working</b><small></small></span>${icon(
         'chev',
         'i mn-act-chev',
@@ -1052,7 +1194,6 @@ export class ChatView {
     const st = a && ACTS.get(a);
     if (!a || !st) return;
     a.classList.remove('live');
-    a.removeAttribute('open');
     const changed = Array.from(st.changed);
     const read = Array.from(st.read).filter((p) => !st.changed.has(p));
     const time = elapsed ?? st.ms;
@@ -1208,6 +1349,23 @@ export class ChatView {
       hooks.openNote(wl.dataset.note!);
       return;
     }
+    // A question from Mnemo: an option answers it; Other lets the owner type the answer.
+    const opt = t.closest<HTMLElement>('[data-ask-opt]');
+    if (opt && !this.busy) {
+      const card = opt.closest<HTMLElement>('.mn-ask')!;
+      if (card.classList.contains('done')) return;
+      const id = card.dataset.ask!;
+      if (opt.dataset.askOpt === 'other') {
+        this.answering = id;
+        this.input.placeholder = 'Type your answer…';
+        this.focus();
+        return;
+      }
+      card.classList.add('done');
+      opt.classList.add('on');
+      void this.send(opt.dataset.label || opt.textContent || '', { to: id, approve: opt.dataset.approve === '1' });
+      return;
+    }
     // Carousel arrows, and a picture of a message opened full size (with its neighbours).
     const arrow = t.closest<HTMLElement>('[data-car]');
     if (arrow) {
@@ -1278,6 +1436,7 @@ export class ChatView {
 
   /** The owner pressed Stop: end the reply on the server too. */
   stop(): void {
+    if (this.busy) this.halted = true;
     if (this.busy && this.session) void A.stopChat(this.session.id).catch(() => undefined);
     this.ctrl?.abort();
     this.ctrl = null;
@@ -1298,12 +1457,13 @@ export class ChatView {
     this.o.onBusy?.(on);
     this.el.classList.toggle('busy', on);
     this.paintOpen();
+    this.paintQueue();
     this.sendBtn.innerHTML = icon(on ? 'stop' : 'send');
     this.sendBtn.setAttribute('aria-label', on ? 'Stop' : 'Send');
     this.sendBtn.title = on ? 'Stop' : 'Send (Enter)';
   }
 
-  async send(raw: string): Promise<void> {
+  async send(raw: string, answer?: A.Answer): Promise<void> {
     const text = raw.trim();
     if (!text || this.busy) return;
     const s = A.mnemoState() ?? (await A.loadState().catch(() => null));
@@ -1336,7 +1496,11 @@ export class ChatView {
     this.paintRail();
     requestAnimationFrame(() => this.log.querySelectorAll<HTMLElement>('.mn-u:last-of-type .mn-car, .mn-car:not([data-wired])').forEach(syncCarousel));
     const sid0 = this.session!.id;
-    await this.stream((signal, on) => A.streamChat(sid0, text, this.model || undefined, att, signal, on));
+    // "Other" on a question: what the owner types next answers it.
+    const ans = answer ?? (this.answering ? { to: this.answering, other: true } : undefined);
+    this.answering = null;
+    this.input.placeholder = `Ask ${A.MNEMO} about your notes…`;
+    await this.stream((signal, on) => A.streamChat(sid0, text, this.model || undefined, att, signal, on, ans));
   }
 
   /** Run the turn of the owner's message `uid` again: Regenerate on a reply, Try again on a
@@ -1421,6 +1585,17 @@ export class ChatView {
             model = ev.model;
             this.setContext(ev.context);
             break;
+          case 'ask':
+            closeText();
+            think(false);
+            body.append(askEl(ev, null));
+            this.scrollEnd();
+            break;
+          case 'steered':
+            closeText();
+            body.append(el('div', 'mn-steer', `${icon('send')}<span>${esc(ev.text)}</span>`));
+            this.scrollEnd();
+            break;
           case 'compacting':
             think(true, 'Compacting the chat’s memory…');
             break;
@@ -1448,8 +1623,8 @@ export class ChatView {
           case 'tool_start': {
             closeText();
             think(false);
-            // Cards are part of the answer, not a step.
-            if (ev.name === SHOW) {
+            // Cards and questions are part of the answer, not a step.
+            if (ev.name === SHOW || ev.name === ASK) {
               think(true);
               break;
             }
@@ -1459,6 +1634,10 @@ export class ChatView {
             break;
           }
           case 'tool_end': {
+            if (ev.name === ASK) {
+              think(false);
+              break;
+            }
             if (ev.name === SHOW) {
               if (ev.shown?.length) body.append(cardsEl(ev.shown));
               this.scrollEnd();
@@ -1514,6 +1693,10 @@ export class ChatView {
         this.o.onChange?.(this.session);
       }
       if (wrote) void hooks.loadCore();
+      // The next queued message goes out by itself (not after Stop).
+      const halted = this.halted;
+      this.halted = false;
+      if (this.queue.length && !halted) window.setTimeout(() => this.sendQueued(), 400);
       // Keep the stored transcript in step (the next open reads it again anyway).
       void A.getSession(sid)
         .then((r) => {
@@ -1625,6 +1808,47 @@ function relatedHTML(body: HTMLElement): string {
     )
     .join('');
   return `<div class="mn-rel"><span class="mn-rel-h">Related</span>${carouselHTML(chips + (items.length > cap ? `<small class="mn-rel-more">+${items.length - cap}</small>` : ''))}</div>`;
+}
+
+/** Mnemo's tool that asks the owner a question with options. */
+const ASK = 'ask_owner';
+
+/** The question in an ask_owner call's arguments (as the server checks it). */
+function askOf(args: unknown): Omit<A.Ask, 'id'> | null {
+  const a = (args || {}) as { question?: unknown; options?: unknown; allow_other?: unknown };
+  const question = typeof a.question === 'string' ? a.question.trim() : '';
+  const options = (Array.isArray(a.options) ? a.options : [])
+    .map((o) => o as { label?: unknown; description?: unknown; approve?: unknown })
+    .filter((o) => typeof o.label === 'string' && o.label.trim())
+    .slice(0, 5)
+    .map((o) => ({ label: String(o.label).trim(), description: typeof o.description === 'string' ? o.description : null, approve: o.approve === true }));
+  return question && options.length >= 2 ? { question, options, allow_other: a.allow_other !== false } : null;
+}
+
+/** How a question was answered in the stored chat: the label, or '' for Other; null if not yet. */
+function answerTo(messages: A.Message[], id: string): string | null {
+  const m = messages.find((x) => x.role === 'user' && (x.meta?.answer as A.Answer | undefined)?.to === id);
+  if (!m) return null;
+  return (m.meta?.answer as A.Answer).other ? '' : m.content;
+}
+
+/** A question card: the options as buttons (the chosen one marked once answered), and Other. */
+function askEl(q: A.Ask, answered: string | null): HTMLElement {
+  const box = el('div', 'mn-ask' + (answered !== null ? ' done' : ''));
+  box.dataset.ask = q.id;
+  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(q.question)}</span></div><div class="mn-ask-o">${q.options
+    .map(
+      (o) =>
+        `<button type="button" class="mn-ask-b${o.approve ? ' ok' : ''}${answered !== null && answered === o.label ? ' on' : ''}" data-ask-opt="1" data-label="${attr(o.label)}" data-approve="${o.approve ? '1' : ''}"${
+          answered !== null ? ' disabled' : ''
+        }><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</button>`,
+    )
+    .join('')}${
+    q.allow_other
+      ? `<button type="button" class="mn-ask-b other${answered === '' ? ' on' : ''}" data-ask-opt="other"${answered !== null ? ' disabled' : ''}><b>Other…</b><small>Type your own answer</small></button>`
+      : ''
+  }</div>`;
+  return box;
 }
 
 /** Most pictures one message may carry (each goes to the model as an image). */
