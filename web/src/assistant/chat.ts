@@ -1182,14 +1182,17 @@ export class ChatView {
     return el('div', 'mn-turn', `<div class="mn-av" aria-hidden="true">${markHTML('sm')}</div><div class="mn-tb"></div>`);
   }
 
+  /** A failed reply: a short plain message and Try again; the provider's full error only on request. */
   private errorCard(msg: string): HTMLElement {
-    const setup = /key|model|provider|401|403|404|unauthori|not found/i.test(msg);
+    const f = friendlyError(msg);
+    const full = plainError(msg);
+    const more = full && full !== f.text ? full : '';
     return el(
       'div',
       'mn-err',
-      `${icon('alert')}<span>${esc(msg)}</span><span class="mn-err-a"><button type="button" class="btn sm" data-retry>${icon('refresh')}<span>Try again</span></button>${
-        setup ? `<button type="button" class="btn ghost sm" data-setup>Open settings</button>` : ''
-      }</span>`,
+      `${icon('alert')}<span class="mn-err-t">${esc(f.text)}</span><span class="mn-err-a"><button type="button" class="btn sm" data-retry>${icon('refresh')}<span>Try again</span></button>${
+        f.setup ? `<button type="button" class="btn ghost sm" data-setup>Open settings</button>` : ''
+      }</span>${more ? `<details class="mn-err-d"><summary>Show the full error</summary><pre>${esc(more)}</pre></details>` : ''}`,
     );
   }
 
@@ -1895,6 +1898,41 @@ function askEl(q: A.Ask, answered: string | false | null): HTMLElement {
       : ''
   }</div>`;
   return box;
+}
+
+/** An error's text without HTML: an error page becomes its title, spaces folded. */
+function plainError(msg: string): string {
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(msg)?.[1]?.trim();
+  const t = msg.replace(/<!doctype[\s\S]*?<\/html>/gi, title || 'an HTML error page').replace(/<[^>]+>/g, ' ');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+/** A provider error in plain words; HTTP codes and raw bodies stay behind "Show the full error".
+ *  The status the provider answered with decides first (numbers inside a body can be anything). */
+function friendlyError(msg: string): { text: string; setup: boolean } {
+  const KEY = { text: 'The AI provider did not accept the key. Check it in Settings.', setup: true };
+  const LOST = { text: 'The AI provider could not find this model or address. Check it in Settings.', setup: true };
+  const BUSY = { text: 'The AI provider is busy or out of quota. Try again in a moment.', setup: false };
+  const DOWN = { text: 'The AI provider is not answering right now. Try again in a moment.', setup: false };
+  const NET = { text: 'Could not reach the AI provider. Check the connection and try again.', setup: false };
+  const code = Number(/answered (\d{3})/i.exec(msg)?.[1] || 0);
+  if (code === 401 || code === 403) return KEY;
+  if (code === 404) return LOST;
+  if (code === 429) return BUSY;
+  if (code >= 500) return DOWN;
+  const m = plainError(msg).toLowerCase().slice(0, 400);
+  const has = (...xs: string[]): boolean => xs.some((x) => m.includes(x));
+  if (has('unauthori', 'forbidden', 'api key', 'invalid key')) return KEY;
+  if (has('no such model', 'model_not_found', 'model not found')) return LOST;
+  if (has('rate limit', 'quota', 'too many requests')) return BUSY;
+  if (has('overload', 'unavailable', 'bad gateway', 'gateway timeout')) return DOWN;
+  if (has('could not reach', 'timed out', 'timeout', 'failed to fetch', 'networkerror', 'connection refused', 'dns')) return NET;
+  if (!m.trim() || m.includes('no reply came back')) return { text: 'No reply came back.', setup: false };
+  if (has('no provider', 'add a provider', 'no model')) return { text: msg.trim(), setup: true };
+  // Memora's own short messages are already plain; raw provider bodies are not.
+  const t = msg.trim();
+  if (!code && t.length <= 160 && !/[{}<>]|\b\d{3}\b/.test(t)) return { text: t.charAt(0).toUpperCase() + t.slice(1), setup: false };
+  return { text: 'Something went wrong with this reply.', setup: false };
 }
 
 /** Most pictures one message may carry (each goes to the model as an image). */

@@ -119,7 +119,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}
 .mn-err{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.45;color:var(--fg);
   background:var(--danger-soft,color-mix(in srgb,var(--danger) 10%,transparent));border:1px solid color-mix(in srgb,var(--danger) 30%,transparent)}
 .mn-err>.i{width:16px;height:16px;flex:none;color:var(--danger)}
-.mn-err>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.mn-err{flex-wrap:wrap}
+.mn-err>span.mn-err-t{flex:1;min-width:0;overflow-wrap:anywhere}
+.mn-err-d{flex:1 0 100%;margin:0;font-size:12px;color:var(--muted)}
+.mn-err-d summary{display:inline-flex;cursor:pointer;list-style:none;text-decoration:underline;text-underline-offset:2px}
+.mn-err-d summary::-webkit-details-marker{display:none}
+.mn-err-d summary:hover{color:var(--fg)}
+.mn-err-d pre{margin:6px 0 0;max-height:180px;overflow:auto;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--fg) 6%,transparent);
+  font:11.5px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2,var(--fg))}
 .mn-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;flex:1;color:var(--muted);font-size:13px}
 
 .mn-hello{display:flex;flex-direction:column;align-items:center;text-align:center;margin:auto;padding:24px 4px 12px;max-width:620px!important}

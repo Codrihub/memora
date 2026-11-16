@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.2] - 2026-11-16
 
-Mnemo fits your screen: full width on phones, and a text size you choose.
+Mnemo fits your screen and rides out a provider that is down for a moment:
+full width on phones, a text size you choose, and plain errors with Try again.
 
 ### Added
 
@@ -23,6 +24,15 @@ Mnemo fits your screen: full width on phones, and a text size you choose.
 - On phones Mnemo's replies drop the avatar beside them and use the full
   width, with equal margins on both sides; the timeline narrows into the
   right margin.
+- When a reply fails (the provider answers 503, 404, 401, 429, times out…)
+  Mnemo says what went wrong in plain words with Try again (and Open
+  settings when the key or model needs a look); the provider's full error
+  shows only when you open it. In the console `/details` prints it.
+- A provider that is briefly down or busy (502, 503, 504, 429, a dropped
+  connection) is asked again up to three times over about half a minute,
+  with a note in the reply, before Mnemo shows an error; never once text has
+  started to stream. An HTML error page from a proxy is cut down to its
+  title in the error.
 
 ## [2.1.1] - 2026-11-16
 

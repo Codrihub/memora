@@ -27,7 +27,7 @@ interface Release {
 const RELEASES: Release[] = [
   {
     version: '2.1.2',
-    title: 'Mnemo fits your screen',
+    title: 'Mnemo fits your screen, and errors read plainly',
     lead: 'On a phone Mnemo uses the full width, and you choose how big its text is.',
     groups: [
       {
@@ -40,6 +40,7 @@ const RELEASES: Release[] = [
         kind: 'better',
         items: [
           { icon: 'chat', title: 'Full width on phones', text: "Replies drop the avatar beside them and use the whole width, with the same margin on both sides." },
+          { icon: 'refresh', title: 'Clear errors', text: 'A provider that is down for a moment is asked again by itself for about half a minute. If it still fails, Mnemo says so in plain words with Try again; the full error is there only if you open it.' },
         ],
       },
     ],

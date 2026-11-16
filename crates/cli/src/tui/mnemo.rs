@@ -403,6 +403,13 @@ fn chat(link: &Link, theme: &ColorfulTheme) -> Result<()> {
                 }
                 continue;
             }
+            "/details" => {
+                match last_error().lock().ok().and_then(|e| e.clone()) {
+                    Some(e) if !e.is_empty() => println!("{e}"),
+                    _ => ok("No error in this session."),
+                }
+                continue;
+            }
             "/retry" | "/regenerate" => {
                 // The last message again: its reply is replaced by a new one.
                 let Some(id) = c.id.clone() else {
@@ -622,6 +629,7 @@ fn chat_help() {
             "/retry",
             "run your last message again (a new reply replaces the old one)",
         ),
+        ("/details", "the full error of the last failed reply"),
         (
             "/export",
             "save this chat as a Markdown file (here, or /export path.md)",
@@ -904,6 +912,77 @@ fn urlenc(s: &str) -> String {
         .collect()
 }
 
+/// The full error of the last failed reply, shown by `/details`.
+fn last_error() -> &'static std::sync::Mutex<Option<String>> {
+    static ERR: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+    ERR.get_or_init(Default::default)
+}
+
+/// A provider error in plain words (HTTP codes and raw bodies stay in `/details`).
+fn friendly_error(msg: &str) -> String {
+    let m = msg.to_ascii_lowercase();
+    // The status the provider answered with decides first: numbers inside a body can be anything.
+    let status: u16 = m
+        .split("answered ")
+        .nth(1)
+        .and_then(|r| r.get(..3))
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(0);
+    let head: String = m.chars().take(400).collect();
+    let code = |c: &str| {
+        let n = c.parse::<u16>().ok();
+        match n {
+            Some(n) => status == n || (status == 0 && head.contains(c)),
+            None => head.contains(c),
+        }
+    };
+    if status >= 500 {
+        "The AI provider is not answering right now. Try again in a moment.".into()
+    } else if code("401")
+        || code("403")
+        || code("unauthori")
+        || code("forbidden")
+        || code("api key")
+        || code("invalid key")
+    {
+        "The AI provider did not accept the key. Check it in /setup.".into()
+    } else if code("404") || code("not found") || code("no such model") || code("model_not_found") {
+        "The AI provider could not find this model or address. Check it in /setup.".into()
+    } else if code("429") || code("rate limit") || code("quota") || code("too many") {
+        "The AI provider is busy or out of quota. Try again in a moment.".into()
+    } else if code("500")
+        || code("502")
+        || code("503")
+        || code("504")
+        || code("overload")
+        || code("unavailable")
+        || code("bad gateway")
+    {
+        "The AI provider is not answering right now. Try again in a moment.".into()
+    } else if code("timed out")
+        || code("timeout")
+        || code("connect")
+        || code("network")
+        || code("dns")
+        || code("unreachable")
+    {
+        "Could not reach the AI provider. Check the connection and try again.".into()
+    } else if m.trim().is_empty() {
+        "No reply came back.".into()
+    } else if status == 0
+        && msg.trim().chars().count() <= 160
+        && !msg.contains(['{', '}', '<', '>'])
+        && !msg
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|d| d.len() == 3)
+    {
+        // Memora's own short messages are already plain; raw provider bodies are not.
+        msg.trim().to_string()
+    } else {
+        "Something went wrong with this reply.".into()
+    }
+}
+
 /// The question Mnemo asked in the last reply (answered right after it).
 fn last_ask() -> &'static std::sync::Mutex<Option<Value>> {
     static ASK: std::sync::OnceLock<std::sync::Mutex<Option<Value>>> = std::sync::OnceLock::new();
@@ -1128,11 +1207,17 @@ fn stream_reply(link: &Link, path: &str, body: Value) -> Result<()> {
             if !at_line_start {
                 let _ = writeln!(out);
             }
+            // A short, plain message; the provider's full error waits for /details.
+            let full = ev["message"].as_str().unwrap_or("").to_string();
+            let short = friendly_error(&full);
+            if let Ok(mut e) = last_error().lock() {
+                *e = Some(full);
+            }
+            let _ = writeln!(out, "{} {short}", style("error:").red().bold());
             let _ = writeln!(
                 out,
-                "{} {}",
-                style("error:").red().bold(),
-                ev["message"].as_str().unwrap_or("")
+                "  {}",
+                style("/retry to try again · /details for the full error").dim()
             );
             at_line_start = true;
         }
@@ -1592,5 +1677,34 @@ fn models(link: &Link, theme: &ColorfulTheme) -> Result<()> {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::friendly_error;
+
+    #[test]
+    fn provider_errors_read_plainly() {
+        assert!(
+            friendly_error("provider answered 503 Service Unavailable: {\"error\":\"x\"}")
+                .contains("not answering")
+        );
+        assert!(friendly_error("HTTP 404: model gpt-x not found").contains("could not find"));
+        assert!(friendly_error("401 Unauthorized").contains("key"));
+        assert!(friendly_error("429 Too Many Requests").contains("busy"));
+        assert!(friendly_error("error sending request: connection refused").contains("reach"));
+        assert_eq!(
+            friendly_error("Stopped before it finished."),
+            "Stopped before it finished."
+        );
+        assert_eq!(
+            friendly_error("{\"weird\":true}"),
+            "Something went wrong with this reply."
+        );
+        assert!(friendly_error(
+            "the provider answered 503: [x] [502]: holver.id | 502: Bad gateway, Ray 4011ab"
+        )
+        .contains("not answering"));
     }
 }

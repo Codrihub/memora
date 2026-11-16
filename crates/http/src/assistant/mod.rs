@@ -1850,6 +1850,34 @@ fn strip_images(history: &mut [Msg]) -> bool {
 }
 
 /// Whether a provider error says the model does not take images.
+/// Seconds to wait before each new try when the provider is briefly unavailable.
+const RETRY_WAITS: [u64; 3] = [3, 8, 20];
+
+/// A failure worth trying again: the provider busy or down for a moment, or the connection lost.
+fn transient(e: &str) -> bool {
+    let m = e.to_ascii_lowercase();
+    if let Some(code) = m
+        .split("answered ")
+        .nth(1)
+        .and_then(|r| r.get(..3))
+        .and_then(|d| d.parse::<u16>().ok())
+    {
+        return matches!(code, 408 | 425 | 429 | 500 | 502 | 503 | 504 | 520..=529);
+    }
+    m.starts_with("could not reach the provider")
+        && [
+            "timed out",
+            "timeout",
+            "reset",
+            "refused",
+            "broken pipe",
+            "connection",
+            "dns",
+        ]
+        .iter()
+        .any(|w| m.contains(w))
+}
+
 fn refuses_images(e: &str) -> bool {
     let l = e.to_ascii_lowercase();
     ["image", "vision", "multimodal", "image_url", "input_image"]
@@ -2829,11 +2857,35 @@ fn run_agent(
                 json!({"type": "notice", "text": "Older messages were left out to fit the model's context."}),
             );
         }
-        let mut on = |part: providers::Stream| match part {
-            providers::Stream::Text(t) => send(tx, json!({"type": "text", "delta": t})),
-            providers::Stream::Think(t) => send(tx, json!({"type": "thinking", "delta": t})),
+        let got = std::cell::Cell::new(false);
+        let mut on = |part: providers::Stream| {
+            got.set(true);
+            match part {
+                providers::Stream::Text(t) => send(tx, json!({"type": "text", "delta": t})),
+                providers::Stream::Think(t) => send(tx, json!({"type": "thinking", "delta": t})),
+            }
         };
         let mut res = providers::run(ep, model, system, &history, tools, &opts, &mut on);
+        // A provider that is briefly down or busy (502, 503, 429, a dropped connection) is
+        // asked again a few times, over about half a minute, before the owner sees an error;
+        // only while nothing of this step has streamed yet, so no text is repeated.
+        for (n, wait) in RETRY_WAITS.iter().enumerate() {
+            match &res {
+                Err(e) if transient(e) && !got.get() => {
+                    let note = format!(
+                        "The AI provider did not answer; trying again in {wait} s ({}/{})…",
+                        n + 1,
+                        RETRY_WAITS.len()
+                    );
+                    if !send(tx, json!({"type": "notice", "text": note})) {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(*wait));
+                    res = providers::run(ep, model, system, &history, tools, &opts, &mut on);
+                }
+                _ => break,
+            }
+        }
         // A model without eyes: say so and ask again with the pictures as text.
         if let Err(e) = &res {
             if refuses_images(e) && strip_images(&mut history) {
@@ -3055,6 +3107,22 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn only_passing_failures_are_tried_again() {
+        assert!(transient(
+            "the provider answered 503: [x] [502]: holver.id | 502: Bad gateway (reset after 30s)"
+        ));
+        assert!(transient("the provider answered 429: rate limited"));
+        assert!(transient(
+            "could not reach the provider: Connection reset by peer"
+        ));
+        assert!(!transient(
+            "the provider answered 404: No active credentials for provider: tokenrouter"
+        ));
+        assert!(!transient("the provider answered 401: bad key"));
+        assert!(!transient("stopped"));
+    }
     use memora_state::assistant::Message;
 
     fn msg(role: &str, content: &str) -> Message {

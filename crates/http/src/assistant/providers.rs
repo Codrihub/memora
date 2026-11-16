@@ -150,6 +150,37 @@ fn authed(ep: &Endpoint, req: ureq::Request) -> ureq::Request {
     }
 }
 
+/// An error body made short and readable: an HTML error page (a proxy's 502, say) becomes
+/// its title, whatever wrapped it stays, spaces are folded and the length is capped.
+fn condense_error(msg: &str) -> String {
+    let low = msg.to_ascii_lowercase();
+    let mut out = msg.to_string();
+    if let Some(start) = ["<!doctype", "<html"]
+        .iter()
+        .filter_map(|t| low.find(t))
+        .min()
+    {
+        let end = low
+            .rfind("</html>")
+            .map(|i| i + "</html>".len())
+            .unwrap_or(msg.len());
+        let page = &low[start..end];
+        let title = page
+            .find("<title>")
+            .and_then(|a| page[a + 7..].find("</title>").map(|b| (a + 7, a + 7 + b)))
+            .map(|(a, b)| msg[start + a..start + b].trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "an HTML error page".to_string());
+        out = format!("{}{}{}", &msg[..start], title, &msg[end..]);
+    }
+    let folded = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if folded.chars().count() > 400 {
+        folded.chars().take(400).collect::<String>() + "…"
+    } else {
+        folded
+    }
+}
+
 /// The error a failed call reads as: the provider's own message when it sent one.
 fn call_error(e: ureq::Error) -> String {
     match e {
@@ -164,8 +195,8 @@ fn call_error(e: ureq::Error) -> String {
                         .or_else(|| v["message"].as_str())
                         .map(str::to_string)
                 })
-                .unwrap_or_else(|| body.chars().take(300).collect());
-            format!("the provider answered {code}: {msg}")
+                .unwrap_or_else(|| body.clone());
+            format!("the provider answered {code}: {}", condense_error(&msg))
         }
         ureq::Error::Transport(t) => format!("could not reach the provider: {t}"),
     }
@@ -1062,6 +1093,20 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn an_html_error_page_reads_as_its_title() {
+        let raw = "[x/deepseek] [502]: <!DOCTYPE html> <html lang=\"en\"> <head> <title>holver.id | 502: Bad gateway</title> </head> <body> Ray 4011 </body> </html> (reset after 30s)";
+        assert_eq!(
+            condense_error(raw),
+            "[x/deepseek] [502]: holver.id | 502: Bad gateway (reset after 30s)"
+        );
+        assert_eq!(
+            condense_error("plain  message\n here"),
+            "plain message here"
+        );
+        assert!(condense_error(&"a".repeat(900)).chars().count() <= 401);
+    }
 
     #[test]
     fn inline_think_tags_become_thinking_even_split_across_chunks() {
