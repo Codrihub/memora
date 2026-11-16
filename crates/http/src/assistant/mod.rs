@@ -1683,8 +1683,8 @@ mention); the Mnemo page has your own Activity view.\n\
 - The console has you too: /mnemo in the Memora terminal app, with the same chats, models and keys.\n\
 - Visuals: when a chart, graph, diagram, timeline or small mock-up explains better than text, you may add one \
 self-contained ```html block (inline CSS and JavaScript, or SVG; scripts from https CDNs are allowed). It cannot \
-fetch anything, so put the data in the page. Once your reply is done the web app shows it as a live preview \
-(the eye) that the owner can switch to code, copy, download or open full screen. Use it only when it helps, \
+fetch anything, so put the data in the page. Once your reply is done the web app shows it as a file card that \
+opens the page beside the chat (full screen on phones), with Preview, Code, Copy and Download. Use it only when it helps, \
 keep it light, and never in a reply written into a note.";
 
 fn system_prompt(st: &AppState, scope: &str, extra: Option<&str>) -> String {

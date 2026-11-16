@@ -20,6 +20,7 @@ import { useActivityStyles } from '../control/activity';
 import { ChatView, openMnemoSettings, openShown, type Artifact } from './chat';
 import { MNEMO_CSS, markHTML } from './styles';
 import { textSizeHTML, wireTextSize } from './textsize';
+import { noteSessions, onUnread, unreadOf } from './unread';
 
 
 let root: HTMLElement | null = null;
@@ -88,6 +89,8 @@ export async function renderAssistant(): Promise<void> {
 }
 
 function build(): void {
+  // A chat seen here (or news from elsewhere) repaints its row's count.
+  onUnread(() => paintList());
   root = el('div', 'mnp');
   root.innerHTML = `
     <aside class="mnp-side" id="mnpSide" aria-label="Chats">
@@ -518,6 +521,7 @@ function watchRunning(): void {
 async function refreshList(): Promise<void> {
   try {
     sessions = (await A.listSessions()).sessions;
+    noteSessions(sessions);
   } catch (e) {
     sessions = [];
     const list = root?.querySelector('#mnpList');
@@ -531,6 +535,7 @@ function upsert(s: A.Session): void {
   const i = sessions.findIndex((x) => x.id === s.id);
   if (i >= 0) sessions[i] = { ...sessions[i], ...s };
   else sessions.unshift(s);
+  noteSessions(sessions);
   paintList();
 }
 
@@ -613,9 +618,11 @@ function paintList(): void {
       last = b;
     }
     const ic = s.scope.startsWith('note:') ? 'note' : s.scope.startsWith('folder:') ? 'folder' : 'chat';
-    html += `<div class="mnp-row${s.id === cur ? ' on' : ''}${s.running ? ' run' : ''}" data-id="${attr(s.id)}" role="button" tabindex="0" aria-current="${s.id === cur}">
+    const news = s.running || s.id === cur ? 0 : unreadOf(s);
+    html += `<div class="mnp-row${s.id === cur ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}" data-id="${attr(s.id)}" role="button" tabindex="0" aria-current="${s.id === cur}">
       <span class="mnp-row-ic">${s.running ? `<i class="mnp-spin" title="${A.MNEMO} is working on this"></i>` : icon(ic)}</span>
       <span class="mnp-row-t"><b>${titleHTML(s.title)}</b><small>${esc(A.scopeLabel(s.scope))} · ${esc(relTs(s.updated_at))}</small></span>
+      ${news ? `<span class="mnp-new" title="${news} new message${news === 1 ? '' : 's'}" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}
       <button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button></div>`;
   }
   list.innerHTML = html;
@@ -934,6 +941,10 @@ const PAGE_CSS = `
 .mnp-row-ic .i{width:15px;height:15px}
 .mnp-row-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
 .mnp-row-t b{font-size:13.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-row.unread .mnp-row-t b{font-weight:700;color:var(--fg)}
+.mnp-new{flex:none;display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg,#fff);
+  font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.mnp-row.unread:hover .mnp-new,.mnp-row.unread:focus-within .mnp-new{display:none}
 .mnp-row-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-more{opacity:0}.mnp-row:hover .mnp-row-more,.mnp-row.on .mnp-row-more,.mnp-row-more:focus-visible{opacity:1}
 /* Touch screens have no hover: the ⋯ is always there (iOS would spend the first tap on a hover). */

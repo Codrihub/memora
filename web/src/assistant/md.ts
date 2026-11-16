@@ -43,29 +43,29 @@ function linkFor(target: string): string {
     : `<span class="mn-wl missing" title="No note with this name">${esc(shown)}</span>`;
 }
 
-/** Languages whose code blocks are shown as a live preview once the reply is done. */
+/** Languages whose code blocks become a file card once the reply is done. */
 const ART_LANGS = /^(html|htm|svg)$/i;
 
-/** An HTML or SVG block, finished: a preview (eye) by default, with Code, Download and Full screen. */
-function artBlock(lang: string, rest: string): string {
+/** A finished HTML or SVG block as a file card: tap it to open the preview beside the chat
+ *  (full screen on tablets and phones). The source stays inside, hidden. */
+function fileCard(lang: string, code: string): string {
   const kind = lang.toLowerCase() === 'svg' ? 'svg' : 'html';
-  const btn = (k: string, ic: string, label: string): string =>
-    `<button type="button" class="mn-art-b" ${k} title="${label}" aria-label="${label}">${icon(ic)}</button>`;
+  const KIND = kind.toUpperCase();
+  const t = /&lt;title&gt;([^&<]{1,80})&lt;\/title&gt;/i.exec(code)?.[1]?.trim();
+  const title = t || (kind === 'svg' ? 'Image' : 'Page');
+  const lines = code.split('\n').length;
   return (
-    `<div class="dc-code mn-art" data-art="${kind}" data-view="preview"><div class="dc-code-bar">` +
-    `<span class="mn-art-tabs" role="tablist" aria-label="Show">` +
-    `<button type="button" role="tab" data-art-view="preview" aria-selected="true">${icon('eye')}<span>Preview</span></button>` +
-    `<button type="button" role="tab" data-art-view="code" aria-selected="false">${icon('code')}<span>Code</span></button></span>` +
-    `<span class="mn-art-k">${kind === 'svg' ? 'SVG' : 'HTML'}</span><span class="mn-art-sp"></span>` +
-    btn('data-art-dl', 'download', `Download the ${kind === 'svg' ? 'SVG' : 'HTML'} file`) +
-    btn('data-art-full', 'expand', 'Full screen') +
-    rest +
-    `</div><div class="mn-art-v"></div><pre>`
+    `<div class="mn-file" data-art="${kind}" data-title="${attr(title)}" role="button" tabindex="0" aria-label="Open ${attr(title)} (${KIND})">` +
+    `<span class="mn-file-ic">${icon('code')}</span>` +
+    `<span class="mn-file-t"><b>${esc(title)}</b><small>${KIND} · ${lines} line${lines === 1 ? '' : 's'}</small></span>` +
+    `<span class="mn-file-a"><span class="mn-file-open">${icon('eye')}<span>Open</span></span>` +
+    `<button type="button" class="mn-file-dl" data-file-dl title="Download the ${KIND} file" aria-label="Download the ${KIND} file">${icon('download')}</button></span>` +
+    `<pre class="mn-file-src" hidden><code>${code}</code></pre></div>`
   );
 }
 
 /** Render a reply. Links open in a new tab; wikilinks and note paths open the note.
- *  `live` while it streams: HTML blocks stay code until the reply is done. */
+ *  `live` while it streams: HTML blocks stay code until the reply is done, then become file cards. */
 export function renderReply(src: string, live = false): string {
   const links: string[] = [];
   // Wikilinks outside code: swap for tokens the renderer leaves alone.
@@ -94,8 +94,8 @@ export function renderReply(src: string, live = false): string {
   });
   if (!live)
     html = html.replace(
-      /<div class="dc-code"><div class="dc-code-bar"><span>([a-z]+)<\/span>([\s\S]*?)<\/div><pre>/gi,
-      (m, lang: string, rest: string) => (ART_LANGS.test(lang) ? artBlock(lang, rest) : m),
+      /<div class="dc-code"><div class="dc-code-bar"><span>([a-z]+)<\/span>[\s\S]*?<\/div><pre><code>([\s\S]*?)<\/code><\/pre><\/div>/gi,
+      (m, lang: string, code: string) => (ART_LANGS.test(lang) ? fileCard(lang, code) : m),
     );
   // Headings in a chat bubble carry no ids or anchors.
   return html.replace(/<h([1-6]) id="[^"]*"/g, '<h$1').replace(/<a class="dc-anchor"[^>]*>#<\/a>/g, '');

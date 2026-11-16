@@ -56,7 +56,8 @@ Screenshots use a demo vault.
   console using your own OpenAI, Anthropic or OpenAI-compatible API key. Mnemo
   finds, writes, tags, links, moves and tidies notes with Memora's own tools,
   shows every step, and has no web, shell or delete-for-good access. It can
-  answer with a chart or diagram, shown as a live, sandboxed preview.
+  answer with a chart or diagram: a file card that opens a sandboxed preview
+  beside the chat.
 - **Images beside notes.** Paste or drop PNG, JPEG, WebP or GIF into a note; the
   file lives in the note's folder and moves, goes to the Trash and comes back
   with it. Folder galleries show which note and section uses each image.

@@ -149,7 +149,19 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-setup>span{color:var(--muted);max-width:380px;line-height:1.5}
 .mn-setup .btn{margin-top:8px}
 
-.mn-comp{flex:none;padding:10px 24px 14px}
+.mn-comp{flex:none;padding:10px 24px 14px;position:relative}
+.mn-down{position:absolute;left:50%;bottom:calc(100% + 6px);z-index:6;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;min-width:34px;padding:0 9px;
+  border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--surface-1,var(--panel)) 92%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px -8px rgba(15,23,42,.35);
+  opacity:0;pointer-events:none;transform:translate(-50%,8px) scale(.96);transition:opacity .2s,transform .25s var(--ease-out,ease-out),background .15s}
+.mn-down .i{width:16px;height:16px}
+.mn-down span{display:none}
+.mn-down.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.mn-down.new{padding:0 14px 0 11px;background:var(--accent);border-color:transparent;color:var(--accent-fg,#fff)}
+.mn-down.new span{display:inline}
+.mn-down:hover{background:var(--hover)}
+.mn-down.new:hover{background:color-mix(in srgb,var(--accent) 88%,#000)}
+.mn-down:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mn-chat.compact .mn-comp{padding:8px 12px 12px}
 .mn-comp-box{max-width:780px;margin:0 auto;border:1px solid var(--line-strong);border-radius:20px;background:var(--surface-0,var(--bg));
   box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -12px rgba(15,23,42,.12);transition:border-color .15s,box-shadow .15s}
@@ -481,7 +493,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 @keyframes mnFlash{0%,30%{box-shadow:0 0 0 3px var(--accent);border-radius:12px;background:var(--accent-soft)}100%{box-shadow:0 0 0 0 transparent}}
 
 /* Where older messages were compacted into a summary. */
-.mn-compact{align-self:stretch;margin:2px 0;font-size:12.5px;color:var(--muted)}
+.mn-compact{align-self:stretch;margin:2px auto;font-size:12.5px;color:var(--muted)}
 .mn-compact summary{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;cursor:pointer;list-style:none;text-align:center}
 .mn-compact summary::-webkit-details-marker{display:none}
 .mn-compact summary::before,.mn-compact summary::after{content:"";flex:1 1 0;min-width:12px;height:1px;background:var(--line)}

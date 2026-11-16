@@ -19,7 +19,8 @@ import { nav } from '../vault/nav';
 import { openLightbox } from '../ui/lightbox';
 import * as A from './api';
 import { renderReply, resolveNote } from './md';
-import { mountArt } from './art';
+import { closePreview, mountArt } from './art';
+import { markSeen } from './unread';
 import { MNEMO_CSS, markHTML } from './styles';
 import { applyTextSize } from './textsize';
 
@@ -175,7 +176,19 @@ export interface ChatOptions {
 
 export class ChatView {
   readonly el: HTMLElement;
-  session: A.Session | null = null;
+  private downBtn!: HTMLButtonElement;
+  private cur: A.Session | null = null;
+  /** The open chat; the element carries its id so the unread count knows it is on screen. */
+  get session(): A.Session | null {
+    return this.cur;
+  }
+  set session(v: A.Session | null) {
+    this.cur = v;
+    if (!this.el) return;
+    if (v) this.el.dataset.sid = v.id;
+    else delete this.el.dataset.sid;
+    if (v && !document.hidden && this.el.getClientRects().length) markSeen(v.id, v.messages);
+  }
   private messages: A.Message[] = [];
   /** Messages typed while Mnemo works: sent one by one when each reply ends. */
   private queue: { id: number; text: string; attach: A.Attach[] }[] = [];
@@ -216,6 +229,7 @@ export class ChatView {
       <div class="mn-log" role="log" aria-live="polite" aria-label="Conversation with ${A.MNEMO}"></div>
       <nav class="mn-rail" aria-label="Jump to a message" hidden></nav>
       <form class="mn-comp" autocomplete="off">
+        <button type="button" class="mn-down" aria-label="Scroll to the latest message" tabindex="-1">${icon('chev-down')}<span>New messages</span></button>
         <div class="mn-comp-box">
           <div class="mn-queue" hidden></div>
           <div class="mn-att" aria-live="polite"><div class="mn-att-in"></div></div>
@@ -254,6 +268,11 @@ export class ChatView {
     this.log.addEventListener('scroll', () => {
       if (!this.railFrame) this.railFrame = requestAnimationFrame(() => this.syncRail());
     }, { passive: true });
+    this.downBtn = this.el.querySelector('.mn-down')!;
+    this.downBtn.onclick = () => {
+      this.log.scrollTo({ top: this.log.scrollHeight, behavior: 'smooth' });
+      this.input.focus({ preventScroll: true });
+    };
     const form = this.el.querySelector('form')!;
     form.onsubmit = (e) => {
       e.preventDefault();
@@ -857,6 +876,7 @@ export class ChatView {
     const max = this.log.scrollHeight - this.log.clientHeight;
     this.el.classList.toggle('fade-top', top > 8);
     this.el.classList.toggle('fade-bot', max - top > 8);
+    this.paintDown(max - top);
     if (this.rail.hidden) return;
     const us = this.log.querySelectorAll<HTMLElement>('.mn-u');
     const box = this.log.getBoundingClientRect().top;
@@ -1060,6 +1080,7 @@ export class ChatView {
   // ---- transcript ----
 
   private renderAll(): void {
+    closePreview();
     this.log.innerHTML = '';
     if (!this.messages.length) {
       this.paintEmpty();
@@ -1339,7 +1360,22 @@ export class ChatView {
 
   private scrollEnd(force = false): void {
     const near = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 140;
-    if (force || near) this.log.scrollTop = this.log.scrollHeight;
+    if (force || near) {
+      this.log.scrollTop = this.log.scrollHeight;
+      this.downBtn.classList.remove('new');
+    } else {
+      // Scrolled up while something new arrives: the button says so.
+      this.downBtn.classList.add('new');
+      this.paintDown(this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight);
+    }
+  }
+
+  /** The scroll-down button: shown when the latest message is out of sight, "New messages" when news came in. */
+  private paintDown(fromEnd: number): void {
+    const show = fromEnd > 220;
+    if (!show) this.downBtn.classList.remove('new');
+    this.downBtn.classList.toggle('on', show);
+    this.downBtn.tabIndex = show ? 0 : -1;
   }
 
   private onLogClick(e: MouseEvent): void {
@@ -1607,7 +1643,7 @@ export class ChatView {
       if (md) {
         md.innerHTML = renderReply(raw2);
         md.dataset.raw = raw2;
-        mountArt(md);
+        mountArt(md, true);
       }
       md = null;
       raw2 = '';

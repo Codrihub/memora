@@ -26,6 +26,27 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.4',
+    title: 'Pages open like files, and news is marked',
+    lead: 'A page Mnemo writes is a card in the chat; open it and it sits beside the chat. Chats with news stand out.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'chev-down', title: 'Back to the latest', text: 'Scrolled up? A button above the message box takes you down again, and says New messages when a reply came in meanwhile.' },
+          { icon: 'bell', title: 'Unread chats', text: 'The Mnemo item in the sidebar shows how many chats have news; in Mnemo each one is in bold with its number of new messages.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'code', title: 'File cards and a side panel', text: 'Charts and pages show as a card with Open and Download. On a wide screen the page opens beside the chat; on a tablet or phone it fills the screen until you close it. Preview, Code, Copy, Download and Close sit in one clear bar.' },
+          { icon: 'refresh', title: 'Compacted, centred', text: 'The divider where a chat was compacted sits in the middle of the chat again.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.3',
     title: 'Mnemo answers with pictures',
     lead: 'Ask for a chart, a diagram or a small page and see it live in the chat.',

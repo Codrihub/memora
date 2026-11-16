@@ -14,6 +14,7 @@ import { openWelcome } from './views/welcome';
 import { THEME_ICON, THEME_LABEL, setThemePref, themePref, type ThemePref } from './theme';
 import { segmented } from './ui/components';
 import { toast } from './toast';
+import { repaintUnread } from './assistant/unread';
 
 interface SessionInfo {
   authenticated?: boolean;
@@ -303,6 +304,7 @@ export function openProfileMenu(anchor: HTMLElement): void {
     )}
     <div class="pm-sep" role="separator"></div>
     <button class="pm-item danger" role="menuitem" type="button" data-act="signout">${icon('logout')}<span class="pm-label">Sign out</span></button>`;
+  repaintUnread();
 
   // Appearance: a menuitemradio group, kept in sync with the segmented control.
   const slot = menu.querySelector('#pmTheme');
