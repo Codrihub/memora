@@ -7,6 +7,171 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-16
+
+Mnemo, a notes agent built into Memora, and images that live beside their
+notes. The state database needs no migration: Mnemo keeps its chats, models
+and sealed API keys in a separate `assistant.sqlite3` beside it, so 2.0 can
+still roll back by swapping the binary.
+
+### Added
+
+- **Mnemo**, the notes agent built into Memora. Add as many providers as
+  you like, each with its own name and ID: OpenAI (Chat Completions or the
+  Responses API), Anthropic (Messages) or any OpenAI-compatible server
+  (OpenRouter, Groq, Ollama, LM Studio, vLLM…), with your own API key; the
+  key is sealed on the server and never sent back. Each provider can be
+  tested, switched off (its models leave the pickers) or deleted.
+  Mnemo finds, reads, writes, tags, links, moves and tidies notes with
+  Memora's own tools, under its own name in Activity. It has no web, shell,
+  admin or delete-for-good tools.
+  - A full-screen chat page at `/mnemo` (no app header or tab bar; close it
+    with the X or Esc, or go back to Memora from the chat list) with a chat
+    list (search, pin, rename, delete). Opening Mnemo (the menu, the floating
+    button on every page, Ctrl/Cmd+J or "Ask Mnemo" on notes and folders)
+    always starts a new chat, with the open note or folder ready to attach;
+    earlier chats are in the list. Drag the button to either side; drop it on the X (or
+    use its × on hover) to hide it on that device, and bring it back from
+    More, Show the Mnemo button.
+  - Thinking as the model writes it: Claude's and OpenAI's reasoning
+    summaries, the raw reasoning that OpenAI-compatible servers send
+    (`reasoning_content`, `reasoning`, `reasoning_details`; Mnemo asks for it
+    and stops asking a server that refuses), and the `<think>` blocks open
+    models such as DeepSeek-R1, Qwen and Hermes write into their answers.
+  - Mnemo knows the time where you are (its `current_time` tool uses your
+    device's time zone) and Memora's own documentation (`search_docs`,
+    `read_docs`): it answers questions about Memora and links the Docs page
+    it used.
+  - Streaming replies with live thinking (where the provider shows it) and an
+    Activity block per reply: each step as it happens, then what Mnemo did,
+    how long it took and the notes it read or changed (tap to open).
+    Wikilinks open notes. The composer rests as a one-line capsule and opens
+    on focus with +, the model picker (pinned first, hidden left out), a pin
+    that makes the model the default for new chats (browser and console) and
+    the memory ring. A timeline rail at the right edge, in thumb reach, has a
+    bar per question: tap one to jump, hover it, or press and slide along the
+    rail to scrub through the chat (the bars swell under the finger, a label
+    names the question, phones tick). The transcript fades under its edges
+    while you scroll.
+  - Each chat keeps its whole conversation for its model. Near full, Mnemo
+    folds the older messages into a summary written by the same model and
+    carries on (a marker in the chat opens the summary); the memory ring
+    shows how full the chat is, where compaction starts, and compacts on
+    request.
+  - Attach notes, folders and images to a message with + (or paste and drop
+    images): they show as chips above the prompt, each with an ×, in one row
+    that slides left and right (arrows on wide screens, no scrollbar). Up to
+    four images per message; tap one to preview it. Images go to the model
+    as real image input (OpenAI, Responses and Anthropic formats), so it can
+    see them; a model without vision gets their names and a notice. Mnemo
+    can also put an attached image beside the note it belongs to with its
+    `place_image` tool. A big folder or the whole vault goes along as a list
+    that Mnemo reads one note at a time, in batches, saying how far it got.
+  - In the chat, the pictures that came with a message are tiles (tap for
+    the full view, with the others of that message) next to its note chips,
+    in the order they were attached, in a sliding row. Under every reply a
+    Related row lists what it changed, showed and read.
+  - Models: fetch them from the provider, with the context window and
+    reply limit it reports in its standard model list, or add them by name;
+    pin, hide and pick a default (with no default, new chats take the first
+    pinned model, the same one everywhere).
+  - Settings, Mnemo: providers, models, your own instructions in plain
+    words and the floating button. Temperature, limits and tool steps keep
+    sensible defaults (and stay adjustable over `POST /api/assistant/prefs`).
+  - Ask Mnemo inside a note: a line with `@mnemo: <request>` (the editor
+    offers it as you type `@` or `/mn`; also in a quote or a list item, never
+    in code) runs a few seconds after the note is saved. Each request gets a
+    chat of its own, titled `@mnemo · <note>: <request>` and shown with an
+    "@ note" tag, where its steps and thinking stay; then Mnemo strikes the
+    request through
+    (`~~@mnemo: …~~`) and quotes its reply right under it; a struck request
+    never runs again. Agents can ask the same way with
+    `mention_agent` and agent `mnemo`.
+  - Every chat has its own address (`/mnemo/<id>`): a reload, a link or Back
+    opens the same chat. A new chat is called "New chat" until Mnemo's first
+    reply, then the model names it in a few words in your language (a chat
+    you renamed keeps your name).
+  - The Mnemo sidebar has an Appearance card: the theme switch (light, dark,
+    system) and the chat background, picked from preview tiles: Glow (the
+    default), Aurora, Mesh, Dusk, Dawn, Deep, Dots, Grid, Lines, Waves, Grain
+    or Plain. Quiet and theme-aware (a touch stronger on dark), remembered
+    per device.
+  - "In this chat", a panel on the right (a drawer on smaller screens):
+    every note, folder, image and the vault the chat attached, read, changed
+    or showed, grouped, each opening on a tap. The chat list folds away on
+    wide screens too; both are remembered.
+  - Phones: the Mnemo page follows the part of the screen the keyboard
+    leaves, so the composer stays right above it (iOS, Android and the
+    installed app).
+  - Replies keep going on the server when you leave: open another chat,
+    leave the page or lose the network, and the reply goes on; its chat
+    spins in the list, and opening it shows the reply still streaming (or
+    done). Only Stop ends a reply early.
+  - Regenerate under every reply, and Try again on every message of yours
+    and on errors: the turn runs again with the chat's model (later turns
+    are replaced, after you confirm).
+  - Mnemo hands things over: with its `show_items` tool, notes, folders,
+    images or the whole vault appear as cards in its reply that open on a
+    tap. The model picker links straight to Settings (Manage models and
+    providers).
+  - Export a chat: Download as Markdown, or Save as a note (in "Mnemo
+    chats"), from the chat's menu; `/export` in the console.
+  - Search every chat: the chat list's search box finds words in what you
+    and Mnemo said (and in titles), marks them, and opens the chat at the
+    message. Mnemo can look back too, with its own `search_chats` and
+    `read_chat` tools, when you refer to an earlier conversation.
+  - Mnemo has its own activity (Mnemo page, Activity; or its row on the
+    Activity page): every tool call, each marked with who it was for and how
+    it was asked ("owner · chat", "owner · console",
+    "research-bot · @mnemo in Inbox"). Activity events carry this as `for`.
+  - The console has it too: `/mnemo` chats with the same Mnemo (same chats,
+    models and keys), shows its thinking and a summary of each reply, and
+    takes `/attach` (a note or folder) and `/image` (a picture file),
+    `/pin` (this model for new chats), `/memory`, `/compact`, `/activity`,
+    `/search` and `/retry`, and opening a chat with a reply still running
+    streams it;
+    `/mnemo setup` adds, tests, switches and deletes providers and manages
+    models.
+  - Routes under `/api/assistant/` (signed-in browser only; API keys are
+    refused). See docs/API.md.
+- **Images beside notes.** Upload PNG, JPEG, WebP or GIF from the editor
+  (button, paste or drop). An image is stored in the note's own folder and
+  shown with `![alt](path:name.png)`; a `path:` to an image in another
+  folder is copied beside the note on save, so a note never points across
+  folders. URLs still work.
+  - Images follow their note: moved with it, soft-deleted to the Trash with
+    it, restored with it (to the same or another folder) and deleted for
+    good with it. An image another note in the folder still shows is kept.
+  - A gallery view of a folder's images (that folder only), and an Images
+    tab beside a note (this note or its folder). The viewer shows which
+    notes and sections show an image and opens the note at that spot.
+  - Settings, Images: the largest upload (0.1 to 50 MB, 5 MB by default)
+    and how much notes and images take.
+  - MCP tools `upload_image` and `list_images` (77 tools in all), and
+    `POST /api/vault/image`, `POST /api/vault/image/delete`,
+    `GET /api/vault/images`, `GET /api/vault/storage`,
+    `GET|POST /api/settings/media`.
+- Reading settings offer nine colours (from paper and sepia to night and
+  high contrast), nine fonts (including Literata, Atkinson Hyperlegible,
+  Nunito, IBM Plex and OpenDyslexic, served by Memora itself) and nine text
+  sizes.
+- The sidebar can be dragged wider (up to 440 px) while it is open;
+  double-click the edge to reset. Collapsing works as before.
+- Version history shows a calm loading animation while it reads.
+
+### Fixed
+
+- Staying signed in while you work: the browser's session cookie used to keep
+  the lifetime it got at sign-in, so it was dropped after the idle timeout (3
+  hours by default) however active you were, although the server kept the
+  session alive. Every request now renews the cookie too (at most every five
+  minutes), and an open, visible tab you are using renews it while you read
+  or scroll. An idle or hidden tab still signs out after the timeout.
+- The Brain, Graph and Canvas toolbar no longer lets the search box, its
+  shortcut and the badges overlap or spill out on medium widths. On phones
+  the search is a plain "Search" pill, and touch screens no longer show the
+  "/" keyboard hint.
+
 ## [2.0.1] - 2026-10-24
 
 A calmer reader. Notes read like a clean page whatever the reading settings.

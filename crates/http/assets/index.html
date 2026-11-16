@@ -3,9 +3,9 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="memora-build" content="84ec585a8f43">
+<meta name="memora-build" content="c08239017bec">
 <script>(function(){var p='system';try{var v=localStorage.getItem('memora.theme');if(v==='light'||v==='dark'||v==='system')p=v}catch(e){}if(p==='system'){try{p=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){p='dark'}}document.documentElement.dataset.theme=p})();</script>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="dark light">
 <title>Memora</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -141,8 +141,9 @@ html,body{margin:0;height:100%;background:#07090e;color:#e8ecf3;overflow:hidden;
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></svg>
       </button>
       <div id="sideStatsPop" class="side-stats-pop" role="dialog" aria-label="Your notes in numbers" hidden></div>
-      <nav class="side-links" aria-label="Trash and settings">
+      <nav class="side-links" aria-label="Mnemo, trash and settings">
         <button id="sideCollapse" class="nav-item side-collapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="sidebar" aria-expanded="true"><span class="ni-tile"><svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></span><span class="ni-label sc-label">Collapse sidebar</span></button>
+        <button class="nav-item side-mnemo" type="button" data-page="assistant" data-tip="Mnemo" aria-label="Mnemo, your notes agent"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-8a2.6 2.6 0 0 1 5.2 0v4.2a2.8 2.8 0 0 0 5.6 0V10a2.6 2.6 0 0 1 5.2 0v8"/><path d="M12 2.8v2.6M10.7 4.1h2.6"/></svg></span><span class="ni-label">Mnemo</span><span class="ni-new" aria-hidden="true">New</span></button>
         <button class="nav-item" type="button" data-act="trash" data-page="trash" data-tip="Trash" aria-label="Trash"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 1.8h7a2 2 0 0 0 2-1.8l1-12M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7"/></svg></span><span class="ni-label">Trash</span></button>
         <button class="nav-item" type="button" data-page="settings" data-tip="Settings" aria-label="Settings"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span class="ni-label">Settings</span></button>
       </nav>
@@ -153,6 +154,7 @@ html,body{margin:0;height:100%;background:#07090e;color:#e8ecf3;overflow:hidden;
       </button>
 
     </div>
+    <div id="sideResize" class="side-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-controls="sidebar" tabindex="0" title="Drag to resize · double-click to reset"></div>
   </aside>
   <div id="sideScrim" aria-hidden="true"></div>
 
@@ -208,6 +210,7 @@ html,body{margin:0;height:100%;background:#07090e;color:#e8ecf3;overflow:hidden;
       <section id="view-access" class="view hidden" data-page="access" aria-label="Access"></section>
       <section id="view-settings" class="view hidden" data-page="settings" aria-label="Settings"></section>
       <section id="view-docs" class="view hidden" data-page="docs" aria-label="Documentation"></section>
+      <section id="view-assistant" class="view hidden" data-page="assistant" aria-label="Mnemo"></section>
       <section id="view-trash" class="view hidden" data-page="trash" aria-label="Trash"></section>
     </div>
   </main>
@@ -238,6 +241,6 @@ html,body{margin:0;height:100%;background:#07090e;color:#e8ecf3;overflow:hidden;
   <div id="toasts" class="toasts" role="region" aria-label="Notifications" aria-live="polite"></div>
   </div>
 </div>
-<script src="/app.js?v=892a7be52ad5"></script>
+<script src="/app.js?v=9a28c1175423"></script>
 </body>
 </html>
