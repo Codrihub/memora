@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-11-16
+
+Mnemo fits your screen: full width on phones, and a text size you choose.
+
+### Added
+
+- Text size for Mnemo's chat: Auto, Small, Medium or Large, from Appearance
+  in the chat list or Settings, Mnemo (kept per device). Auto is small on
+  phones, so more fits on the screen, and medium elsewhere. Replies, your
+  messages, questions, steps and thinking all follow it.
+
+### Changed
+
+- On phones Mnemo's replies drop the avatar beside them and use the full
+  width, with equal margins on both sides; the timeline narrows into the
+  right margin.
+
 ## [2.1.1] - 2026-11-16
 
 Mnemo asks before it guesses, works on its own when you let it, and takes
