@@ -618,15 +618,15 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 @container vxnote (min-width:820px) and (max-width:1079px){
   .vx-page.toc-open:not(.editing){grid-template-columns:256px minmax(0,1fr);gap:20px;padding:24px 24px 120px}
   .vx-toc{padding:10px 8px 8px 12px}
-  .vx-toc .vx-ct-seg button{padding:0 4px;font-size:12px}
+  .vx-toc .vx-ct-seg button{padding:0 2px;font-size:11px}
 }
 .vx-galsec{display:flex;flex-direction:column;gap:14px}
 .vx-galhead{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px}
 .vx-galhead em{font-style:normal;font-size:12.5px;color:var(--muted)}
 .vx-ct-imgs{display:flex;flex-direction:column;gap:10px;padding:8px 2px 4px}
-.vx-ct-scope{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:3px;border-radius:9px;background:var(--seg-track,var(--surface-2))}
+.vx-ct-scope{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--fg) 7%,transparent)}
 .vx-ct-scope button{height:26px;border:0;border-radius:6px;background:none;color:var(--muted);font:inherit;font-size:12px;font-weight:550;cursor:pointer}
-.vx-ct-scope button[aria-pressed=true]{background:var(--seg-thumb,var(--surface-1));color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.vx-ct-scope button[aria-pressed=true]{background:color-mix(in srgb,var(--fg) 12%,var(--bg));color:var(--fg);box-shadow:0 0 0 1px var(--line)}
 .vx-ct .vx-gal{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
 .vx-ct .vx-gal-th{border-radius:9px}
 .vx-ct .vx-gal-cap b{font-size:11.5px}.vx-ct .vx-gal-cap small{font-size:10.5px}
@@ -752,24 +752,26 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 /* contents: tabs, then the outline / links / mentions */
 .vx-ct{display:flex;flex-direction:column;min-height:0}
 .vx-ct-main{display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:1;min-width:0;height:34px;padding:3px;border-radius:10px;box-sizing:border-box;
-  background:var(--seg-track,var(--surface-2))}
+  background:color-mix(in srgb,var(--fg) 7%,transparent)}
+/* Colours come from the reading tone (--fg, --bg), so the tabs read well in every theme. */
 .vx-ct-main button{border:0;border-radius:7px;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;
   white-space:nowrap;transition:color .15s,background .15s}
 .vx-ct-main button:hover{color:var(--fg)}
-.vx-ct-main button[aria-selected=true]{background:var(--seg-thumb,var(--surface-1));color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08),0 0 0 1px var(--line)}
+.vx-ct-main button[aria-selected=true]{background:color-mix(in srgb,var(--fg) 12%,var(--bg));color:var(--fg);
+  box-shadow:0 1px 2px rgba(0,0,0,.12),inset 0 0 0 1px var(--line-strong,var(--line))}
 .vx-ct-main button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .vx-ct>.vx-ct-main{flex:none;margin-bottom:12px}
 .vx-ct-inner{display:flex;flex-direction:column;min-height:0}
-.vx-ct-seg{display:flex;gap:2px;height:36px;margin:0 -2px;border-bottom:1px solid var(--line);box-sizing:border-box;flex:none;overflow-x:auto;scrollbar-width:none}
-.vx-ct-seg::-webkit-scrollbar{display:none}
-.vx-ct-seg button{position:relative;flex:1 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 6px;border:0;border-radius:7px 7px 0 0;
-  background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:550;white-space:nowrap;cursor:pointer;transition:color .15s}
-.vx-ct-seg button b{font-size:11px;font-weight:500;color:var(--text-3);font-variant-numeric:tabular-nums}
-.vx-ct-seg button::after{content:"";position:absolute;left:6px;right:6px;bottom:-1px;height:2px;border-radius:2px;background:transparent;transition:background .15s}
-.vx-ct-seg button:hover{color:var(--fg)}
-.vx-ct-seg button[aria-selected=true]{color:var(--fg)}
-.vx-ct-seg button[aria-selected=true]::after{background:var(--accent)}
-.vx-ct-seg button[aria-selected=true] b{color:var(--muted)}
+/* Outline, Links, Mentions, Images: four equal tabs, the count over the name, so all four always fit. */
+.vx-ct-seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 8px;padding:0 0 8px;border-bottom:1px solid var(--line);flex:none}
+.vx-ct-seg button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:0;height:46px;padding:0 4px;border:0;
+  border-radius:9px;background:none;color:var(--muted);font:inherit;font-size:11.5px;font-weight:550;cursor:pointer;transition:color .15s,background .15s}
+.vx-ct-seg button>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vx-ct-seg button b{order:-1;font-size:15px;font-weight:650;line-height:1.2;color:var(--fg);opacity:.55;font-variant-numeric:tabular-nums}
+.vx-ct-seg button:hover{background:color-mix(in srgb,var(--fg) 5%,transparent);color:var(--fg)}
+.vx-ct-seg button[aria-selected=true]{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--fg);box-shadow:inset 0 0 0 1px var(--accent-line,var(--accent))}
+.vx-ct-seg button[aria-selected=true] b{opacity:1;color:var(--accent)}
+.vx-ct-seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .vx-ct-list{overflow:auto;min-height:0;scrollbar-width:none;overscroll-behavior:contain}
 .vx-ct-list::-webkit-scrollbar{display:none}
 .vx-ct-none{margin:0;padding:10px 2px;font-size:12.5px;color:var(--muted);line-height:1.5}
@@ -808,11 +810,11 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-sheet.vx-pop-hist .vx-sheet-grab{display:none}
 }
 .vx-sheet.vx-pop-ct .vx-pop-body{display:flex;flex-direction:column;overflow:hidden;padding:4px 16px 0}
-.vx-sheet .vx-ct-seg{height:42px}
+.vx-sheet .vx-ct-seg button{height:52px}
 .vx-sheet .vx-ct-main{height:42px;border-radius:12px}
 .vx-sheet .vx-ct-main button{font-size:14.5px;border-radius:9px}
-.vx-sheet .vx-ct-seg button{font-size:14px}
-.vx-sheet .vx-ct-seg button b{font-size:12px}
+.vx-sheet .vx-ct-seg button{font-size:13px}
+.vx-sheet .vx-ct-seg button b{font-size:17px}
 .vx-sheet .vx-ct-list{flex:1 1 auto;margin:10px -16px 0;padding:0 16px calc(16px + var(--safe-b,0px))}
 .vx-sheet .vx-ct-h{font-size:15px;line-height:1.4;padding:10px 10px 10px calc(14px + var(--lv,0) * 16px);min-height:44px}
 .vx-sheet .vx-ct-i{font-size:15px;min-height:52px}

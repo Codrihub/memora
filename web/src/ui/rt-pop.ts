@@ -149,6 +149,10 @@ let loading = false;
 let live: ActivityItem[] = [];
 let liveOff: (() => void) | null = null;
 let showIdleKeys = false;
+/** All agent rows shown, not just the first few. */
+let showAllAgents = false;
+/** Agent rows shown before "Show all". */
+const AGENTS_SHOWN = 5;
 let backTo = '';
 
 function when(ms: number, active: boolean, now = Date.now()): string {
@@ -172,6 +176,7 @@ export function resetRtPop(): void {
   shownView = undefined;
   lastHtml = '';
   showIdleKeys = false;
+  showAllAgents = false;
   backTo = '';
 }
 
@@ -331,12 +336,14 @@ function overview(d: PopData, all: ActivityItem[]): string {
       : at
         ? `<span class="t">${esc(short(at))}</span>`
         : '';
+    // Mnemo is built in: it has no key of its own to remove.
+    const note = a.id === 'mnemo' ? 'built in' : a.keyed ? '' : 'key removed';
     const state = a.active ? 'working now' : at ? 'last active ' + when(at, false) : dim ? 'not connected yet' : 'idle';
     return `<button type="button" class="rp3-ag${dim ? ' dim' : ''}" data-nav data-agent="${attr(key)}" style="--ag:${attr(
       agentColor(a.name, a.id),
-    )}" aria-label="${attr(`${a.name}, ${state}${a.keyed ? '' : ', key removed'}`)}" title="${attr(`${a.name}: what it did recently`)}">
+    )}" aria-label="${attr(`${a.name}, ${state}${note ? ', ' + note : ''}`)}" title="${attr(`${a.name}: what it did recently`)}">
       ${avatarHTML(a.name, 26, a.active ? 'live' : '', a.id)}
-      <span class="n"><span>${esc(a.name)}</span>${a.keyed ? '' : '<small>key removed</small>'}</span>${right}</button>`;
+      <span class="n"><span>${esc(a.name)}</span>${note ? `<small>${note}</small>` : ''}</span>${right}</button>`;
   };
   const latest = runs(all, LATEST_N);
   const busy = d.agents.filter((a) => a.active);
@@ -352,7 +359,14 @@ function overview(d: PopData, all: ActivityItem[]): string {
   const agentsHTML = d.agents.length
     ? `<div class="rp3-sep" aria-hidden="true"></div>
       <div class="rp3-sec">${seen.length ? 'Agents' : 'Not connected yet'} <span>${d.agents.length}</span></div>
-      ${seen.map((r) => agentRow(r)).join('')}
+      ${(showAllAgents ? seen : seen.slice(0, AGENTS_SHOWN)).map((r) => agentRow(r)).join('')}
+      ${
+        seen.length > AGENTS_SHOWN
+          ? `<button type="button" class="rp3-more" data-nav data-rp="all-agents" aria-expanded="${showAllAgents}">${icon('chev-down')}<span>${
+              showAllAgents ? 'Show fewer' : `Show all <b>(${seen.length})</b>`
+            }</span></button>`
+          : ''
+      }
       ${
         never.length
           ? `${
@@ -389,7 +403,7 @@ function detail(a: PopAgent, all: ActivityItem[]): string {
   const status = a.active
     ? '<div class="rp3-st"><i class="rp3-dot" aria-hidden="true"></i><span>Working now</span></div>'
     : `<div class="rp3-st"><span>${
-        at ? 'Last active ' + esc(when(at, false)) : !a.keyed ? 'Key removed' : feed ? 'Not connected yet' : 'Loading…'
+        at ? 'Last active ' + esc(when(at, false)) : a.id === 'mnemo' ? 'Built in' : !a.keyed ? 'Key removed' : feed ? 'Not connected yet' : 'Loading…'
       }</span></div>`;
   const n = (v: number, one: string, many: string, bad = false): string =>
     `<span><b${bad && v ? ' class="bad"' : ''}>${feed ? v : '…'}</b> ${v === 1 ? one : many}</span>`;
@@ -475,6 +489,11 @@ function wire(pop: HTMLElement, d: PopData, all: ActivityItem[]): void {
       if (what === 'back') {
         view = null;
         goingBack = true;
+        d.rerender();
+        return;
+      }
+      if (what === 'all-agents') {
+        showAllAgents = b.getAttribute('aria-expanded') !== 'true';
         d.rerender();
         return;
       }

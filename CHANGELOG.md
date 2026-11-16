@@ -45,6 +45,12 @@ messages while it works.
 
 ### Fixed
 
+- Mnemo no longer shows as "key removed" in Your AIs, nor greyed out in Live
+  activity: it is built in. Your AIs lists five agents, with Show all for
+  the rest.
+- The note panel's Contents and Details tabs, and Outline, Links, Mentions
+  and Images, follow the reading theme, so they stay readable in every
+  theme; the four tabs always fit, each count above its name.
 - A long note path no longer runs over the step's title and result.
 - The ⋯ on each chat in the list works on touch screens (iOS spent the first
   tap on a hover), and All chats opens a folded chat list.

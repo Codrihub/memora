@@ -1044,7 +1044,7 @@ function paintActivity(): void {
           .map((x) => {
             const kid = kidOf(x) ?? '';
             // History from keys that no longer exist stays, greyed out.
-            const gone = x.source === 'agent' && (kid ? !live.has(kid) : !names.has(x.actor));
+            const gone = x.source === 'agent' && kid !== 'mnemo' && (kid ? !live.has(kid) : !names.has(x.actor));
             const fresh = !!x.live && now - x.ts < 2;
             const who = whoOf(x, me);
             const pred = plainText(predicate(x));

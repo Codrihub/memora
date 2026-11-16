@@ -176,7 +176,7 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
     inner.innerHTML = `<div class="vx-ct-seg" role="tablist" aria-label="Contents">${tabs
       .map(
         (t) =>
-          `<button type="button" role="tab" data-tab="${t.k}" aria-selected="${t.k === tab}" tabindex="${t.k === tab ? 0 : -1}">${t.label}${
+          `<button type="button" role="tab" data-tab="${t.k}" aria-selected="${t.k === tab}" tabindex="${t.k === tab ? 0 : -1}" title="${t.label}"><span>${t.label}</span>${
             t.n >= 0 ? `<b>${t.n}</b>` : ''
           }</button>`,
       )
