@@ -253,8 +253,11 @@ export class ChatView {
     const form = this.el.querySelector('form')!;
     form.onsubmit = (e) => {
       e.preventDefault();
-      if (this.busy) this.stop();
-      else void this.send(this.input.value);
+      // While Mnemo works the button stops it, unless something is typed: then it queues.
+      if (this.busy) {
+        if (this.input.value.trim()) this.enqueue();
+        else this.stop();
+      } else void this.send(this.input.value);
     };
     this.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -268,6 +271,7 @@ export class ChatView {
     this.input.addEventListener('input', () => {
       this.grow();
       this.paintOpen();
+      this.paintSend();
     });
     this.input.addEventListener('scroll', () => this.fadeInput(), { passive: true });
     // Capsule <-> full composer: open on focus, fold back when the owner taps or tabs away
@@ -428,6 +432,7 @@ export class ChatView {
     this.paintAtt();
     this.grow();
     this.paintQueue();
+    this.paintSend();
   }
 
   private sendQueued(): void {
@@ -452,6 +457,7 @@ export class ChatView {
         this.grow();
       }
       this.paintQueue();
+      this.paintSend();
     } catch (e) {
       toast(`${(e as Error).message}`, 'warn');
       if (!fromQueue) this.enqueue();
@@ -1458,9 +1464,19 @@ export class ChatView {
     this.el.classList.toggle('busy', on);
     this.paintOpen();
     this.paintQueue();
-    this.sendBtn.innerHTML = icon(on ? 'stop' : 'send');
-    this.sendBtn.setAttribute('aria-label', on ? 'Stop' : 'Send');
-    this.sendBtn.title = on ? 'Stop' : 'Send (Enter)';
+    this.paintSend();
+  }
+
+  /** Send, or Stop while a reply runs and nothing is typed (typing turns it back into Send,
+   *  which then queues; Ctrl/Cmd+Enter steers). */
+  private paintSend(): void {
+    const stop = this.busy && !this.input.value.trim();
+    const queue = this.busy && !stop;
+    this.sendBtn.innerHTML = icon(stop ? 'stop' : 'send');
+    this.sendBtn.classList.toggle('queue', queue);
+    const t = stop ? 'Stop' : queue ? 'Add to the queue (Enter) · Ctrl+Enter steers this reply now' : 'Send (Enter)';
+    this.sendBtn.title = t;
+    this.sendBtn.setAttribute('aria-label', stop ? 'Stop' : queue ? 'Add to the queue' : 'Send');
   }
 
   async send(raw: string, answer?: A.Answer): Promise<void> {

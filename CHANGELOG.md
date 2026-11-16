@@ -27,7 +27,8 @@ messages while it works.
   can be reordered (arrows or drag) or removed, and goes out by itself when
   the reply ends (not after Stop). Ctrl/Cmd+Enter, or the arrow on a queued
   message, steers the running reply instead: Mnemo reads it before its next
-  step, and it shows inside the reply.
+  step, and it shows inside the reply. While a reply runs the button is Stop,
+  and turns back into Send (to the queue) as soon as you type.
 
 ### Changed
 

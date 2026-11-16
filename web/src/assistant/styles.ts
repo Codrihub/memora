@@ -195,7 +195,8 @@ export const MNEMO_CSS = `
   transition:transform .15s var(--ease,ease),opacity .15s}
 .mn-send:hover{transform:scale(1.05)}.mn-send:active{transform:scale(.96)}
 .mn-send .i{width:17px;height:17px;stroke-width:2.3}
-.mn-chat.busy .mn-send .i{fill:currentColor;stroke-width:0;width:14px;height:14px}
+.mn-chat.busy .mn-send:not(.queue) .i{fill:currentColor;stroke-width:0;width:14px;height:14px}
+.mn-send.queue{background:var(--accent);color:var(--on-accent,#fff)}
 .mn-fine{margin:8px auto 0;max-width:780px;text-align:center;font-size:11.5px;color:var(--text-3,var(--muted))}
 .mn-chat.compact .mn-fine{display:none}
 @media (max-width:640px){.mn-log{padding:18px 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}}
