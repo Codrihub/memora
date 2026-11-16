@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-11-17
+
+Mnemo's pages open like files, a button takes you back to the latest
+message, and chats with news are marked.
+
+### Added
+
+- A scroll-down button in Mnemo's chat: it appears in the middle above the
+  message box when the latest message is out of sight, and turns into "New
+  messages" when a reply arrives while you are reading further up.
+- Unread chats: the sidebar's Mnemo item (and its menu entry) shows how many
+  chats have news you have not seen, and the Mnemo chat list marks each one
+  with its number of new messages, in bold. Kept per device; a chat counts
+  as read once it is open on screen.
+
+### Changed
+
+- An HTML or SVG answer now shows in the chat as a file card (title, kind
+  and length, Open and Download). Opening it shows the page in a panel
+  beside the chat on a wide screen, with the chat making room, and full
+  screen on tablets and phones; the panel has Preview and Code, Copy,
+  Download and a clear Close (Esc). A page Mnemo has just written opens
+  beside the chat by itself when there is room.
+
+### Fixed
+
+- The "Compacted" divider sits in the middle of the chat column again (its
+  own margin overrode the column's centring).
+
 ## [2.1.3] - 2026-11-17
 
 Mnemo can answer with a picture: charts, diagrams and small pages show as a
