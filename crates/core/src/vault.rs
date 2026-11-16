@@ -15,7 +15,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+mod images;
 mod purge;
+pub use images::{decode_base64, image_max_bytes, set_image_max_bytes, DEFAULT_IMAGE_MAX};
 
 /// A regex compiled once per call site (the renderer runs per line; compiling its
 /// patterns on every call dominated the cost of rendering a note).
@@ -1060,6 +1062,22 @@ fn image_src(raw: &str, ctx: &RenderCtx, by_name: bool) -> ImgSrc {
         } else {
             ImgSrc::Blocked("data: URL".to_string())
         };
+    }
+    // `path:name` is an image beside the note; `path:Folder/name` is copied beside it on save.
+    if lower.starts_with("path:") {
+        let name = pct_decode(t[5..].trim());
+        if name.is_empty() || name.chars().any(|c| c.is_control()) || image_mime(&name).is_none() {
+            return ImgSrc::Missing(name);
+        }
+        let cand = if name.contains('/') {
+            normalize_rel("", name.trim_start_matches('/'))
+        } else {
+            normalize_rel(ctx.note_dir, &name)
+        };
+        if let Some(rel) = cand.and_then(|c| (ctx.file)(&c, false)) {
+            return ImgSrc::Url(vault_file_url(&rel));
+        }
+        return ImgSrc::Missing(name);
     }
     if t.starts_with("//") || re_scheme().is_match(t) {
         return ImgSrc::Blocked(t.to_string());
@@ -3187,7 +3205,7 @@ impl MemoryStore {
         let ap = self.resolve_new(&rel)?;
         self.ensure_free(&ap, &rel, None)?;
         let body = match content {
-            Some(c) => c.to_string(),
+            Some(c) => self.localize_images(&rel, c),
             None => format!("---\ncreated: {}\n---\n\n# {}\n\n", now_iso(), name.title),
         };
         if let Some(parent) = ap.parent() {
@@ -3205,6 +3223,7 @@ impl MemoryStore {
         if !ap.is_file() {
             return err(format!("not found: {rel_path}"));
         }
+        let content = self.localize_images(rel_path, content);
         fs::write(&ap, content).map_err(|e| MemoryErr(e.to_string()))?;
         self.refresh_notes(&[&ap]);
         self.git_commit(&format!("edit: {rel_path}"));
@@ -3278,7 +3297,9 @@ impl MemoryStore {
             fs::create_dir_all(p).map_err(|e| MemoryErr(e.to_string()))?;
         }
         let before = self.all_note_paths();
+        let content = self.read(&ap).unwrap_or_default();
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
+        self.carry_images(rel_path, &dest, &content);
         self.path_event(PathEvent::Moved {
             from: rel_path.to_string(),
             to: dest.clone(),
@@ -3299,14 +3320,17 @@ impl MemoryStore {
             return err(format!("not found: {rel_path}"));
         }
         let rel = self.rel_of(&ap);
+        let content = self.read(&ap).unwrap_or_default();
         fs::remove_file(&ap).map_err(|e| MemoryErr(e.to_string()))?;
+        let mut erased = vec![rel.clone()];
+        erased.extend(self.delete_images(&rel, &content));
         self.path_event(PathEvent::Deleted {
             path: rel_path.to_string(),
         });
         let _ = self.reindex();
         if self.history_enabled() {
             self.git_commit("delete forever (1 note)");
-            self.purge_history(std::slice::from_ref(&rel), &[])
+            self.purge_history(&erased, &[])
                 .map_err(|e| erase_failed(&rel, e))?;
         }
         Ok(())
@@ -3757,12 +3781,15 @@ impl MemoryStore {
                 dap = self.resolve(&format!("{stem}-{i}.md"))?;
                 i += 1;
             }
+            let src = self.resolve(&rel)?;
+            let content = self.read(&src).unwrap_or_default();
             let ok = dap.parent().is_some_and(|p| fs::create_dir_all(p).is_ok())
-                && fs::rename(self.resolve(&rel)?, &dap).is_ok();
+                && fs::rename(&src, &dap).is_ok();
             if !ok {
                 failed.push(rel);
                 continue;
             }
+            self.carry_images(&rel, &self.rel_of(&dap), &content);
             // Out of a deleted folder: the note keeps that folder's protection.
             self.path_event(PathEvent::Moved {
                 from: rel.clone(),
@@ -4481,6 +4508,9 @@ impl MemoryStore {
             dap = self.resolve(&format!(".Trash/{stem}-{i}.{ext}"))?;
             i += 1;
         }
+        let content = self.read(&ap).unwrap_or_default();
+        let entry_name = self.rel_of(&dap).trim_start_matches(".Trash/").to_string();
+        let images = self.trash_images(rel, &content, &entry_name);
         fs::rename(&ap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
         let to = self.rel_of(&dap);
         // In the trash the note keeps the protection of the folder it left.
@@ -4494,6 +4524,9 @@ impl MemoryStore {
         let mut entry = json!({"path": rel, "deleted": now_iso()});
         if let Some(by) = DeletedBy::current() {
             entry["by"] = by;
+        }
+        if !images.is_empty() {
+            entry["images"] = json!(images);
         }
         index.insert(name, entry);
         self.save_trash_index(&index);
@@ -4618,12 +4651,14 @@ impl MemoryStore {
     ) -> MResult<(Vec<String>, Option<Value>)> {
         let mut index = self.trash_index();
         let mut gone = Vec::new();
+        let mut image_paths: Vec<String> = Vec::new();
         for n in names {
             let ap = self.resolve(&format!(".Trash/{n}"))?;
             if !ap.is_file() {
                 continue;
             }
             fs::remove_file(&ap).map_err(|e| MemoryErr(e.to_string()))?;
+            image_paths.extend(self.drop_trash_images(n));
             self.path_event(PathEvent::Deleted {
                 path: format!(".Trash/{n}"),
             });
@@ -4639,7 +4674,8 @@ impl MemoryStore {
                 n => format!("{why} ({n} notes)"),
             });
             if self.history_enabled() {
-                let paths: Vec<String> = gone.iter().map(|n| format!(".Trash/{n}")).collect();
+                let mut paths: Vec<String> = gone.iter().map(|n| format!(".Trash/{n}")).collect();
+                paths.extend(image_paths);
                 hist = Some(
                     self.purge_history(&paths, &gone)
                         .map_err(|e| erase_failed(&gone.join(", "), e))?,
@@ -4719,6 +4755,7 @@ impl MemoryStore {
             fs::create_dir_all(p).ok();
         }
         fs::rename(&tap, &dap).map_err(|e| MemoryErr(e.to_string()))?;
+        self.restore_images(&base, &dest);
         self.path_event(PathEvent::Moved {
             from: rel.clone(),
             to: dest.clone(),
