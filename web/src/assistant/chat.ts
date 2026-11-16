@@ -218,10 +218,10 @@ export class ChatView {
           <textarea rows="1" maxlength="40000" placeholder="Ask ${A.MNEMO} about your notes…" aria-label="Message to ${A.MNEMO}"></textarea>
           <div class="mn-comp-bar">
             <button type="button" class="mn-plus" aria-label="Attach notes or folders from your vault" title="Attach notes or folders from your vault">${icon('plus')}</button>
-            <span class="mn-model-slot"></span>
             <button type="button" class="mn-perm" hidden></button>
-            <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
             <span class="mn-grow"></span>
+            <span class="mn-model-slot"></span>
+            <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
             <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
             <button type="submit" class="mn-send" aria-label="Send">${icon('send')}</button>
           </div>
@@ -973,7 +973,7 @@ export class ChatView {
         label: 'Model',
         searchable: opts.length > 7,
         className: 'mn-model',
-        align: 'start',
+        align: 'end',
         minWidth: 260,
         render: (o) => `<span class="mn-model-v">${o ? esc(o.label) : 'Model'}</span>`,
         onChange: (v) => void this.chooseModel(v),

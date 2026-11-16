@@ -31,6 +31,8 @@ messages while it works.
 
 ### Changed
 
+- The composer reads left to right: attach, the permission chip, then the
+  model (with its pin) beside the memory ring and Send.
 - Mnemo's replies sit on a frosted card that stays readable over any chat
   background; the chat scrolls without a scrollbar (the timeline and the
   edge fades show where you are).

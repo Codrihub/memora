@@ -178,7 +178,7 @@ export const MNEMO_CSS = `
 .mn-pick-none{margin:0;padding:12px;font-size:13px;color:var(--muted)}
 .mn-chip.warn{color:var(--warn,#d97706);border-color:color-mix(in srgb,var(--warn,#d97706) 40%,transparent)}
 .mn-model-slot{display:inline-flex;min-width:0}
-.ui-sel.mn-model{height:28px;max-width:220px;padding:0 6px 0 10px;border-radius:999px;border-color:var(--line);background:none;font-size:12.5px;gap:4px}
+.ui-sel.mn-model{height:28px;max-width:min(220px,40vw);padding:0 6px 0 10px;border-radius:999px;border-color:var(--line);background:none;font-size:12.5px;gap:4px}
 .ui-sel.mn-model .ui-sel-chev{width:14px;height:14px}
 .mn-model-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-star{display:grid;place-items:center;color:#f59e0b}.mn-star .i{width:14px;height:14px;fill:currentColor;stroke-width:1.5}
