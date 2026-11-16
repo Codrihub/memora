@@ -18,9 +18,9 @@ export const MNEMO_CSS = `
 @keyframes mnPulse{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 0 rgba(20,184,166,.35)}50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 8px rgba(20,184,166,0)}}
 
 .mn-chat{display:flex;flex-direction:column;min-height:0;height:100%;position:relative}
-.mn-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:28px 24px 12px;display:flex;flex-direction:column;gap:18px;scroll-padding-bottom:24px}
+.mn-log{--lp:28px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--lp) 24px 12px;display:flex;flex-direction:column;gap:18px;scroll-padding-bottom:24px}
 .mn-log>*{width:100%;max-width:780px;margin-inline:auto}
-.mn-chat.compact .mn-log{padding:16px 14px 8px;gap:14px}
+.mn-chat.compact .mn-log{--lp:16px;padding:var(--lp) 14px 8px;gap:14px}
 
 .mn-u{display:flex;flex-direction:column;align-items:flex-end;gap:4px;animation:mnIn .25s var(--ease-out,ease-out) both}
 .mn-ub{max-width:min(82%,620px);padding:10px 15px;border-radius:20px 20px 6px 20px;white-space:pre-wrap;overflow-wrap:anywhere;
@@ -199,7 +199,7 @@ export const MNEMO_CSS = `
 .mn-send.queue{background:var(--accent);color:var(--on-accent,#fff)}
 .mn-fine{margin:8px auto 0;max-width:780px;text-align:center;font-size:11.5px;color:var(--text-3,var(--muted))}
 .mn-chat.compact .mn-fine{display:none}
-@media (max-width:640px){.mn-log{padding:18px 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}}
+@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}}
 @media (prefers-reduced-motion:reduce){.mn-u,.mn-turn,.mn-tool,.mn-sug{animation:none}.mn-hello-mark::before,.mn-mark.pulse,.mn-turn.live .mn-av .mn-mark{animation:none}.mn-think i,.mn-think span,.mn-caret{animation:none}}
 
 /* Composer: + attach, chips that grow the box, the model pill once there is something to send. */
@@ -444,15 +444,17 @@ export const MNEMO_CSS = `
 .mn-steer .i{width:13px;height:13px;flex:none;margin-top:3px;color:var(--accent)}
 
 /* An open section keeps its header in view while you scroll through it, so it can be closed
-   from anywhere (overflow: clip above, not hidden, lets the headers stick to the chat). */
+   from anywhere (overflow: clip above, not hidden, lets the headers stick to the chat).
+   Sticky offsets count from inside the chat's top padding (--lp), so they start at minus it:
+   the header sits at the very top edge and nothing scrolls past above it. */
 .mn-act>summary{box-sizing:border-box;height:52px;min-height:52px}
-.mn-act[open]>summary{position:sticky;top:0;z-index:4;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
+.mn-act[open]>summary{position:sticky;top:calc(0px - var(--lp,0px));z-index:4;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
   box-shadow:0 8px 14px -12px rgba(15,23,42,.35)}
 /* A step's header sticks right under the Activity header (52px), with nothing showing between. */
-.mn-tool[open]>summary{position:sticky;top:52px;z-index:3;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
+.mn-tool[open]>summary{position:sticky;top:calc(52px - var(--lp,0px));z-index:3;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
   box-shadow:0 0 0 1px var(--surface-1,var(--panel)),0 8px 14px -12px rgba(15,23,42,.3)}
 .mn-tools{padding-top:0}
-.mn-compact[open]>summary{position:sticky;top:0;z-index:2;padding:4px 0;background:var(--bg)}
+.mn-compact[open]>summary{position:sticky;top:calc(0px - var(--lp,0px));z-index:2;padding:4px 0;background:var(--bg)}
 
 /* A search hit opened in the chat. */
 .mn-flash{animation:mnFlash 2.2s var(--ease-out,ease-out)}
