@@ -19,6 +19,7 @@ import { nav } from '../vault/nav';
 import { openLightbox } from '../ui/lightbox';
 import * as A from './api';
 import { renderReply, resolveNote } from './md';
+import { mountArt } from './art';
 import { MNEMO_CSS, markHTML } from './styles';
 import { applyTextSize } from './textsize';
 
@@ -1112,6 +1113,7 @@ export class ChatView {
         if (m.content) {
           const md = el('div', 'mn-md');
           md.innerHTML = renderReply(m.content);
+          mountArt(md);
           md.dataset.raw = m.content;
           md.dataset.mid = String(m.id);
           body.append(md);
@@ -1144,7 +1146,7 @@ export class ChatView {
   /** Where older messages were folded into a summary (open it to read the summary). */
   private compactNote(n: number, summary: string): HTMLElement {
     const d = el('details', 'mn-compact');
-    d.innerHTML = `<summary><span>${icon('refresh')}${n ? `${n} older messages compacted into a summary` : 'Compacting the chat’s memory…'}</span></summary>${
+    d.innerHTML = `<summary title="${n ? 'Open to read the summary' : ''}"><span>${icon('refresh')}${n ? 'Compacted' : 'Compacting…'}</span></summary>${
       summary ? `<div class="mn-md mn-compact-b">${renderReply(summary)}</div>` : ''
     }`;
     return d;
@@ -1588,7 +1590,7 @@ export class ChatView {
     let model = '';
     const paint = (): void => {
       frame = 0;
-      if (md) md.innerHTML = renderReply(raw2) + '<span class="mn-caret"></span>';
+      if (md) md.innerHTML = renderReply(raw2, true) + '<span class="mn-caret"></span>';
       this.scrollEnd();
     };
     const think = (on: boolean, label = 'Thinking'): void => {
@@ -1605,6 +1607,7 @@ export class ChatView {
       if (md) {
         md.innerHTML = renderReply(raw2);
         md.dataset.raw = raw2;
+        mountArt(md);
       }
       md = null;
       raw2 = '';

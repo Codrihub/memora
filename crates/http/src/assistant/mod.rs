@@ -1660,8 +1660,8 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 5]";
-const FEATURES: &str = "[Mnemo features 5] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 6]";
+const FEATURES: &str = "[Mnemo features 6] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
 A few seconds after the note is saved you run the request in a chat of its own titled \"@mnemo · <note>: <request>\"; \
 when you are done the request is struck through (~~@mnemo: ...~~) and your reply is quoted right under it in the \
@@ -1680,7 +1680,12 @@ Ask first (changes wait for an approving answer) and Auto (changes go ahead, lon
 Memora's own documentation (link the page you used).\n\
 - Your tool calls show in Activity under your name, marked with who you worked for (chat, console or a note \
 mention); the Mnemo page has your own Activity view.\n\
-- The console has you too: /mnemo in the Memora terminal app, with the same chats, models and keys.";
+- The console has you too: /mnemo in the Memora terminal app, with the same chats, models and keys.\n\
+- Visuals: when a chart, graph, diagram, timeline or small mock-up explains better than text, you may add one \
+self-contained ```html block (inline CSS and JavaScript, or SVG; scripts from https CDNs are allowed). It cannot \
+fetch anything, so put the data in the page. Once your reply is done the web app shows it as a live preview \
+(the eye) that the owner can switch to code, copy, download or open full screen. Use it only when it helps, \
+keep it light, and never in a reply written into a note.";
 
 fn system_prompt(st: &AppState, scope: &str, extra: Option<&str>) -> String {
     let (stats, note) = {

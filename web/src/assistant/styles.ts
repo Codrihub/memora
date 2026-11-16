@@ -2,13 +2,14 @@
 
 import { icon } from '../ui/icons';
 import { TEXT_SIZE_CSS } from './textsize';
+import { ART_CSS } from './art';
 
 /** The Mnemo mark: a memory wave with a spark, on a teal-to-indigo tile. */
 export function markHTML(cls = ''): string {
   return `<span class="mn-mark ${cls}" aria-hidden="true">${icon('mnemo', 'i mn-mark-g')}</span>`;
 }
 
-export const MNEMO_CSS = `${TEXT_SIZE_CSS}
+export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-mark{--s:28px;position:relative;display:inline-grid;place-items:center;flex:none;width:var(--s);height:var(--s);border-radius:calc(var(--s) * .32);
   color:#fff;background:linear-gradient(145deg,#5eead4 0%,#14b8a6 30%,#4f46e5 100%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(15,23,42,.18),0 1px 2px rgba(15,23,42,.16)}
@@ -481,10 +482,10 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}
 
 /* Where older messages were compacted into a summary. */
 .mn-compact{align-self:stretch;margin:2px 0;font-size:12.5px;color:var(--muted)}
-.mn-compact summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}
+.mn-compact summary{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;cursor:pointer;list-style:none;text-align:center}
 .mn-compact summary::-webkit-details-marker{display:none}
-.mn-compact summary::before,.mn-compact summary::after{content:"";flex:1;height:1px;background:var(--line)}
-.mn-compact summary span{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.mn-compact summary::before,.mn-compact summary::after{content:"";flex:1 1 0;min-width:12px;height:1px;background:var(--line)}
+.mn-compact summary span{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:3px 12px;border-radius:99px;border:1px solid var(--line);white-space:nowrap;line-height:1.4}
 .mn-compact summary .i{width:13px;height:13px}
 .mn-compact[open] summary span{color:var(--fg);border-color:var(--line-strong)}
 .mn-compact-b{margin-top:10px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--fg) 4%,transparent);font-size:13px;color:var(--text-2,var(--fg))}

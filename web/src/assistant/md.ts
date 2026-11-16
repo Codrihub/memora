@@ -3,6 +3,7 @@
 import { attr, esc } from '../dom';
 import { renderMarkdown } from '../docs/markdown';
 import { allNotes, noteTitle } from '../state';
+import { icon } from '../ui/icons';
 
 const TOKEN = 'MNWLTOKEN';
 
@@ -42,8 +43,30 @@ function linkFor(target: string): string {
     : `<span class="mn-wl missing" title="No note with this name">${esc(shown)}</span>`;
 }
 
-/** Render a reply. Links open in a new tab; wikilinks and note paths open the note. */
-export function renderReply(src: string): string {
+/** Languages whose code blocks are shown as a live preview once the reply is done. */
+const ART_LANGS = /^(html|htm|svg)$/i;
+
+/** An HTML or SVG block, finished: a preview (eye) by default, with Code, Download and Full screen. */
+function artBlock(lang: string, rest: string): string {
+  const kind = lang.toLowerCase() === 'svg' ? 'svg' : 'html';
+  const btn = (k: string, ic: string, label: string): string =>
+    `<button type="button" class="mn-art-b" ${k} title="${label}" aria-label="${label}">${icon(ic)}</button>`;
+  return (
+    `<div class="dc-code mn-art" data-art="${kind}" data-view="preview"><div class="dc-code-bar">` +
+    `<span class="mn-art-tabs" role="tablist" aria-label="Show">` +
+    `<button type="button" role="tab" data-art-view="preview" aria-selected="true">${icon('eye')}<span>Preview</span></button>` +
+    `<button type="button" role="tab" data-art-view="code" aria-selected="false">${icon('code')}<span>Code</span></button></span>` +
+    `<span class="mn-art-k">${kind === 'svg' ? 'SVG' : 'HTML'}</span><span class="mn-art-sp"></span>` +
+    btn('data-art-dl', 'download', `Download the ${kind === 'svg' ? 'SVG' : 'HTML'} file`) +
+    btn('data-art-full', 'expand', 'Full screen') +
+    rest +
+    `</div><div class="mn-art-v"></div><pre>`
+  );
+}
+
+/** Render a reply. Links open in a new tab; wikilinks and note paths open the note.
+ *  `live` while it streams: HTML blocks stay code until the reply is done. */
+export function renderReply(src: string, live = false): string {
   const links: string[] = [];
   // Wikilinks outside code: swap for tokens the renderer leaves alone.
   const parts = src.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g);
@@ -69,6 +92,11 @@ export function renderReply(src: string): string {
     const path = resolveNote(raw);
     return path ? `<a href="#" class="mn-wl code" data-note="${attr(path)}"><code>${inner}</code></a>` : m;
   });
+  if (!live)
+    html = html.replace(
+      /<div class="dc-code"><div class="dc-code-bar"><span>([a-z]+)<\/span>([\s\S]*?)<\/div><pre>/gi,
+      (m, lang: string, rest: string) => (ART_LANGS.test(lang) ? artBlock(lang, rest) : m),
+    );
   // Headings in a chat bubble carry no ids or anchors.
   return html.replace(/<h([1-6]) id="[^"]*"/g, '<h$1').replace(/<a class="dc-anchor"[^>]*>#<\/a>/g, '');
 }

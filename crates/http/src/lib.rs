@@ -1186,6 +1186,33 @@ fn page_csp(nonce: &str) -> String {
     )
 }
 
+/// Where Mnemo's HTML answers are shown: a blank page that writes the HTML the chat
+/// posts to it. The chat loads it in a sandboxed iframe (scripts, no same origin), so
+/// the page runs with an opaque origin: no cookies, no API, nothing of the app.
+const PREVIEW_FRAME: &str = "/preview-frame";
+
+/// The preview page's own policy: inline and https scripts and styles, pictures and
+/// fonts, nothing that calls a server, framed only by the app itself.
+const PREVIEW_CSP: &str = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; \
+     style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; \
+     media-src data: blob: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; \
+     frame-ancestors 'self'";
+
+/// The preview page: waits for the HTML from the chat that framed it, then writes it.
+const PREVIEW_HTML: &str = r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preview</title><style>html,body{margin:0;background:#fff;color:#111;font:14px/1.5 system-ui,sans-serif}</style></head><body><script>(function(){var done=false;addEventListener("message",function(e){if(done||e.source!==parent||!e.data||typeof e.data.mnHtml!=="string")return;done=true;document.open();document.write(e.data.mnHtml);document.close();});if(parent!==window)parent.postMessage({mnFrameReady:1},"*");})();</script></body></html>"#;
+
+async fn h_preview_frame() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+            (header::CONTENT_SECURITY_POLICY, PREVIEW_CSP),
+        ],
+        PREVIEW_HTML,
+    )
+        .into_response()
+}
+
 /// CSP for the service worker script (it fetches pages and assets).
 const SW_CSP: &str =
     "default-src 'none'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -1527,10 +1554,13 @@ async fn mw_security_headers(
         header::HeaderName::from_static("x-content-type-options"),
         header::HeaderValue::from_static("nosniff"),
     );
-    h.insert(
-        header::HeaderName::from_static("x-frame-options"),
-        header::HeaderValue::from_static("DENY"),
-    );
+    // The preview page is framed by the app (its CSP allows only that); nothing else is.
+    if path != PREVIEW_FRAME {
+        h.insert(
+            header::HeaderName::from_static("x-frame-options"),
+            header::HeaderValue::from_static("DENY"),
+        );
+    }
     h.insert(
         header::HeaderName::from_static("referrer-policy"),
         header::HeaderValue::from_static("no-referrer"),
@@ -1613,6 +1643,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/icon-maskable-512.png", get(h_asset_root))
         .route("/apple-touch-icon.png", get(h_asset_root))
         .route("/offline.html", get(h_asset_root))
+        .route(PREVIEW_FRAME, get(h_preview_frame))
         // Realtime: one WebSocket channel plus the event intake bus, both on this port
         .route("/ws", get(h_ws))
         .route("/_bus", post(h_bus))
@@ -2031,6 +2062,21 @@ mod front_door_tests {
             host,
             ("sec-fetch-site", "cross-site")
         ])));
+    }
+
+    #[test]
+    fn the_preview_frame_runs_scripts_but_reaches_nothing() {
+        for d in [
+            "script-src 'unsafe-inline'",
+            "connect-src 'none'",
+            "form-action 'none'",
+            "frame-ancestors 'self'",
+        ] {
+            assert!(PREVIEW_CSP.contains(d), "{d}");
+        }
+        assert!(!PREVIEW_CSP.contains("'self' 'nonce"));
+        assert!(PREVIEW_HTML.contains("e.source!==parent"));
+        assert!(!PREVIEW_FRAME.starts_with("/mnemo/"));
     }
 
     #[test]

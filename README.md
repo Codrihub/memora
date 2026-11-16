@@ -55,7 +55,8 @@ Screenshots use a demo vault.
 - **Mnemo, a built-in notes agent.** Chat with your notes in the browser or the
   console using your own OpenAI, Anthropic or OpenAI-compatible API key. Mnemo
   finds, writes, tags, links, moves and tidies notes with Memora's own tools,
-  shows every step, and has no web, shell or delete-for-good access.
+  shows every step, and has no web, shell or delete-for-good access. It can
+  answer with a chart or diagram, shown as a live, sandboxed preview.
 - **Images beside notes.** Paste or drop PNG, JPEG, WebP or GIF into a note; the
   file lives in the note's folder and moves, goes to the Trash and comes back
   with it. Folder galleries show which note and section uses each image.

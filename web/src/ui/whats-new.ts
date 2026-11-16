@@ -26,6 +26,25 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.3',
+    title: 'Mnemo answers with pictures',
+    lead: 'Ask for a chart, a diagram or a small page and see it live in the chat.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'eye', title: 'Live previews', text: 'When a chart, graph or diagram says it better, Mnemo writes a small HTML or SVG page. Once the reply is done it shows as a preview; switch to Code, copy it, download it or open it full screen. It runs sandboxed, away from your notes.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'refresh', title: 'Calmer compact divider', text: 'Where a chat was compacted the divider just says Compacted, centred; open it to read the summary.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.2',
     title: 'Mnemo fits your screen, and errors read plainly',
     lead: 'On a phone Mnemo uses the full width, and you choose how big its text is.',
