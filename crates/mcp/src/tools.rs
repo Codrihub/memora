@@ -423,6 +423,23 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             json!({"zip_path":{"type":"string","description":"File name of a zip in the server's exchange folder (as export_memory returns)"},"overwrite":{"type":"boolean","default":false}}),
             &["zip_path"],
         ),
+        // ---- images beside notes ----
+        spec(
+            "upload_image",
+            "note",
+            "Store an image (PNG, JPEG, WebP or GIF, told by its bytes) in the folder of a note, up to the server's image size limit. The name is cleaned (letters, digits, '-', '_') and gets the extension of the real kind; an identical file there is reused, another name gets -1, -2... Returns {path, name, bytes, url, markdown}; `markdown` (`![name](path:name.webp)`) shows the image in that note. With append the line is added to the end of the note. Images follow their note: moved, trashed, restored and deleted with it.",
+            "When an image belongs in a note: a screenshot, a diagram, a photo. Web images can stay as https URLs instead.",
+            json!({"path":{"type":"string","description":"The note the image belongs to ('Folder/Note.md'); the image is stored in that note's folder"},"name":{"type":"string","description":"File name, e.g. 'diagram.png'"},"data":{"type":"string","description":"The image bytes as base64 (or a data:image/...;base64, URL)"},"alt":{"type":"string","description":"Alt text for the markdown line (default: the file name)"},"append":{"type":"boolean","default":false,"description":"Also add the image line to the end of the note"}}),
+            &["path", "name", "data"],
+        ),
+        spec(
+            "list_images",
+            "note",
+            "Images of one folder (never its sub folders or parents), each with {path, name, bytes, url, used_in:[{note, title, heading}]} naming the notes of that folder that show it and the section it sits in. With path: the images that note shows (with heading) plus every image of its folder.",
+            "To see what images a folder or a note has before reusing, linking or cleaning them up.",
+            json!({"folder":{"type":"string","description":"Folder path ('Root' or empty = top level)"},"path":{"type":"string","description":"A note path instead of a folder"}}),
+            &[],
+        ),
         // ---- ux ----
         spec(
             "get_todos",
@@ -870,6 +887,43 @@ pub fn call_extra(
             }
 
             // ---------------- ux ----------------
+            "upload_image" => {
+                let note = s("path");
+                let Some(bytes) = memora_core::vault::decode_base64(&s("data")) else {
+                    anyhow::bail!(
+                        "data must be the image as base64 (or a data:image/...;base64, URL)"
+                    );
+                };
+                let mut out = store.save_image_impl(
+                    &note,
+                    &s("name"),
+                    &bytes,
+                    memora_core::vault::image_max_bytes(),
+                )?;
+                if b("append", false) {
+                    let alt = opt("alt")
+                        .unwrap_or_else(|| out["name"].as_str().unwrap_or("image").to_string());
+                    let line = format!(
+                        "![{}](path:{})",
+                        alt.replace(['[', ']', '\n'], " "),
+                        out["name"].as_str().unwrap_or("")
+                    );
+                    store.patch_memory_impl(
+                        &note,
+                        &[json!({"op": "append", "text": format!("\n{line}\n")})],
+                    )?;
+                    out["appended"] = json!(true);
+                    out["markdown"] = json!(line);
+                }
+                out
+            }
+            "list_images" => match opt("path") {
+                Some(p) => store.note_images_impl(&p)?,
+                None => {
+                    let folder = opt("folder").unwrap_or_else(|| "Root".to_string());
+                    json!({"folder": folder, "images": store.folder_images_impl(&folder)?})
+                }
+            },
             "get_todos" => json!(store.get_todos_impl(opt("path").as_deref())?),
             "follow_ups" => store.follow_ups_impl(i("limit", 50)),
             "validate_memory" => store.validate_memory_impl(&s("path"))?,

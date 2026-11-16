@@ -10,6 +10,7 @@ pub mod watch;
 pub mod access;
 pub mod activity;
 pub mod arm;
+pub mod assistant;
 pub mod config;
 pub mod control;
 pub mod keys;

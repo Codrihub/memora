@@ -566,6 +566,9 @@ pub struct Caller {
     pub perms: Option<KeyPermissions>,
     /// Caller IP, for the activity log.
     pub ip: Option<String>,
+    /// Who an agent acts for and how it was asked (Mnemo: "owner · chat",
+    /// "owner · @mnemo in Inbox.md"), shown with its activity.
+    pub on_behalf: Option<String>,
 }
 
 impl Caller {
@@ -576,6 +579,7 @@ impl Caller {
             name: None,
             perms: None,
             ip: None,
+            on_behalf: None,
         }
     }
 
@@ -586,6 +590,7 @@ impl Caller {
             name: None,
             perms: Some(perms),
             ip,
+            on_behalf: None,
         }
     }
 
@@ -594,6 +599,20 @@ impl Caller {
         let n: String = name.into();
         let n = n.trim();
         self.name = (!n.is_empty()).then(|| n.to_string());
+        self
+    }
+
+    /// Say who the caller acts for (one line, clipped); blank clears it.
+    pub fn on_behalf_of(mut self, who: impl Into<String>) -> Self {
+        let w: String = who.into();
+        let w: String = w
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(160)
+            .collect();
+        self.on_behalf = (!w.is_empty()).then_some(w);
         self
     }
 

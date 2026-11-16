@@ -16,4 +16,6 @@ serde.workspace = true
 serde_json.workspace = true
 dialoguer = { version = "0.11", default-features = false, features = ["password"] }
 console = "0.15"
+# Talks to the local server for /mnemo (same crate and features as memora-http).
+ureq = { version = "2", default-features = false, features = ["tls"] }
 libc = "0.2"

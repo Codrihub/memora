@@ -1,0 +1,470 @@
+//! `@mnemo:` in a note asks Mnemo for something right there.
+//!
+//! A line with `@mnemo: <request>` (anywhere in the line, also inside a quote or a list
+//! item, never in code) is a pending mention. A few seconds after the note is saved by the
+//! owner in the browser, or changed by an agent's tool call (`mention_agent` with agent
+//! `mnemo` writes one), Mnemo runs the request as a chat of its own (listed with the other
+//! chats), then answers in the note: the request is struck through (`~~@mnemo: …~~`) and its
+//! reply goes right under it as a quote. A struck mention is done and never runs again.
+
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use memora_state::assistant::NewMessage;
+
+use super::{
+    busy, caller_for, endpoint, new_id, resolve_model, run_agent, store, system_prompt, NAME,
+};
+use crate::AppState;
+
+/// Title prefix of the chats that answer a request written in a note.
+pub const TITLE_PREFIX: &str = "@mnemo · ";
+
+/// What the model is told with a request from a note.
+pub fn instruction(path: &str, line: i64) -> String {
+    format!(
+        "(Asked with @mnemo in the note {path}, line {line}. Do what it asks with your tools. Your last \
+reply is written into that note right under the request, so keep it short Markdown without headings, \
+and say what you changed.)"
+    )
+}
+
+/// The word that asks Mnemo, followed by `:`.
+pub const TAG: &str = "@mnemo:";
+/// Wait after a change before reading the note, so a burst of saves runs once.
+const SETTLE: Duration = Duration::from_secs(3);
+/// Mentions answered per note per pass (the rest wait for the next change).
+const PER_PASS: usize = 3;
+/// Longest request taken from one line.
+const MAX_REQUEST: usize = 2000;
+
+/// One pending mention: its line index, the text before the tag, and the request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pending {
+    pub line: usize,
+    pub before: String,
+    pub request: String,
+}
+
+/// Byte offset of `@mnemo:` in `line` (any case), if it is a live mention: not struck
+/// (`~~` right before it) and not inside inline code.
+fn tag_at(line: &str) -> Option<usize> {
+    let lower = line.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find(TAG) {
+        let at = from + i;
+        let before = &line[..at];
+        let struck = before.ends_with("~~");
+        let in_code = before.matches('`').count() % 2 == 1;
+        if !struck && !in_code {
+            return Some(at);
+        }
+        from = at + TAG.len();
+    }
+    None
+}
+
+/// Every pending mention in a note's text, outside fenced code blocks.
+pub fn pending(text: &str) -> Vec<Pending> {
+    let mut out = Vec::new();
+    let mut fence: Option<&str> = None;
+    for (n, line) in text.lines().enumerate() {
+        let t = line.trim_start().trim_start_matches(['>', ' ']);
+        for f in ["```", "~~~"] {
+            if t.starts_with(f) {
+                fence = match fence {
+                    Some(open) if open == f => None,
+                    None => Some(f),
+                    other => other,
+                };
+            }
+        }
+        if fence.is_some() || t.starts_with("```") || t.starts_with("~~~") {
+            continue;
+        }
+        let Some(at) = tag_at(line) else { continue };
+        let request: String = line[at + TAG.len()..]
+            .trim()
+            .chars()
+            .take(MAX_REQUEST)
+            .collect();
+        if request.is_empty() {
+            continue;
+        }
+        out.push(Pending {
+            line: n,
+            before: line[..at].to_string(),
+            request,
+        });
+    }
+    out
+}
+
+/// What goes in front of each reply line: the mention line's quote markers, list markers
+/// turned into spaces (so the reply sits inside the item).
+fn reply_indent(before: &str) -> String {
+    let lead: String = before
+        .chars()
+        .take_while(|c| {
+            c.is_whitespace()
+                || c.is_ascii_digit()
+                || matches!(c, '>' | '-' | '*' | '+' | '.' | ')' | '[' | ']' | 'x' | 'X')
+        })
+        .collect();
+    lead.chars()
+        .map(|c| {
+            if c == '>' || c == ' ' || c == '\t' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect()
+}
+
+/// The note with mention `p` struck through and `reply` quoted under it. `None` when the
+/// line changed since it was read (the owner edited it meanwhile).
+pub fn answered(text: &str, p: &Pending, reply: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let line = *lines.get(p.line)?;
+    let at = tag_at(line)?;
+    if line[..at] != p.before {
+        return None;
+    }
+    let rest = line[at + TAG.len()..].trim_end();
+    if rest.trim() != p.request.as_str() && !rest.trim().starts_with(p.request.as_str()) {
+        return None;
+    }
+    let struck = format!("{}~~@mnemo: {}~~", p.before, rest.trim());
+    let ind = reply_indent(&p.before);
+    // A reply never asks again: its own "@mnemo:" is broken with a zero-width space.
+    let safe = reply
+        .replace(TAG, "@\u{200b}mnemo:")
+        .replace("@Mnemo:", "@\u{200b}Mnemo:");
+    let mut body: Vec<String> = Vec::new();
+    for (i, l) in safe.trim().lines().enumerate() {
+        let l = l.trim_end();
+        let lead = if i == 0 {
+            format!("**{NAME}:** ")
+        } else {
+            String::new()
+        };
+        body.push(if l.is_empty() && i > 0 {
+            format!("{ind}>")
+        } else {
+            format!("{ind}> {lead}{l}")
+        });
+    }
+    let mut out: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    out[p.line] = struck;
+    // The reply goes after the mention's quoted continuation lines (mention_agent writes
+    // a multi-line message as one quote).
+    let mut end = p.line + 1;
+    if p.before.trim_start().starts_with('>') {
+        while end < lines.len() {
+            let l = lines[end];
+            if l.trim().is_empty() || !l.trim_start().starts_with('>') || tag_at(l).is_some() {
+                break;
+            }
+            end += 1;
+        }
+    }
+    for (i, b) in body.into_iter().enumerate() {
+        out.insert(end + i, b);
+    }
+    let mut s = out.join("\n");
+    if text.ends_with('\n') {
+        s.push('\n');
+    }
+    Some(s)
+}
+
+// ---------------- running them ----------------
+
+#[derive(Default)]
+struct Queue {
+    /// Bumped by every change of a note; a pass only runs if no newer change came.
+    gen: HashMap<String, u64>,
+    /// Notes being answered right now, and the ones changed meanwhile (run again after).
+    running: HashSet<String>,
+    again: HashMap<String, String>,
+}
+
+fn queue() -> &'static Mutex<Queue> {
+    static Q: OnceLock<Mutex<Queue>> = OnceLock::new();
+    Q.get_or_init(Default::default)
+}
+
+fn lock() -> std::sync::MutexGuard<'static, Queue> {
+    queue().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A note changed (`by` changed it): look for mentions once it settles.
+pub fn poke(st: &AppState, path: &str, by: &str) {
+    if !path.to_ascii_lowercase().ends_with(".md") || by == NAME {
+        return;
+    }
+    let g = {
+        let mut q = lock();
+        if q.running.contains(path) {
+            q.again.insert(path.to_string(), by.to_string());
+            return;
+        }
+        let g = q.gen.entry(path.to_string()).or_insert(0);
+        *g += 1;
+        *g
+    };
+    let (st, path, by) = (st.clone(), path.to_string(), by.to_string());
+    tokio::spawn(async move {
+        tokio::time::sleep(SETTLE).await;
+        {
+            let mut q = lock();
+            if q.gen.get(&path) != Some(&g) || q.running.contains(&path) {
+                return;
+            }
+            q.running.insert(path.clone());
+        }
+        let st2 = st.clone();
+        let (p2, b2) = (path.clone(), by.clone());
+        crate::blocking(move || answer_all(&st2, &p2, &b2)).await;
+        let again = {
+            let mut q = lock();
+            q.running.remove(&path);
+            q.again.remove(&path)
+        };
+        if let Some(by) = again {
+            poke(&st, &path, &by);
+        }
+    });
+}
+
+/// Agents' tool calls that changed notes (from the realtime hub) are changes too.
+pub fn watch(st: &AppState) {
+    let mut rx = memora_core::events::hub().subscribe();
+    let st = st.clone();
+    tokio::spawn(async move {
+        loop {
+            let line = match rx.recv().await {
+                Ok(l) => l,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return,
+            };
+            let Ok(ev) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if ev["type"] != "ai_activity" || ev["phase"] != "end" || ev["ok"] != true {
+                continue;
+            }
+            let actor = ev["actor"].as_str().unwrap_or("");
+            let tool = ev["action"].as_str().unwrap_or("");
+            if actor == NAME || memora_mcp::activity::is_read_only(tool) {
+                continue;
+            }
+            for p in ev["paths"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                poke(&st, p, actor);
+            }
+        }
+    });
+}
+
+fn note_text(st: &AppState, path: &str) -> Option<String> {
+    crate::store_as(st, None)
+        .read_note_impl(path)
+        .ok()
+        .and_then(|v| v["content"].as_str().map(str::to_string))
+}
+
+/// Answer the pending mentions of one note, oldest line first.
+fn answer_all(st: &AppState, path: &str, by: &str) {
+    let Some(text) = note_text(st, path) else {
+        return;
+    };
+    let todo: Vec<Pending> = pending(&text).into_iter().take(PER_PASS).collect();
+    if todo.is_empty() {
+        return;
+    }
+    let Ok(store) = store(st) else { return };
+    // No model yet: leave the mentions waiting for the next change.
+    let Ok((provider, model)) = resolve_model(store, None, None) else {
+        return;
+    };
+    let Ok(ep) = endpoint(st, store, &provider) else {
+        return;
+    };
+    let name = path
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .trim_end_matches(".md");
+    for p in todo {
+        let reply = ask(st, store, path, name, by, &p, &provider, &model, &ep);
+        // Read again: the note may have changed while Mnemo worked (also by Mnemo's tools).
+        let Some(now) = note_text(st, path) else {
+            return;
+        };
+        let Some(m) = pending(&now)
+            .into_iter()
+            .find(|x| x.request == p.request && x.before == p.before)
+        else {
+            continue;
+        };
+        let Some(next) = answered(&now, &m, &reply) else {
+            continue;
+        };
+        let who = caller_for(&format!("{by} · @mnemo in {name}"));
+        let args = json!({"path": path, "content": next});
+        if let Err(e) = st.mcp.call_tool_by("save_memory", &args, &who) {
+            tracing::warn!(path, "could not write Mnemo's reply: {e}");
+        }
+    }
+}
+
+/// Run one mention as a chat of its own; the reply text (or why there is none).
+#[allow(clippy::too_many_arguments)]
+fn ask(
+    st: &AppState,
+    store: &memora_state::assistant::Store,
+    path: &str,
+    name: &str,
+    by: &str,
+    p: &Pending,
+    provider: &str,
+    model: &str,
+    ep: &super::Endpoint,
+) -> String {
+    let now = memora_state::now();
+    let scope = format!("note:{path}");
+    let title: String = format!("{TITLE_PREFIX}{name}: {}", p.request)
+        .chars()
+        .take(80)
+        .collect();
+    let sid = new_id();
+    if store
+        .create_session(&sid, &title, &scope, &format!("{provider}/{model}"), now)
+        .is_err()
+    {
+        return "Could not start a chat for this.".into();
+    }
+    let extra = store
+        .prefs()
+        .unwrap_or_default()
+        .get("system_prompt")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let system = system_prompt(st, &scope, extra.as_deref());
+    // The chat shows the request as the owner wrote it, with the note as a chip; how to
+    // answer goes to the model with the message (see `history_within`).
+    let meta = json!({
+        "system": system,
+        "mention": {"path": path, "line": p.line + 1, "by": by},
+        "attach": [{"kind": "note", "path": path, "title": name}],
+    });
+    let text = p.request.clone();
+    if store
+        .append(
+            &sid,
+            &NewMessage {
+                role: "user".into(),
+                content: text,
+                meta: Some(meta),
+                ..Default::default()
+            },
+            now,
+        )
+        .is_err()
+    {
+        return "Could not start a chat for this.".into();
+    }
+    if let Ok(mut b) = busy().lock() {
+        b.insert(sid.clone());
+    }
+    // A live run, so the owner can watch it on the Mnemo page while it works.
+    let tx = super::live::start(&sid);
+    run_agent(
+        st,
+        store,
+        &sid,
+        &scope,
+        provider,
+        model,
+        ep,
+        &tx,
+        &format!("{by} · @mnemo in {name}"),
+    );
+    drop(tx);
+    let error = store
+        .messages(&sid)
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .find(|m| m.role == "assistant")
+        .and_then(|m| m.meta.and_then(|v| v["error"].as_str().map(str::to_string)));
+    if let Ok(mut b) = busy().lock() {
+        b.remove(&sid);
+    }
+    let last = store
+        .messages(&sid)
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .find(|m| m.role == "assistant" && !m.content.trim().is_empty())
+        .map(|m| m.content);
+    match (last, error) {
+        (Some(t), _) => t,
+        (None, Some(e)) => format!("Could not answer: {e}"),
+        (None, None) => "Done.".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mentions_are_found_outside_code_and_strikes() {
+        let t = "# Plan\n@mnemo: tidy this note\n> @Mnemo: summarise\n~~@mnemo: done already~~\n`@mnemo: code`\n```\n@mnemo: in a fence\n```\n- [ ] @mnemo:   \n- item @mnemo: tag it #x\n";
+        let p = pending(t);
+        let req: Vec<&str> = p.iter().map(|x| x.request.as_str()).collect();
+        assert_eq!(req, vec!["tidy this note", "summarise", "tag it #x"]);
+        assert_eq!(p[1].before, "> ");
+        assert_eq!(p[2].before, "- item ");
+    }
+
+    #[test]
+    fn a_reply_strikes_the_request_and_sits_under_it() {
+        let t = "intro\n@mnemo: what is due?\nafter\n";
+        let p = &pending(t)[0];
+        let out = answered(t, p, "Two tasks.\n\n- A\n- B").unwrap();
+        assert_eq!(
+            out,
+            "intro\n~~@mnemo: what is due?~~\n> **Mnemo:** Two tasks.\n>\n> - A\n> - B\nafter\n"
+        );
+        assert!(
+            pending(&out).is_empty(),
+            "answered mentions never run again"
+        );
+        // A reply that says @mnemo: itself does not ask again.
+        let again = answered(t, p, "write @mnemo: more").unwrap();
+        assert!(pending(&again).is_empty());
+        // In a list item the reply is indented into the item; in a quote it stays quoted.
+        let l = "- [ ] @mnemo: check\n";
+        assert_eq!(
+            answered(l, &pending(l)[0], "ok").unwrap(),
+            "- [ ] ~~@mnemo: check~~\n      > **Mnemo:** ok\n"
+        );
+        let q = "> @mnemo: first\n> second line\nnext\n";
+        assert_eq!(
+            answered(q, &pending(q)[0], "ok").unwrap(),
+            "> ~~@mnemo: first~~\n> second line\n> > **Mnemo:** ok\nnext\n"
+        );
+        // The owner changed the line meanwhile: nothing is written.
+        assert!(answered("@mnemo: other\n", p, "x").is_none());
+    }
+}

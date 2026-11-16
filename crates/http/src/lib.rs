@@ -25,8 +25,10 @@ use tower_http::compression::Predicate as _;
 
 pub mod api;
 mod assets;
+pub mod assistant;
 pub mod cache;
 pub mod guard;
+pub mod images;
 pub mod oauth;
 pub mod pins;
 pub mod privacy;
@@ -144,6 +146,7 @@ pub fn required_scope(method: &axum::http::Method, path: &str) -> Option<&'stati
         "access",
         "logs/settings",
         "settings/server",
+        "settings/media",
         "oauth/clients",
         "privacy",
         "trash/delete",
@@ -413,7 +416,30 @@ async fn mw_auth(
 
     if let Some(sess) = session_of(&st, req.headers()) {
         tracing::debug!(user = %sess.user, path = %path, "browser session");
-        return next.run(req).await;
+        // The server slides the session on every use; the browser's cookie must slide too,
+        // or it drops the cookie `session_ttl` after login however active the owner is.
+        let renew = cookie_renew_due(&sess.sid_hash).then(|| {
+            (
+                cookie_value(req.headers(), cache::SESSION_COOKIE),
+                is_https(req.headers()),
+            )
+        });
+        let mut resp = next.run(req).await;
+        if let Some((Some(raw), https)) = renew {
+            let replaced = resp.headers().get_all(header::SET_COOKIE).iter().any(|v| {
+                v.to_str()
+                    .is_ok_and(|c| c.starts_with(&format!("{}=", cache::SESSION_COOKIE)))
+            });
+            if !replaced && resp.status() != StatusCode::UNAUTHORIZED {
+                let ttl = cache::remaining(&st, &sess);
+                if let Ok(v) =
+                    header::HeaderValue::from_str(&session_cookie_header(&raw, ttl, https))
+                {
+                    resp.headers_mut().append(header::SET_COOKIE, v);
+                }
+            }
+        }
+        return resp;
     }
 
     // Plain 401 for auth UI endpoints; the API-key message below is for agents.
@@ -994,6 +1020,14 @@ fn asset_allowed(name: &str) -> bool {
             | "shortcut-brain.png"
             | "shortcut-nodes.png"
             | "shortcut-activity.png"
+            | "font-literata.woff2"
+            | "font-atkinson-400.woff2"
+            | "font-atkinson-700.woff2"
+            | "font-nunito.woff2"
+            | "font-plex-400.woff2"
+            | "font-plex-600.woff2"
+            | "font-opendyslexic-400.woff2"
+            | "font-opendyslexic-700.woff2"
     )
 }
 
@@ -1169,6 +1203,15 @@ async fn h_asset(
     };
     match read_asset(&st, &name) {
         Some(body) if name.ends_with(".html") => html_page(body),
+        // Reading fonts never change under a name, so browsers keep them.
+        Some(body) if name.ends_with(".woff2") => (
+            [
+                (header::CONTENT_TYPE, ct),
+                (header::CACHE_CONTROL, "public, max-age=2592000"),
+            ],
+            body,
+        )
+            .into_response(),
         Some(body) => ([(header::CONTENT_TYPE, ct)], body).into_response(),
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
@@ -1201,6 +1244,29 @@ pub(crate) fn logout_response() -> Response {
         String::new(),
     )
         .into_response()
+}
+
+/// How often an active browser's session cookie gets a fresh `Max-Age`.
+const COOKIE_RENEW_SECS: i64 = 300;
+
+/// Whether the cookie of this session (by id hash) is due a fresh `Max-Age`: at most once
+/// every [`COOKIE_RENEW_SECS`] per session, remembered in memory (a restart renews once).
+fn cookie_renew_due(sid_hash: &str) -> bool {
+    static RENEWED: std::sync::OnceLock<Mutex<std::collections::HashMap<String, i64>>> =
+        std::sync::OnceLock::new();
+    let now = memora_state::now();
+    let mut m = RENEWED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if m.get(sid_hash).is_some_and(|t| now - t < COOKIE_RENEW_SECS) {
+        return false;
+    }
+    if m.len() > 4096 {
+        m.retain(|_, t| now - *t < 86_400);
+    }
+    m.insert(sid_hash.to_string(), now);
+    true
 }
 
 /// `Set-Cookie` header for a new session (HttpOnly, SameSite=Lax, `Secure` over HTTPS).
@@ -1523,6 +1589,8 @@ pub fn build_router(st: AppState) -> Router {
         .route("/docs", get(h_app_route))
         .route("/docs/{*section}", get(h_app_route))
         .route("/trash", get(h_app_route))
+        .route("/mnemo", get(h_app_route))
+        .route("/mnemo/{chat}", get(h_app_route))
         // Older page names the web app still understands.
         .route("/home", get(h_app_route))
         .route("/vault", get(h_app_route))
@@ -1560,6 +1628,8 @@ pub fn build_router(st: AppState) -> Router {
         .merge(api::api_router())
         .merge(privacy::router())
         .merge(pins::router())
+        .merge(images::router())
+        .merge(assistant::router())
         .merge(shutdown::router())
         .merge(oauth::router())
         .fallback(h_notfound)
@@ -1993,6 +2063,13 @@ mod front_door_tests {
             "no-cache, no-store, must-revalidate"
         );
         assert_ne!(csp_nonce(), csp_nonce());
+    }
+
+    #[test]
+    fn session_cookies_are_renewed_at_most_every_few_minutes() {
+        assert!(cookie_renew_due("renew-test-a"));
+        assert!(!cookie_renew_due("renew-test-a"), "not again right away");
+        assert!(cookie_renew_due("renew-test-b"), "each session on its own");
     }
 
     #[test]

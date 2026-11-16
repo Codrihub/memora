@@ -663,7 +663,7 @@ fn npm_assets(bin: &Path) -> Option<PathBuf> {
 }
 
 /// Where the server listens, as a connectable address (0.0.0.0 / :: become loopback).
-fn listen_addr(ctx: &Ctx) -> SocketAddr {
+pub(crate) fn listen_addr(ctx: &Ctx) -> SocketAddr {
     let snap = ctx
         .state
         .join(DB_FILE)

@@ -57,6 +57,7 @@ const READ_ONLY: &[&str] = &[
     "get_folder_meta",
     "list_actors",
     "get_todos",
+    "list_images",
     "follow_ups",
     "validate_memory",
     "list_pins",
@@ -245,7 +246,7 @@ fn clip(s: &str, max: usize) -> String {
 
 /// The fields shared by both phases.
 fn base(caller: &Caller, call_id: &str, tool: &str, label: &str, paths: &[String]) -> Value {
-    json!({
+    let mut v = json!({
         "type": "ai_activity",
         "call_id": call_id,
         "actor": caller.actor(),
@@ -254,7 +255,11 @@ fn base(caller: &Caller, call_id: &str, tool: &str, label: &str, paths: &[String
         "action": tool,
         "label": clip(label, MAX_LABEL),
         "paths": paths,
-    })
+    });
+    if let Some(w) = &caller.on_behalf {
+        v["for"] = json!(w);
+    }
+    v
 }
 
 /// The `start` event.

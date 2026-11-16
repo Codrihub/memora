@@ -101,6 +101,18 @@ pub(super) const COMMANDS: &[Cmd] = &[
     Cmd { name: "/mcp", args: "", group: "Agents",
         short: "connect AI agents: MCP endpoint and client configs",
         long: "Prints the MCP endpoint and copy-paste configs for common MCP clients." },
+    Cmd { name: "/mnemo", args: "[setup]", group: "Agents",
+        short: "chat with Mnemo, the built-in notes agent",
+        long: "Mnemo is the agent built into Memora: it finds, reads, writes, tags,\n\
+               links, moves and tidies notes with Memora's own tools (no web, no shell,\n\
+               no delete-for-good). It is the same Mnemo as in the browser: the same\n\
+               chats, models and keys, and every action shows in Activity.\n\
+               /mnemo opens a chat: pick a recent one or start a new one, then type.\n\
+               In a chat: /model, /new, /chats, /setup, /exit.\n\
+               /mnemo setup connects OpenAI, Anthropic or an OpenAI-compatible server\n\
+               (API key, sealed on the server), fetches models, and pins, hides or\n\
+               picks the default model. Needs the server running (/start); the chat\n\
+               uses a short console session that ends when you leave." },
     Cmd { name: "/tools", args: "", group: "Agents",
         short: "MCP tools: switch tools on/off for every agent",
         long: "Lists every MCP tool by category, with ✓ on / ✗ off and what it does.\n\

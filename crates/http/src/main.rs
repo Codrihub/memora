@@ -325,6 +325,8 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
         "Memora HTTP server starting"
     );
     cache::spawn_background(&app_state);
+    memora_http::assistant::mentions::watch(&app_state);
+    memora_http::images::load_media_settings(&app_state);
     memora_http::release::spawn();
 
     let router = build_router(app_state.clone());

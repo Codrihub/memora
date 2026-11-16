@@ -860,7 +860,21 @@ async fn h_api_save(
     };
     let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).save_impl(&path, content) {
-        Ok(()) => Json(json!({"ok": true, "path": path})).into_response(),
+        Ok(()) => {
+            // `@mnemo:` lines in the saved text ask Mnemo (see assistant::mentions).
+            if content
+                .to_ascii_lowercase()
+                .contains(crate::assistant::mentions::TAG)
+            {
+                let by = key
+                    .as_deref()
+                    .map(|k| k.name.clone())
+                    .or_else(|| owner_name(&st))
+                    .unwrap_or_else(|| "owner".into());
+                crate::assistant::mentions::poke(&st, &path, &by);
+            }
+            Json(json!({"ok": true, "path": path})).into_response()
+        }
         Err(e) => mem_err(e),
     }
 }
@@ -882,7 +896,20 @@ async fn h_api_create(
     let content = b.get("content").and_then(|x| x.as_str());
     let _author = web_author(&st, key.as_deref());
     match crate::store_as(&st, key.as_deref()).create_impl(&title, &folder, content) {
-        Ok(path) => Json(json!({"ok": true, "path": path})).into_response(),
+        Ok(path) => {
+            if content.is_some_and(|c| {
+                c.to_ascii_lowercase()
+                    .contains(crate::assistant::mentions::TAG)
+            }) {
+                let by = key
+                    .as_deref()
+                    .map(|k| k.name.clone())
+                    .or_else(|| owner_name(&st))
+                    .unwrap_or_else(|| "owner".into());
+                crate::assistant::mentions::poke(&st, &path, &by);
+            }
+            Json(json!({"ok": true, "path": path})).into_response()
+        }
         Err(e) => mem_err(e),
     }
 }
@@ -2789,6 +2816,10 @@ fn layout_gate(key: &Option<Extension<ApiKeyCaller>>, name: &str) -> Option<Resp
         return Some(bad(
             "invalid layout name: use 1-40 characters of a-z, 0-9, '_' or '-'",
         ));
+    }
+    // `srv-*` documents hold server settings and have their own admin routes.
+    if name.starts_with("srv-") {
+        return Some(forbidden("this name is reserved for server settings"));
     }
     None
 }

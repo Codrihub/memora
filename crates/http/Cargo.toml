@@ -23,6 +23,8 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 chacha20poly1305 = "0.10"
 # gzip for the UI bundle (already in the tree via zip).
 flate2 = "1"
+# Streams the built-in agent's replies (server-sent events).
+futures-util = { version = "0.3", default-features = false }
 
 [[bin]]
 name = "memora"

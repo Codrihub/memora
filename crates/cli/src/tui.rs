@@ -6,6 +6,7 @@
 
 mod commands;
 pub(crate) mod docs;
+mod mnemo;
 mod welcome;
 
 use crate::store::{self, Snapshot};
@@ -234,6 +235,7 @@ pub fn run(ctx: &Ctx) -> Result<()> {
             "/logout" => crate::manage::logout(ctx, &theme, arg.as_deref()),
             "/activity" => crate::manage::activity(ctx, arg.as_deref()),
             "/mcp" => crate::manage::mcp_guide(ctx),
+            "/mnemo" | "/ask" => mnemo::run(ctx, &theme, arg.as_deref()),
             "/docs" => docs::run(ctx, &theme, arg.as_deref()),
             "/quit" | "/exit" | "/q" => return Ok(()),
             other => {
