@@ -12,6 +12,7 @@ import { createSelect, type Select } from '../ui/select';
 import { useFormStyles } from '../ui/forms';
 import * as A from './api';
 import { markHTML, MNEMO_CSS } from './styles';
+import { textSizeHTML, wireTextSize } from './textsize';
 
 const KINDS: A.ProviderKind[] = ['openai', 'anthropic', 'custom'];
 
@@ -181,6 +182,8 @@ function behaviourCard(s: A.MnemoState): string {
       <div class="st-c"><div class="mns-seg" role="radiogroup" aria-label="Permission">${(['ask', 'auto'] as const)
         .map((v) => `<label><input type="radio" name="mnsPerm" value="${v}"${(p.permission === 'auto' ? 'auto' : 'ask') === v ? ' checked' : ''}><span>${v === 'ask' ? 'Ask first' : 'Auto'}</span></label>`)
         .join('')}</div></div></div>
+    <div class="st-row"><div class="st-l"><b>Text size</b><small>The size of the chat's text on this device. Auto is small on phones, so more fits, and medium elsewhere. Saved at once.</small></div>
+      <div class="st-c">${textSizeHTML('settings')}</div></div>
     <div class="st-row full"><div class="st-l"><b>Your instructions</b><small>Tell ${A.MNEMO} how you like things, in your own words: the language to answer in, how to name notes, folders to leave alone…</small></div>
       <div class="st-c"><textarea class="ui-input mns-instr" name="system_prompt" rows="3" maxlength="4000" placeholder="e.g. Answer in Indonesian. Keep meeting notes in Meetings/YYYY.">${esc(p.system_prompt || '')}</textarea></div></div>
     <div class="st-row sw"><div class="st-l"><b>Floating button</b><small>The ${A.MNEMO} button on every page (Ctrl+J). Saved at once. You can also hide or show it from More, or hide it by dragging it onto the X.</small></div><div class="st-c end">${switchHTML('mnsLauncher', hooks.mnemoButton(), 'Floating button')}</div></div>
@@ -444,6 +447,7 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
     });
     slot.append(defaultSel.el);
     const launcher = beh.querySelector<HTMLElement>('#mnsLauncher')!;
+    wireTextSize(beh);
     beh.querySelectorAll<HTMLInputElement>('[name=mnsPerm]').forEach((r) => {
       r.onchange = () => {
         void A.savePrefs({ permission: r.value as 'ask' | 'auto' })

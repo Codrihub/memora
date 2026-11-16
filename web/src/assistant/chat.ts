@@ -20,6 +20,10 @@ import { openLightbox } from '../ui/lightbox';
 import * as A from './api';
 import { renderReply, resolveNote } from './md';
 import { MNEMO_CSS, markHTML } from './styles';
+import { applyTextSize } from './textsize';
+
+// The chosen text size (per device) applies to every Mnemo chat.
+applyTextSize();
 
 /** Friendly words for each tool, and whether it changes notes. */
 const TOOL_WORDS: Record<string, [string, boolean]> = {

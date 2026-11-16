@@ -1,13 +1,14 @@
 // Mnemo's look: the mark, the chat (bubbles, tool cards, composer) and shared bits.
 
 import { icon } from '../ui/icons';
+import { TEXT_SIZE_CSS } from './textsize';
 
 /** The Mnemo mark: a memory wave with a spark, on a teal-to-indigo tile. */
 export function markHTML(cls = ''): string {
   return `<span class="mn-mark ${cls}" aria-hidden="true">${icon('mnemo', 'i mn-mark-g')}</span>`;
 }
 
-export const MNEMO_CSS = `
+export const MNEMO_CSS = `${TEXT_SIZE_CSS}
 .mn-mark{--s:28px;position:relative;display:inline-grid;place-items:center;flex:none;width:var(--s);height:var(--s);border-radius:calc(var(--s) * .32);
   color:#fff;background:linear-gradient(145deg,#5eead4 0%,#14b8a6 30%,#4f46e5 100%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(15,23,42,.18),0 1px 2px rgba(15,23,42,.16)}
@@ -24,7 +25,7 @@ export const MNEMO_CSS = `
 
 .mn-u{display:flex;flex-direction:column;align-items:flex-end;gap:4px;animation:mnIn .25s var(--ease-out,ease-out) both}
 .mn-ub{max-width:min(82%,620px);padding:10px 15px;border-radius:20px 20px 6px 20px;white-space:pre-wrap;overflow-wrap:anywhere;
-  font-size:14.5px;line-height:1.55;color:var(--fg);background:color-mix(in srgb,var(--accent) 13%,var(--surface-1,var(--panel)));
+  font-size:var(--mn-fs,14.5px);line-height:1.55;color:var(--fg);background:color-mix(in srgb,var(--accent) 13%,var(--surface-1,var(--panel)));
   border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
 .mn-u-act{display:flex;align-items:center;justify-content:flex-end;gap:2px;height:28px;margin:-2px -4px 0 0;opacity:0;transform:translateY(-3px);
   transition:opacity .15s,transform .18s var(--ease-out,ease-out);pointer-events:none}
@@ -42,17 +43,17 @@ export const MNEMO_CSS = `
 .mn-tb{min-width:0;display:flex;flex-direction:column;gap:8px}
 @keyframes mnIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-.mn-md{font-size:14.5px;line-height:1.68;color:var(--fg);overflow-wrap:anywhere}
+.mn-md{font-size:var(--mn-fs,14.5px);line-height:1.68;color:var(--fg);overflow-wrap:anywhere}
 .mn-md>:first-child{margin-top:0}.mn-md>:last-child{margin-bottom:0}
 .mn-md p{margin:.55em 0}
 .mn-md h1,.mn-md h2,.mn-md h3,.mn-md h4{margin:1em 0 .4em;font-weight:650;line-height:1.3;letter-spacing:-.01em}
-.mn-md h1{font-size:19px}.mn-md h2{font-size:17px}.mn-md h3,.mn-md h4{font-size:15px}
+.mn-md h1{font-size:1.31em}.mn-md h2{font-size:1.17em}.mn-md h3,.mn-md h4{font-size:1.04em}
 .mn-md ul,.mn-md ol{margin:.5em 0;padding-left:1.35em}.mn-md li{margin:.2em 0}.mn-md li::marker{color:var(--muted)}
 .mn-md a{color:inherit;text-decoration:underline;text-decoration-color:var(--accent-line,var(--accent));text-underline-offset:3px}
 .mn-md code{font-family:var(--mono);font-size:.86em;padding:.1em .38em;border-radius:6px;background:color-mix(in srgb,var(--fg) 7%,transparent)}
 .mn-md blockquote{margin:.6em 0;padding:.1em 0 .1em 14px;border-left:3px solid var(--accent-line,var(--line-strong));color:var(--text-2,var(--muted))}
 .mn-md hr{border:0;border-top:1px solid var(--line);margin:1em 0}
-.mn-md table{border-collapse:collapse;margin:.6em 0;font-size:13.5px;display:block;overflow-x:auto;max-width:100%}
+.mn-md table{border-collapse:collapse;margin:.6em 0;font-size:.93em;display:block;overflow-x:auto;max-width:100%}
 .mn-md th,.mn-md td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .mn-md th{font-weight:600;color:var(--text-2,var(--muted));font-size:12.5px}
 .mn-md .dc-code{margin:.6em 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-1,var(--panel))}
@@ -69,7 +70,7 @@ export const MNEMO_CSS = `
 .mn-caret{display:inline-block;width:7px;height:1.05em;margin-left:2px;vertical-align:-2px;border-radius:2px;background:var(--accent);animation:mnBlink 1s steps(2) infinite}
 @keyframes mnBlink{50%{opacity:0}}
 
-.mn-think{display:inline-flex;align-items:center;gap:4px;height:26px;font-size:13px;color:var(--muted)}
+.mn-think{display:inline-flex;align-items:center;gap:4px;height:26px;font-size:calc(var(--mn-fs,14.5px) - 1.5px);color:var(--muted)}
 .mn-think i{width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:.35;animation:mnDot 1.2s ease-in-out infinite}
 .mn-think i:nth-child(2){animation-delay:.15s}.mn-think i:nth-child(3){animation-delay:.3s}
 .mn-think span{margin-left:6px;background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;
@@ -88,8 +89,8 @@ export const MNEMO_CSS = `
 .mn-tool.w .mn-tool-ic{color:var(--accent);background:var(--accent-soft)}
 .mn-tool-ic .i{width:14px;height:14px;stroke-width:2}
 .mn-tool-t{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
-.mn-tool-t b{flex:none;font-size:13px;font-weight:600}
-.mn-tool-t small{min-width:0;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-tool-t b{flex:none;font-size:calc(var(--mn-fs,14.5px) - 1.5px);font-weight:600}
+.mn-tool-t small{min-width:0;font-size:calc(var(--mn-fs,14.5px) - 2px);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-tool-s{display:inline-flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;max-width:46%;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .mn-tool-s>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-tool-s>.i{flex:none}
@@ -270,14 +271,14 @@ export const MNEMO_CSS = `
 .mn-act-ic .i{width:15px;height:15px;stroke-width:2.2}
 .mn-act.bad .mn-act-ic{color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%,transparent)}
 .mn-act-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
-.mn-act-t b{font-size:13px;font-weight:620}
-.mn-act-t small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-act-t b{font-size:calc(var(--mn-fs,14.5px) - 1.5px);font-weight:620}
+.mn-act-t small{font-size:calc(var(--mn-fs,14.5px) - 2.5px);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-act.live .mn-act-t b{background:linear-gradient(90deg,var(--fg) 30%,var(--accent) 50%,var(--fg) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 1.8s linear infinite}
 .mn-act-chev{width:14px;height:14px;flex:none;color:var(--muted);transition:transform .18s var(--ease,ease)}
 .mn-act[open]>summary .mn-act-chev{transform:rotate(90deg)}
 .mn-act-b{display:flex;flex-direction:column;gap:8px;padding:2px 12px 12px}
 .mn-act .mn-tools{display:flex;flex-direction:column;gap:6px;position:relative;padding-left:14px;border-left:2px solid var(--line)}
-.mn-thought{font-size:13px;line-height:1.6;color:var(--text-2,var(--muted))}
+.mn-thought{font-size:calc(var(--mn-fs,14.5px) - 1.5px);line-height:1.6;color:var(--text-2,var(--muted))}
 .mn-thought-t{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow-y:auto}
 .mn-act:not(.live) .mn-thought-t{max-height:none}
 .mn-seg-end{display:none}
@@ -319,7 +320,18 @@ export const MNEMO_CSS = `
 .mn-rlab b{flex:none;font-size:11px;font-weight:650;color:var(--accent);font-variant-numeric:tabular-nums}
 .mn-rlab.in{opacity:1;transform:translate(0,-50%)}
 .mn-chat.has-rail .mn-log{padding-right:44px}
-@media (max-width:640px){.mn-chat.has-rail .mn-log{padding-right:30px}.mn-rail{right:0}}
+/* Phones: no avatar beside Mnemo's replies, so they and the questions use the full width between equal margins;
+   the timeline narrows into the right margin instead of taking a column of its own. */
+@media (max-width:640px){
+  .mn-log,.mn-chat.has-rail .mn-log{padding-left:12px;padding-right:12px}
+  .mn-turn{grid-template-columns:minmax(0,1fr);gap:0}
+  .mn-turn>.mn-av{display:none}
+  .mn-ub{max-width:88%}
+  .mn-rail{right:0;width:12px}
+  .mn-rb{width:12px;padding:0 1px}
+  .mn-rb i{width:calc(var(--w,12px) * .45 * var(--m,1))}
+  .mn-rb.on i{width:10px}
+}
 
 /* Chat memory popover (the ring in the composer). */
 .mn-cx{position:fixed;z-index:120;display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:16px;background:var(--panel,var(--surface-1));-webkit-backdrop-filter:none;backdrop-filter:none;border:1px solid var(--line-strong);
@@ -350,7 +362,7 @@ export const MNEMO_CSS = `
 .mn-card-img img{display:block;width:100%;height:100%;object-fit:cover}
 .mn-card-img.broken img{display:none}
 .mn-card-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
-.mn-card-t b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-card-t b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-card-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-card-go{width:14px;height:14px;flex:none;color:var(--muted)}
 
@@ -384,7 +396,7 @@ export const MNEMO_CSS = `
 
 /* A question from Mnemo: options to tap, and Other. */
 .mn-ask{margin:10px 0 4px;padding:12px;border:1px solid var(--accent-line,var(--line-strong));border-radius:14px;background:color-mix(in srgb,var(--accent) 5%,var(--panel,var(--surface-1)))}
-.mn-ask-q{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:600;line-height:1.45;margin-bottom:10px}
+.mn-ask-q{display:flex;gap:8px;align-items:flex-start;font-size:calc(var(--mn-fs,14.5px) - .5px);font-weight:600;line-height:1.45;margin-bottom:10px}
 .mn-ask-q .i{width:17px;height:17px;flex:none;margin-top:2px;color:var(--accent)}
 .mn-ask-o{display:flex;flex-direction:column;gap:6px}
 .mn-ask-b{display:flex;align-items:flex-start;gap:10px;width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:11px;background:var(--panel,var(--surface-1));
@@ -395,8 +407,8 @@ export const MNEMO_CSS = `
   color:var(--muted);font-size:12px;font-weight:600}
 .mn-ask-n .i{width:13px;height:13px}
 .mn-ask-c{display:flex;flex-direction:column;gap:2px;min-width:0}
-.mn-ask-b b{font-size:13.5px;font-weight:600}
-.mn-ask-b small{font-size:12px;color:var(--muted);line-height:1.4}
+.mn-ask-b b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:600}
+.mn-ask-b small{font-size:calc(var(--mn-fs,14.5px) - 2.5px);color:var(--muted);line-height:1.4}
 .mn-ask-b.ok b::before{content:"✓ ";color:var(--accent)}
 .mn-ask-b.other{border-style:dashed}
 .mn-ask-b.on .mn-ask-n{background:var(--accent);color:var(--on-accent,#fff)}
@@ -440,7 +452,7 @@ export const MNEMO_CSS = `
 .mn-q-a [data-qa=steer]{color:var(--accent)}
 .mn-q-a .mn-ibtn:disabled{opacity:.3;cursor:default}
 .mn-steer{display:flex;align-items:flex-start;gap:7px;align-self:flex-end;max-width:85%;margin:8px 0;padding:7px 11px;border-radius:12px 12px 4px 12px;
-  font-size:13px;color:var(--fg);background:var(--accent-soft);border:1px solid var(--accent-line,transparent)}
+  font-size:calc(var(--mn-fs,14.5px) - 1.5px);color:var(--fg);background:var(--accent-soft);border:1px solid var(--accent-line,transparent)}
 .mn-steer .i{width:13px;height:13px;flex:none;margin-top:3px;color:var(--accent)}
 
 /* An open section keeps its header in view while you scroll through it, so it can be closed

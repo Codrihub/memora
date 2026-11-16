@@ -26,6 +26,25 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.2',
+    title: 'Mnemo fits your screen',
+    lead: 'On a phone Mnemo uses the full width, and you choose how big its text is.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'eye', title: 'Text size', text: 'Auto, Small, Medium or Large, from Appearance in the chat list or Settings, Mnemo. Auto is small on phones so more fits, and medium elsewhere.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'chat', title: 'Full width on phones', text: "Replies drop the avatar beside them and use the whole width, with the same margin on both sides." },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.1',
     title: 'Mnemo asks first, or just gets on with it',
     lead: 'Pick how much Mnemo may do on its own, answer its questions with a tap, and keep typing while it works.',

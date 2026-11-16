@@ -19,6 +19,7 @@ import { useAgentPageStyles } from '../views/agent-page';
 import { useActivityStyles } from '../control/activity';
 import { ChatView, openMnemoSettings, openShown, type Artifact } from './chat';
 import { MNEMO_CSS, markHTML } from './styles';
+import { textSizeHTML, wireTextSize } from './textsize';
 
 
 let root: HTMLElement | null = null;
@@ -106,6 +107,7 @@ function build(): void {
             'chev-down',
           )}</button>
         </div>
+        <div class="mnp-prefs-r mnp-fsrow"><span class="mnp-fsl">Text</span>${textSizeHTML('side')}</div>
       </div>
       <nav class="mnp-sfoot" aria-label="${A.MNEMO}">
         <button type="button" class="mnp-set" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom">${icon('activity')}<span>Activity</span></button>
@@ -216,6 +218,7 @@ function build(): void {
     };
   });
   root.querySelector<HTMLElement>('#mnpBg')!.onclick = (e) => bgMenu(e.currentTarget as HTMLElement);
+  wireTextSize(root.querySelector<HTMLElement>('.mnp-fsrow')!);
   paintPrefs();
   root.querySelector<HTMLElement>('#mnpActBtn')!.onclick = () => {
     side(false);
@@ -857,6 +860,8 @@ const PAGE_CSS = `
 .mnp-prefs{margin:8px 10px 6px;padding:9px 10px 10px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg))}
 .mnp-prefs-l{display:block;margin:0 2px 7px;font-size:11px;font-weight:650;letter-spacing:.02em;color:var(--muted)}
 .mnp-prefs-r{display:flex;align-items:center;gap:6px}
+.mnp-fsrow{margin-top:8px}
+.mnp-fsl{flex:1;min-width:0;margin-left:2px;font-size:12.5px;color:var(--text-2,var(--fg))}
 .mnp-theme{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:10px;background:var(--seg-track,color-mix(in srgb,var(--fg) 6%,transparent))}
 .mnp-theme button{display:grid;place-items:center;width:30px;height:28px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
 .mnp-theme button .i{width:15px;height:15px}
