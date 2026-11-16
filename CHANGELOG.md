@@ -172,6 +172,11 @@ still roll back by swapping the binary.
   the search is a plain "Search" pill, and touch screens no longer show the
   "/" keyboard hint.
 
+### Security
+
+- SQLite updated (bundled with `rusqlite` 0.41 / `libsqlite3-sys` 0.39) for
+  RUSTSEC-2026-0459.
+
 ## [2.0.1] - 2026-10-24
 
 A calmer reader. Notes read like a clean page whatever the reading settings.
