@@ -101,7 +101,28 @@ indexHtml = indexHtml.replace('__MEMORA_BUILD__', build);
 sw = sw.replace('__MEMORA_BUILD__', build);
 if (indexHtml.includes('__MEMORA_') || sw.includes('__MEMORA_')) throw new Error('unresolved build placeholder');
 
+// The docs as data for Mnemo (its search_docs and read_docs tools): the same Markdown the
+// Docs page shows, with the page each file becomes.
+const repo = join(web, '..');
+const DOCS = [
+  ['README.md', 'get-started', 'Get started'],
+  ['docs/INSTALL.md', 'install', 'Install'],
+  ['docs/CONFIGURATION.md', 'configuration', 'Configuration'],
+  ['docs/MCP.md', 'mcp', 'MCP tools'],
+  ['docs/API.md', 'api', 'HTTP API'],
+  ['docs/DEPLOYMENT.md', 'deployment', 'Deployment'],
+  ['docs/ARCHITECTURE.md', 'architecture', 'Architecture'],
+  ['docs/DATABASE.md', 'database', 'Database'],
+  ['docs/contracts/tools-permissions.md', 'tool-reference', 'Tool reference'],
+  ['SECURITY.md', 'security', 'Security'],
+  ['CHANGELOG.md', 'changelog', 'Changelog'],
+];
+const docsJson = JSON.stringify(
+  DOCS.filter(([f]) => existsSync(join(repo, f))).map(([file, slug, title]) => ({ file, slug, title, text: readFileSync(join(repo, file), 'utf8') })),
+);
+
 console.log('pages built:');
+write('mnemo-docs.json', docsJson);
 write('index.html', stamp(indexHtml));
 write('login.html', stamp(loginHtml));
 write('offline.html', stamp(offlineHtml));

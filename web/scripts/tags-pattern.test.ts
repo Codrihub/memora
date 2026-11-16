@@ -2,7 +2,7 @@
 // Run: npx tsx scripts/tags-pattern.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchPattern, notesForPattern, parsePattern, patternText, type TagEntry } from '../src/views/tags-model';
+import { matchPattern, notesForPattern, parsePattern, patternText, type TagEntry } from '../src/views/tags-model.ts';
 
 const text = (s: string): string => {
   const r = parsePattern(s);

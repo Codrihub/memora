@@ -7,6 +7,7 @@ import { noteTitle } from '../state';
 import { Modal } from '../modal';
 import { I } from './icons';
 import { nav } from './nav';
+import { hooks } from '../hooks';
 import {
   deleteFolder,
   moveNotes,
@@ -307,6 +308,7 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void, extra:
     [
       { label: 'New note here', icon: I.newNote, hint: 'N', run: () => nav.newNote(path) },
       { label: 'New folder here', icon: I.newFolder, run: () => nav.newFolder(path) },
+      { label: root ? 'Ask Mnemo about the vault' : 'Ask Mnemo about this folder', icon: I.mnemo, run: () => hooks.askMnemo(root ? 'global' : 'folder:' + path) },
       { sep: true, label: '' },
       {
         label: 'Rename',

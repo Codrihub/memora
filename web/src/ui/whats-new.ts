@@ -26,6 +26,37 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.0',
+    title: 'Meet Mnemo, your notes have a helper now',
+    lead: 'Ask in plain words and Mnemo finds, writes, tidies and links your notes for you, with the AI key you already have. And your notes can finally hold pictures.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'mnemo', title: 'Ask Mnemo anything about your notes', text: '“What did I decide about the launch?” “Tag everything from last week.” “Turn this into a checklist.” Mnemo does it and shows each step. It only works inside your notes and never deletes for good.' },
+          { icon: 'note', title: 'Write @mnemo: right in a note', text: 'Leave a request on any line, save, and come back to the answer underneath with the request crossed out. Handy for to-dos you would rather hand off.' },
+          { icon: 'image', title: 'Show it a picture', text: 'Paste a screenshot or a photo and Mnemo actually sees it: ask what it says, or have it filed beside the right note.' },
+          { icon: 'chat', title: 'It remembers the whole chat', text: 'Long conversations get folded into a summary instead of forgotten, replies keep going if you switch chats, and the search box finds anything either of you said.' },
+          { icon: 'image', title: 'Images live in your notes', text: 'Drop a PNG, JPEG, WebP or GIF into a note. It sits in the note’s folder and moves, goes to the Trash and comes back with it. Each folder gets a gallery too.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'eye', title: 'Read your way', text: 'Nine reading themes from paper and sepia to night, plus fonts like Literata, Atkinson Hyperlegible and OpenDyslexic, in the size you like.' },
+          { icon: 'sparkle', title: 'A chat that feels like yours', text: 'Light or dark right from Mnemo’s sidebar, a dozen quiet backgrounds, and a timeline on the right edge to jump through long chats with your thumb.' },
+          { icon: 'check', title: 'No more surprise sign-outs', text: 'Memora keeps you signed in while you are using it; it only times out when you really step away.' },
+        ],
+      },
+      {
+        kind: 'admin',
+        items: [
+          { icon: 'settings', title: 'Bring your own AI', text: 'Settings, Mnemo: add OpenAI, Anthropic or any OpenAI-compatible server, test it, pick a default model and write instructions in your own words. Mnemo is in the terminal app too.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.0.1',
     title: 'A calmer reader',
     lead: 'Notes now read like a clean page, whatever reading settings you pick.',

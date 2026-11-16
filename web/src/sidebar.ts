@@ -167,6 +167,63 @@ function wireStatsPop(): void {
   onNavigate(() => close());
 }
 
+/** The open sidebar's width: the default from the theme, dragged up to SIDE_MAX. */
+const SIDE_MIN = 280;
+const SIDE_MAX = 440;
+
+function applySideWidth(w: number | undefined): void {
+  const root = document.documentElement;
+  if (w === undefined || w <= SIDE_MIN) root.style.removeProperty('--sb');
+  else root.style.setProperty('--sb', Math.min(SIDE_MAX, Math.round(w)) + 'px');
+}
+
+function setSideWidth(w: number | undefined, save: boolean): void {
+  const next = w === undefined ? undefined : Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(w)));
+  applySideWidth(next);
+  if (next === undefined || next <= SIDE_MIN) delete ui.width;
+  else ui.width = next;
+  if (save) saveUI();
+  window.dispatchEvent(new Event('resize'));
+}
+
+/** Drag, double-click or arrow keys on the sidebar's edge; works only while the sidebar is open. */
+function wireSideResize(): void {
+  const grip = document.getElementById('sideResize');
+  if (!grip) return;
+  applySideWidth(ui.width);
+  let raf = 0;
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || isMobile() || $('#app').classList.contains('side-collapsed')) return;
+    e.preventDefault();
+    const left = $('#sidebar').getBoundingClientRect().left;
+    grip.setPointerCapture(e.pointerId);
+    $('#app').classList.add('side-resizing');
+    const move = (ev: PointerEvent): void => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setSideWidth(ev.clientX - left, false));
+    };
+    const up = (): void => {
+      grip.removeEventListener('pointermove', move);
+      $('#app').classList.remove('side-resizing');
+      saveUI();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up, { once: true });
+    grip.addEventListener('pointercancel', up, { once: true });
+  });
+  grip.addEventListener('dblclick', () => setSideWidth(undefined, true));
+  grip.addEventListener('keydown', (e) => {
+    const cur = ui.width ?? SIDE_MIN;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setSideWidth(cur + (e.key === 'ArrowRight' ? 16 : -16), true);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setSideWidth(undefined, true);
+    }
+  });
+}
+
 export function toggleCollapsed(force?: boolean): void {
   const app = $('#app');
   const next = force ?? !app.classList.contains('side-collapsed');
@@ -390,6 +447,7 @@ export function initSidebar(deps: SidebarDeps): void {
   $('#app').classList.toggle('side-collapsed', startCollapsed);
   paintCollapse();
 
+  wireSideResize();
   $('#sideCollapse').onclick = () => toggleCollapsed();
   $('#sideCollapseTop').onclick = () => toggleCollapsed(true);
   wireStatsPop();

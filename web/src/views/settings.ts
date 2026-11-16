@@ -32,6 +32,7 @@ import {
 } from '../control/ui';
 import type { AuthState, Config, KeyRow, KeysResult, OkResult, SettingsInfo } from '../types';
 import { SYS_PAGE_CSS } from './tools';
+import { mnemoSectionHTML, wireMnemo } from '../assistant/settings';
 
 /** The window listener that keeps the theme cards in step is added once. */
 let themeSync = false;
@@ -214,6 +215,7 @@ const CSS = `
   mask-image:repeating-linear-gradient(90deg,#000 0 calc(100% / 32 - 3px),transparent calc(100% / 32 - 3px) calc(100% / 32))}
 .lg-use-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .6s cubic-bezier(.2,.8,.2,1)}
 .lg-lim{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:14px}
+.st-img-form{align-items:flex-end;margin-bottom:0}
 .lg-lim label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:500;color:var(--text-2)}
 .lg-lim label span{display:flex;align-items:center;gap:8px;color:var(--muted);font-weight:400}
 .lg-lim input{width:104px;height:40px;box-sizing:border-box;padding:0 12px;border-radius:10px;border:1px solid transparent;
@@ -491,6 +493,8 @@ const SECTIONS: Section[] = [
   { id: 'stInterface', slug: 'interface', label: 'Interface', icon: 'sidebar', desc: 'Sidebar, pins and tag suggestions', group: 'personal' },
   { id: 'stToasts', slug: 'notifications', label: 'Notifications', icon: 'bell', desc: 'Pop-ups when an agent works in your notes', group: 'personal' },
   { id: 'stVault', slug: 'notes-folder', label: 'Notes folder', icon: 'folder', desc: 'Where every note is kept on the server', group: 'server' },
+  { id: 'stImages', slug: 'images', label: 'Images', icon: 'image', desc: 'How large an image may be, and what images take', group: 'server' },
+  { id: 'stMnemo', slug: 'mnemo', label: 'Mnemo (AI agent)', icon: 'mnemo', desc: 'Models, API keys and what the notes agent may do', group: 'server' },
   { id: 'stLogs', slug: 'activity-log', label: 'Activity log', icon: 'activity', desc: 'How much history the server keeps', group: 'server' },
   { id: 'stServer', slug: 'server', label: 'Server details', icon: 'monitor', desc: 'Addresses, folders and sign-in limits', group: 'server' },
   { id: 'stVersion', slug: 'version', label: 'Version', icon: 'refresh', desc: 'What is installed and how to update', group: 'server' },
@@ -969,6 +973,21 @@ export async function renderSettings(): Promise<void> {
       )}`,
       ),
     )}
+
+    ${section(
+      'stImages',
+      'Images live beside the notes that show them. Choose how large one may be, and see what notes and images take.',
+      card(
+        `${row('Storage', 'Notes and images in the notes folder.', '<div id="sImgStore"><span class="st-note">Counting…</span></div>')}
+      ${row(
+        'Largest image',
+        'Uploads above this size are refused, from this app and from agents alike. Between 0.1 and 50 MB.',
+        `<form id="sImgForm" class="lg-lim st-img-form"><label>Up to<span><input id="sImgMb" type="number" min="0.1" max="50" step="0.1" inputmode="decimal"> MB</span></label><button class="btn sm primary" type="submit" id="sImgSave">Save</button></form>`,
+      )}`,
+      ),
+    )}
+
+    ${section('stMnemo', 'The notes agent built into Memora: connect a model with your own API key, choose models and set how it works.', mnemoSectionHTML())}
 
     ${section(
       'stLogs',
@@ -1798,6 +1817,51 @@ export async function renderSettings(): Promise<void> {
 
   // Activity log
   void wireLogLimits(host);
+  void wireImages(host);
+  void wireMnemo(host);
+}
+
+interface StorageInfo {
+  notes: number;
+  note_bytes: number;
+  images: number;
+  image_bytes: number;
+  total_bytes: number;
+  max_image_bytes: number;
+}
+
+/** Storage of notes and images, and the image size limit form. */
+async function wireImages(host: HTMLElement): Promise<void> {
+  const box = host.querySelector<HTMLElement>('#sImgStore');
+  const form = host.querySelector<HTMLFormElement>('#sImgForm');
+  if (!box || !form) return;
+  const mbIn = host.querySelector<HTMLInputElement>('#sImgMb')!;
+  const size = (n: number): string => (n < 1048576 ? `${Math.max(0.1, n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+  try {
+    const s = await apiGet<StorageInfo>('/api/vault/storage');
+    if (!host.contains(box)) return;
+    box.innerHTML = `<div class="st-figs"><div><small>Notes</small><b>${size(s.note_bytes)}</b><span>${s.notes.toLocaleString('en-US')} files</span></div><div><small>Images</small><b>${size(
+      s.image_bytes,
+    )}</b><span>${s.images.toLocaleString('en-US')} files</span></div><div><small>Together</small><b>${size(s.total_bytes)}</b></div></div>`;
+    mbIn.value = String(Math.round((s.max_image_bytes / 1048576) * 10) / 10);
+  } catch (e) {
+    box.innerHTML = `<span class="st-note">Could not count the storage: ${esc((e as Error).message)}</span>`;
+  }
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const mb = Number(mbIn.value);
+    if (!(mb >= 0.1 && mb <= 50)) {
+      toast('Choose between 0.1 and 50 MB', 'err');
+      return;
+    }
+    try {
+      const r = await apiPost<{ max_image_mb: number }>('/api/settings/media', { max_image_mb: mb });
+      mbIn.value = String(r.max_image_mb);
+      toast(`Images can now be up to ${r.max_image_mb} MB`, 'ok');
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
 }
 
 /** Would these limits remove stored entries right away? */

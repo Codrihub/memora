@@ -25,6 +25,12 @@ interface Hooks {
   openTrash: () => void;
   /** The server switched to another vault folder. */
   vaultChanged: (vault: string) => void;
+  /** Open Mnemo with a new chat about a note, a folder or the whole vault. */
+  askMnemo: (scope: string, text?: string) => void;
+  /** Whether the Mnemo button shows on this device; `show` changes it. */
+  mnemoButton: (show?: boolean) => boolean;
+  /** Open Mnemo's own activity (what it did, and for whom). */
+  mnemoActivity: () => void;
 }
 
 export const hooks: Hooks = {
@@ -44,4 +50,7 @@ export const hooks: Hooks = {
   openNewFolder: () => {},
   openTrash: () => {},
   vaultChanged: () => {},
+  askMnemo: () => {},
+  mnemoButton: () => true,
+  mnemoActivity: () => {},
 };

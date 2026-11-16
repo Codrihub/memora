@@ -15,6 +15,7 @@ export type Page =
   | 'access'
   | 'settings'
   | 'docs'
+  | 'assistant'
   | 'trash';
 
 interface GraphState {

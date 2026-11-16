@@ -101,7 +101,7 @@ interface LightboxImage {
   caption: string;
 }
 
-function openLightbox(src: string, caption: string, set: LightboxImage[] = [], at = 0): void {
+export function openLightbox(src: string, caption: string, set: LightboxImage[] = [], at = 0): void {
   close();
   useStyles('lightbox-css', CSS);
   lastFocus = document.activeElement;

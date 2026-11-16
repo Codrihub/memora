@@ -1,0 +1,394 @@
+// Mnemo's look: the mark, the chat (bubbles, tool cards, composer) and shared bits.
+
+import { icon } from '../ui/icons';
+
+/** The Mnemo mark: a memory wave with a spark, on a teal-to-indigo tile. */
+export function markHTML(cls = ''): string {
+  return `<span class="mn-mark ${cls}" aria-hidden="true">${icon('mnemo', 'i mn-mark-g')}</span>`;
+}
+
+export const MNEMO_CSS = `
+.mn-mark{--s:28px;position:relative;display:inline-grid;place-items:center;flex:none;width:var(--s);height:var(--s);border-radius:calc(var(--s) * .32);
+  color:#fff;background:linear-gradient(145deg,#5eead4 0%,#14b8a6 30%,#4f46e5 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(15,23,42,.18),0 1px 2px rgba(15,23,42,.16)}
+.mn-mark .mn-mark-g{width:62%;height:62%;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.mn-mark.sm{--s:26px}.mn-mark.md{--s:32px}.mn-mark.lg{--s:40px}.mn-mark.xl{--s:64px}
+.mn-mark.xl .mn-mark-g{stroke-width:1.8}
+.mn-mark.pulse{animation:mnPulse 1.6s var(--ease,ease) infinite}
+@keyframes mnPulse{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 0 rgba(20,184,166,.35)}50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 8px rgba(20,184,166,0)}}
+
+.mn-chat{display:flex;flex-direction:column;min-height:0;height:100%;position:relative}
+.mn-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:28px 24px 12px;display:flex;flex-direction:column;gap:18px;scroll-padding-bottom:24px}
+.mn-log>*{width:100%;max-width:780px;margin-inline:auto}
+.mn-chat.compact .mn-log{padding:16px 14px 8px;gap:14px}
+
+.mn-u{display:flex;flex-direction:column;align-items:flex-end;gap:4px;animation:mnIn .25s var(--ease-out,ease-out) both}
+.mn-ub{max-width:min(82%,620px);padding:10px 15px;border-radius:20px 20px 6px 20px;white-space:pre-wrap;overflow-wrap:anywhere;
+  font-size:14.5px;line-height:1.55;color:var(--fg);background:color-mix(in srgb,var(--accent) 13%,var(--surface-1,var(--panel)));
+  border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+.mn-u-act{display:flex;align-items:center;justify-content:flex-end;gap:2px;height:28px;margin:-2px -4px 0 0;opacity:0;transform:translateY(-3px);
+  transition:opacity .15s,transform .18s var(--ease-out,ease-out);pointer-events:none}
+.mn-u:hover .mn-u-act,.mn-u:focus-within .mn-u-act,.mn-u.show-act .mn-u-act{opacity:1;transform:none;pointer-events:auto}
+.mn-u-act time{margin-right:4px;font-size:11.5px;color:var(--text-3,var(--muted));font-variant-numeric:tabular-nums;white-space:nowrap}
+.mn-u-btns{display:inline-flex;gap:2px}
+.mn-u-btns .mn-ibtn,.mn-foot-a .mn-ibtn{width:28px;height:28px;border-radius:8px}
+.mn-u-btns .mn-ibtn .i,.mn-foot-a .mn-ibtn .i{width:15px;height:15px}
+.mn-err-a{display:flex;gap:6px;margin-left:auto;flex:none}
+.mn-err-a .btn .i{width:14px;height:14px}
+@media (max-width:640px){.mn-err{flex-wrap:wrap}.mn-err-a{margin-left:0}}
+.mn-turn{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;align-items:start;animation:mnIn .3s var(--ease-out,ease-out) both}
+.mn-av{padding-top:1px}
+.mn-turn.live .mn-av .mn-mark{animation:mnPulse 1.6s var(--ease,ease) infinite}
+.mn-tb{min-width:0;display:flex;flex-direction:column;gap:8px}
+@keyframes mnIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.mn-md{font-size:14.5px;line-height:1.68;color:var(--fg);overflow-wrap:anywhere}
+.mn-md>:first-child{margin-top:0}.mn-md>:last-child{margin-bottom:0}
+.mn-md p{margin:.55em 0}
+.mn-md h1,.mn-md h2,.mn-md h3,.mn-md h4{margin:1em 0 .4em;font-weight:650;line-height:1.3;letter-spacing:-.01em}
+.mn-md h1{font-size:19px}.mn-md h2{font-size:17px}.mn-md h3,.mn-md h4{font-size:15px}
+.mn-md ul,.mn-md ol{margin:.5em 0;padding-left:1.35em}.mn-md li{margin:.2em 0}.mn-md li::marker{color:var(--muted)}
+.mn-md a{color:inherit;text-decoration:underline;text-decoration-color:var(--accent-line,var(--accent));text-underline-offset:3px}
+.mn-md code{font-family:var(--mono);font-size:.86em;padding:.1em .38em;border-radius:6px;background:color-mix(in srgb,var(--fg) 7%,transparent)}
+.mn-md blockquote{margin:.6em 0;padding:.1em 0 .1em 14px;border-left:3px solid var(--accent-line,var(--line-strong));color:var(--text-2,var(--muted))}
+.mn-md hr{border:0;border-top:1px solid var(--line);margin:1em 0}
+.mn-md table{border-collapse:collapse;margin:.6em 0;font-size:13.5px;display:block;overflow-x:auto;max-width:100%}
+.mn-md th,.mn-md td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.mn-md th{font-weight:600;color:var(--text-2,var(--muted));font-size:12.5px}
+.mn-md .dc-code{margin:.6em 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-1,var(--panel))}
+.mn-md .dc-code-bar{display:flex;align-items:center;justify-content:space-between;padding:5px 8px 5px 12px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+.mn-md .dc-copy{border:0;background:none;color:var(--muted);font:inherit;cursor:pointer;padding:2px 6px;border-radius:6px}
+.mn-md .dc-copy:hover{background:var(--hover);color:var(--fg)}
+.mn-md pre{margin:0;padding:10px 12px;overflow-x:auto;font:12.5px/1.6 var(--mono)}
+.mn-md pre code{padding:0;background:none;font-size:inherit}
+.mn-md .dc-anchor{display:none}
+.mn-wl{color:var(--fg)!important;text-decoration:none!important;border-bottom:1.5px solid var(--accent-line,var(--accent));font-weight:550;cursor:pointer}
+.mn-wl:hover{background:var(--accent-soft)}
+.mn-wl.code{border-bottom:0}.mn-wl.code code{box-shadow:inset 0 -1.5px 0 var(--accent-line,var(--accent))}
+.mn-wl.missing{border-bottom-style:dashed;border-bottom-color:var(--line-strong);color:var(--text-2,var(--muted))!important;font-weight:inherit;cursor:help}
+.mn-caret{display:inline-block;width:7px;height:1.05em;margin-left:2px;vertical-align:-2px;border-radius:2px;background:var(--accent);animation:mnBlink 1s steps(2) infinite}
+@keyframes mnBlink{50%{opacity:0}}
+
+.mn-think{display:inline-flex;align-items:center;gap:4px;height:26px;font-size:13px;color:var(--muted)}
+.mn-think i{width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:.35;animation:mnDot 1.2s ease-in-out infinite}
+.mn-think i:nth-child(2){animation-delay:.15s}.mn-think i:nth-child(3){animation-delay:.3s}
+.mn-think span{margin-left:6px;background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 1.8s linear infinite}
+@keyframes mnDot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+@keyframes mnShine{from{background-position:100% 0}to{background-position:-100% 0}}
+
+.mn-tools{display:flex;flex-direction:column;gap:6px}
+.mn-tool{border:1px solid var(--line);border-radius:12px;background:var(--surface-1,var(--panel));overflow:hidden;animation:mnIn .25s var(--ease-out,ease-out) both;transition:border-color .15s}
+.mn-tool[open]{border-color:var(--line-strong)}
+.mn-tool summary{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 10px 6px 7px;cursor:pointer;list-style:none;user-select:none}
+.mn-tool summary::-webkit-details-marker{display:none}
+.mn-tool summary:hover{background:var(--hover)}
+.mn-tool summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.mn-tool-ic{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:8px;color:var(--text-2,var(--muted));background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mn-tool.w .mn-tool-ic{color:var(--accent);background:var(--accent-soft)}
+.mn-tool-ic .i{width:14px;height:14px;stroke-width:2}
+.mn-tool-t{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+.mn-tool-t b{flex:none;font-size:13px;font-weight:600}
+.mn-tool-t small{min-width:0;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-tool-s{display:inline-flex;align-items:center;gap:5px;flex:none;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mn-tool-s .i{width:14px;height:14px;stroke-width:2.2}
+.mn-tool.ok .mn-tool-s .i{color:var(--ok,#10b981)}.mn-tool.err .mn-tool-s{color:var(--danger)}
+.mn-tool-chev{width:14px;height:14px;flex:none;color:var(--muted);transition:transform .18s var(--ease,ease)}
+.mn-tool[open] .mn-tool-chev{transform:rotate(90deg)}
+.mn-tool-b{padding:2px 12px 12px;display:flex;flex-direction:column;gap:6px}
+.mn-tool-k{font-size:11.5px;font-weight:600;color:var(--muted);font-family:var(--mono)}
+.mn-tool-b pre{margin:0;max-height:240px;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--surface-0,var(--bg));border:1px solid var(--line);
+  font:11.5px/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.mn-spin{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:mnSpin .7s linear infinite}
+@keyframes mnSpin{to{transform:rotate(360deg)}}
+
+.mn-foot{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-height:28px;font-size:11.5px;color:var(--text-3,var(--muted))}
+.mn-foot-a{display:inline-flex;gap:2px;margin-left:-6px}
+.mn-foot-m{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.mn-foot-m>span{white-space:nowrap}
+.mn-foot i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.6;flex:none}
+.mn-ibtn{display:inline-grid;place-items:center;width:26px;height:26px;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
+.mn-ibtn:hover{background:var(--hover);color:var(--fg)}
+.mn-ibtn .i{width:15px;height:15px;stroke-width:1.9}
+.mn-notice{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.mn-notice .i{width:14px;height:14px;flex:none}
+.mn-err{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.45;color:var(--fg);
+  background:var(--danger-soft,color-mix(in srgb,var(--danger) 10%,transparent));border:1px solid color-mix(in srgb,var(--danger) 30%,transparent)}
+.mn-err>.i{width:16px;height:16px;flex:none;color:var(--danger)}
+.mn-err>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.mn-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;flex:1;color:var(--muted);font-size:13px}
+
+.mn-hello{display:flex;flex-direction:column;align-items:center;text-align:center;margin:auto;padding:24px 4px 12px;max-width:620px!important}
+.mn-hello-mark{position:relative;margin-bottom:18px}
+.mn-hello-mark::before{content:"";position:absolute;inset:-18px;border-radius:50%;z-index:-1;filter:blur(18px);opacity:.55;
+  background:conic-gradient(from 0deg,#5eead4,#818cf8,#14b8a6,#a5b4fc,#5eead4);animation:mnHalo 8s linear infinite}
+@keyframes mnHalo{to{transform:rotate(360deg)}}
+.mn-hello h2{margin:0;font-size:22px;font-weight:680;letter-spacing:-.02em;color:var(--fg)}
+.mn-chat.compact .mn-hello h2{font-size:18px}
+.mn-hello p{margin:8px 0 0;font-size:14px;line-height:1.55;color:var(--text-2,var(--muted));max-width:460px}
+.mn-sugs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin-top:22px}
+.mn-chat.compact .mn-sugs{grid-template-columns:1fr;margin-top:16px}
+.mn-sug{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg));
+  color:var(--fg);font:inherit;font-size:13.5px;line-height:1.4;text-align:left;cursor:pointer;
+  transition:border-color .15s,transform .2s var(--ease-out,ease-out),background .15s;animation:mnIn .35s var(--ease-out,ease-out) both;animation-delay:calc(var(--i) * 50ms)}
+.mn-sug:hover{border-color:var(--accent-line,var(--line-strong));background:var(--surface-1,var(--panel));transform:translateY(-1px)}
+.mn-sug .i{width:15px;height:15px;flex:none;margin-top:2px;color:var(--accent)}
+.mn-setup{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:20px;padding:18px 20px;border:1px dashed var(--accent-line,var(--line-strong));border-radius:16px;font-size:13.5px}
+.mn-setup>span{color:var(--muted);max-width:380px;line-height:1.5}
+.mn-setup .btn{margin-top:8px}
+
+.mn-comp{flex:none;padding:10px 24px 14px}
+.mn-chat.compact .mn-comp{padding:8px 12px 12px}
+.mn-comp-box{max-width:780px;margin:0 auto;border:1px solid var(--line-strong);border-radius:20px;background:var(--surface-0,var(--bg));
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -12px rgba(15,23,42,.12);transition:border-color .15s,box-shadow .15s}
+.mn-comp-box:focus-within{border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft),0 8px 24px -12px rgba(15,23,42,.14)}
+.mn-comp textarea{display:block;width:100%;min-height:46px;max-height:240px;resize:none;border:0;outline:0;background:none;box-shadow:none;
+  padding:13px 16px 4px;font:inherit;font-size:14.5px;line-height:1.5;color:var(--fg)}
+.mn-comp textarea::placeholder{color:var(--text-3,var(--muted))}
+.mn-comp-bar{display:flex;align-items:center;gap:6px;padding:6px 8px 8px 10px;min-width:0}
+.mn-grow{flex:1}
+.mn-chip{display:inline-flex;align-items:center;gap:6px;height:28px;min-width:0;max-width:220px;padding:0 10px;border:1px solid var(--line);border-radius:999px;
+  background:none;color:var(--text-2,var(--fg));font:inherit;font-size:12.5px;cursor:pointer;transition:background .15s,border-color .15s}
+.mn-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-chip .i{width:14px;height:14px;flex:none;stroke-width:1.9}
+.mn-chip:hover:not(.fixed){background:var(--hover);border-color:var(--line-strong)}
+.mn-chip.fixed{cursor:default}
+.mn-chip em{font-style:normal;color:var(--muted)}
+.mn-chip .mn-chip-chev{width:12px;height:12px;transform:rotate(90deg);color:var(--muted)}
+.mn-ibtn[hidden],.mn-meter[hidden]{display:none}
+.mn-pick{display:flex;flex-direction:column;gap:10px}
+.mn-pick-q{display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px}
+.mn-pick-q:focus-within{border-color:var(--accent-line,var(--accent))}
+.mn-pick-q .i{width:16px;height:16px;color:var(--muted);flex:none}
+.mn-pick-q input{flex:1;min-width:0;border:0;outline:0;background:none;box-shadow:none;padding:0;height:100%;font:inherit;font-size:14px}
+.mn-pick-l{display:flex;flex-direction:column;gap:2px;max-height:min(50vh,420px);overflow-y:auto}
+.mn-pick-i{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:10px;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer}
+.mn-pick-i:hover,.mn-pick-i:focus-visible{background:var(--hover);outline:none}
+.mn-pick-i .i{width:16px;height:16px;flex:none;color:var(--muted)}
+.mn-pick-i span{display:flex;flex-direction:column;min-width:0}
+.mn-pick-i b{font-size:13.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-pick-i small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-pick-ck{display:grid;place-items:center;flex:none;width:20px;height:20px;margin-left:auto;border-radius:6px;border:1.5px solid var(--line-strong);color:transparent;transition:background .14s,border-color .14s,color .14s}
+.mn-pick-ck .i{width:13px;height:13px;stroke-width:3;color:inherit}
+.mn-pick-i.on{background:var(--accent-soft)}
+.mn-pick-i.on .mn-pick-ck{background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff)}
+.mn-pick-none{margin:0;padding:12px;font-size:13px;color:var(--muted)}
+.mn-chip.warn{color:var(--warn,#d97706);border-color:color-mix(in srgb,var(--warn,#d97706) 40%,transparent)}
+.mn-model-slot{display:inline-flex;min-width:0}
+.ui-sel.mn-model{height:28px;max-width:220px;padding:0 6px 0 10px;border-radius:999px;border-color:var(--line);background:none;font-size:12.5px;gap:4px}
+.ui-sel.mn-model .ui-sel-chev{width:14px;height:14px}
+.mn-model-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-star{display:grid;place-items:center;color:#f59e0b}.mn-star .i{width:14px;height:14px;fill:currentColor;stroke-width:1.5}
+.mn-pdot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.mn-pdot[data-p=openai]{background:#10a37f}.mn-pdot[data-p=anthropic]{background:#d97757}.mn-pdot[data-p=custom]{background:#6366f1}
+.mn-meter{display:inline-grid;place-items:center;width:28px;height:28px;flex:none;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.mn-meter:hover{background:var(--hover)}
+.mn-meter svg{width:20px;height:20px;transform:rotate(-90deg)}
+.mn-meter circle{fill:none;stroke-width:2.6}
+.mn-meter .t{stroke:var(--line-strong)}
+.mn-meter .v{stroke:var(--accent);stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:calc(100 - var(--pct,0));transition:stroke-dashoffset .4s var(--ease,ease)}
+.mn-meter.hot .v{stroke:var(--warn,#d97706)}
+.mn-send{display:grid;place-items:center;width:34px;height:34px;flex:none;border:0;border-radius:50%;cursor:pointer;color:var(--bg);background:var(--fg);
+  transition:transform .15s var(--ease,ease),opacity .15s}
+.mn-send:hover{transform:scale(1.05)}.mn-send:active{transform:scale(.96)}
+.mn-send .i{width:17px;height:17px;stroke-width:2.3}
+.mn-chat.busy .mn-send .i{fill:currentColor;stroke-width:0;width:14px;height:14px}
+.mn-fine{margin:8px auto 0;max-width:780px;text-align:center;font-size:11.5px;color:var(--text-3,var(--muted))}
+.mn-chat.compact .mn-fine{display:none}
+@media (max-width:640px){.mn-log{padding:18px 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}}
+@media (prefers-reduced-motion:reduce){.mn-u,.mn-turn,.mn-tool,.mn-sug{animation:none}.mn-hello-mark::before,.mn-mark.pulse,.mn-turn.live .mn-av .mn-mark{animation:none}.mn-think i,.mn-think span,.mn-caret{animation:none}}
+
+/* Composer: + attach, chips that grow the box, the model pill once there is something to send. */
+.mn-plus{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:50%;background:none;color:var(--fg);cursor:pointer;
+  transition:background .15s,transform .2s var(--ease-out,ease-out),border-color .15s}
+.mn-plus:hover{background:var(--hover);border-color:var(--line-strong)}
+.mn-plus:active{transform:scale(.94)}
+.mn-plus .i{width:18px;height:18px;stroke-width:2}
+.mn-att{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s var(--ease-out,ease-out)}
+.mn-att.has{grid-template-rows:1fr}
+.mn-att-in{overflow:hidden;padding:0 12px;min-height:0}
+.mn-att.has .mn-att-in{padding:12px 12px 0}
+.mn-att-c{display:inline-flex;align-items:center;gap:6px;height:30px;max-width:240px;padding:0 4px 0 10px;border-radius:10px;font-size:12.5px;color:var(--fg);
+  background:color-mix(in srgb,var(--fg) 6%,transparent);border:1px solid var(--line);animation:mnChip .25s var(--ease-out,ease-out) both;animation-delay:calc(var(--i,0) * 30ms)}
+.mn-att-c>.i{width:14px;height:14px;flex:none;color:var(--muted)}
+.mn-att-c>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-att-c small{flex:none;font-size:11px;color:var(--muted)}
+.mn-att-c button{display:grid;place-items:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer}
+.mn-att-c button:hover{background:var(--hover);color:var(--danger)}
+.mn-att-c button .i{width:12px;height:12px;stroke-width:2.4}
+.mn-att-c.img{padding-left:3px;cursor:zoom-in}
+.mn-att-c.img img{width:24px;height:24px;flex:none;border-radius:7px;object-fit:cover}
+.mn-att-c.sm{height:26px;font-size:12px;padding:0 9px 0 7px;cursor:default}
+.mn-att-c.sm[data-note]{cursor:pointer}.mn-att-c.sm[data-note]:hover{border-color:var(--accent-line,var(--line-strong))}
+.mn-att-c.sm.img{padding-left:2px}.mn-att-c.sm.img img{width:22px;height:22px}
+.mn-att-c.w>.i{color:var(--accent)}
+@keyframes mnChip{from{opacity:0;transform:scale(.9) translateY(4px)}to{opacity:1;transform:none}}
+/* At rest the composer is a one-line capsule; focus opens the bar (+, model, meter, send). */
+.mn-comp-box{transition:border-color .15s,box-shadow .15s,border-radius .28s var(--ease-out,ease-out)}
+.mn-comp-box:not(.open){border-radius:24px;cursor:text}
+.mn-comp-box:not(.open) textarea{padding:12px 20px;max-height:46px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.mn-comp textarea{transition:padding .28s var(--ease-out,ease-out)}
+.mn-comp-bar{max-height:60px;opacity:1;visibility:visible;transition:max-height .28s var(--ease-out,ease-out),padding .28s var(--ease-out,ease-out),opacity .2s .06s,visibility 0s}
+.mn-comp-box:not(.open) .mn-comp-bar{max-height:0;padding-top:0;padding-bottom:0;opacity:0;visibility:hidden;overflow:hidden;
+  transition:max-height .24s var(--ease-out,ease-out),padding .24s var(--ease-out,ease-out),opacity .12s,visibility 0s .24s}
+.mn-comp-box.drop{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.mn-u-att{max-width:min(82%,620px);min-width:0}
+/* One sliding row of chips (no scrollbar); arrows fade in where there is more. */
+.mn-car{position:relative;min-width:0}
+.mn-car-row{display:flex;gap:6px;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0}
+.mn-car-row::-webkit-scrollbar{display:none}
+.mn-car-row>*{flex:none;scroll-snap-align:start}
+.mn-u-att .mn-car-row{justify-content:flex-start}
+.mn-u-att .mn-car:not(.more-l):not(.more-r) .mn-car-row{justify-content:flex-end}
+.mn-car-a{position:absolute;top:50%;z-index:2;display:grid;place-items:center;width:26px;height:26px;padding:0;border:1px solid var(--line-strong);border-radius:50%;
+  background:var(--panel,var(--surface-1));color:var(--fg);box-shadow:0 4px 12px -4px rgba(15,23,42,.25);cursor:pointer;opacity:0;pointer-events:none;
+  transform:translateY(-50%) scale(.85);transition:opacity .15s,transform .15s}
+.mn-car-a .i{width:14px;height:14px;stroke-width:2.2}
+.mn-car-a.l{left:-4px}.mn-car-a.r{right:-4px}
+.mn-car.more-l .mn-car-a.l,.mn-car.more-r .mn-car-a.r{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+.mn-car.more-l .mn-car-row{-webkit-mask-image:linear-gradient(90deg,transparent,#000 28px);mask-image:linear-gradient(90deg,transparent,#000 28px)}
+.mn-car.more-r .mn-car-row{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+.mn-car.more-l.more-r .mn-car-row{-webkit-mask-image:linear-gradient(90deg,transparent,#000 28px,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,transparent,#000 28px,#000 calc(100% - 28px),transparent)}
+@media (hover:none){.mn-car-a{display:none}}
+/* A picture that came with a message: a tile, tap for the full view. */
+.mn-u-img{position:relative;display:block;width:76px;height:76px;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--fg) 6%,transparent);cursor:zoom-in}
+.mn-u-img img{display:block;width:100%;height:100%;object-fit:cover}
+.mn-u-img span{display:none}
+.mn-u-img.gone{cursor:default}.mn-u-img.gone img{display:none}
+.mn-u-img.gone span{display:flex;align-items:center;justify-content:center;height:100%;padding:6px;font-size:10.5px;color:var(--muted);text-align:center;word-break:break-all}
+
+/* Activity: what Mnemo thinks and does, live, then a summary. */
+.mn-act{border:1px solid var(--line);border-radius:14px;background:var(--surface-1,var(--panel));overflow:hidden;animation:mnIn .25s var(--ease-out,ease-out) both}
+.mn-act>summary{display:flex;align-items:center;gap:10px;min-height:44px;padding:7px 12px 7px 10px;cursor:pointer;list-style:none;user-select:none}
+.mn-act>summary::-webkit-details-marker{display:none}
+.mn-act>summary:hover{background:var(--hover)}
+.mn-act-ic{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:8px;color:var(--accent);background:var(--accent-soft)}
+.mn-act-ic .i{width:15px;height:15px;stroke-width:2.2}
+.mn-act.bad .mn-act-ic{color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%,transparent)}
+.mn-act-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.mn-act-t b{font-size:13px;font-weight:620}
+.mn-act-t small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-act.live .mn-act-t b{background:linear-gradient(90deg,var(--fg) 30%,var(--accent) 50%,var(--fg) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 1.8s linear infinite}
+.mn-act-chev{width:14px;height:14px;flex:none;color:var(--muted);transition:transform .18s var(--ease,ease)}
+.mn-act[open]>summary .mn-act-chev{transform:rotate(90deg)}
+.mn-act-b{display:flex;flex-direction:column;gap:8px;padding:2px 12px 12px}
+.mn-act .mn-tools{display:flex;flex-direction:column;gap:6px;position:relative;padding-left:14px;border-left:2px solid var(--line)}
+.mn-thought{font-size:13px;line-height:1.6;color:var(--text-2,var(--muted))}
+.mn-thought-t{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow-y:auto}
+.mn-act:not(.live) .mn-thought-t{max-height:none}
+.mn-seg-end{display:none}
+.mn-act-notes{display:flex;flex-direction:column;gap:6px}
+.mn-act-notes>div{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.mn-act-notes b{font-size:11.5px;font-weight:600;color:var(--muted);margin-right:4px}
+.mn-act-notes small{font-size:11.5px;color:var(--muted)}
+.mn-act-notes:empty{display:none}
+@media (prefers-reduced-motion:reduce){.mn-att,.mn-comp-box,.mn-comp textarea,.mn-comp-bar{transition:none!important}.mn-att-c,.mn-act{animation:none}.mn-act.live .mn-act-t b{animation:none;color:var(--fg);background:none}}
+
+/* Pin: the model new chats use (web and TUI). */
+.mn-pin{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:none;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.mn-pin[hidden]{display:none}
+.mn-pin:hover{background:var(--hover);color:var(--fg)}
+.mn-pin .i{width:15px;height:15px;stroke-width:2;transform:rotate(35deg);transition:transform .2s var(--ease-out,ease-out)}
+.mn-pin.on{color:var(--accent)}
+.mn-pin.on .i{transform:none;fill:currentColor}
+
+/* Scrolling: the log fades out under its edges, like a timeline. */
+.mn-log{--fa:0px;--fb:0px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%)}
+.mn-chat.fade-top .mn-log{--fa:36px}
+.mn-chat.fade-bot .mn-log{--fb:28px}
+
+/* Timeline rail, top right: one bar per question; the one in view is longer and darker. */
+.mn-rail{position:absolute;top:50%;right:2px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:6px 0;width:40px;
+  max-height:60%;transform:translateY(-50%);touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer}
+.mn-rail[hidden]{display:none}
+.mn-rb{position:relative;display:flex;align-items:center;justify-content:flex-end;width:40px;height:var(--rh,10px);padding:0 6px;border:0;background:none;cursor:pointer;flex:none;pointer-events:none}
+.mn-rb i{display:block;width:calc(var(--w,12px) * var(--m,1));height:2px;border-radius:2px;background:var(--line-strong);
+  transition:width .14s cubic-bezier(.2,.9,.3,1.3),background .12s,height .12s}
+.mn-rb.on i{background:var(--fg);width:calc((var(--w,12px) + 8px) * var(--m,1));height:3px}
+.mn-rb.hot i{background:var(--accent);height:3px}
+.mn-rail.scrub .mn-rb i{background:color-mix(in srgb,var(--fg) 45%,transparent)}
+.mn-rail.scrub .mn-rb.hot i{background:var(--accent)}
+.mn-rlab{position:absolute;right:calc(100% + 2px);top:50%;transform:translate(8px,-50%);display:flex;gap:7px;align-items:baseline;max-width:min(260px,70vw);padding:6px 10px;border-radius:10px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--fg);background:var(--panel,var(--surface-1));border:1px solid var(--line-strong);
+  box-shadow:0 10px 28px -12px rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .12s,transform .16s var(--ease-out,ease-out),top .08s linear}
+.mn-rlab b{flex:none;font-size:11px;font-weight:650;color:var(--accent);font-variant-numeric:tabular-nums}
+.mn-rlab.in{opacity:1;transform:translate(0,-50%)}
+.mn-chat.has-rail .mn-log{padding-right:44px}
+@media (max-width:640px){.mn-chat.has-rail .mn-log{padding-right:30px}.mn-rail{right:0}}
+
+/* Chat memory popover (the ring in the composer). */
+.mn-cx{position:fixed;z-index:120;display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:16px;background:var(--panel,var(--surface-1));-webkit-backdrop-filter:none;backdrop-filter:none;border:1px solid var(--line-strong);
+  box-shadow:0 24px 60px -20px rgba(15,23,42,.35),0 8px 20px -10px rgba(15,23,42,.18);font-size:13px;animation:mnIn .18s var(--ease-out,ease-out) both}
+.mn-cx-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mn-cx-h b{font-size:14px;font-weight:650}
+.mn-cx-h small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-cx-bar{position:relative;height:8px;border-radius:99px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:visible}
+.mn-cx-bar i{position:absolute;inset:0 auto 0 0;width:var(--p);border-radius:inherit;background:var(--accent);transition:width .3s}
+.mn-cx-bar u{position:absolute;top:-3px;bottom:-3px;left:var(--c);width:2px;border-radius:2px;background:var(--warn,#d97706)}
+.mn-cx-n{color:var(--text-2,var(--fg))}.mn-cx-n b{font-weight:650;color:var(--fg)}
+.mn-cx p{margin:0;color:var(--muted);line-height:1.5;font-size:12.5px}
+.mn-cx-k{display:flex;align-items:center;gap:6px}.mn-cx-k .i{width:14px;height:14px;flex:none}
+.mn-cx-a{display:flex;gap:8px;flex-wrap:wrap}
+.mn-cx-a .btn{flex:1;justify-content:center}
+
+/* Cards Mnemo hands over (show_items): notes, folders, images, the vault. */
+.mn-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin:8px 0 2px;animation:mnIn .2s var(--ease-out,ease-out) both}
+.mn-card{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 10px 9px 9px;border:1px solid var(--line);border-radius:12px;background:var(--panel,var(--surface-1));
+  color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}
+.mn-card:hover{border-color:var(--accent-line,var(--line-strong));background:color-mix(in srgb,var(--accent) 5%,var(--panel,var(--surface-1)))}
+.mn-card:active{transform:scale(.98)}
+.mn-card-ic{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:9px;color:var(--accent);background:var(--accent-soft)}
+.mn-card-ic .i{width:17px;height:17px}
+.mn-card.k-folder .mn-card-ic{color:#d97706;background:color-mix(in srgb,#d97706 12%,transparent)}
+.mn-card.k-vault .mn-card-ic{color:#6366f1;background:color-mix(in srgb,#6366f1 12%,transparent)}
+.mn-card-img{flex:none;width:44px;height:44px;border-radius:9px;overflow:hidden;background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mn-card-img img{display:block;width:100%;height:100%;object-fit:cover}
+.mn-card-img.broken img{display:none}
+.mn-card-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.mn-card-t b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-card-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-card-go{width:14px;height:14px;flex:none;color:var(--muted)}
+
+/* Under a reply: what it changed, showed and read. */
+.mn-rel{display:flex;align-items:center;gap:8px;margin-top:10px;min-width:0}
+.mn-rel-h{flex:none;font-size:11.5px;font-weight:600;color:var(--muted)}
+.mn-rel .mn-car{flex:1}
+.mn-rel .mn-att-c{cursor:pointer}
+.mn-rel .mn-att-c:hover{border-color:var(--accent-line,var(--line-strong))}
+.mn-rel-more{align-self:center;padding:0 6px;font-size:11.5px;color:var(--muted)}
+
+/* Scrollbars on the Mnemo page: a hairline that thickens a little under the pointer. */
+@supports not selector(::-webkit-scrollbar){
+  .mn-log,.mnp-list,.mnp-art-b,.mnp-act{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--fg) 16%,transparent) transparent}
+}
+.mn-log::-webkit-scrollbar,.mnp-list::-webkit-scrollbar,.mnp-art-b::-webkit-scrollbar,.mnp-act::-webkit-scrollbar{width:6px;height:6px}
+.mn-log::-webkit-scrollbar-track,.mnp-list::-webkit-scrollbar-track,.mnp-art-b::-webkit-scrollbar-track,.mnp-act::-webkit-scrollbar-track{background:transparent}
+.mn-log::-webkit-scrollbar-thumb,.mnp-list::-webkit-scrollbar-thumb,.mnp-art-b::-webkit-scrollbar-thumb,.mnp-act::-webkit-scrollbar-thumb{
+  border-radius:99px;border:2px solid transparent;background:color-mix(in srgb,var(--fg) 14%,transparent) padding-box}
+.mn-log:hover::-webkit-scrollbar-thumb,.mnp-list:hover::-webkit-scrollbar-thumb,.mnp-art-b:hover::-webkit-scrollbar-thumb,.mnp-act:hover::-webkit-scrollbar-thumb{background-color:color-mix(in srgb,var(--fg) 26%,transparent)}
+.mn-log::-webkit-scrollbar-thumb:active,.mnp-list::-webkit-scrollbar-thumb:active{background-color:color-mix(in srgb,var(--fg) 38%,transparent)}
+.mn-log::-webkit-scrollbar-button,.mnp-list::-webkit-scrollbar-button,.mnp-art-b::-webkit-scrollbar-button,.mnp-act::-webkit-scrollbar-button{display:none}
+
+/* The prompt box scrolls without a bar: its edges fade where there is more text. */
+.mn-comp textarea{scrollbar-width:none;--ta-ft:0px;--ta-fb:0px;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--ta-ft),#000 calc(100% - var(--ta-fb)),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 var(--ta-ft),#000 calc(100% - var(--ta-fb)),transparent 100%)}
+.mn-comp textarea::-webkit-scrollbar{display:none}
+.mn-comp textarea.ft{--ta-ft:18px}
+.mn-comp textarea.fb{--ta-fb:18px}
+
+/* A search hit opened in the chat. */
+.mn-flash{animation:mnFlash 2.2s var(--ease-out,ease-out)}
+@keyframes mnFlash{0%,30%{box-shadow:0 0 0 3px var(--accent);border-radius:12px;background:var(--accent-soft)}100%{box-shadow:0 0 0 0 transparent}}
+
+/* Where older messages were compacted into a summary. */
+.mn-compact{align-self:stretch;margin:2px 0;font-size:12.5px;color:var(--muted)}
+.mn-compact summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}
+.mn-compact summary::-webkit-details-marker{display:none}
+.mn-compact summary::before,.mn-compact summary::after{content:"";flex:1;height:1px;background:var(--line)}
+.mn-compact summary span{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.mn-compact summary .i{width:13px;height:13px}
+.mn-compact[open] summary span{color:var(--fg);border-color:var(--line-strong)}
+.mn-compact-b{margin-top:10px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--fg) 4%,transparent);font-size:13px;color:var(--text-2,var(--fg))}
+`;

@@ -5,6 +5,7 @@ import { closePanel, openPanel } from './panel';
 import { noteTitle } from '../state';
 import { dirOf, folderColor, ROOT_LABEL } from './store';
 import { fadeScroll } from '../ui/scroll-fade';
+import { galleryGrid, noteImages, type NoteImages } from './images';
 
 export interface ContentsData {
   heads: HTMLElement[];
@@ -14,6 +15,10 @@ export interface ContentsData {
   links: HTMLElement[];
   /** The Details tab: property rows (folder, tags, dates, counts) as HTML. */
   details: string;
+  /** The note's path, for its image gallery. */
+  path: string;
+  /** How many vault images the note shows. */
+  images: number;
 }
 
 interface ContentsActions {
@@ -27,7 +32,7 @@ interface ContentsActions {
   tag: (tag: string) => void;
 }
 
-type Tab = 'toc' | 'out' | 'back';
+type Tab = 'toc' | 'out' | 'back' | 'img';
 type Main = 'contents' | 'details';
 let last: Tab = 'toc';
 let lastMain: Main = 'contents';
@@ -63,7 +68,35 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
     { k: 'toc', label: 'Outline', n: d.heads.length },
     { k: 'out', label: 'Links', n: d.outs.length },
     { k: 'back', label: 'Mentions', n: d.backlinks.length },
+    { k: 'img', label: 'Images', n: d.images },
   ];
+  let scope: 'note' | 'folder' = 'note';
+  let gal: NoteImages | null = null;
+  const fillImages = (): void => {
+    const box = inner.querySelector<HTMLElement>('.vx-ct-gal');
+    if (!box) return;
+    const draw = (g: NoteImages): void => {
+      box.replaceChildren(
+        galleryGrid(
+          scope === 'note' ? g.images : g.folder_images,
+          scope === 'note' ? 'This note shows no image of its folder yet.' : 'This folder has no images yet.',
+          () => {
+            gal = null;
+            fillImages();
+          },
+        ),
+      );
+    };
+    if (gal) return draw(gal);
+    box.innerHTML = '<p class="vx-ct-none">Loading the images…</p>';
+    noteImages(d.path).then(
+      (g) => {
+        gal = g;
+        if (tab === 'img') draw(g);
+      },
+      (e: Error) => (box.innerHTML = `<p class="vx-ct-none">Could not load the images: ${esc(e.message)}</p>`),
+    );
+  };
   let main: Main = lastMain;
   const mainSeg = el('div', 'vx-ct-main');
   mainSeg.setAttribute('role', 'tablist');
@@ -84,6 +117,10 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
     `<i style="--fc:${attr(folderColor(dirOf(path)))}"></i><span><b>${esc(noteTitle(path))}</b><small>${esc(dirOf(path) || ROOT_LABEL)}</small></span>`;
 
   const list = (): string => {
+    if (tab === 'img')
+      return `<div class="vx-ct-imgs"><div class="vx-ct-scope" role="group" aria-label="Which images">${(['note', 'folder'] as const)
+        .map((k) => `<button type="button" data-scope="${k}" aria-pressed="${scope === k}">${k === 'note' ? 'This note' : 'This folder'}</button>`)
+        .join('')}</div><div class="vx-ct-gal"></div></div>`;
     if (tab === 'toc')
       return d.heads.length
         ? `<nav class="vx-ct-toc" aria-label="Outline">${d.heads
@@ -146,6 +183,7 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       .join('')}</div><div class="vx-ct-list" role="tabpanel">${list()}</div>`;
     fadeScroll(inner.querySelector<HTMLElement>('.vx-ct-list')!);
     if (tab === 'toc') markHead(inner, act.current(), true);
+    if (tab === 'img') fillImages();
   };
   paintMain();
   paint();
@@ -170,6 +208,11 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
     const b = (e.target as HTMLElement).closest<HTMLElement>('button');
     if (!b) return;
     if (b.dataset.main) return;
+    if (b.dataset.scope) {
+      scope = b.dataset.scope === 'folder' ? 'folder' : 'note';
+      paint();
+      return;
+    }
     if (b.dataset.tab) {
       tab = last = b.dataset.tab as Tab;
       paint();

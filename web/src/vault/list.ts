@@ -34,6 +34,7 @@ import {
 import { emptyState, inlineEdit, openMenu } from './ui';
 import { normQuery, score, similar } from '../ui/match';
 import { mountSelect, type SelectOption } from '../ui/select';
+import { folderImages, galleryGrid } from './images';
 
 let query = '';
 /** Folders or Nodes, when a folder has both (kept while browsing). */
@@ -195,6 +196,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     tbar.appendChild(tabs);
   }
   const cards = prefs.view === 'cards';
+  const gallery = prefs.view === 'gallery';
   if (showTab === 'nodes') {
     tbar.insertAdjacentHTML(
       'beforeend',
@@ -205,6 +207,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     <div class="vx-seg" role="group" aria-label="Layout">
       <button type="button" data-view="list" aria-pressed="${!cards}" aria-label="List" title="List">${LIST_ICON}</button>
       <button type="button" data-view="cards" aria-pressed="${cards}" aria-label="Grid" title="Grid">${CARDS_ICON}</button>
+      <button type="button" data-view="gallery" aria-pressed="${gallery}" aria-label="Images in this folder" title="Images in this folder">${I.image}</button>
     </div>`,
     );
   }
@@ -332,6 +335,10 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   card.appendChild(rows);
   if (add && !cards) card.insertAdjacentHTML('beforeend', add);
   sec.appendChild(card);
+  if (gallery && showTab === 'nodes') {
+    sec.hidden = true;
+    page.appendChild(gallerySection(folder));
+  }
   page.appendChild(sec);
   sc.scrollTop = scroll;
   // The table shows no excerpts: only grid cards ask the server for them.
@@ -372,7 +379,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   });
   tbar.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => {
     b.onclick = () => {
-      prefs.view = b.dataset.view === 'cards' ? 'cards' : 'list';
+      prefs.view = b.dataset.view === 'cards' ? 'cards' : b.dataset.view === 'gallery' ? 'gallery' : 'list';
       savePrefs();
       renderList(host, mobile);
     };
@@ -477,6 +484,29 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
 const GO = `<span class="vx-go" aria-hidden="true"><svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>`;
 
 /** Folders | Notes: the old list fades out toward the side it leaves, then the new one renders. */
+/** The images of the open folder only (never its sub folders or parents). */
+function gallerySection(folder: string): HTMLElement {
+  const sec = el('section', 'vx-bsec vx-galsec');
+  sec.setAttribute('aria-label', 'Images');
+  sec.innerHTML = `<div class="vx-galhead"><h2 class="vx-label">Images<span data-n></span></h2><em>${esc(
+    folder ? `In ${baseName(folder)} only, not its sub folders` : 'At the top level only, not inside folders',
+  )}</em></div><div class="vx-galbody"><p class="vx-muted">Loading the images…</p></div>`;
+  const body = sec.querySelector<HTMLElement>('.vx-galbody')!;
+  const load = (): void => {
+    folderImages(folder).then(
+      (r) => {
+        sec.querySelector('[data-n]')!.textContent = String(r.images.length);
+        body.replaceChildren(
+          galleryGrid(r.images, 'No images here yet. Add one while editing a note: the Image button, paste or drop.', load),
+        );
+      },
+      (e: Error) => (body.innerHTML = `<p class="vx-muted">Could not load the images: ${esc(e.message)}</p>`),
+    );
+  };
+  load();
+  return sec;
+}
+
 function switchTab(host: HTMLElement, mobile: boolean, tabs: HTMLElement, next: 'nodes' | 'folders'): void {
   tab = next;
   if (next === 'folders') query = '';

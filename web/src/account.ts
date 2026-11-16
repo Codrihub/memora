@@ -254,12 +254,19 @@ export function openProfileMenu(anchor: HTMLElement): void {
       label,
     )}</span>${extra}</button>`;
   const keys = (n: number): string => `<span class="pm-keys alt" aria-hidden="true"><kbd>${alt}</kbd><kbd>${n}</kbd></span>`;
+  const fabShown = hooks.mnemoButton();
+  const mnemoToggle = `<button class="pm-item" role="menuitem" type="button" data-act="mnemofab">${icon(fabShown ? 'eye-off' : 'eye')}<span class="pm-label">${
+      fabShown ? 'Hide the Mnemo button' : 'Show the Mnemo button'
+    }</span></button>`;
+  const mnemo = item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + mnemoToggle;
   const group = (id: string, label: string, body: string): string =>
     `<div class="pm-group" role="group" aria-labelledby="pmg-${id}"><div class="pm-glabel" id="pmg-${id}">${label}</div>${body}</div>`;
   // On phones this sheet is the tab bar's "More": it also lists the pages the bar has no room for.
   // On wider screens the everyday pages are in the sidebar; the menu keeps the workspace ones.
   const sheet = window.matchMedia(SHEET_QUERY).matches;
-  const pages = sheet ? group('pages', 'Pages', item('tags', 'Tags', 'tags') + item('trash', 'Trash', 'trash')) : '';
+  const pages = sheet
+    ? group('pages', 'Pages', item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + item('tags', 'Tags', 'tags') + item('trash', 'Trash', 'trash'))
+    : '';
   menu.innerHTML = `
     <div class="pm-top">
     <div class="pm-grab" aria-hidden="true"></div>
@@ -276,11 +283,12 @@ export function openProfileMenu(anchor: HTMLElement): void {
         ? group(
             'agents',
             'Agents',
-            item('logs', 'Activity', 'activity', live ? `<span class="pm-live"><i></i>${live} live</span>` : keys(7)) +
+            mnemoToggle +
+              item('logs', 'Activity', 'activity', live ? `<span class="pm-live"><i></i>${live} live</span>` : keys(7)) +
               item('keys', 'Agents & API keys', 'key', keys(8)) +
               item('tools', 'Tools', 'tools', keys(9)),
           ) + group('system', 'System', item('access', 'Access rules', 'shield') + item('settings', 'Settings', 'settings'))
-        : group('system', 'Workspace', item('tools', 'Tools', 'tools') + item('access', 'Access rules', 'shield'))
+        : group('system', 'Workspace', mnemo + item('tools', 'Tools', 'tools') + item('access', 'Access rules', 'shield'))
     }
     ${group(
       'help',
@@ -324,6 +332,11 @@ export function openProfileMenu(anchor: HTMLElement): void {
       else if (act === 'whatsnew') openWhatsNew();
       else if (act === 'install') void PWA.install();
       else if (act === 'signout') void signOut();
+      else if (act === 'mnemofab') {
+        const show = !hooks.mnemoButton();
+        hooks.mnemoButton(show);
+        toast(show ? 'The Mnemo button is back' : 'Mnemo button hidden. Show it again from More, Show the Mnemo button.', 'ok');
+      }
     };
   });
   menu.onkeydown = (e) => onMenuKey(menu, e);

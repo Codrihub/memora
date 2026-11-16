@@ -194,13 +194,16 @@ const CSS = `
 .vc-search{display:flex;align-items:center;gap:8px;width:var(--vc-w);height:var(--vc-h);box-sizing:border-box;padding:0 12px;transition:border-color .2s}
 .vc-search:focus-within{border-color:var(--accent-line,rgba(94,234,212,.38))}
 .vc-search svg{width:16px;height:16px;flex:none;color:var(--vc-ctl-icon);fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
-.vc-search input{all:unset;flex:1;min-width:0;font-size:13.5px;color:var(--fg,#e6e9ef)}
-.vc-search input::placeholder{color:var(--muted,#8b98ad)}
+.vc-search input{all:unset;flex:1;min-width:0;font-size:13.5px;color:var(--fg,#e6e9ef);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vc-search input::placeholder{color:var(--muted,#8b98ad);text-overflow:ellipsis}
 .vc-search input::-webkit-search-cancel-button{display:none}
-.vc-search kbd{color:var(--muted,#8b98ad)}
-.vc-search em{font-style:normal;font-size:12px;color:var(--muted,#8b98ad);white-space:nowrap}
+.vc-search kbd{flex:none;color:var(--muted,#8b98ad)}
+.vc-search em{flex:none;font-style:normal;font-size:12px;color:var(--muted,#8b98ad);white-space:nowrap}
 .vc-search em:empty{display:none}
 .vc-search:focus-within kbd{display:none}
+.vc-sq{display:none}
+/* Touch screens have no "/" key to press: the hint only confuses. */
+@media (hover:none){.vc-search kbd,.vc-bar .vc-search kbd{display:none!important}}
 
 .vc-modes{flex-direction:row;width:var(--vc-w);height:var(--vc-h);box-sizing:border-box;gap:2px;padding:3px;background:var(--vc-track)}
 .vc-modes button{all:unset;box-sizing:border-box;position:relative;cursor:pointer;flex:1;height:100%;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:7px;
@@ -464,14 +467,14 @@ const CSS = `
 .vc[data-open=regions] .vc-bar{left:calc(var(--vc-gap) + var(--vc-dw) + 52px);opacity:1;translate:none;pointer-events:none}
 .vc[data-open=activity] .vc-bar{right:calc(var(--vc-gap) + var(--vc-dw) + 52px)}
 .vc-barin{position:relative;display:flex;align-items:center;gap:4px;height:48px;max-width:100%;padding:4px;box-sizing:border-box;border-radius:999px;
-  background:var(--vc-solid);border:1px solid var(--line-strong,var(--vc-ctl-line));box-shadow:0 8px 28px -12px rgba(0,0,0,.55),0 1px 2px rgba(0,0,0,.12)}
+  min-width:0;background:var(--vc-solid);border:1px solid var(--line-strong,var(--vc-ctl-line));box-shadow:0 8px 28px -12px rgba(0,0,0,.55),0 1px 2px rgba(0,0,0,.12)}
 :root[data-theme=light] .vc-barin{background:#fff;border-color:rgba(15,23,42,.12);box-shadow:0 8px 24px -12px rgba(15,23,42,.28),0 1px 2px rgba(15,23,42,.06)}
 .vc-bar .vc-modes button{width:96px;padding:0;justify-content:center}
 .vc-bar .vc-modes{display:flex;flex-direction:row;width:auto;height:100%;padding:0;gap:2px;background:none;border:0}
 .vc-bar .vc-modes button{flex:none;height:100%;padding:0 14px;border-radius:999px;border:0}
 .vc-bar .vc-modes button.on{background:var(--vc-thumb);box-shadow:inset 0 0 0 1px var(--vc-ctl-line)}
 .vc-sep{flex:none;width:1px;height:20px;background:var(--vc-ctl-line);margin:0 4px}
-.vc-bar .vc-search{flex:none;width:280px;height:100%;padding:0 12px;border:0;border-radius:999px;background:color-mix(in srgb,var(--fg,#e6e9ef) 5%,transparent)}
+.vc-bar .vc-search{flex:0 1 280px;width:auto;min-width:148px;height:100%;padding:0 12px;border:0;border-radius:999px;background:color-mix(in srgb,var(--fg,#e6e9ef) 5%,transparent)}
 .vc-bar .vc-search:focus-within{background:color-mix(in srgb,var(--fg,#e6e9ef) 8%,transparent);border:0}
 .vc-bar .vc-search kbd{display:inline;height:auto;min-width:0;border:0;background:none;box-shadow:none;font:500 11.5px/1 var(--font);color:var(--muted,#8b98ad);padding:0}
 .vc-x{all:unset;box-sizing:border-box;cursor:pointer;flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;color:var(--muted,#8b98ad)}
@@ -502,7 +505,7 @@ const CSS = `
 @media (max-width:1100px){
   .vc-bar .vc-modes button{width:44px;min-width:0;padding:0}
   .vc-bar .vc-modes button span{display:none}
-  .vc-bar .vc-search{width:clamp(180px,30vw,280px)}
+  .vc-bar .vc-search{flex-basis:clamp(180px,30vw,280px)}
   .vc-dock .vc-mini{width:120px;height:84px}
   .vc-dock .vc-globe{width:84px;height:84px}
   .vc-dock .vc-globe canvas{left:18px;top:18px;width:48px;height:48px}
@@ -515,8 +518,11 @@ const CSS = `
   .vc-barin{width:100%;height:48px}
   .vc-bar .vc-modes,.vc-bar .vc-tr{flex-direction:row;width:auto;height:100%}
   .vc-bar .vc-modes button{width:44px;padding:0;justify-content:center}
-  .vc-bar .vc-search{flex:none;width:40px;padding:0;justify-content:center;background:none;margin-left:auto}
-  .vc-bar .vc-search.open{margin-left:0;flex:1 1 auto;width:auto;padding:0 12px;justify-content:flex-start;background:color-mix(in srgb,var(--fg,#e6e9ef) 6%,transparent)}
+  .vc-bar .vc-search{flex:1 1 auto;width:auto;min-width:0;max-width:220px;height:38px;align-self:center;padding:0 14px;gap:8px;justify-content:flex-start;margin:0 4px;
+    background:color-mix(in srgb,var(--fg,#e6e9ef) 6%,transparent)}
+  .vc-bar .vc-search kbd{display:none!important}
+  .vc-bar .vc-search:not(.open) .vc-sq{display:block;font-size:13.5px;color:var(--muted,#8b98ad);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vc-bar .vc-search.open{margin:0 4px;flex:1 1 auto;width:auto;max-width:none;padding:0 12px;justify-content:flex-start;background:color-mix(in srgb,var(--fg,#e6e9ef) 6%,transparent)}
   .vc-bar:has(.vc-search.open) :is(.vc-modes,.vc-sep){display:none}
   .vc-bar .vc-tr{top:auto}
   .vc-bar .vc-tr .vc-b{height:100%;width:40px}
@@ -645,7 +651,7 @@ export class ViewChrome {
   <div class="vc-p vc-barin">
   <nav class="vc-modes" aria-label="View">${modes}</nav>
   <span class="vc-sep" aria-hidden="true"></span>
-  <label class="vc-search">${I.search}<input type="search" placeholder="${attr(o.search.placeholder)}" aria-label="${attr(o.search.placeholder)}" autocomplete="off" spellcheck="false"><em></em><button type="button" class="vc-x" title="Clear the search" aria-label="Clear the search" hidden>${I.close}</button><kbd>/</kbd></label>
+  <label class="vc-search">${I.search}<input type="search" placeholder="${attr(o.search.placeholder)}" aria-label="${attr(o.search.placeholder)}" autocomplete="off" spellcheck="false"><em></em><button type="button" class="vc-x" title="Clear the search" aria-label="Clear the search" hidden>${I.close}</button><kbd title="Press / to search">/</kbd><span class="vc-sq" aria-hidden="true">Search</span></label>
   <span class="vc-sep" aria-hidden="true"></span>
   <div class="vc-tr">
   <button type="button" class="vc-b vc-reset" data-reset title="Reset this view to its defaults" aria-label="Reset this view to its defaults">${I.reset}</button>

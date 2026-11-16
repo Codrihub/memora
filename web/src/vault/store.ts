@@ -32,7 +32,7 @@ interface Prefs {
   filter: ListFilter;
   treeW: number;
   showNotesInTree: boolean;
-  view: 'list' | 'cards';
+  view: 'list' | 'cards' | 'gallery';
 }
 
 const LS_PREFS = 'memora.vault.v1';

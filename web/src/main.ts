@@ -1,6 +1,9 @@
 // Must stay the first import: snapshots the hooks.ts defaults before any package installs its own.
 import { DEFAULT_REFRESH_TREE, DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import './global.css';
+import { initMnemoLauncher } from './assistant/launcher';
+import { initKeepAlive } from './keepalive';
+import { renderAssistant } from './assistant/page';
 import { updateInfo, type UpdateInfo } from './version';
 import { apiGet } from './api';
 import {
@@ -123,6 +126,9 @@ function wireShell(): void {
     { id: 'new-note', title: 'New note', hint: 'Write a new note', icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
     { id: 'open-brain', title: 'Open brain', hint: 'Your memory as a living brain', icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
     { id: 'new-folder', title: 'New folder', hint: 'Create a folder', icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
+    { id: 'mnemo', title: 'Ask Mnemo', hint: 'Chat with your notes agent', icon: 'mnemo', keywords: 'ai agent chat assistant gpt claude llm', kbd: 'Ctrl J', run: () => hooks.askMnemo('global') },
+    { id: 'mnemo-fab', title: 'Show or hide the Mnemo button', hint: 'The floating button in the corner, on this device', icon: 'eye', keywords: 'ai agent floating launcher bubble', run: () => void hooks.mnemoButton(!hooks.mnemoButton()) },
+    { id: 'mnemo-page', title: 'Open Mnemo chats', hint: 'Every chat with your notes agent', icon: 'chat', keywords: 'ai agent chat assistant history sessions', run: () => go('assistant') },
     { id: 'activity', title: 'Show live activity', hint: 'What agents are doing now', icon: 'activity', keywords: 'logs agents feed', run: () => go('logs') },
     { id: 'new-key', title: 'Connect an agent', hint: 'Set up an AI app so it can use your notes', icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
     { id: 'theme', title: 'Switch theme', hint: 'Dark, light or system', icon: 'sun', keywords: 'dark light mode appearance', run: () => cycleTheme() },
@@ -265,6 +271,7 @@ async function boot(): Promise<void> {
   registerView('access', renderAccess);
   registerView('settings', renderSettings);
   registerView('docs', renderDocs);
+  registerView('assistant', renderAssistant);
   registerView('trash', renderTrash);
 
   // The tree hooks are only filled when the Vault package has not installed its own.
@@ -359,6 +366,8 @@ async function boot(): Promise<void> {
 
   RT.start();
   PWA.init();
+  initMnemoLauncher();
+  initKeepAlive();
 }
 
 function start(): void {

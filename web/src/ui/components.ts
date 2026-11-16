@@ -8,6 +8,8 @@ export const COMPONENTS_CSS = `
 .user-avatar.sm{width:24px;height:24px;font-size:11px}
 .user-avatar.lg{width:40px;height:40px;font-size:16px;border-radius:13px}
 .acct-avatar{width:44px;height:44px;border-radius:14px;font-size:17px}
+.ag-av.ag-mn{color:#fff;background:linear-gradient(145deg,#5eead4 0%,#14b8a6 32%,#4f46e5 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.ag-av.ag-mn .i{width:58%;height:58%;stroke-width:2.2}
 .ag-av{display:inline-grid;place-items:center;flex:none;border-radius:50%;font-weight:750;letter-spacing:.02em;line-height:1;
   color:var(--ag);background:color-mix(in srgb,var(--ag) 17%,var(--panel));
   box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--ag) 55%,transparent)}

@@ -1,6 +1,7 @@
 // Agent identity shared by every view: one color and one set of initials per actor name.
 
 import { esc } from '../dom';
+import { icon } from '../ui/icons';
 
 /** Mid-lightness hues that read on both the dark and the light background. */
 export const AGENT_PALETTE = [
@@ -82,6 +83,10 @@ export function agentInitials(name?: string | null): string {
 
 /** Round avatar with initials, tinted with the agent color. `size` in px. */
 export function avatarHTML(name?: string | null, size = 30, extraCls = '', id?: string | null): string {
+  // Mnemo, the built-in agent, wears its own mark instead of initials.
+  if (id === 'mnemo') {
+    return `<span class="ag-av ag-mn${extraCls ? ' ' + extraCls : ''}" aria-hidden="true" style="width:${size}px;height:${size}px">${icon('mnemo')}</span>`;
+  }
   const c = agentColor(name, id);
   const fs = Math.max(9, Math.round(size * 0.38));
   return `<span class="ag-av${extraCls ? ' ' + extraCls : ''}" aria-hidden="true" style="--ag:${c};width:${size}px;height:${size}px;font-size:${fs}px">${esc(

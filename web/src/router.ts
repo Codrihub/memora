@@ -31,6 +31,7 @@ export const PAGE_META: Record<Page, PageMeta> = {
   access: { label: 'Access rules', title: 'Access rules', hint: 'Which addresses may reach Memora', icon: 'shield', group: 'system', path: '/access' },
   settings: { label: 'Settings', title: 'Settings', hint: 'Account, appearance and preferences', icon: 'settings', group: 'system', path: '/settings' },
   docs: { label: 'Documentation', title: 'Documentation', hint: 'Guides, agent instructions and reference', icon: 'book', group: 'system', path: '/docs' },
+  assistant: { label: 'Mnemo', title: 'Mnemo', hint: 'Your notes agent: ask, find, write and tidy', icon: 'mnemo', group: 'content', path: '/mnemo' },
   // Last, so the Alt+1..9 shortcuts of the other pages stay where they are.
   trash: { label: 'Trash', title: 'Trash', hint: 'Deleted notes, ready to restore', icon: 'trash', group: 'system', path: '/trash' },
 };
@@ -111,6 +112,33 @@ export function takeRouteAgent(): string | null {
   return id;
 }
 
+/** The Mnemo chat in the address (/mnemo/<id>): the open chat, so a reload, a link or Back
+ *  shows the same one. `null` is a new chat (/mnemo). */
+let mnemoChat: string | null = null;
+/** A chat the address asked for that the Mnemo page has not opened yet. */
+let mnemoWanted: string | null = null;
+
+/** The Mnemo page opened chat `id` (or a new chat): the address follows, without a new
+ *  history entry. */
+export function setMnemoChat(id: string | null): void {
+  mnemoChat = id;
+  if (state.page !== 'assistant') return;
+  const url = id ? `/mnemo/${id}` : '/mnemo';
+  if (location.pathname === url) return;
+  try {
+    history.replaceState({ page: 'assistant' }, '', url);
+  } catch {
+    /* sandboxed frames can refuse history writes */
+  }
+}
+
+/** The chat the address asked for (once). */
+export function takeMnemoChat(): string | null {
+  const id = mnemoWanted;
+  mnemoWanted = null;
+  return id;
+}
+
 /** The tabs of an agent's own page, at /agents/<id>/<tab> (overview has no segment). */
 export const AGENT_TABS = ['overview', 'setup', 'activity', 'access', 'settings'] as const;
 
@@ -171,6 +199,13 @@ export function parseLocation(loc: Location = location): Route {
     else routeKeys = null;
     return { page: 'keys' };
   }
+  const mc = /^\/mnemo\/(c[0-9a-f]{12})$/.exec(path);
+  if (mc) {
+    mnemoWanted = mc[1];
+    mnemoChat = mc[1];
+    return { page: 'assistant' };
+  }
+  if (path === '/mnemo') mnemoChat = null;
   const page = BY_PATH.get(path);
   return page ? { page } : { page: 'brain', unknown: true };
 }
@@ -227,6 +262,7 @@ function urlFor(page: Page): string {
   // An /activity/<id> address being opened keeps its agent (the page reads it).
   if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
   if (page === 'logs' && logsTimeline) return '/activity/timeline';
+  if (page === 'assistant' && mnemoChat) return `/mnemo/${mnemoChat}`;
   if (page === 'keys' && routeKeys) {
     const to = routeKeys;
     routeKeys = null;

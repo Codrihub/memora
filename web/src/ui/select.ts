@@ -27,6 +27,8 @@ interface SelectConfig {
   id?: string;
   disabled?: boolean;
   onChange?: (value: string, option: SelectOption) => void;
+  /** An action under the list (e.g. "Manage models"): closes the list, then runs. */
+  footer?: { label: string; icon?: string; run: () => void };
 }
 
 export interface Select {
@@ -87,6 +89,10 @@ const CSS = `
 .ui-sel-o[aria-selected=true] .ui-sel-ck{visibility:visible}
 .ui-sel-o[aria-selected=true] .tx b{font-weight:650}
 .ui-sel-empty{margin:0;padding:14px 12px 16px;text-align:center;font-size:12.5px;color:var(--muted)}
+.ui-sel-foot{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;margin-top:4px;padding:8px 12px;border:0;border-top:1px solid var(--line);border-radius:0 0 10px 10px;
+  background:none;color:var(--text-2,var(--fg));font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.ui-sel-foot:hover,.ui-sel-foot:focus-visible{background:var(--hover);color:var(--fg);outline:none}
+.ui-sel-foot .i{width:15px;height:15px;flex:none;color:var(--muted)}
 .ui-sel-h{display:none}
 .ui-sel-pop.sheet{left:0;right:0;bottom:0;top:auto;max-width:none;width:auto;max-height:88dvh;border-radius:var(--r) var(--r) 0 0;border-bottom:0;
   padding-bottom:env(safe-area-inset-bottom);animation:none;transform:translateY(100%);transition:transform .22s var(--ease)}
@@ -309,11 +315,21 @@ export function createSelect(cfg: SelectConfig): Select {
             uid,
           )}-lb" placeholder="Search" autocomplete="off" spellcheck="false"></label>`
         : ''
-    }<ul class="ui-sel-lb" role="listbox" id="${attr(uid)}-lb" aria-label="${attr(cfg.label)}" tabindex="-1"></ul><p class="ui-sel-empty" hidden>Nothing matches</p>`;
+    }<ul class="ui-sel-lb" role="listbox" id="${attr(uid)}-lb" aria-label="${attr(cfg.label)}" tabindex="-1"></ul><p class="ui-sel-empty" hidden>Nothing matches</p>${
+      cfg.footer ? `<button type="button" class="ui-sel-foot">${cfg.footer.icon || ''}<span>${esc(cfg.footer.label)}</span></button>` : ''
+    }`;
     list = pop.querySelector('.ui-sel-lb');
     input = pop.querySelector('input');
     fadeScroll(list);
     pop.querySelector<HTMLElement>('.ui-sel-x')!.onclick = () => close(true);
+    const foot = pop.querySelector<HTMLElement>('.ui-sel-foot');
+    if (foot && cfg.footer) {
+      const run = cfg.footer.run;
+      foot.onclick = () => {
+        close(true);
+        run();
+      };
+    }
     document.body.append(scrim, pop);
     btn.setAttribute('aria-expanded', 'true');
     paintList();

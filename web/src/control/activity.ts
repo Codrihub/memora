@@ -44,6 +44,7 @@ const CSS = `
 .act-who.go:hover{text-decoration:underline;text-underline-offset:2px}
 .act-who.go:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .act-p{color:var(--fg)}
+.act-for{display:inline-block;margin-left:6px;padding:0 7px;border-radius:99px;font-size:11.5px;line-height:18px;color:var(--muted);background:color-mix(in srgb,var(--fg) 6%,transparent);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;vertical-align:1px}
 .act-p.cap{display:inline-block}
 .act-p.cap::first-letter{text-transform:uppercase}
 .act-n{font-style:normal;font-weight:600;color:var(--fg)}
@@ -180,6 +181,12 @@ function named(it: ActivityItem): number {
   return 1;
 }
 
+/** Who an agent acted for (Mnemo: "owner · chat", "owner · @mnemo in Inbox"). */
+function forHTML(it: ActivityItem): string {
+  const f = it.raw.for;
+  return typeof f === 'string' && f ? ` <span class="act-for" title="${attr('For ' + f)}">for ${esc(f)}</span>` : '';
+}
+
 /** One activity row: the AI's colour and avatar, then what it did as a sentence. */
 export function actRowHTML(it: ActivityItem, opts: RowOpts = {}): string {
   const kid = typeof it.raw.actor_id === 'string' ? it.raw.actor_id : null;
@@ -190,7 +197,7 @@ export function actRowHTML(it: ActivityItem, opts: RowOpts = {}): string {
   const pred = b ? burstPredicate(b) : predicate(it);
   const text = `${who} ${plainText(pred)}`;
   const whoHTML =
-    kid && who !== 'You' && keyExists(kid) !== false
+    kid && who !== 'You' && (keyExists(kid) !== false || kid === 'mnemo')
       ? `<button type="button" class="act-who go" data-agent-page="${attr(kid)}" title="${attr(`Open ${it.actor}'s page`)}">${esc(who)}</button>`
       : `<span class="act-who">${esc(who)}</span>`;
   const more = opts.compact
@@ -209,7 +216,7 @@ export function actRowHTML(it: ActivityItem, opts: RowOpts = {}): string {
     it.id,
   )}" style="--ag:${c}" aria-label="${attr(text)}">
     <span class="av">${avatarHTML(it.actor, 30, it.running ? 'live' : '', kid)}</span>
-    <span style="min-width:0"><span class="act-l1">${whoHTML} <span class="act-p">${pred}</span></span>${more}</span>
+    <span style="min-width:0"><span class="act-l1">${whoHTML} <span class="act-p">${pred}</span>${forHTML(it)}</span>${more}</span>
     <span class="act-meta"><span title="${attr(fmtTs(it.ts))}">${clock(it.ts)} · ${ago(it.ts)}</span>${statusHTML(it)}${undo}${sysTag(it)}</span>
   </div>`;
   if (!b || !opts.open || opts.compact) return row;
@@ -319,6 +326,11 @@ export function wireActRows(
 
 /** An agent's own page on the Agents page (/agents/<key id>). */
 export function openAgentPage(keyId: string, tab = ''): void {
+  // Mnemo is built in (no key): its activity lives on the Mnemo page.
+  if (keyId === 'mnemo') {
+    hooks.mnemoActivity();
+    return;
+  }
   setKeysRoute('/agents/' + encodeURIComponent(keyId) + (tab ? '/' + tab : ''));
   hooks.go('keys');
 }
@@ -348,6 +360,7 @@ function openActivity(it: ActivityItem, onFilterActor?: (actor: string) => void,
     <dl class="cc-kv">
       <dt>Result</dt><dd><span class="ad-res ${stCls}"><span class="cc-dot ${dot}"></span>${esc(status)}</span></dd>
       ${why ? `<dt>Why</dt><dd>${why}</dd>` : ''}
+      ${typeof it.raw.for === 'string' && it.raw.for ? `<dt>For</dt><dd>${esc(it.raw.for)}</dd>` : ''}
       <dt>When</dt><dd>${esc(new Date(it.ts * 1000).toLocaleString('en-US'))}</dd>
     </dl>
     ${

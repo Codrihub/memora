@@ -19,6 +19,8 @@ import { inlineEdit, openMenu, undoToast } from './ui';
 import { nodeUrl, replaceHistory, setLeaveGuard } from '../router';
 import { clearDraft, moveDraft, readDraft, saveDraft } from './drafts';
 import { skBlock } from '../ui/skeleton';
+import { IMAGE_ACCEPT, takePendingImage, uploadImage } from './images';
+import { toast } from '../toast';
 import { Modal } from '../modal';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
 import {
@@ -233,6 +235,7 @@ function draw(): void {
         ? ''
         : `<span class="vx-rgroup"><button class="vx-ct-btn" type="button" data-contents aria-label="Contents" title="Contents: outline and links">${I.toc}<span>Contents</span></button>
     <button class="vx-ct-btn vx-hist-btn" type="button" data-hist aria-label="Version history" title="Version history: see and restore earlier versions">${I.history}<span>History</span></button>
+    <button class="vx-ct-btn vx-mn-btn" type="button" data-mnemo aria-label="Ask Mnemo about this note" title="Ask Mnemo about this note">${I.mnemo}<span>Ask</span></button>
     <button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="Reading settings" title="Reading settings">Aa</button></span><span class="vx-vsep" aria-hidden="true"></span>`
     }
     <span class="vx-rgroup">${
@@ -315,6 +318,8 @@ function draw(): void {
       art.innerHTML = `<p class="vx-muted vx-empty-doc">This note is empty. <button class="vx-linkbtn" data-start>Start writing</button> or press <kbd>E</kbd>.</p>`;
     col.appendChild(art);
     wireProse(art);
+    const want = takePendingImage(path);
+    if (want) showImageIn(art, want);
   }
 
   const outRefs = outs.map((o) => ({ name: o, path: findNote(o)?.path || null }));
@@ -404,7 +409,8 @@ function draw(): void {
     if (target.tagName === 'A') target.focus({ preventScroll: true });
   };
   // Contents: a sticky card beside the page on wide readers, a bottom sheet elsewhere.
-  const cdata: ContentsData = { heads, backlinks, outs: outRefs, links, details: detailsHTML };
+  const shownImages = art ? art.querySelectorAll('img[src^="/api/vault/file"]').length : 0;
+  const cdata: ContentsData = { heads, backlinks, outs: outRefs, links, details: detailsHTML, path, images: shownImages };
   const cact = {
     open: (p: string) => nav.openNote(p),
     create: (name: string, at: HTMLElement) => offerCreate(name, at),
@@ -454,6 +460,8 @@ function draw(): void {
       ctBtn.focus();
     };
   }
+  const mBtn = bar.querySelector<HTMLElement>('[data-mnemo]');
+  if (mBtn) mBtn.onclick = () => hooks.askMnemo('note:' + path);
   // Version history opens as a dialog on every width (a bottom sheet on phones).
   const hBtn = bar.querySelector<HTMLElement>('[data-hist]');
   if (hBtn) {
@@ -694,6 +702,7 @@ function moreMenu(path: string, at: HTMLElement): void {
       },
       { label: 'Privacy…', icon: LOCK_ICON, run: () => void openPrivacy('node', path) },
       { label: 'Version history', icon: I.history, run: () => void showHistory() },
+      { label: 'Ask Mnemo about this note', icon: I.mnemo, run: () => hooks.askMnemo('note:' + path) },
       { sep: true, label: '' },
       {
         label: 'Copy link',
@@ -975,13 +984,14 @@ const TOOLS: { k: string; icon: string; label: string; key?: string }[] = [
   { k: 'code', icon: I.code, label: 'Code', key: 'Ctrl+`' },
   { k: 'link', icon: I.link, label: 'Link', key: 'Ctrl+K' },
   { k: 'wiki', icon: I.wiki, label: 'Wikilink', key: '[[' },
+  { k: 'img', icon: I.image, label: 'Image (or paste or drop one)' },
 ];
 
 function editorEl(): HTMLElement {
   const wrap = el('div', 'vx-edit');
   wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="Formatting">${TOOLS.map(
     (x) =>
-      `${x.k === 'ul' || x.k === 'link' ? '<span class="vx-tsep" aria-hidden="true"></span>' : ''}<button data-t="${x.k}" title="${attr(
+      `${x.k === 'ul' || x.k === 'link' || x.k === 'img' ? '<span class="vx-tsep" aria-hidden="true"></span>' : ''}<button data-t="${x.k}" title="${attr(
         x.label + (x.key ? ' (' + x.key + ')' : ''),
       )}" aria-label="${attr(x.label)}">${x.icon}</button>`,
   ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint"><kbd>Ctrl</kbd><kbd>S</kbd> save · <kbd>Esc</kbd> close</span></div>
@@ -1008,6 +1018,21 @@ function editorEl(): HTMLElement {
     suggest(ta);
   };
   ta.onkeydown = (e) => editorKey(e, ta);
+  ta.addEventListener('paste', (e) => {
+    const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    void insertImages(ta, files);
+  });
+  ta.addEventListener('dragover', (e) => {
+    if (Array.from(e.dataTransfer?.items || []).some((i) => i.kind === 'file')) e.preventDefault();
+  });
+  ta.addEventListener('drop', (e) => {
+    const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    void insertImages(ta, files);
+  });
   wrap.querySelector<HTMLElement>('.vx-edit-acts [data-save]')!.onclick = () => void saveAndClose();
   wrap.querySelector<HTMLElement>('.vx-edit-acts [data-cancel]')!.onclick = () => cancelEdit();
   ta.onblur = () => setTimeout(() => closeSuggest(), 150);
@@ -1200,7 +1225,56 @@ function format(ta: HTMLTextAreaElement, k: string): void {
     ta.dispatchEvent(new Event('input'));
   } else if (k === 'wiki') {
     wrapSel(ta, '[[', ']]', '');
+  } else if (k === 'img') {
+    const pick = document.createElement('input');
+    pick.type = 'file';
+    pick.accept = IMAGE_ACCEPT;
+    pick.multiple = true;
+    pick.onchange = () => void insertImages(ta, Array.from(pick.files || []));
+    pick.click();
   }
+}
+
+/** Upload images beside the note being edited and put their lines at the cursor. */
+async function insertImages(ta: HTMLTextAreaElement, files: File[]): Promise<void> {
+  const note = ed.path;
+  const imgs = files.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
+  if (!note || !imgs.length) {
+    if (files.length) toast('Only PNG, JPEG, WebP and GIF images can be added', 'err');
+    return;
+  }
+  toast(imgs.length === 1 ? 'Adding the image…' : `Adding ${imgs.length} images…`, 'info', 2200);
+  const lines: string[] = [];
+  for (const f of imgs) {
+    try {
+      lines.push((await uploadImage(note, f)).markdown);
+    } catch (e) {
+      toast(`${f.name || 'Image'}: ${(e as Error).message}`, 'err', 6000);
+    }
+  }
+  if (!lines.length) return;
+  const s = ta.selectionStart;
+  const before = ta.value.slice(0, s);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  ta.setRangeText(`${lead}${lines.join('\n')}\n`, s, ta.selectionEnd, 'end');
+  ta.dispatchEvent(new Event('input'));
+  ta.focus();
+}
+
+/** Scroll the reader to an image of the note (from a gallery) and mark it briefly. */
+function showImageIn(art: HTMLElement, name: string): void {
+  const enc = encodeURIComponent(name);
+  const img = Array.from(art.querySelectorAll<HTMLImageElement>('img')).find((i) => {
+    const src = decodeURIComponent(i.getAttribute('src') || '');
+    return src.endsWith('/' + name) || src.endsWith('=' + name) || (i.getAttribute('src') || '').endsWith(enc);
+  });
+  if (!img) return;
+  const box = (img.closest('figure') as HTMLElement | null) || img;
+  requestAnimationFrame(() => {
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    box.classList.add('vx-hit');
+    setTimeout(() => box.classList.remove('vx-hit'), 1800);
+  });
 }
 
 function editorKey(e: KeyboardEvent, ta: HTMLTextAreaElement): void {
@@ -1276,7 +1350,12 @@ interface Sug {
   folder: string;
   /** What goes between the brackets. */
   text: string;
+  /** `@mnemo:`: replaces the typed `@…` or `/…` instead of filling a link. */
+  mention?: boolean;
 }
+
+/** `@` or `/` (after a space or at a line start) and the first letters of "mnemo". */
+const MENTION_RE = /(^|[\s>(])([@/])([a-z]{0,5})$/i;
 
 let sug: { box: HTMLElement; items: Sug[]; i: number; from: number } | null = null;
 
@@ -1296,6 +1375,26 @@ function closeSuggest(): void {
 function suggest(ta: HTMLTextAreaElement): void {
   const s = ta.selectionStart;
   const before = ta.value.slice(Math.max(0, s - 80), s);
+  // "@mnemo:" asks Mnemo right in the note: offer it as soon as "@" or "/mn…" is typed.
+  const mm = MENTION_RE.exec(before);
+  if (mm && 'mnemo'.startsWith(mm[3].toLowerCase()) && (mm[2] === '@' || mm[3].length > 0)) {
+    const at = s - mm[3].length - 1;
+    const item: Sug = { name: '@mnemo:', folder: 'Ask Mnemo here; it answers under the line', text: '@mnemo: ', mention: true };
+    if (!sug) {
+      const box = el('div', 'vx-suggest');
+      box.setAttribute('role', 'listbox');
+      ta.parentElement?.appendChild(box);
+      sug = { box, items: [item], i: 0, from: at };
+    }
+    sug.items = [item];
+    sug.i = 0;
+    sug.from = at;
+    const line = ta.value.slice(0, s).split('\n').length;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 22;
+    sug.box.style.top = Math.min(ta.offsetTop + line * lh + 8 - ta.scrollTop, ta.offsetTop + ta.offsetHeight - 40) + 'px';
+    drawSuggest(ta);
+    return;
+  }
   const m = /\[\[([^\]\n|]*)$/.exec(before);
   if (!m) {
     closeSuggest();
@@ -1340,7 +1439,7 @@ function drawSuggest(ta: HTMLTextAreaElement): void {
   cur.box.innerHTML = cur.items
     .map(
       (n, i) =>
-        `<button role="option" aria-selected="${i === cur.i}" class="${i === cur.i ? 'on' : ''}" data-i="${i}">${I.note}<span>${esc(n.name)}</span><small style="margin-left:auto;padding-left:10px;color:var(--muted);font-size:11.5px">${esc(n.folder || ROOT_LABEL)}</small></button>`,
+        `<button role="option" aria-selected="${i === cur.i}" class="${i === cur.i ? 'on' : ''}" data-i="${i}">${n.mention ? I.mnemo : I.note}<span>${esc(n.name)}</span><small style="margin-left:auto;padding-left:10px;color:var(--muted);font-size:11.5px">${esc(n.folder || ROOT_LABEL)}</small></button>`,
     )
     .join('');
   cur.box.querySelectorAll<HTMLElement>('button').forEach((b) => {
@@ -1355,6 +1454,12 @@ function pickSuggest(ta: HTMLTextAreaElement, i: number): void {
   if (!sug) return;
   const name = sug.items[i].text;
   const s = ta.selectionStart;
+  if (sug.items[i].mention) {
+    ta.setRangeText(name, sug.from, s, 'end');
+    closeSuggest();
+    ta.dispatchEvent(new Event('input'));
+    return;
+  }
   const closing = ta.value.slice(s, s + 2) === ']]' ? '' : ']]';
   ta.setRangeText(name + closing, sug.from, s, 'end');
   if (!closing) ta.setSelectionRange(sug.from + name.length + 2, sug.from + name.length + 2);
@@ -1369,6 +1474,11 @@ function suggestKey(e: KeyboardEvent, ta: HTMLTextAreaElement): boolean {
     sug.i = (sug.i + (e.key === 'ArrowDown' ? 1 : -1) + sug.items.length) % sug.items.length;
     drawSuggest(ta);
     return true;
+  }
+  // A bare "@" then Enter is a new line, not a mention (Tab or a tap still picks it).
+  if (e.key === 'Enter' && sug.items[sug.i]?.mention && ta.selectionStart - sug.from <= 1) {
+    closeSuggest();
+    return false;
   }
   if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault();

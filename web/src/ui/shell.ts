@@ -17,6 +17,13 @@ export const SHELL_CSS = `
 .brand-tile.sm{width:32px;height:32px;border-radius:10px}
 .brand-mark{width:100%;height:100%;display:block}
 
+.side-resize{position:absolute;top:0;right:0;bottom:0;width:7px;z-index:5;cursor:col-resize;touch-action:none;outline:none}
+.side-resize::after{content:"";position:absolute;top:0;bottom:0;right:0;width:2px;background:transparent;transition:background var(--dur-2)}
+.side-resize:hover::after,.side-resize:focus-visible::after,#app.side-resizing .side-resize::after{background:var(--accent-line,var(--accent))}
+#app.side-resizing{transition:none;cursor:col-resize;user-select:none}
+#app.side-resizing *{cursor:col-resize}
+#app.side-collapsed .side-resize{display:none}
+@media (max-width:760px){.side-resize{display:none}}
 #app.side-collapsed #sidebar{cursor:pointer}
 /* Shares add up to 100% so the rail stays opaque. */
 @media (min-width:761px) and (hover:hover){#app.side-collapsed #sidebar:hover{background:color-mix(in srgb,var(--side-bg) 97%,var(--fg) 3%)}}
@@ -159,6 +166,10 @@ export const SHELL_CSS = `
 
 .side-foot{flex:none;display:flex;flex-direction:column;gap:8px;padding:8px 12px calc(12px + var(--safe-b));border-top:1px solid var(--line)}
 .side-links{display:flex;flex-direction:column;gap:2px}
+.nav-item .ni-new{margin-left:auto;padding:2px 7px;border-radius:999px;font-size:10.5px;font-weight:650;letter-spacing:.02em;line-height:1.3;color:#fff;
+  background:linear-gradient(135deg,#14b8a6,#4f46e5)}
+.side-mnemo .ni-tile .i{color:var(--accent)}
+#app.side-collapsed .nav-item .ni-new{display:none}
 .side-foot .user-avatar,.pm-head .user-avatar{background:linear-gradient(180deg,#3b82f6,#2563eb);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
 .side-foot .user-avatar{width:36px;height:36px;border-radius:10px;font-size:14px;font-weight:650}
 .profile-btn{display:flex;align-items:center;gap:11px;width:100%;min-width:0;height:58px;padding:0 10px 0 10px;border:1px solid var(--line);background:var(--side-active);border-radius:12px;text-align:left;
@@ -228,6 +239,7 @@ export const SHELL_CSS = `
 @media (hover:none){.pm-item:focus-visible{outline:0;background:transparent}.pm-item:active{background:var(--hover)}}
 .pm-label{flex:1;min-width:0;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pm-keys{display:flex;gap:3px;flex:none;opacity:.8}
+.pm-new{flex:none;padding:2px 7px;border-radius:999px;font-size:10.5px;font-weight:650;line-height:1.3;color:#fff;background:linear-gradient(135deg,#14b8a6,#4f46e5)}
 .pm-keys kbd{height:18px;min-width:18px;padding:0 4px;font-size:10px}
 .pm-live{display:inline-flex;align-items:center;gap:5px;flex:none;font-size:12px;font-weight:600;color:var(--accent)}
 .pm-live i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pm-live 1.6s ease-in-out infinite}

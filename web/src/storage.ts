@@ -16,6 +16,8 @@ interface LegacyPin {
 
 interface UiPrefs {
   collapsed: boolean;
+  /** The open sidebar's width in px, when the person dragged it wider. */
+  width?: number;
 }
 
 interface TagIndexCache {
@@ -51,7 +53,12 @@ function field(v: unknown, k: string): unknown {
   return v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined;
 }
 
-export const ui: UiPrefs = { collapsed: field(read('local', LS_UI), 'collapsed') === true };
+const uiRaw = read('local', LS_UI);
+const uiWidth = field(uiRaw, 'width');
+export const ui: UiPrefs = {
+  collapsed: field(uiRaw, 'collapsed') === true,
+  ...(typeof uiWidth === 'number' && Number.isFinite(uiWidth) ? { width: uiWidth } : {}),
+};
 
 /** Activity toasts: `off` silences every one; `muted` lists API key ids. */
 interface ToastPrefs {

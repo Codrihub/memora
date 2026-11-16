@@ -10,6 +10,7 @@ import { VAULT_CSS } from './styles';
 import { mountTree as mount, refreshTrees, type TreeOptions, type TreeView } from './tree';
 import { renderTrash } from './trash';
 import { openNote, renderVault } from './view';
+import { setImageNoteOpener } from './images';
 
 export { openNote, renderTrash, renderVault };
 
@@ -31,6 +32,7 @@ export function initVault(): void {
   hooks.refreshTree = refreshTrees;
   hooks.refreshVault = redraw;
   hooks.openNote = (p: string) => void openNote(p);
+  setImageNoteOpener((p) => hooks.openNote(p));
   // Global "New note" / "New folder" start at the vault root.
   hooks.openNewNote = () => nav.newNote('');
   hooks.openNewFolder = () => nav.newFolder('');

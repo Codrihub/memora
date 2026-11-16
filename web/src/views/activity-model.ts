@@ -237,6 +237,8 @@ export interface AgentInfo {
   /** Last activity seen at all (any range we loaded). */
   lastTs: number;
   disabled?: boolean;
+  /** Built into Memora (Mnemo): never "removed", though it has no key. */
+  builtin?: boolean;
 }
 
 const ACTIVE_SECS = 300;
@@ -263,6 +265,10 @@ export function classifyAgents(all: ActivityItem[], scoped: ActivityItem[], keys
     if (it.ts > a.lastTs) a.lastTs = it.ts;
     const kid = typeof it.raw.actor_id === 'string' ? it.raw.actor_id : null;
     if (kid && !a.id && kid.startsWith('k_')) a.id = kid;
+    if (kid === 'mnemo') {
+      a.id = kid;
+      a.builtin = true;
+    }
     if (it.source === 'agent' || it.raw.actor_kind === 'agent') isAgent.add(it.actor);
     if (it.running) running.add(it.actor);
   }
@@ -285,7 +291,7 @@ export function classifyAgents(all: ActivityItem[], scoped: ActivityItem[], keys
     a.nodes = nodes.get(a.name)?.size || 0;
     const key = (a.id && keyById.get(a.id)) || keyByName.get(a.name.toLowerCase());
     if (!isAgent.has(a.name)) a.cls = 'people';
-    else if (!key) a.cls = 'removed';
+    else if (!key && !a.builtin) a.cls = 'removed';
     else if (running.has(a.name) || now - a.lastTs < ACTIVE_SECS) a.cls = 'active';
     else if (now - a.lastTs < RECENT_SECS) a.cls = 'recent';
     else a.cls = 'idle';

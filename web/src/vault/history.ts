@@ -91,10 +91,11 @@ const avatar = (v: Version): string => {
 /** The panel body: a skeleton, then the versions by day (or why there are none). */
 function historyBody(h: HistoryHost): HTMLElement {
   const body = el('div', 'vh');
-  body.innerHTML = `<div class="vh-list" aria-busy="true">${[0, 1, 2, 3]
+  body.innerHTML = `<div class="vh-loading" role="status"><span>Reading the history…</span><i class="vh-bar" aria-hidden="true"></i></div>
+    <div class="vh-list vh-sks" aria-busy="true">${[0, 1, 2, 3, 4]
     .map(
-      () =>
-        `<div class="vh-sk"><span class="vx-skel" style="width:10px;height:10px;border-radius:50%"></span><span style="flex:1;display:flex;flex-direction:column;gap:7px"><span class="vx-skel" style="width:46%;height:11px"></span><span class="vx-skel" style="width:70%;height:10px"></span></span></div>`,
+      (i) =>
+        `<div class="vh-sk" style="--i:${i}"><span class="vh-sk-dot"></span><span class="vh-sk-lines"><span class="vh-sk-l" style="width:${42 + ((i * 13) % 20)}%"></span><span class="vh-sk-l" style="width:${64 + ((i * 7) % 18)}%"></span></span></div>`,
     )
     .join('')}</div>`;
   void loadHistory(h.path).then((r) => paint(body, h, r));
@@ -126,6 +127,7 @@ function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
   numbers.clear();
   for (const v of list.versions) numbers.set(v.rev, v.version);
   const groups = groupByDay(list.versions);
+  let row = 0;
   const more = list.total > list.versions.length ? `<p class="vh-more">Showing the latest ${list.versions.length} of ${list.total} versions.</p>` : '';
   body.innerHTML = `<p class="vh-sum">${list.total === 1 ? '1 version' : `${list.total} versions`} · newest first</p>
     <div class="vh-list" role="list" aria-label="Versions">${groups
@@ -137,7 +139,7 @@ function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
               const cur = v.version === list.total;
               const on = viewing ? v.rev === viewing : cur;
               const renamed = v.path ? `<span class="vh-was" title="${attr(v.path)}">as ${esc((v.path.split('/').pop() || v.path).replace(/\.md$/i, ''))}</span>` : '';
-              return `<button type="button" role="listitem" class="vh-v${cur ? ' cur' : ''}${on ? ' on' : ''}" data-rev="${attr(v.rev)}"${
+              return `<button type="button" role="listitem" class="vh-v${cur ? ' cur' : ''}${on ? ' on' : ''}" style="--i:${Math.min(row++, 12)}" data-rev="${attr(v.rev)}"${
                 on ? ' aria-current="true"' : ''
               } aria-label="${attr(`Version ${v.version}, ${g.label} ${timeLabel(ms)}, by ${whoOf(v)}${cur ? ', current version' : ''}`)}">
                 <span class="vh-dot" aria-hidden="true"></span>
@@ -222,7 +224,7 @@ export function previewBanner(
 export function diffView(v: Version, diff: string | null): HTMLElement {
   const box = el('div', 'vh-diff');
   if (diff == null) {
-    box.innerHTML = `<p class="vh-diff-note" aria-busy="true">Comparing with the current version…</p>`;
+    box.innerHTML = `<div class="vh-loading" role="status"><span>Comparing with the current version…</span><i class="vh-bar" aria-hidden="true"></i></div>`;
     return box;
   }
   const lines = parseDiff(diff);
@@ -319,7 +321,20 @@ export const HIST_CSS = `
 :root[data-theme=light] .vh-av{color:color-mix(in srgb,var(--ac) 55%,#111)}
 .vh-av.you{background:linear-gradient(180deg,#1b2433,#0d121b);color:#5eead4}
 .vh-av.you .vx-i{width:11px;height:11px;stroke-width:2.4}
-.vh-sk{display:flex;align-items:flex-start;gap:12px;padding:10px 8px}
+.vh-loading{display:flex;flex-direction:column;gap:8px;padding:2px 4px 10px;font-size:12.5px;color:var(--muted)}
+.vh-bar{position:relative;display:block;height:2px;border-radius:2px;overflow:hidden;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.vh-bar::after{content:"";position:absolute;top:0;bottom:0;left:-40%;width:40%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:vhBar 1.15s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes vhBar{to{left:100%}}
+.vh-sk{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;opacity:0;animation:vhIn .45s var(--ease,ease-out) forwards;animation-delay:calc(var(--i) * 90ms)}
+.vh-sk-dot{flex:none;width:10px;height:10px;margin-top:2px;border-radius:50%;background:var(--panel-2);animation:vhDot 1.6s ease-in-out infinite;animation-delay:calc(var(--i) * 180ms)}
+@keyframes vhDot{0%,100%{background:var(--panel-2);box-shadow:none}40%{background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 18%,transparent)}}
+.vh-sk-lines{flex:1;display:flex;flex-direction:column;gap:7px}
+.vh-sk-l{display:block;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--panel-2) 0%,color-mix(in srgb,var(--fg) 12%,var(--panel-2)) 50%,var(--panel-2) 100%) 0 0/220% 100%;animation:vhShine 1.4s linear infinite;animation-delay:calc(var(--i) * 120ms)}
+.vh-sk-l:first-child{height:11px}
+@keyframes vhShine{from{background-position:110% 0}to{background-position:-110% 0}}
+@keyframes vhIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.vh-day .vh-v{animation:vhIn .4s var(--ease,ease-out) both;animation-delay:calc(var(--i,0) * 45ms)}
+@media (prefers-reduced-motion:reduce){.vh-bar::after,.vh-sk-dot,.vh-sk-l,.vh-sk,.vh-day .vh-v{animation:none;opacity:1}}
 .vh-more{margin:8px 8px 0;font-size:12px;color:var(--muted)}
 .vh-empty{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:6px 4px 4px}
 .vh-empty b{font-size:14px;font-weight:600;color:var(--fg)}

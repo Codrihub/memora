@@ -42,6 +42,8 @@ export const I = {
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   history: svg('<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>'),
+  mnemo: svg('<path d="M4 18v-8a2.6 2.6 0 0 1 5.2 0v4.2a2.8 2.8 0 0 0 5.6 0V10a2.6 2.6 0 0 1 5.2 0v8"/><path d="M12 2.8v2.6M10.7 4.1h2.6"/>'),
+  image: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="9.5" r="1.8"/><path d="m21 16-5-5L5 20"/>'),
 };
 
 /** Optional per-folder icons (folder-meta `icon`). Anything else is drawn as text (emoji). */
