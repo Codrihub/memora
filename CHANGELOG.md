@@ -14,9 +14,10 @@ messages while it works.
 
 ### Added
 
-- Mnemo can ask you a question with options to tap (and Other for your own
-  answer); its reply ends there and your answer goes on. In the console the
-  options are a pick list.
+- Mnemo can ask you a question with options listed one under another, and
+  Other, which opens a box in the card for your own answer; its reply ends
+  there and your answer goes on. Sending something else instead marks the
+  question skipped. In the console the options are a pick list.
 - Permission: **Ask first** (the default: Mnemo reads freely, but a change to
   your notes waits until you approve it through one of its questions) or
   **Auto** (changes go ahead without asking and long jobs keep going, up to 40
@@ -25,8 +26,8 @@ messages while it works.
   note count as approved.
 - A queue: what you send while Mnemo is answering waits above the prompt,
   can be reordered (arrows or drag) or removed, and goes out by itself when
-  the reply ends (not after Stop). Ctrl/Cmd+Enter, or the arrow on a queued
-  message, steers the running reply instead: Mnemo reads it before its next
+  the reply ends (not after Stop). Ctrl/Cmd+Enter, or the Enter button on a
+  queued message, steers the running reply instead: Mnemo reads it before its next
   step, and it shows inside the reply. While a reply runs the button is Stop,
   and turns back into Send (to the queue) as soon as you type.
 

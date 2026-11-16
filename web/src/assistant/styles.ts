@@ -386,17 +386,29 @@ export const MNEMO_CSS = `
 .mn-ask{margin:10px 0 4px;padding:12px;border:1px solid var(--accent-line,var(--line-strong));border-radius:14px;background:color-mix(in srgb,var(--accent) 5%,var(--panel,var(--surface-1)))}
 .mn-ask-q{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:600;line-height:1.45;margin-bottom:10px}
 .mn-ask-q .i{width:17px;height:17px;flex:none;margin-top:2px;color:var(--accent)}
-.mn-ask-o{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
-.mn-ask-b{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:11px;background:var(--panel,var(--surface-1));
+.mn-ask-o{display:flex;flex-direction:column;gap:6px}
+.mn-ask-b{display:flex;align-items:flex-start;gap:10px;width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:11px;background:var(--panel,var(--surface-1));
   color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,background .15s,transform .12s}
 .mn-ask-b:hover:not(:disabled){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--panel,var(--surface-1)))}
-.mn-ask-b:active:not(:disabled){transform:scale(.98)}
+.mn-ask-b:active:not(:disabled){transform:scale(.99)}
+.mn-ask-n{display:grid;place-items:center;flex:none;width:22px;height:22px;margin-top:1px;border-radius:7px;background:var(--surface-2,color-mix(in srgb,var(--fg) 7%,transparent));
+  color:var(--muted);font-size:12px;font-weight:600}
+.mn-ask-n .i{width:13px;height:13px}
+.mn-ask-c{display:flex;flex-direction:column;gap:2px;min-width:0}
 .mn-ask-b b{font-size:13.5px;font-weight:600}
 .mn-ask-b small{font-size:12px;color:var(--muted);line-height:1.4}
 .mn-ask-b.ok b::before{content:"✓ ";color:var(--accent)}
 .mn-ask-b.other{border-style:dashed}
+.mn-ask-b.on .mn-ask-n{background:var(--accent);color:var(--on-accent,#fff)}
+.mn-ask-f{display:flex;gap:6px;align-items:center;padding:4px 4px 4px 12px;border:1px solid var(--accent);border-radius:11px;background:var(--panel,var(--surface-1))}
+.mn-ask-f[hidden]{display:none}
+.mn-ask-f input{flex:1;min-width:0;height:32px;border:0;outline:0;background:none;color:var(--fg);font:inherit;font-size:14px}
+.mn-ask-f .mn-ibtn{background:var(--accent);color:var(--on-accent,#fff);border-radius:8px}
+.mn-ask-skip{margin-left:auto;flex:none;padding:1px 8px;border-radius:999px;background:var(--surface-2,color-mix(in srgb,var(--fg) 7%,transparent));color:var(--muted);font-size:11.5px;font-style:normal;font-weight:500}
 .mn-ask.done .mn-ask-b{cursor:default;opacity:.55}
 .mn-ask.done .mn-ask-b.on{opacity:1;border-color:var(--accent);background:var(--accent-soft)}
+.mn-ask.skipped{background:none;border-color:var(--line)}
+.mn-ask.skipped .mn-ask-q{color:var(--muted)}
 /* Permission chip in the composer. */
 .mn-perm{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 10px 0 8px;border:1px solid var(--line);border-radius:999px;background:none;color:var(--text-2,var(--fg));
   font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}

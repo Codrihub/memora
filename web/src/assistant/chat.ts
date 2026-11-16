@@ -178,7 +178,6 @@ export class ChatView {
   /** The owner pressed Stop: the queue waits instead of going out. */
   private halted = false;
   /** The question an "Other" answer goes to (set by tapping Other). */
-  private answering: string | null = null;
   /** Bumped by every reply watched and every detach, so a left reply cannot touch this view. */
   private run = 0;
   /** The model chosen for this chat ('' = the default). */
@@ -387,6 +386,18 @@ export class ChatView {
       else if (t.classList.contains('mn-comp-box')) this.focus();
     });
     this.log.addEventListener('click', (e) => this.onLogClick(e));
+    // The answer typed under Other on a question card.
+    this.log.addEventListener('submit', (e) => {
+      const f = (e.target as HTMLElement).closest<HTMLFormElement>('.mn-ask-f');
+      if (!f) return;
+      e.preventDefault();
+      const card = f.closest<HTMLElement>('.mn-ask')!;
+      const text = f.querySelector<HTMLInputElement>('input')!.value.trim();
+      if (!text || this.busy || card.classList.contains('done')) return;
+      card.classList.add('done');
+      f.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button').forEach((x) => (x.disabled = true));
+      void this.send(text, { to: card.dataset.ask!, other: true });
+    });
     this.offState = A.onState(() => this.paintModels());
     void A.loadState().then(() => {
       this.paintModels();
@@ -477,7 +488,7 @@ export class ChatView {
         (q, i) => `<div class="mn-q-i" data-q="${q.id}" draggable="true"><span class="mn-q-n">${i + 1}</span><span class="mn-q-t" title="${attr(q.text)}">${esc(q.text)}${
           q.attach.length ? ` <small>+${q.attach.length}</small>` : ''
         }</span><span class="mn-q-a">${
-          this.busy ? `<button type="button" class="mn-ibtn" data-qa="steer" title="Steer this reply now: Mnemo reads it before its next step" aria-label="Steer now">${icon('send')}</button>` : ''
+          this.busy ? `<button type="button" class="mn-ibtn" data-qa="steer" title="Steer this reply now: Mnemo reads it before its next step" aria-label="Steer now">${icon('enter')}</button>` : ''
         }<button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
           i === this.queue.length - 1 ? ' disabled' : ''
         }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="Remove" aria-label="Remove">${icon('close')}</button></span></div>`,
@@ -1059,7 +1070,7 @@ export class ChatView {
     };
     for (const m of this.messages) {
       if (m.role === 'user' && m.meta?.steer === true && turn) {
-        turn.querySelector<HTMLElement>('.mn-tb')!.append(el('div', 'mn-steer', `${icon('send')}<span>${esc(m.content)}</span>`));
+        turn.querySelector<HTMLElement>('.mn-tb')!.append(el('div', 'mn-steer', `${icon('enter')}<span>${esc(m.content)}</span>`));
         continue;
       }
       if (m.role === 'user') {
@@ -1362,9 +1373,11 @@ export class ChatView {
       if (card.classList.contains('done')) return;
       const id = card.dataset.ask!;
       if (opt.dataset.askOpt === 'other') {
-        this.answering = id;
-        this.input.placeholder = 'Type your answer…';
-        this.focus();
+        // Other: a box to type the answer opens right in the card.
+        const f = card.querySelector<HTMLFormElement>('.mn-ask-f')!;
+        f.hidden = false;
+        opt.classList.add('on');
+        f.querySelector<HTMLInputElement>('input')!.focus();
         return;
       }
       card.classList.add('done');
@@ -1512,11 +1525,9 @@ export class ChatView {
     this.paintRail();
     requestAnimationFrame(() => this.log.querySelectorAll<HTMLElement>('.mn-u:last-of-type .mn-car, .mn-car:not([data-wired])').forEach(syncCarousel));
     const sid0 = this.session!.id;
-    // "Other" on a question: what the owner types next answers it.
-    const ans = answer ?? (this.answering ? { to: this.answering, other: true } : undefined);
-    this.answering = null;
-    this.input.placeholder = `Ask ${A.MNEMO} about your notes…`;
-    await this.stream((signal, on) => A.streamChat(sid0, text, this.model || undefined, att, signal, on, ans));
+    // A new message that answers no question leaves the open questions skipped.
+    if (!answer) this.log.querySelectorAll<HTMLElement>('.mn-ask:not(.done)').forEach(skipAsk);
+    await this.stream((signal, on) => A.streamChat(sid0, text, this.model || undefined, att, signal, on, answer));
   }
 
   /** Run the turn of the owner's message `uid` again: Regenerate on a reply, Try again on a
@@ -1609,7 +1620,7 @@ export class ChatView {
             break;
           case 'steered':
             closeText();
-            body.append(el('div', 'mn-steer', `${icon('send')}<span>${esc(ev.text)}</span>`));
+            body.append(el('div', 'mn-steer', `${icon('enter')}<span>${esc(ev.text)}</span>`));
             this.scrollEnd();
             break;
           case 'compacting':
@@ -1841,27 +1852,42 @@ function askOf(args: unknown): Omit<A.Ask, 'id'> | null {
   return question && options.length >= 2 ? { question, options, allow_other: a.allow_other !== false } : null;
 }
 
-/** How a question was answered in the stored chat: the label, or '' for Other; null if not yet. */
-function answerTo(messages: A.Message[], id: string): string | null {
+/** How a question was answered in the stored chat: the label, or '' for Other; false when the
+ *  owner wrote something else after it (skipped); null while it is still open. */
+function answerTo(messages: A.Message[], id: string): string | false | null {
   const m = messages.find((x) => x.role === 'user' && (x.meta?.answer as A.Answer | undefined)?.to === id);
-  if (!m) return null;
-  return (m.meta?.answer as A.Answer).other ? '' : m.content;
+  if (m) return (m.meta?.answer as A.Answer).other ? '' : m.content;
+  const at = messages.findIndex((x) => x.role === 'assistant' && (x.tool_calls || []).some((c) => c.id === id));
+  return at >= 0 && messages.slice(at + 1).some((x) => x.role === 'user') ? false : null;
 }
 
-/** A question card: the options as buttons (the chosen one marked once answered), and Other. */
-function askEl(q: A.Ask, answered: string | null): HTMLElement {
-  const box = el('div', 'mn-ask' + (answered !== null ? ' done' : ''));
+/** Mark an open question card skipped. */
+function skipAsk(card: HTMLElement): void {
+  card.classList.add('done', 'skipped');
+  card.querySelectorAll<HTMLInputElement | HTMLButtonElement>('button,input').forEach((x) => (x.disabled = true));
+  card.querySelector('.mn-ask-f')?.setAttribute('hidden', '');
+  card.querySelector('.mn-ask-q')!.insertAdjacentHTML('beforeend', '<em class="mn-ask-skip">Skipped</em>');
+}
+
+/** A question card: the options listed one under another (the chosen one marked once
+ *  answered), and Other, which opens a box to type the answer in the card. */
+function askEl(q: A.Ask, answered: string | false | null): HTMLElement {
+  const done = answered !== null;
+  const box = el('div', 'mn-ask' + (done ? ' done' : '') + (answered === false ? ' skipped' : ''));
   box.dataset.ask = q.id;
-  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(q.question)}</span></div><div class="mn-ask-o">${q.options
+  const dis = done ? ' disabled' : '';
+  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(q.question)}</span>${answered === false ? '<em class="mn-ask-skip">Skipped</em>' : ''}</div><div class="mn-ask-o">${q.options
     .map(
-      (o) =>
-        `<button type="button" class="mn-ask-b${o.approve ? ' ok' : ''}${answered !== null && answered === o.label ? ' on' : ''}" data-ask-opt="1" data-label="${attr(o.label)}" data-approve="${o.approve ? '1' : ''}"${
-          answered !== null ? ' disabled' : ''
-        }><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</button>`,
+      (o, i) =>
+        `<button type="button" class="mn-ask-b${o.approve ? ' ok' : ''}${answered === o.label ? ' on' : ''}" data-ask-opt="1" data-label="${attr(o.label)}" data-approve="${o.approve ? '1' : ''}"${dis}><span class="mn-ask-n">${
+          i + 1
+        }</span><span class="mn-ask-c"><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></button>`,
     )
     .join('')}${
     q.allow_other
-      ? `<button type="button" class="mn-ask-b other${answered === '' ? ' on' : ''}" data-ask-opt="other"${answered !== null ? ' disabled' : ''}><b>Other…</b><small>Type your own answer</small></button>`
+      ? `<button type="button" class="mn-ask-b other${answered === '' ? ' on' : ''}" data-ask-opt="other"${dis}><span class="mn-ask-n">${icon('edit')}</span><span class="mn-ask-c"><b>Other</b><small>Type your own answer</small></span></button><form class="mn-ask-f" hidden><input type="text" placeholder="Type your answer…" aria-label="Your answer" autocomplete="off"${dis}><button type="submit" class="mn-ibtn" title="Send the answer (Enter)" aria-label="Send the answer"${dis}>${icon(
+          'enter',
+        )}</button></form>`
       : ''
   }</div>`;
   return box;
