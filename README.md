@@ -39,7 +39,7 @@ single port, with all server state in one embedded SQLite database.
 | ![Brain](docs/screenshots/brain.jpg) **Brain**: every folder is a region, every note a node | ![Node card](docs/screenshots/brain-node.jpg) **Node card**: links, backlinks and a preview |
 | ![Graph](docs/screenshots/graph.jpg) **Graph**: force, radial or cluster layouts | ![Canvas](docs/screenshots/canvas.jpg) **Canvas**: one frame per folder |
 | ![Reader](docs/screenshots/reader.jpg) **Reader** with contents and reading settings | ![Activity](docs/screenshots/activity.jpg) **Activity**: every agent call, live |
-| ![Agents](docs/screenshots/agents.jpg) **Agents & API keys**: one key per agent, scoped | |
+| ![Agents](docs/screenshots/agents.jpg) **Agents & API keys**: one key per agent, scoped | ![Mnemo](docs/screenshots/mnemo.jpg) **Mnemo**: the notes agent, with its steps and the notes it used |
 
 Screenshots use a demo vault.
 
@@ -49,16 +49,24 @@ Screenshots use a demo vault.
   `[[wikilinks]]`. Edit it with any tool; nothing is locked in a database.
 - **Git history.** Changes are committed, so any revision can be listed, diffed
   and restored (`get_history`, `diff`, `restore_memory`).
-- **MCP for agents.** 75 tools for notes, folders, search, tags, graph traversal,
+- **MCP for agents.** 77 tools for notes, folders, search, tags, graph traversal,
   history, locks, activity, pins and import/export, plus admin tools, over the
   streamable HTTP transport.
+- **Mnemo, a built-in notes agent.** Chat with your notes in the browser or the
+  console using your own OpenAI, Anthropic or OpenAI-compatible API key. Mnemo
+  finds, writes, tags, links, moves and tidies notes with Memora's own tools,
+  shows every step, and has no web, shell or delete-for-good access.
+- **Images beside notes.** Paste or drop PNG, JPEG, WebP or GIF into a note; the
+  file lives in the note's folder and moves, goes to the Trash and comes back
+  with it. Folder galleries show which note and section uses each image.
 - **API keys or OAuth.** Give each agent its own key, or let MCP clients such as
   Claude or ChatGPT connect with OAuth after you approve them in the browser.
 - **Per-agent control.** Scopes (`mcp`, `read`, `write`, `admin`), per-key tool
   lists, server-wide tool switches, and privacy rules that hide notes or
   folders from chosen agents.
-- **Web UI.** Brain and graph views, a canvas, the vault editor, tags, live
-  agent activity, keys, tools, access rules and settings. Installable as a PWA.
+- **Web UI.** Brain and graph views, a canvas, the vault editor with nine reading
+  colours, fonts and sizes, tags, live agent activity, keys, tools, access
+  rules and settings. Installable as a PWA.
 - **Safe first run.** An unclaimed instance cannot be taken over by whoever
   finds the port: the operator console opens a short setup window and you
   finish in the browser.

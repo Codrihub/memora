@@ -148,7 +148,9 @@ in this order, outermost first:
      `/api/auth/{state,login,logout,bootstrap,reset,verify}`.
    - `/ws` needs a valid session and a same-origin request.
    - A valid session cookie (`memora_sess`) passes and is touched (sliding
-     TTL).
+     TTL); the response renews the cookie's `Max-Age` too, at most every five
+     minutes per session, so an active browser keeps it. The web app pings
+     `/api/auth/me` every few minutes while its tab is visible and in use.
    - Remaining `/api/*` and `/mcp` requests need an API key, read from
      `Authorization: Bearer <key>` or `X-API-Key: <key>`. The key must carry
      the scope the route needs (`mcp` for `/mcp`, `admin` for keys, tools,

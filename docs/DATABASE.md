@@ -16,6 +16,7 @@ server, port, or password.
 | `memora.db` | 0600 | The database. |
 | `memora.db-wal`, `memora.db-shm` | 0600 | WAL journal and shared memory. Part of the live database; never copy `memora.db` without them while the server runs. |
 | `key-seal.bin` | 0600 | Master key for the sealed API key copies (`api_key_secret`). Not inside the database. |
+| `assistant.sqlite3` (+ `-wal`, `-shm`) | 0600 | Mnemo's own small database (`memora_state::assistant`): `providers` (API keys sealed with `key-seal.bin`, a four-character hint), `models`, `prefs`, `sessions` and `messages`. Kept apart from `memora.db`, so the main schema and its migrations are unchanged and an older binary simply ignores it. |
 | `backups/` | 0700 | Output of `memora-cli db backup` and the pre-restore snapshot. |
 | `legacy-json-<unix time>/` | 0700 | JSON state files found at startup, moved here after their one-time import. |
 

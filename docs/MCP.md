@@ -12,7 +12,7 @@ catalog.
 | Auth | API key in `Authorization: Bearer <key>` or `X-API-Key: <key>`, or an OAuth 2.1 access token |
 | Discovery card | `GET /.well-known/mcp.json` (public) |
 | Readable catalog | `GET /tools` (HTML page, public) |
-| Catalog size | 75 tools, plus 5 admin tools for keys with the `admin` scope |
+| Catalog size | 77 tools, plus 5 admin tools for keys with the `admin` scope |
 
 `initialize` answers with the protocol version the client asks for when it is
 one of the three above, and with `2025-06-18` otherwise.
@@ -286,6 +286,8 @@ copied in the web app (Copy path in a note or folder menu) works as is as the
 | `delete_memory` | W | `path` (string, required), `permanent` (boolean, default false) | Moves a note to the Trash (`.Trash`), remembering where it came from and who deleted it: `{ok, path, trashed, to}`. `list_trash` shows it and `restore_trash` brings it back. `permanent: true` deletes it for good instead (`{ok, path, permanent}`) and is refused for keys without the `admin` scope. With version history on, every earlier version is erased from the history as well (every name the note had, its trash record and the commit messages naming it; other notes keep their versions but their revision ids change), so no one, agents included, can read it again. |
 | `move_memory` | W | `path` (string, required), `folder` (string, required; relative to the vault, `Root` for the top level) | Moves a note into another folder. Wikilinks resolve by note name, so they keep working. |
 | `rename_memory` | W | `path` (string, required), `new_name` (string, required) | Renames a note in its folder. |
+| `upload_image` | W | `path` (string, required: the note the image belongs to), `name` (string, required, e.g. `diagram.png`), `data` (string, required: base64 or a `data:image/...;base64,` URL), `alt` (string), `append` (boolean, default false) | Stores a PNG, JPEG, WebP or GIF in the note's own folder (checked by content; the upload limit in Settings, Images applies, 5 MB by default). Identical bytes reuse the existing file; a taken name gets `-1`, `-2` ...: `{ok, path, name, bytes, url, markdown}`. Show it in the note with the returned `markdown` line, `![alt](path:name.png)`; `append: true` adds that line to the end of the note. The image then moves, goes to the Trash, is restored and is deleted with its note. |
+| `list_images` | R | `folder` (string; `Root` or empty for the top level) or `path` (a note) | The images of one folder (not its sub folders), each with `used_in` (the notes and sections that show it); with `path`, the images that note shows and every image of its folder. |
 
 ### Search (`search`)
 
@@ -377,7 +379,7 @@ otherwise they answer "version history is off".
 | `lock_node` | W | `path` (string, required), `owner` (string, default the caller), `ttl` (integer seconds, default 300) | Soft lock on a note. |
 | `release_lock` | W | `path` (string, required), `owner` (string, default the caller) | Releases a lock. |
 | `get_locks` | R | none | Active locks. |
-| `mention_agent` | W | `agent` (string, required), `path` (string, required), `message` (string) | Writes `> @agent: message` into a note. |
+| `mention_agent` | W | `agent` (string, required), `path` (string, required), `message` (string) | Writes `> @agent: message` into a note. With agent `mnemo`, Memora's own agent answers it in the note (the request is struck through and the reply quoted under it). |
 | `get_assignments` | R | `agent` (string) | Notes with `assigned_to` in their frontmatter. |
 
 ### Activity and health (`ops`)

@@ -68,12 +68,19 @@ The `settings` table holds one row, edited from the Settings page of the web UI:
 | Key | Default | Range | What it does |
 |---|---|---|---|
 | `realm` | `Memora` | 1-64 characters | Instance name shown in the UI and reported by `/api/config` and `/api/auth/state`. |
-| `session_ttl` | `10800` (3 hours) | 300-2592000 seconds | Idle timeout of a browser session. |
+| `session_ttl` | `10800` (3 hours) | 300-2592000 seconds | Idle timeout of a browser session: any use renews it (requests, and an open tab in use). |
 | `session_max_age` | `0` | `0` or at least `session_ttl` | Absolute session lifetime in seconds. `0` means no cap. |
 | `min_password_len` | `10` | 10-256 | Minimum owner password length. |
 | `log_max_mb` | `8` | 1-512 | Size limit in MB of the vault event log (`.events.jsonl`). |
 | `log_max_days` | `0` | 0-3650 | Age limit in days of the vault event log. `0` means no age limit. |
 | `vault_path` | unset | absolute path | The vault folder. Set in the browser after the first sign-in, or with `memora-cli vault PATH`. |
+
+Two more settings live in the `ui_layout` table and in a file beside the database:
+
+| Setting | Default | Where | What it does |
+|---|---|---|---|
+| Largest image | 5 MB | Settings, Images (`POST /api/settings/media`, admin); stored as the `srv-media` document | Uploads above this size are refused, from the app, the HTTP API and MCP `upload_image` alike. 0.1 to 50 MB. |
+| Mnemo | not set up | Settings, Mnemo, or `/mnemo setup` in the console; stored in `assistant.sqlite3` | Providers (OpenAI, Anthropic, one OpenAI-compatible server) with sealed API keys, models (pinned, hidden, default, context window and reply limit), temperature, reply and context limits, tool steps per reply, your instructions, and the floating button. |
 
 ## memora-cli options
 
@@ -119,6 +126,7 @@ and `RUST_LOG=info`.
 |---|---|
 | `memora.db` (+ `-wal`, `-shm`) | The state database: owner, API keys (hashes), tool switches and per-key permissions, OAuth clients and grants, privacy rules, sessions (hashed ids), setup window and lock state, access rules, settings, `server_config`, activity log. Mode 0600, WAL mode, must be on a local filesystem. See [DATABASE.md](DATABASE.md). |
 | `key-seal.bin` | 32-byte master key (mode 0600) that encrypts the copies of dashboard-created API keys, so the owner can show a key again. Created on first use. Back it up together with `memora.db`. |
+| `assistant.sqlite3` (+ `-wal`, `-shm`) | Mnemo, the built-in agent: providers (API keys sealed with `key-seal.bin`), models, preferences, chats and messages. Mode 0600. Separate from `memora.db`, so the main schema is unchanged; delete it to forget every Mnemo chat and key. Back it up with `memora.db` if you want to keep chats. |
 | `backups/` | `memora-cli db backup` output (newest 10 kept by default). |
 | `exchange/` | Zips written by the `export_memory` MCP tool and read by `import_memory` (mode 0700, created on first use). Private to this instance; delete old zips when no longer needed. |
 | `legacy-json-<unix time>/` | JSON state files found at startup, moved here after their one-time import into `memora.db`. |
@@ -131,7 +139,9 @@ The vault holds the markdown notes plus derived and metadata files. See
 The important ones for operations are `.git/` (history), `.events.jsonl`
 (event log), and `.Trash/`
 (soft-deleted notes; `.Trash/.index.json` remembers where each one came from,
-so `restore_trash` puts it back there).
+so `restore_trash` puts it back there; `.Trash/.assets/<entry>/` keeps the images
+of a trashed note until it is restored or deleted for good). Images uploaded to a
+note are ordinary files in the note's folder.
 
 ## Version history
 

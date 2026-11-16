@@ -124,7 +124,7 @@ errors map to `404` for not-found (including paths hidden from the caller) and
 
 App routes are the web app's client-side pages: `/brain`, `/nodes`, `/graph`,
 `/canvas`, `/tags`, `/activity`, `/agents`, `/access`, `/settings`,
-`/overview`, `/welcome`, the older names `/home`, `/vault`, `/logs`, `/keys`,
+`/overview`, `/welcome`, `/trash`, `/mnemo`, the older names `/home`, `/vault`, `/logs`, `/keys`,
 and `/node/` or `/node/<percent-encoded vault path>`. The path is never used to
 read a file; a path holding NUL or another control character (raw or
 percent-encoded) is `400`. `/tools` is an app route for a signed-in browser and
@@ -192,6 +192,25 @@ not in the vault or its history, or is hidden from the calling key. Web writes
 (save, create, rename, move, delete, restore) are committed with the caller as the
 author: the owner's username for the browser, the key's name for an API key.
 
+### Images
+
+Images live in the folder of the note that shows them, and a note shows one with
+`![alt](path:name.png)` (`path:` names a file in the note's own folder). Saving a
+note that points with `path:Other/Folder/pic.png` to an image elsewhere copies that
+image beside the note and rewrites the link, so notes never point across folders.
+Images follow their note: a move carries them, the Trash keeps them in
+`.Trash/.assets/<entry>/` until the note is restored (to the same or another
+folder) or deleted for good, and a deleted folder takes its images along. An image
+that another note of the same folder still shows is copied or kept instead.
+
+| Method | Path | Auth | Returns |
+|---|---|---|---|
+| POST | `/api/vault/image?note=<path>&name=<file>` | Session or key (`write`, +CSRF) | The raw image bytes as the body (PNG, JPEG, WebP or GIF, checked by content). Stored beside the note; identical bytes reuse the existing file, a taken name gets `-1`, `-2` ...: `{ok, path, name, bytes, url, markdown}` (`markdown` is the line to put in the note). `400` for another file type, a size above the upload limit, or a missing note. |
+| POST | `/api/vault/image/delete` | Session or key (`write`, +CSRF) | Body: `{path}`. Deletes one image file (the version history keeps it): `{ok, deleted}`. |
+| GET | `/api/vault/images?folder=<folder>` | Session or key (`read`) | The images of that one folder (not its sub folders or parents): `{folder, images: [{path, name, folder, bytes, mtime, url, used_in: [{note, title, heading}]}]}`. `heading` is the section that shows the image (`null` before the first heading). |
+| GET | `/api/vault/images?note=<path>` | Session or key (`read`) | `{note, folder, images, folder_images}`: the images the note shows, and every image of its folder. |
+| GET | `/api/vault/storage` | Session or key (`read`) | `{notes, note_bytes, images, image_bytes, total_bytes, max_image_bytes}`. |
+
 ## Search and graph
 
 | Method | Path | Auth | Returns |
@@ -252,6 +271,9 @@ All settings endpoints need a signed-in browser, except `/api/settings/server`, 
 | POST | `/api/settings/sessions/revoke` | Session only (+CSRF) | Signs other browsers out. Body: `{id}` or `{others:true}`. Returns `{ok, revoked}`. `400` for the current session (use logout), `404` when the session has already ended. |
 | POST | `/api/settings/sessions/rename` | Session only (+CSRF) | Names a device. Body: `{id, alias}`; an empty alias clears it. Returns `{ok, alias}`. |
 | GET | `/api/settings/sessions/activity` | Session only | `{events, count, ip, since}`: activity log entries from that session's IP address since it signed in, API-key entries left out, newest first, at most 200. Query: `id`. |
+
+| GET | `/api/settings/media` | Session or key | `{max_image_mb, max_image_bytes}`: the largest image upload (5 MB by default). |
+| POST | `/api/settings/media` | Session or key (`admin`, +CSRF) | Body: `{max_image_mb}` (0.1 to 50). Applies at once to the app, the HTTP API and MCP `upload_image`. |
 
 Session `id` values are the short ids returned by `GET /api/settings/sessions`
 (a unique prefix also works). An ambiguous or malformed id is `400`.
@@ -335,6 +357,9 @@ Every MCP `tools/call` publishes a `start` and an `end` event sharing `call_id`:
   browser session the username with `actor_kind: "user"`. `actor_id` is the key id (or
   the username). Node events (`node_created`, ...) from the call carry the same `actor`.
 - `action`: the tool name.
+- `for` (optional): who the agent acted for and how it was asked. Mnemo, the built-in
+  agent (`actor: "Mnemo"`, `actor_id: "mnemo"`), sets it: `owner · chat`,
+  `owner · console`, `<who> · @mnemo in <note>`.
 - `paths`: vault-relative note paths from the arguments (`path`, `paths`, `from`, `to`,
   `old_path`, `new_path`, `into` of `merge_memory`, `source`/`target` of `find_path`)
   plus note paths found in the result (search hits, the created or moved note), at
@@ -356,6 +381,7 @@ Every MCP `tools/call` publishes a `start` and an `end` event sharing `call_id`:
 
 `name` is `[a-z0-9_-]{1,40}` (else `400`). API keys get `403`. `data` is stored as
 serialized JSON of at most 512 KiB (`413` above); the request body limit is 600 KiB.
+Names starting with `srv-` are reserved for server settings (`403`).
 Layouts are stored in the `ui_layout` table of `memora.db`. The web UI uses them for
 `canvas` (card positions and frames) and `graph` (pinned positions).
 
@@ -384,6 +410,77 @@ moving an item to the trash or deleting it removes its pin, and deleting a folde
 removes every pin under it. Every change publishes a `pins_changed` realtime event with
 no other data; open browsers reload the list. Pins are stored in the `pin` table of
 `memora.db`.
+
+## Mnemo (built-in agent)
+
+Mnemo is the notes agent built into Memora. Every route needs the signed-in
+browser session (API keys get `403`, writes need CSRF); the console's `/mnemo`
+uses a short local session. Mnemo's data lives in `assistant.sqlite3` beside
+`memora.db` (file mode 0600): providers with their API keys sealed
+(ChaCha20-Poly1305, the same key as the server's other secrets), models,
+preferences, chats and messages. A key is never returned; providers carry a
+four-character `key_hint`.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/assistant/state` | `{name, ready, providers, models, prefs, tools, defaults}`. `ready` is true when a model can answer. `tools` is the fixed list Mnemo may use. |
+| POST | `/api/assistant/providers` | Adds or changes a provider. Body: `{id?, kind?, label?, api_style?, base_url?, api_key?, enabled?}`. Up to 20 providers, several of the same type allowed. `id` is the owner's own (1-32 characters of `a-z`, `0-9`, `-`; made from `label` when left out; it cannot change, since models are keyed `id/model`). `kind` is `openai`, `anthropic` or `custom` (any OpenAI-compatible server, which needs `base_url`, its `/v1` address); `api_style` is `chat` or `responses` (OpenAI and compatible) or `messages` (Anthropic). For an existing `id`, fields left out keep their value, so `{id, enabled: false}` switches a provider off (its models leave the model pickers). Leaving `api_key` out keeps the saved key; `""` removes it. Returns the state plus `saved` (the id). |
+| POST | `/api/assistant/providers/test` | Body: `{id}`. Lists the provider's models as a connection check: `{ok, models, ms}` or `{ok: false, error}`. |
+| POST | `/api/assistant/providers/delete` | Body: `{id}`. Removes the provider, its key and its models. |
+| POST | `/api/assistant/models/fetch` | Body: `{provider}`. Reads the provider's model list (`GET <base>/models`, every page for Anthropic) with the limits it reports: the context window from `max_input_tokens`, `context_length`, `context_window`, `max_context_length` or `max_model_len`, and the reply limit from `max_tokens` or `max_completion_tokens`. Pinned models stay; unpinned ones the provider no longer lists go. Returns the state plus `fetched`. `502` when the provider refuses. |
+| POST | `/api/assistant/models` | Body: `{provider, model, label?, context_window?, max_output?, pinned?, hidden?}`. Adds a model by hand or changes it; `null` clears a limit. The app sets only pinned, hidden and new models; limits normally come from the provider. |
+| POST | `/api/assistant/models/delete` | Body: `{provider, model}`. |
+| POST | `/api/assistant/prefs` | Any of `default_model` (`provider/model`), `system_prompt` (up to 4000 characters), `temperature` (0-2), `max_output_tokens` (64-200000), `context_tokens` (2000-2000000, for models without a window), `max_steps` (1-30 tool rounds per reply), `launcher` (the floating button); `null` resets one. |
+| GET | `/api/assistant/sessions` | `{sessions: [{id, title, scope, model, pinned, created_at, updated_at, messages}]}`. |
+| POST | `/api/assistant/sessions` | Body: `{scope?, model?, title?}`. `scope` is `global`, `note:<path>` or `folder:<path>`. Returns `{session}`. |
+| GET | `/api/assistant/sessions/{id}` | `{session, messages: [{id, role, content, tool_calls, tool_call_id, tool_name, meta, created_at}], context}`. `context` is `{used, window, reserved_output, compact_at, compactions, model}` for the model the chat would use now (approximate tokens), or `null` without a usable model. A message with `meta.compact: true` is a summary that stands in for every message before `meta.keep_from`. |
+| GET | `/api/assistant/search` | Query `q` (every word must appear, any case), `limit` (default 60, at most 200). `{query, hits: [{chat, title, scope, message_id, role, snippet, at}]}`, newest first: the owner's messages and Mnemo's replies whose text or chat title holds the words; `message_id` is `null` for a chat matched by its title alone. |
+| POST | `/api/assistant/sessions/{id}/rerun` | Body: `{message_id?, model?}` (default: the last of the owner's messages). Runs that message's turn again: every message after it is removed, then the reply streams as for `/chat`. `400` when `message_id` is not one of the owner's messages in the chat, `409` while it answers. |
+| GET | `/api/assistant/sessions/{id}/live` | The reply running in the chat as server-sent events: every event since it began, then live, until it ends. `204` when none is running. |
+| GET | `/api/assistant/sessions/{id}/export` | The chat as a Markdown file (`text/markdown`, a download): each message with its time, Mnemo's steps, what it showed, compaction summaries. |
+| POST | `/api/assistant/sessions/{id}/stop` | End the reply running in the chat. `{stopped}`. |
+| POST | `/api/assistant/sessions/{id}/compact` | Fold the older turns into a summary now (the chat's model writes it; the last turn stays as it is). `{ok: true, messages, tokens, context}`, or `{ok: false, reason, context}` when there is nothing older yet. `409` while the chat is answering. |
+| POST | `/api/assistant/sessions/{id}` | Body: `{title?, model?, pinned?}`. |
+| POST | `/api/assistant/sessions/{id}/delete` | Deletes the chat and its messages (notes are not touched). |
+| POST | `/api/assistant/sessions/{id}/chat` | Body: `{text, model?, attach?, tz?, tz_offset?}` (`tz` an IANA zone name and `tz_offset` minutes east of UTC, from the browser, for Mnemo's `current_time`). `attach` lists up to 8 items `{kind, path}`: `note` (its text, up to 8000 characters), `folder` (the notes in it, up to 200) or `image` (`path` is an id from `/api/assistant/uploads`). A snapshot of them is stored with the message (`meta.attach`, `meta.context`) and stays in the chat's context. Replies as server-sent events, one JSON object per `data:` line: `start {model, context}`, `compacting` and `compacted {messages, tokens}` (the chat was near full and its older messages were folded into a summary first), `thinking {delta}` (the model's thinking, where the provider shows it), `text {delta}`, `tool_start {id, name, args}`, `tool_end {id, name, ok, summary, ms}`, `notice {text}`, `error {message}`, `done {input_tokens, output_tokens, title, context}`. `409` while the chat is already answering. The reply runs on the server: closing the stream does not stop it (watch it again with `/live`, end it with `/stop`); `GET /api/assistant/sessions` and `GET /api/assistant/sessions/{id}` say `running` meanwhile. |
+| POST | `/api/assistant/uploads?name=<file>` | The raw bytes of a PNG, JPEG, WebP or GIF (the Images upload limit applies): `{id, name, bytes, url}`. The image waits in `assistant-uploads/` in the state folder for a week. Attached to a chat message, it goes to the model as an image (OpenAI `image_url`, Responses `input_image`, Anthropic `image` blocks; the newest 6 images of the chat, each up to 4.5 MB; a model that refuses images gets their names instead), and Mnemo's `place_image` tool can put it beside a note through MCP `upload_image`. |
+| GET | `/api/assistant/uploads/{id}` | The staged image, for the chat's thumbnails. |
+
+Mnemo runs its tools through the MCP server under the name **Mnemo** (actor id
+`mnemo`), so every call shows in Activity and respects tools switched off on the
+Tools page. It has one tool of its own, `place_image {upload, note, name?, alt?,
+append?}`, which hands a staged chat image to `upload_image` (and is off when
+that tool is off).
+
+Thinking: Anthropic models are asked for adaptive thinking with summaries
+(models that refuse the field are asked without it from then on), OpenAI GPT-5
+and o-series models on the Responses API for reasoning summaries, and
+OpenAI-compatible servers stream `reasoning_content` or `reasoning` on their
+own. A Claude reply that carried thinking is stored block for block
+(`meta.raw`) and sent back verbatim, and each chat keeps the system prompt it
+started with (`meta.system` on its first message), so the model's earlier
+thinking stays valid. Thinking from before a compaction is not replayed, and
+when the API refuses a replayed thinking block the request is sent again
+without it. Besides `place_image` it has `current_time` (date, time, weekday and the owner's time zone), `search_docs` and `read_docs` (Memora's own documentation, from `mnemo-docs.json` the web build writes next to the assets; answers link `/docs/<page>#<heading>`), `show_items` (cards in the reply for notes, folders,
+images or the vault; `tool_end` carries the checked items as `shown`) and two tools of its own over its chats, `search_chats`
+(every word, newest first) and `read_chat` (one chat's messages), for when the owner
+refers to an earlier conversation. It may use 54 tools for reading and looking after notes, folders,
+tags, links, pins, history and the Trash; it never gets `delete_memory`,
+`bulk_delete`, `delete_folder`, export or import, admin or web tools. A line with `@mnemo: <request>` in a note (outside code; a struck
+`~~@mnemo: …~~` is done) is a request to Mnemo: a few seconds after the owner
+saves the note (`POST /api/save` or `/api/create`), or after an agent's tool
+call changes it, Mnemo runs it as a chat of its own (one per request, titled
+`@mnemo · <note>: <request>`, scope `note:<path>`; the first message holds the
+request as written, `meta.mention` says `{path, line, by}` and `meta.attach` names
+the note), then saves the note with
+the request struck through and its reply quoted under it. Activity events of
+Mnemo's tool calls carry `for` ("owner · chat", "owner · console",
+"<who> · @mnemo in <note>"). A chat keeps
+its whole conversation for its model: when its history passes 80% of the tokens
+it may use, the chat's model folds the older turns into a summary (stored as a
+message with `meta.compact`, sent in front of the kept turns) before the next
+reply, keeping the last one or two turns as they are. Only if that fails are the
+oldest turns left out (a reply and its tool results always stay together).
 
 ## Status codes
 
