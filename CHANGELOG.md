@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-11-17
+
+Mnemo can answer with a picture: charts, diagrams and small pages show as a
+live preview right in the chat.
+
+### Added
+
+- HTML and SVG answers: when a chart, graph, diagram, timeline or mock-up
+  explains better than text, Mnemo writes one self-contained page and, once
+  the reply is done, the chat shows it as a live preview (the eye) with Code,
+  Copy, Download and Full screen. The page runs in a sandboxed frame with no
+  access to your notes, your session or the network beyond scripts and
+  styles from https, so it costs the server nothing. Older chats learn it
+  too.
+
+### Changed
+
+- The divider where a chat's memory was compacted now just says
+  "Compacted", centred between its lines on every screen size; open it to
+  read the summary.
+
 ## [2.1.2] - 2026-11-16
 
 Mnemo fits your screen and rides out a provider that is down for a moment:
