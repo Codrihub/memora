@@ -298,7 +298,7 @@ export const MNEMO_CSS = `
 /* Scrolling: the log fades out under its edges, like a timeline. */
 .mn-log{--fa:0px;--fb:0px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%);
   mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%)}
-.mn-chat.fade-top .mn-log{--fa:18px}
+.mn-chat.fade-top .mn-log{--fa:0px}
 .mn-chat.fade-bot .mn-log{--fb:28px}
 
 /* Timeline rail, top right: one bar per question; the one in view is longer and darker. */
@@ -432,8 +432,13 @@ export const MNEMO_CSS = `
 
 /* An open section keeps its header in view while you scroll through it, so it can be closed
    from anywhere (overflow: clip above, not hidden, lets the headers stick to the chat). */
-.mn-act[open]>summary{position:sticky;top:0;z-index:3;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line)}
-.mn-tool[open]>summary{position:sticky;top:44px;z-index:2;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line)}
+.mn-act>summary{box-sizing:border-box;height:52px;min-height:52px}
+.mn-act[open]>summary{position:sticky;top:0;z-index:4;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
+  box-shadow:0 8px 14px -12px rgba(15,23,42,.35)}
+/* A step's header sticks right under the Activity header (52px), with nothing showing between. */
+.mn-tool[open]>summary{position:sticky;top:52px;z-index:3;background:var(--surface-1,var(--panel));border-bottom:1px solid var(--line);
+  box-shadow:0 0 0 1px var(--surface-1,var(--panel)),0 8px 14px -12px rgba(15,23,42,.3)}
+.mn-tools{padding-top:0}
 .mn-compact[open]>summary{position:sticky;top:0;z-index:2;padding:4px 0;background:var(--bg)}
 
 /* A search hit opened in the chat. */
