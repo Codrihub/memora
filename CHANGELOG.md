@@ -31,6 +31,7 @@ messages while it works.
 
 ### Changed
 
+- On the Mnemo page notices appear at the top right, clear of Send and Stop.
 - The composer reads left to right: attach, the permission chip, then the
   model (with its pin) beside the memory ring and Send.
 - Mnemo's replies sit on a frosted card that stays readable over any chat

@@ -3987,6 +3987,9 @@ ${t} .cn-prog .done .n{background:var(--tile);border-color:transparent;color:var
 .mnp-title small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-chat{flex:1;min-height:0;display:flex;flex-direction:column}
 .mnp-chat[hidden],.mnp-act[hidden]{display:none}
+/* On the Mnemo page notices come in at the top right, under the header, clear of Send and Stop. */
+:root[data-page=assistant] .toasts{top:calc(66px + env(safe-area-inset-top,0px));bottom:auto;right:16px;left:auto;width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - 160px)}
+@media (max-width:760px){:root[data-page=assistant] .toasts{top:calc(58px + env(safe-area-inset-top,0px));left:12px;right:12px;width:auto;bottom:auto}}
 .mnp-spin{display:block;width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:mnpSpin .8s linear infinite}
 @keyframes mnpSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.mnp-spin{animation-duration:2.4s}}
