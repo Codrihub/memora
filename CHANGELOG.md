@@ -171,7 +171,7 @@ still roll back by swapping the binary.
   - Mnemo has its own activity (Mnemo page, Activity; or its row on the
     Activity page): every tool call, each marked with who it was for and how
     it was asked ("owner · chat", "owner · console",
-    "research-bot · @mnemo in Inbox"). Activity events carry this as `for`.
+    `research-bot · @mnemo in Inbox`). Activity events carry this as `for`.
   - The console has it too: `/mnemo` chats with the same Mnemo (same chats,
     models and keys), shows its thinking and a summary of each reply, and
     takes `/attach` (a note or folder) and `/image` (a picture file),
