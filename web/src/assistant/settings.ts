@@ -32,6 +32,7 @@ const WRITE_TOOLS = new Set([
 let modelQuery = '';
 let showHidden = false;
 let defaultSel: Select | null = null;
+let fbSel: Select | null = null;
 /** The last Test result per provider, shown under its row until the page is left. */
 const tested = new Map<string, { ok: boolean; text: string }>();
 
@@ -178,6 +179,8 @@ function behaviourCard(s: A.MnemoState): string {
   const p = s.prefs;
   return `<form class="st-card mns-beh" id="mnsBeh" novalidate autocomplete="off"><div class="st-ch"><h3>How ${A.MNEMO} works</h3><p>Applies to every chat.</p></div>
     <div class="st-row"><div class="st-l"><b>Default model</b><small>Used by new chats; each chat can switch.</small></div><div class="st-c"><span id="mnsDef"></span></div></div>
+    <div class="st-row full"><div class="st-l"><b>Fallback models</b><small>When a chat's model fails (the provider is down, busy or out of credit), ${A.MNEMO} carries on with these, in this order, up to five. With none left, the chat shows the error and Try again. Saved at once.</small></div>
+      <div class="st-c"><div class="mns-fb">${fallbackRows(s)}<span id="mnsFbAdd"></span></div></div></div>
     <div class="st-row"><div class="st-l"><b>Permission</b><small>Ask first: ${A.MNEMO} reads freely but asks before it changes notes. Auto: it goes ahead and keeps working until the job is done. Saved at once.</small></div>
       <div class="st-c"><div class="mns-seg" role="radiogroup" aria-label="Permission">${(['ask', 'auto'] as const)
         .map((v) => `<label><input type="radio" name="mnsPerm" value="${v}"${(p.permission === 'auto' ? 'auto' : 'ask') === v ? ' checked' : ''}><span>${v === 'ask' ? 'Ask first' : 'Auto'}</span></label>`)
@@ -189,6 +192,22 @@ function behaviourCard(s: A.MnemoState): string {
     <div class="st-row sw"><div class="st-l"><b>Floating button</b><small>The ${A.MNEMO} button on every page (Ctrl+J). Saved at once. You can also hide or show it from More, or hide it by dragging it onto the X.</small></div><div class="st-c end">${switchHTML('mnsLauncher', hooks.mnemoButton(), 'Floating button')}</div></div>
     <div class="st-row mns-save"><button type="submit" class="btn primary">Save</button></div>
   </form>`;
+}
+
+function fallbackRows(s: A.MnemoState): string {
+  const list = s.prefs.fallback_models || [];
+  if (!list.length) return `<p class="mns-fb-none">None yet: a failed reply stops with the error.</p>`;
+  return `<ol class="mns-fb-list">${list
+    .map((k, i) => {
+      const m = s.models.find((x) => A.modelKey(x) === k);
+      const p = k.split('/')[0];
+      return `<li class="mns-fb-i" data-fb="${i}"><span class="mn-q-n">${i + 1}</span><span class="mns-fb-t"><b>${esc(m?.label || m?.model_id || k.split('/').slice(1).join('/'))}</b><small>${esc(A.providerLabel(s, p))}${
+        m ? '' : ' · not in your models'
+      }</small></span><button type="button" class="mn-ibtn" data-fbm="up" title="Earlier" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('chev-up')}</button><button type="button" class="mn-ibtn" data-fbm="down" title="Later" aria-label="Move down"${
+        i === list.length - 1 ? ' disabled' : ''
+      }>${icon('chev-down')}</button><button type="button" class="mn-ibtn" data-fbm="del" title="Remove" aria-label="Remove">${icon('close')}</button></li>`;
+    })
+    .join('')}</ol>`;
 }
 
 function toolsCard(s: A.MnemoState): string {
@@ -446,6 +465,41 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
       minWidth: 260,
     });
     slot.append(defaultSel.el);
+    // Fallback models: add, reorder, remove; each change is saved at once.
+    const fb = (s.prefs.fallback_models || []).slice();
+    const saveFb = (next: string[]): void => {
+      void A.savePrefs({ fallback_models: next.length ? next : null }).catch(fail);
+    };
+    beh.querySelectorAll<HTMLButtonElement>('[data-fbm]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.closest<HTMLElement>('[data-fb]')?.dataset.fb);
+        const next = fb.slice();
+        if (b.dataset.fbm === 'del') next.splice(i, 1);
+        else if (b.dataset.fbm === 'up' && i > 0) [next[i - 1], next[i]] = [next[i], next[i - 1]];
+        else if (b.dataset.fbm === 'down' && i < next.length - 1) [next[i + 1], next[i]] = [next[i], next[i + 1]];
+        saveFb(next);
+      };
+    });
+    const left = list.filter((m) => !fb.includes(A.modelKey(m)));
+    const addSlot = beh.querySelector<HTMLElement>('#mnsFbAdd')!;
+    if (fb.length < 5 && left.length) {
+      fbSel?.close();
+      fbSel = createSelect({
+        options: left.map((m) => ({
+          value: A.modelKey(m),
+          label: m.label || m.model_id,
+          hint: A.providerLabel(s, m.provider_id),
+          group: m.pinned ? 'Pinned' : A.providerLabel(s, m.provider_id),
+        })),
+        value: '',
+        label: 'Add a fallback model',
+        searchable: left.length > 7,
+        minWidth: 260,
+        render: () => `${icon('plus')}<span>Add a fallback model</span>`,
+        onChange: (v) => v && saveFb([...fb, v]),
+      });
+      addSlot.append(fbSel.el);
+    }
     const launcher = beh.querySelector<HTMLElement>('#mnsLauncher')!;
     wireTextSize(beh);
     beh.querySelectorAll<HTMLInputElement>('[name=mnsPerm]').forEach((r) => {
@@ -488,6 +542,14 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
 
 const CSS = `
 .mns{display:flex;flex-direction:column;gap:16px}
+.mns-fb{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%}
+.mns-fb-none{margin:0;font-size:12.5px;color:var(--muted)}
+.mns-fb-list{display:flex;flex-direction:column;gap:6px;width:100%;margin:0;padding:0;list-style:none}
+.mns-fb-i{display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 6px 4px 10px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--fg) 2.5%,transparent)}
+.mns-fb-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.mns-fb-t b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mns-fb-t small{font-size:11.5px;color:var(--muted)}
+.mns-fb-i .mn-ibtn:disabled{opacity:.3;cursor:default}
 .mns-intro{display:flex;align-items:flex-start;gap:14px;padding:18px 20px}
 .mns-intro-t{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .mns-intro-t b{font-size:15px;font-weight:650}

@@ -15,7 +15,8 @@ use std::time::Duration;
 use memora_state::assistant::NewMessage;
 
 use super::{
-    busy, caller_for, endpoint, new_id, resolve_model, run_agent, store, system_prompt, NAME,
+    busy, caller_for, endpoint, new_id, resolve_model, run_agent, store, store as store_of,
+    system_prompt, NAME,
 };
 use crate::AppState;
 
@@ -528,7 +529,7 @@ fn ask(
     }
     // A live run, so the owner can watch it on the Mnemo page while it works.
     let tx = super::live::start(&sid);
-    run_agent(
+    let out = run_agent(
         st,
         store,
         &sid,
@@ -550,6 +551,23 @@ fn ask(
         .and_then(|m| m.meta.and_then(|v| v["error"].as_str().map(str::to_string)));
     if let Ok(mut b) = busy().lock() {
         b.remove(&sid);
+    }
+    super::live::notify(
+        &sid,
+        &serde_json::json!({"type": "idle", "outcome": "mention"}),
+    );
+    // Messages the owner queued in this chat meanwhile go out now.
+    if super::live::queued(&sid) {
+        if let Ok(s) = store_of(st) {
+            super::kick(
+                st,
+                s,
+                &sid,
+                "owner · chat".into(),
+                out == super::Outcome::Failed,
+                true,
+            );
+        }
     }
     let last = store
         .messages(&sid)

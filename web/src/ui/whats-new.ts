@@ -1,5 +1,5 @@
 import { api } from '../api';
-import { esc, useStyles } from '../dom';
+import { attr, esc, useStyles } from '../dom';
 import { state } from '../state';
 import { Modal } from '../modal';
 import { openDocs } from '../router';
@@ -25,6 +25,32 @@ interface Release {
 
 /** Newest first. */
 const RELEASES: Release[] = [
+  {
+    version: '2.1.9',
+    title: 'Chats in step everywhere, a queue that never sticks',
+    lead: 'Every device shows the same chat live, queued messages always go out, and Mnemo can fall back to another model or think harder when you ask.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'monitor', title: 'Live on every device', text: 'A message sent on your phone shows up on your laptop at once, with Mnemo\'s reply streaming on both. The queue is the same everywhere too.' },
+          { icon: 'enter', title: 'Send now, as a new message', text: 'Send a queued message now (or press Ctrl+Enter): Mnemo\'s reply is cut where it is and your message is answered as a new one, not mixed into the old reply.' },
+          { icon: 'refresh', title: 'Fallback models', text: 'Line up to five models in Settings, Mnemo. When the chat\'s model fails, the next one carries on by itself; with none left, the error shows with Try again.' },
+          { icon: 'brain', title: 'Thinking level', text: 'For models that can think, pick Auto, Off, Low, Medium or High next to the model.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'chat', title: 'A queue that keeps moving', text: 'Queued messages wait on the server and go out one by one when each reply ends: finished, stopped or cut. After an error the queue pauses until you resume or send one. Send now, Clear and Resume are always there.' },
+          { icon: 'menu', title: 'Long queues stay small', text: 'Three rows show, the rest scroll with a soft fade; Show all opens the whole list.' },
+          { icon: 'stop', title: 'Stop keeps what was written', text: 'Stopping a reply keeps the text so far in the chat, and the next queued message goes out.' },
+          { icon: 'refresh', title: 'Compaction you can read', text: 'The summary appears under the divider as it is written, and opening the divider always shows it.' },
+          { icon: 'check', title: 'Switching models asks first', text: 'Changing the model of a chat that has begun asks before it switches, since answers may read a little differently.' },
+        ],
+      },
+    ],
+  },
   {
     version: '2.1.8',
     title: '@mnemo requests are never dropped',
@@ -276,7 +302,10 @@ const CSS = `
 .modal:has(.wn){width:min(620px,100%);padding:0;overflow:hidden}
 .modal:has(.wn) .modal-head{display:none}
 .modal:has(.wn) .modal-body{padding:0;display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.wn{display:flex;flex-direction:column;min-height:0;max-height:min(86vh,86dvh)}
+/* One fixed size for every release, so moving between them never makes it jump: the whole
+   dialog, the header (title two lines, lead three, clamped) and the footer keep their height;
+   only the list inside scrolls. */
+.wn{display:flex;flex-direction:column;min-height:0;height:min(700px,86vh,86dvh)}
 .wn-hero{position:relative;overflow:hidden;isolation:isolate;flex:none;padding:22px 24px 24px;color:#e6e9ef;background:linear-gradient(160deg,#17202e,#0b0f17 70%)}
 .wn-hero::before{content:"";position:absolute;inset:-60% -20% auto auto;width:420px;height:420px;z-index:-1;background:radial-gradient(closest-side,rgba(94,234,212,.20),transparent 70%)}
 .wn-top{display:flex;align-items:center;gap:10px;margin-bottom:22px}
@@ -285,11 +314,11 @@ const CSS = `
 .wn-x{margin-left:auto;display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:9px;background:none;color:#8b98ad;cursor:pointer}
 .wn-x:hover{color:#e6e9ef;background:rgba(148,163,184,.12)}
 .wn-x .i{width:16px;height:16px}
-.wn-ver{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#8b98ad}
+.wn-ver{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;height:22px;margin-bottom:10px;overflow:hidden;white-space:nowrap;font-size:12px;color:#8b98ad}
 .wn-ver b{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5eead4}
 .wn-ver .pre{padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,.28);color:#cbd5e1}
-.wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2}
-.wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;color:#a3afc2}
+.wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2;height:2.4em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;height:4.8em;color:#a3afc2;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 /* Releases: one row that slides, newest on the left, with arrows either side. */
 .wn-car{display:flex;align-items:center;gap:6px;margin-top:18px}
 .wn-arr{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:999px;border:1px solid rgba(148,163,184,.3);background:rgba(15,23,42,.35);color:#e6e9ef;cursor:pointer;
@@ -341,8 +370,9 @@ const CSS = `
 @media (max-width:760px){
   .modal:has(.wn){border-radius:var(--r) var(--r) 0 0}
   .modal:has(.wn) .modal-grab{display:none}
-  .wn{max-height:88dvh}
-  .wn-hero{padding:18px 18px 20px}.wn-hero h2{font-size:21px}
+  .wn{height:min(88vh,88dvh)}
+  .wn-hero{padding:18px 18px 20px}.wn-hero h2{font-size:21px}.wn-hero p{font-size:13.5px}
+  .wn-top{margin-bottom:16px}
   .wn-body{padding:4px 18px 10px}
   .wn-foot{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px calc(12px + var(--safe-b,0px))}
   .wn-foot .grow{display:none}
@@ -382,7 +412,7 @@ function body(r: Release): string {
       <div class="wn-ver"><b>What's new in ${esc(r.version)}</b>${r.date ? `<span>${esc(r.date)}</span>` : ''}${
         ahead ? `<span class="pre">Coming next · you run ${esc(now)}</span>` : ''
       }</div>
-      <h2 id="wnT">${esc(r.title)}</h2><p>${esc(r.lead)}</p>
+      <h2 id="wnT" title="${attr(r.title)}">${esc(r.title)}</h2><p title="${attr(r.lead)}">${esc(r.lead)}</p>
       ${
         RELEASES.length > 1
           ? `<div class="wn-car">

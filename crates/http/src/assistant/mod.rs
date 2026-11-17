@@ -178,6 +178,12 @@ pub fn router() -> Router<AppState> {
         .route("/api/assistant/sessions/{id}/live", get(h_live))
         .route("/api/assistant/sessions/{id}/stop", post(h_stop))
         .route("/api/assistant/sessions/{id}/steer", post(h_steer))
+        .route(
+            "/api/assistant/sessions/{id}/queue",
+            get(h_queue).post(h_queue_add),
+        )
+        .route("/api/assistant/sessions/{id}/queue/{qid}", post(h_queue_op))
+        .route("/api/assistant/sessions/{id}/watch", get(h_watch))
         .route("/api/assistant/sessions/{id}/export", get(h_export))
         .merge(uploads::router())
 }
@@ -521,11 +527,29 @@ fn state_json(store: &Store) -> Value {
     for k in [SEEN, FLEETING, OWN_SUGGESTIONS, AI_SUGGESTIONS] {
         prefs.remove(k);
     }
+    let provs = store.providers().unwrap_or_default();
+    // Each model says whether it can think (the chat then offers a thinking level).
+    let models: Vec<Value> = store
+        .models()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| {
+            let p = provs.iter().find(|p| p.id == m.provider_id);
+            let thinks = providers::can_think(
+                p.map_or("", |p| p.kind.as_str()),
+                p.map_or("", |p| p.api_style.as_str()),
+                &m.model_id,
+            );
+            let mut v = serde_json::to_value(&m).unwrap_or(Value::Null);
+            v["thinks"] = json!(thinks);
+            v
+        })
+        .collect();
     json!({
         "name": NAME,
         "ready": resolve_model(store, None, None).is_ok(),
-        "providers": store.providers().unwrap_or_default(),
-        "models": store.models().unwrap_or_default(),
+        "providers": provs,
+        "models": models,
         "prefs": prefs,
         "tools": TOOLS,
         "defaults": {"context_tokens": DEFAULT_CONTEXT, "max_output_tokens": DEFAULT_MAX_OUTPUT, "max_steps": DEFAULT_STEPS},
@@ -643,6 +667,21 @@ async fn h_prefs(
             "max_steps" => v.is_null() || v.as_i64().is_some_and(|x| (1..=60).contains(&x)),
             "permission" => v.is_null() || v.as_str().is_some_and(|x| x == "ask" || x == "auto"),
             "launcher" => v.is_null() || v.is_boolean(),
+            THINKING => {
+                v.is_null()
+                    || v.as_str()
+                        .is_some_and(|x| ["auto", "off", "low", "medium", "high"].contains(&x))
+            }
+            FALLBACKS => {
+                v.is_null()
+                    || v.as_array().is_some_and(|a| {
+                        a.len() <= 5
+                            && a.iter().all(|x| {
+                                x.as_str()
+                                    .is_some_and(|x| x.contains('/') && x.len() <= 260)
+                            })
+                    })
+            }
             other => return bad(&format!("unknown preference: {other}")),
         };
         if !ok {
@@ -709,6 +748,7 @@ fn set_fleeting(store: &Store, id: &str, on: bool) {
 /// Delete a chat with the images sent in it (a picture already placed in a note is a copy in
 /// the vault and stays).
 fn drop_chat(st: &AppState, store: &Store, id: &str) -> bool {
+    live::queue_clear(id);
     for m in store.messages(id).unwrap_or_default() {
         // Pictures Mnemo opened from the vault were staged copies; the vault keeps its own.
         if m.tool_name.as_deref() == Some(VIEW_IMAGE) {
@@ -912,7 +952,8 @@ async fn h_session(
             let sess = store.session(&id).ok().flatten();
             let running = live::running(&id);
             let fleeting = fleeting_ids(store).contains(&id);
-            Json(json!({"session": sess, "messages": messages, "context": context, "running": running, "fleeting": fleeting}))
+            let queue = live::queue_json(&id);
+            Json(json!({"session": sess, "messages": messages, "context": context, "running": running, "fleeting": fleeting, "queue": queue}))
                 .into_response()
         }
         _ => fail(StatusCode::NOT_FOUND, "chat not found"),
@@ -956,12 +997,6 @@ async fn h_compact(
     let Some(sess) = store.session(&id).ok().flatten() else {
         return fail(StatusCode::NOT_FOUND, "chat not found");
     };
-    if busy().lock().is_ok_and(|b| b.contains(&id)) {
-        return fail(
-            StatusCode::CONFLICT,
-            "Mnemo is still answering in this chat",
-        );
-    }
     let (provider, model) = match resolve_model(
         store,
         None,
@@ -974,13 +1009,16 @@ async fn h_compact(
         Ok(e) => e,
         Err(e) => return bad(&e),
     };
-    if let Ok(mut b) = busy().lock() {
-        b.insert(id.clone());
+    if !claim(&id) {
+        return fail(
+            StatusCode::CONFLICT,
+            "Mnemo is still answering in this chat",
+        );
     }
     let (st2, id2) = (st.clone(), id.clone());
     let res = crate::blocking(move || {
         let stp = setup(&st2, store, &id2, &sess.scope, &provider, &model);
-        let r = compact(store, &id2, &provider, &model, &ep, &stp);
+        let r = compact(store, &id2, &provider, &model, &ep, &stp, &mut |_| true);
         let ctx = context_json(
             &stp,
             &store.messages(&id2).unwrap_or_default(),
@@ -989,11 +1027,13 @@ async fn h_compact(
         r.map(|x| (x, ctx))
     })
     .await;
-    if let Ok(mut b) = busy().lock() {
-        b.remove(&id);
-    }
+    unclaim(&id);
     match res {
-        Ok((Some((n, t)), ctx)) => Json(json!({"ok": true, "messages": n, "tokens": t, "context": ctx})).into_response(),
+        Ok((Some((n, t, summary)), ctx)) => {
+            live::notify(&id, &json!({"type": "compacted"}));
+            Json(json!({"ok": true, "messages": n, "tokens": t, "summary": summary, "context": ctx}))
+                .into_response()
+        }
         Ok((None, ctx)) => Json(json!({"ok": false, "reason": "There is nothing older to compact yet.", "context": ctx})).into_response(),
         Err(e) => bad(&format!("could not compact the chat: {e}")),
     }
@@ -1939,6 +1979,7 @@ fn chat_title(store: &Store, id: &str, model: &str, ep: &Endpoint) -> String {
         temperature: None,
         max_output: Some(600),
         think: false,
+        effort: None,
     };
     let prompt = format!(
         "Owner: {}\n\n{NAME}: {}",
@@ -2245,8 +2286,8 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 11]";
-const FEATURES: &str = "[Mnemo features 11] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 12]";
+const FEATURES: &str = "[Mnemo features 12] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
 A few seconds after the note is saved you run the request in that note's chat, titled \"@mnemo · <note>\" (one chat \
 per note: later requests in the same note join it); writing `@mnemo: <request>` into a note yourself (from a chat) asks \
@@ -2258,6 +2299,11 @@ their mention_agent tool and agent \"mnemo\". So yes: mentioning you in a note w
 they can come back to it. Regenerate and Try again run a turn again.\n\
 - Each chat keeps the whole conversation for its model; only when it is full the older part is compacted into a \
 summary (the memory ring in the composer shows how full it is).\n\
+- While you answer, the owner can queue messages (they go out one by one as each reply ends, on every device), \
+send one now (your reply is cut where it is and you answer the new message), or stop you (what you wrote stays). \
+The chat follows live on every device the owner has it open on.\n\
+- The owner picks how hard you think (Auto, Off, Low, Medium, High) for models that can think, and can line up \
+fallback models in Settings, Mnemo: when the chat's model fails, the next one carries on.\n\
 - Chats are connected: list_chats shows the owner's other chats, search_chats finds words in any of them \
 (titles and messages) and read_chat reads one. When the owner points at another chat or something said before, \
 look it up instead of guessing, and say which chat it came from. Every chat can also be searched from the chat \
@@ -3107,6 +3153,7 @@ Write them in the language most of the titles are in. One per line, no numbers, 
             temperature: None,
             max_output: Some(800),
             think: false,
+            effort: None,
         };
         let t = providers::run(
             &ep,
@@ -3155,7 +3202,387 @@ Write them in the language most of the titles are in. One per line, no numbers, 
     fresh
 }
 
+/// A turn ready to run: the owner's message is stored, the model is picked.
+struct Prepared {
+    scope: String,
+    provider: String,
+    model: String,
+    ep: Endpoint,
+}
+
+type Refusal = (StatusCode, String);
+
+/// Store the owner's message in chat `id` from a `/chat` request body (also a queued one)
+/// and pick the model for its reply. Every device with the chat open hears the message.
+fn prepare_turn(
+    st: &AppState,
+    store: &'static Store,
+    id: &str,
+    b: &Value,
+    via: &str,
+) -> Result<Prepared, Refusal> {
+    let badr = |m: &str| (StatusCode::BAD_REQUEST, m.to_string());
+    let Some(text) = s(b, "text").filter(|t| !t.is_empty()) else {
+        return Err(badr("text is required"));
+    };
+    if text.chars().count() > 40_000 {
+        return Err(badr("the message is too long (40000 characters at most)"));
+    }
+    let Some(sess) = store.session(id).ok().flatten() else {
+        return Err((StatusCode::NOT_FOUND, "chat not found".into()));
+    };
+    let asked = s(b, "model").filter(|m| !m.is_empty());
+    let (provider, model) = resolve_model(
+        store,
+        asked.as_deref(),
+        Some(&sess.model)
+            .filter(|m| !m.is_empty())
+            .map(String::as_str),
+    )
+    .map_err(|e| badr(&e))?;
+    let ep = endpoint(st, store, &provider).map_err(|e| badr(&e))?;
+    // Notes and folders the owner attached from the vault: a snapshot goes with this message
+    // (and stays in the chat's context for later turns).
+    let wanted = parse_attach(b).map_err(|e| badr(&e))?;
+    let mut meta = if wanted.is_empty() {
+        None
+    } else {
+        let (items, context) = attach_snapshot(st, &wanted).map_err(|e| badr(&e))?;
+        Some(json!({"attach": items, "context": context}))
+    };
+    // An answer to one of Mnemo's questions (a tapped option or "Other").
+    if let Some(a) = b.get("answer").filter(|a| a.is_object()) {
+        let m = meta.get_or_insert_with(|| json!({}));
+        m["answer"] = json!({
+            "to": a["to"].as_str().map(|t| t.chars().take(80).collect::<String>()),
+            "approve": a["approve"] == true,
+            "other": a["other"] == true,
+        });
+    }
+    // The permission mode this message was sent in (Mnemo is told with it).
+    let prefs = store.prefs().unwrap_or_default();
+    let mode = if prefs.get("permission").and_then(Value::as_str) == Some("auto") {
+        "auto"
+    } else {
+        "ask"
+    };
+    meta.get_or_insert_with(|| json!({}))["mode"] = json!(mode);
+    if via != "chat" {
+        meta.get_or_insert_with(|| json!({}))["via"] = json!(via);
+    }
+    // The owner's time zone (from the browser), for current_time.
+    let tz = s(b, "tz").filter(|t| {
+        t.len() <= 64
+            && t.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c))
+    });
+    let off = b
+        .get("tz_offset")
+        .and_then(Value::as_i64)
+        .filter(|o| o.abs() <= 16 * 60);
+    if tz.is_some() || off.is_some() {
+        let m = meta.get_or_insert_with(|| json!({}));
+        if let Some(t) = tz {
+            m["tz"] = json!(t);
+        }
+        if let Some(o) = off {
+            m["tz_offset"] = json!(o);
+        }
+    }
+    // `/name ...` runs one of the owner's skills: its steps go with this message.
+    if let Some((sk, body)) = skill_for(st, &text) {
+        meta.get_or_insert_with(|| json!({}))["skill"] =
+            json!({"name": sk.name, "path": sk.path, "text": clip(&body, 20_000)});
+    }
+    // The chat's first message carries the system prompt it will keep for its whole life.
+    if store.messages(id).map(|m| m.is_empty()).unwrap_or(false) {
+        let extra = prefs
+            .get("system_prompt")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let prompt = system_prompt(st, &sess.scope, extra.as_deref());
+        meta.get_or_insert_with(|| json!({}))["system"] = json!(prompt);
+    }
+    let now = memora_state::now();
+    let shown = meta.as_ref().map(|m| {
+        let mut m = m.clone();
+        if let Some(o) = m.as_object_mut() {
+            o.remove("system");
+            o.remove("context");
+            if let Some(sk) = o.get_mut("skill").and_then(Value::as_object_mut) {
+                sk.remove("text");
+            }
+        }
+        m
+    });
+    let uid = store
+        .append(
+            id,
+            &NewMessage {
+                role: "user".into(),
+                content: text.clone(),
+                meta,
+                ..Default::default()
+            },
+            now,
+        )
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "could not store the message".to_string(),
+            )
+        })?;
+    // The title stays "New chat" until the first reply: Mnemo names the chat then.
+    if let Some(a) = &asked {
+        let _ = store.update_session(id, None, Some(a), None, None);
+    }
+    live::notify(
+        id,
+        &json!({"type": "user", "via": via, "client": s(b, "client"),
+            "message": {"id": uid, "session_id": id, "role": "user", "content": text, "meta": shown, "created_at": now}}),
+    );
+    Ok(Prepared {
+        scope: sess.scope,
+        provider,
+        model,
+        ep,
+    })
+}
+
+/// Claim chat `id` for one reply (`false`: one is already running or starting).
+fn claim(id: &str) -> bool {
+    busy().lock().is_ok_and(|mut b| b.insert(id.to_string()))
+}
+
+fn unclaim(id: &str) {
+    if let Ok(mut b) = busy().lock() {
+        b.remove(id);
+    }
+}
+
 async fn h_chat(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    if store.session(&id).ok().flatten().is_none() {
+        return fail(StatusCode::NOT_FOUND, "chat not found");
+    }
+    if !claim(&id) {
+        return fail(
+            StatusCode::CONFLICT,
+            "Mnemo is still answering in this chat",
+        );
+    }
+    let (st2, id2) = (st.clone(), id.clone());
+    match crate::blocking(move || prepare_turn(&st2, store, &id2, &b, "chat")).await {
+        Ok(p) => {
+            begin_run(&st, store, &id, p, on_behalf(&st, &headers));
+            live::sse(&id).unwrap_or_else(|| {
+                fail(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "the reply could not start",
+                )
+            })
+        }
+        Err((code, e)) => {
+            unclaim(&id);
+            fail(code, &e)
+        }
+    }
+}
+
+/// Who Mnemo works for in a browser or console request (for Activity).
+fn on_behalf(st: &AppState, headers: &HeaderMap) -> String {
+    let user = crate::cache::session_of(st, headers)
+        .map(|w| w.user)
+        .unwrap_or_else(|| "owner".into());
+    let via = if headers
+        .get("x-memora-client")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("console"))
+    {
+        "console"
+    } else {
+        "chat"
+    };
+    format!("{user} · {via}")
+}
+
+/// Run Mnemo on chat `id` (already claimed) in the background: the reply goes on without a
+/// viewer (see `live`). When it ends, the chat's queue goes on: the next message is sent the
+/// same way, until the queue is empty or paused after a failed reply.
+fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_behalf: String) {
+    let tx = live::start(id);
+    let (st2, id2) = (st.clone(), id.to_string());
+    tokio::task::spawn_blocking(move || {
+        let (mut tx, mut p) = (tx, p);
+        loop {
+            let out = run_agent(
+                &st2,
+                store,
+                &id2,
+                &p.scope,
+                &p.provider,
+                &p.model,
+                &p.ep,
+                &tx,
+                &on_behalf,
+            );
+            drop(tx);
+            live::notify(&id2, &json!({"type": "idle", "outcome": out.word()}));
+            let Some(q) = live::queue_next(&id2, out == Outcome::Failed, true) else {
+                break;
+            };
+            match prepare_turn(&st2, store, &id2, &q.body, "queue") {
+                Ok(np) => {
+                    p = np;
+                    tx = live::start(&id2);
+                }
+                Err((_, e)) => {
+                    live::requeue(&id2, q, true);
+                    live::notify(&id2, &json!({"type": "queue_error", "message": e}));
+                    break;
+                }
+            }
+        }
+        unclaim(&id2);
+    });
+}
+
+/// Start the next queued message of chat `id` when no reply is running (it was sent now,
+/// or the queue was resumed). A failed reply before it holds it unless `forced`.
+pub(crate) fn kick(
+    st: &AppState,
+    store: &'static Store,
+    id: &str,
+    on_behalf: String,
+    failed: bool,
+    after_run: bool,
+) {
+    if !claim(id) {
+        return;
+    }
+    let Some(q) = live::queue_next(id, failed, after_run) else {
+        unclaim(id);
+        return;
+    };
+    match prepare_turn(st, store, id, &q.body, "queue") {
+        Ok(p) => begin_run(st, store, id, p, on_behalf),
+        Err((_, e)) => {
+            live::requeue(id, q, true);
+            live::notify(id, &json!({"type": "queue_error", "message": e}));
+            unclaim(id);
+        }
+    }
+}
+
+/// How a reply ended.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Outcome {
+    Done,
+    Stopped,
+    Failed,
+}
+
+impl Outcome {
+    fn word(self) -> &'static str {
+        match self {
+            Outcome::Done => "done",
+            Outcome::Stopped => "stopped",
+            Outcome::Failed => "failed",
+        }
+    }
+}
+
+/// `GET /api/assistant/sessions/{id}/live`: watch the reply running in this chat (its
+/// events from the start, then live, as server-sent events); `204` when none is running.
+async fn h_live(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<String>) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    live::sse(&id).unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
+}
+
+/// `POST /api/assistant/sessions/{id}/steer` `{text, attach?, model?, tz?, client?}`: send
+/// this message now. A reply running is cut where it is (what it wrote so far stays) and
+/// Mnemo answers this message as a new turn; with no reply running it is sent at once.
+async fn h_steer(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let Some(text) = s(&b, "text").filter(|t| !t.is_empty()) else {
+        return bad("text is required");
+    };
+    if store.session(&id).ok().flatten().is_none() {
+        return fail(StatusCode::NOT_FOUND, "chat not found");
+    }
+    live::enqueue(&id, &text, b, true);
+    live::force_next(&id);
+    go_now(&st, &headers, store, &id).await;
+    Json(json!({"ok": true, "queue": live::queue_json(&id)})).into_response()
+}
+
+/// The first queued message goes now: cut the reply running for it, or start it.
+async fn go_now(st: &AppState, headers: &HeaderMap, store: &'static Store, id: &str) {
+    if !live::cancel(id) {
+        let (st2, id2, who) = (st.clone(), id.to_string(), on_behalf(st, headers));
+        crate::blocking(move || kick(&st2, store, &id2, who, false, false)).await;
+    }
+}
+
+/// `POST /api/assistant/sessions/{id}/stop`: end the reply running in this chat. What it
+/// wrote so far stays; the next queued message (if any) goes out.
+async fn h_stop(
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    Json(json!({"stopped": live::cancel(&id)})).into_response()
+}
+
+/// `GET /api/assistant/sessions/{id}/queue`: the messages waiting for this chat's reply.
+async fn h_queue(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<String>) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    Json(live::queue_json(&id)).into_response()
+}
+
+/// `POST /api/assistant/sessions/{id}/queue` `{text, attach?, model?, tz?, client?}`: add a
+/// message that goes out when the reply running ends (at once when none is running).
+async fn h_queue_add(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
     headers: HeaderMap,
@@ -3178,205 +3605,25 @@ async fn h_chat(
     if text.chars().count() > 40_000 {
         return bad("the message is too long (40000 characters at most)");
     }
-    let Some(sess) = store.session(&id).ok().flatten() else {
+    if store.session(&id).ok().flatten().is_none() {
         return fail(StatusCode::NOT_FOUND, "chat not found");
-    };
-    if busy().lock().is_ok_and(|b| b.contains(&id)) {
-        return fail(
-            StatusCode::CONFLICT,
-            "Mnemo is still answering in this chat",
-        );
     }
-    let asked = s(&b, "model").filter(|m| !m.is_empty());
-    let (provider, model) = match resolve_model(
-        store,
-        asked.as_deref(),
-        Some(&sess.model)
-            .filter(|m| !m.is_empty())
-            .map(String::as_str),
-    ) {
-        Ok(x) => x,
-        Err(e) => return bad(&e),
-    };
-    let ep = match endpoint(&st, store, &provider) {
-        Ok(e) => e,
-        Err(e) => return bad(&e),
-    };
-    // Notes and folders the owner attached from the vault: a snapshot goes with this message
-    // (and stays in the chat's context for later turns).
-    let wanted = match parse_attach(&b) {
-        Ok(a) => a,
-        Err(e) => return bad(&e),
-    };
-    let mut meta = if wanted.is_empty() {
-        None
-    } else {
-        let st3 = st.clone();
-        match crate::blocking(move || attach_snapshot(&st3, &wanted)).await {
-            Ok((items, context)) => Some(json!({"attach": items, "context": context})),
-            Err(e) => return bad(&e),
-        }
-    };
-    // An answer to one of Mnemo's questions (a tapped option or "Other").
-    if let Some(a) = b.get("answer").filter(|a| a.is_object()) {
-        let m = meta.get_or_insert_with(|| json!({}));
-        m["answer"] = json!({
-            "to": a["to"].as_str().map(|t| t.chars().take(80).collect::<String>()),
-            "approve": a["approve"] == true,
-            "other": a["other"] == true,
-        });
+    let qid = live::enqueue(&id, &text, b, false);
+    // The reply may have ended meanwhile: then this goes now (unless the queue is paused).
+    if !live::running(&id) {
+        let (st2, id2, who) = (st.clone(), id.clone(), on_behalf(&st, &headers));
+        crate::blocking(move || kick(&st2, store, &id2, who, false, false)).await;
     }
-    // The permission mode this message was sent in (Mnemo is told with it).
-    let mode = if store
-        .prefs()
-        .unwrap_or_default()
-        .get("permission")
-        .and_then(Value::as_str)
-        == Some("auto")
-    {
-        "auto"
-    } else {
-        "ask"
-    };
-    meta.get_or_insert_with(|| json!({}))["mode"] = json!(mode);
-    // The owner's time zone (from the browser), for current_time.
-    let tz = s(&b, "tz").filter(|t| {
-        t.len() <= 64
-            && t.chars()
-                .all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c))
-    });
-    let off = b
-        .get("tz_offset")
-        .and_then(Value::as_i64)
-        .filter(|o| o.abs() <= 16 * 60);
-    if tz.is_some() || off.is_some() {
-        let m = meta.get_or_insert_with(|| json!({}));
-        if let Some(t) = tz {
-            m["tz"] = json!(t);
-        }
-        if let Some(o) = off {
-            m["tz_offset"] = json!(o);
-        }
-    }
-    // `/name ...` runs one of the owner's skills: its steps go with this message.
-    {
-        let (st5, t5) = (st.clone(), text.clone());
-        if let Some((sk, body)) = crate::blocking(move || skill_for(&st5, &t5)).await {
-            meta.get_or_insert_with(|| json!({}))["skill"] =
-                json!({"name": sk.name, "path": sk.path, "text": clip(&body, 20_000)});
-        }
-    }
-    // The chat's first message carries the system prompt it will keep for its whole life.
-    if store.messages(&id).map(|m| m.is_empty()).unwrap_or(false) {
-        let (st4, scope, extra) = (
-            st.clone(),
-            sess.scope.clone(),
-            store
-                .prefs()
-                .unwrap_or_default()
-                .get("system_prompt")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        );
-        let prompt = crate::blocking(move || system_prompt(&st4, &scope, extra.as_deref())).await;
-        meta.get_or_insert_with(|| json!({}))["system"] = json!(prompt);
-    }
-    let now = memora_state::now();
-    if store
-        .append(
-            &id,
-            &NewMessage {
-                role: "user".into(),
-                content: text.clone(),
-                meta,
-                ..Default::default()
-            },
-            now,
-        )
-        .is_err()
-    {
-        return fail(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "could not store the message",
-        );
-    }
-    // The title stays "New chat" until the first reply: Mnemo names the chat then.
-    if let Some(a) = &asked {
-        let _ = store.update_session(&id, None, Some(a), None, None);
-    }
-    stream_agent(&st, &headers, store, id, sess.scope, provider, model, ep)
+    Json(json!({"id": qid, "queue": live::queue_json(&id)})).into_response()
 }
 
-/// Who Mnemo works for in a browser or console request (for Activity).
-fn on_behalf(st: &AppState, headers: &HeaderMap) -> String {
-    let user = crate::cache::session_of(st, headers)
-        .map(|w| w.user)
-        .unwrap_or_else(|| "owner".into());
-    let via = if headers
-        .get("x-memora-client")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.eq_ignore_ascii_case("console"))
-    {
-        "console"
-    } else {
-        "chat"
-    };
-    format!("{user} · {via}")
-}
-
-/// Run Mnemo on chat `id` in the background and stream its events as server-sent events.
-#[allow(clippy::too_many_arguments)]
-fn stream_agent(
-    st: &AppState,
-    headers: &HeaderMap,
-    store: &'static Store,
-    id: String,
-    scope: String,
-    provider: String,
-    model: String,
-    ep: Endpoint,
-) -> Response {
-    let on_behalf = on_behalf(st, headers);
-    // The reply runs on its own: leaving the chat or closing this stream does not stop it
-    // (see `live`); `/live` shows it again, `/stop` ends it.
-    let tx = live::start(&id);
-    let st2 = st.clone();
-    if let Ok(mut b) = busy().lock() {
-        b.insert(id.clone());
-    }
-    let id2 = id.clone();
-    tokio::task::spawn_blocking(move || {
-        run_agent(
-            &st2, store, &id2, &scope, &provider, &model, &ep, &tx, &on_behalf,
-        );
-        drop(tx);
-        if let Ok(mut b) = busy().lock() {
-            b.remove(&id2);
-        }
-    });
-    live::sse(&id).unwrap_or_else(|| {
-        fail(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "the reply could not start",
-        )
-    })
-}
-
-/// `GET /api/assistant/sessions/{id}/live`: watch the reply running in this chat (its
-/// events from the start, then live, as server-sent events); `204` when none is running.
-async fn h_live(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<String>) -> Response {
-    if let Some(r) = browser_only(&key) {
-        return r;
-    }
-    live::sse(&id).unwrap_or_else(|| StatusCode::NO_CONTENT.into_response())
-}
-
-/// `POST /api/assistant/sessions/{id}/steer` `{text}`: give the running reply a message it
-/// reads before its next step. `409` when no reply is running (send it as a message then).
-async fn h_steer(
+/// `POST /api/assistant/sessions/{id}/queue/{qid}` `{op: del|up|down|move|send, to?}`:
+/// change a queued message; `send` sends it now (cutting the reply running).
+async fn h_queue_op(
+    State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
     headers: HeaderMap,
-    UrlPath(id): UrlPath<String>,
+    UrlPath((id, qid)): UrlPath<(String, String)>,
     Json(b): Json<Value>,
 ) -> Response {
     if let Some(r) = browser_only(&key) {
@@ -3385,33 +3632,46 @@ async fn h_steer(
     if !csrf_ok(&headers) {
         return csrf_fail();
     }
-    let Some(text) = s(&b, "text").filter(|t| !t.is_empty()) else {
-        return bad("text is required");
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
     };
-    let text: String = text.chars().take(8000).collect();
-    if live::steer(&id, &text) {
-        Json(json!({"ok": true})).into_response()
-    } else {
-        fail(
-            StatusCode::CONFLICT,
-            "Mnemo is not answering in this chat now; send it as a message",
-        )
+    let op = s(&b, "op").unwrap_or_default();
+    let to = b.get("to").and_then(Value::as_u64).unwrap_or(0) as usize;
+    match qid.as_str() {
+        "clear" => live::queue_clear(&id),
+        "resume" => {
+            live::queue_resume(&id);
+            if !live::running(&id) {
+                go_now(&st, &headers, store, &id).await;
+            }
+        }
+        q => {
+            let Ok(n) = q.parse::<u64>() else {
+                return bad("unknown queued message");
+            };
+            if !["del", "up", "down", "move", "send"].contains(&op.as_str()) {
+                return bad("op must be del, up, down, move or send");
+            }
+            if !live::queue_op(&id, n, &op, to) {
+                return fail(StatusCode::NOT_FOUND, "that message is no longer queued");
+            }
+            if op == "send" {
+                go_now(&st, &headers, store, &id).await;
+            }
+        }
     }
+    Json(live::queue_json(&id)).into_response()
 }
 
-/// `POST /api/assistant/sessions/{id}/stop`: end the reply running in this chat.
-async fn h_stop(
-    key: Option<Extension<ApiKeyCaller>>,
-    headers: HeaderMap,
-    UrlPath(id): UrlPath<String>,
-) -> Response {
+/// `GET /api/assistant/sessions/{id}/watch`: what happens in this chat from now on, as
+/// server-sent events (new messages from any device, replies starting and ending, the
+/// queue), so every device with the chat open stays in step.
+async fn h_watch(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<String>) -> Response {
     if let Some(r) = browser_only(&key) {
         return r;
     }
-    if !csrf_ok(&headers) {
-        return csrf_fail();
-    }
-    Json(json!({"stopped": live::cancel(&id)})).into_response()
+    live::watch(&id)
 }
 
 /// `POST /api/assistant/sessions/{id}/rerun` `{message_id, model?}`: run the turn of one of
@@ -3473,13 +3733,34 @@ async fn h_rerun(
         Ok(e) => e,
         Err(e) => return bad(&e),
     };
+    if !claim(&id) {
+        return fail(
+            StatusCode::CONFLICT,
+            "Mnemo is still answering in this chat",
+        );
+    }
     if let Err(e) = store.delete_after(&id, user.id) {
+        unclaim(&id);
         return fail(StatusCode::INTERNAL_SERVER_ERROR, &e);
     }
     if let Some(a) = &asked {
         let _ = store.update_session(&id, None, Some(a), None, None);
     }
-    stream_agent(&st, &headers, store, id, sess.scope, provider, model, ep)
+    // Other devices drop the replaced turns.
+    live::notify(&id, &json!({"type": "reload"}));
+    let p = Prepared {
+        scope: sess.scope,
+        provider,
+        model,
+        ep,
+    };
+    begin_run(&st, store, &id, p, on_behalf(&st, &headers));
+    live::sse(&id).unwrap_or_else(|| {
+        fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the reply could not start",
+        )
+    })
 }
 
 /// What one model gets in one chat: its limits, the chat's frozen prompt, the tools and the
@@ -3602,7 +3883,8 @@ fn compact(
     model: &str,
     ep: &Endpoint,
     stp: &Setup,
-) -> Result<Option<(usize, i64)>, String> {
+    on: &mut dyn FnMut(&str) -> bool,
+) -> Result<Option<(usize, i64, String)>, String> {
     let msgs = store.messages(id).map_err(|e| e.to_string())?;
     let (summary, keep_from) = match msgs.iter().rev().find(|m| is_compact(m)) {
         Some(c) => (
@@ -3689,6 +3971,7 @@ fn compact(
         temperature: None,
         max_output: Some(1500),
         think: false,
+        effort: None,
     };
     let turn = providers::run(
         ep,
@@ -3697,7 +3980,10 @@ fn compact(
         &[Msg::User(t)],
         &[],
         &opts,
-        &mut |_| true,
+        &mut |part| match part {
+            providers::Stream::Text(t) => on(t),
+            providers::Stream::Think(_) => true,
+        },
     )?;
     let text = turn.text.trim().to_string();
     if text.is_empty() {
@@ -3709,14 +3995,14 @@ fn compact(
             id,
             &NewMessage {
                 role: "assistant".into(),
-                content: text,
+                content: text.clone(),
                 meta: Some(json!({"compact": true, "keep_from": keep, "messages": older.len(), "model": format!("{provider}/{model}")})),
                 ..Default::default()
             },
             memora_state::now(),
         )
         .map_err(|e| e.to_string())?;
-    Ok(Some((older.len(), tokens)))
+    Ok(Some((older.len(), tokens, text)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3730,14 +4016,27 @@ fn run_agent(
     ep: &Endpoint,
     tx: &tokio::sync::mpsc::UnboundedSender<String>,
     on_behalf: &str,
-) {
+) -> Outcome {
     let prefs = store.prefs().unwrap_or_default();
-    let stp = setup(st, store, id, scope, provider, model);
-    let opts = Options {
+    let (mut provider, mut model, mut ep) = (provider.to_string(), model.to_string(), ep.clone());
+    let mut stp = setup(st, store, id, scope, &provider, &model);
+    // How hard the model thinks: the owner's pick in the chat (off, low, medium, high), or
+    // the model's own default.
+    let level = prefs
+        .get(THINKING)
+        .and_then(Value::as_str)
+        .unwrap_or("auto")
+        .to_string();
+    let mut opts = Options {
         temperature: prefs.get("temperature").and_then(Value::as_f64),
         max_output: Some(stp.max_out),
-        think: true,
+        think: level != "off",
+        effort: ["low", "medium", "high"]
+            .contains(&level.as_str())
+            .then(|| level.clone()),
     };
+    // Models to carry on with when this one fails, in the owner's order.
+    let mut fallbacks = fallback_chain(store, &provider, &model).into_iter();
     let auto = prefs.get("permission").and_then(Value::as_str) == Some("auto");
     let steps = prefs
         .get("max_steps")
@@ -3756,17 +4055,23 @@ fn run_agent(
             .find(|m| m.role == "user")
             .and_then(|m| m.meta.as_ref())
             .is_some_and(|v| v["answer"]["approve"] == true || v["approved"] == true);
-    let (system, tools, budget) = (&stp.system, &stp.tools, stp.budget);
+    let budget = stp.budget;
     // Near full: fold the older turns into a summary before this turn (the whole chat stays
     // in memory, just shorter). If that fails, the oldest turns are left out instead.
     let full = history_tokens(&store.messages(id).unwrap_or_default()) > budget * COMPACT_AT / 100;
     if full {
         if !send(tx, json!({"type": "compacting"})) {
-            return;
+            return Outcome::Stopped;
         }
-        match compact(store, id, provider, model, ep, &stp) {
-            Ok(Some((n, t))) => {
-                send(tx, json!({"type": "compacted", "messages": n, "tokens": t}));
+        // The summary streams into the divider as it is written.
+        let mut on_sum = |t: &str| send(tx, json!({"type": "compact_text", "delta": t}));
+        match compact(store, id, &provider, &model, &ep, &stp, &mut on_sum) {
+            Ok(Some((n, t, summary))) => {
+                send(
+                    tx,
+                    json!({"type": "compacted", "messages": n, "tokens": t, "summary": summary}),
+                );
+                live::notify(id, &json!({"type": "compacted"}));
             }
             Ok(None) => {}
             Err(e) => {
@@ -3779,33 +4084,15 @@ fn run_agent(
     }
     let who = caller_for(on_behalf);
     let (mut tin, mut tout) = (0u64, 0u64);
-    let key = format!("{provider}/{model}");
+    let mut key = format!("{provider}/{model}");
     let start = json!({"type": "start", "model": key, "context": context_json(&stp, &store.messages(id).unwrap_or_default(), &key)});
     if !send(tx, start) {
-        return;
+        return Outcome::Stopped;
     }
-    // Messages the owner sent to this reply while it runs go in before the next step.
-    let steer_in = |tx: &tokio::sync::mpsc::UnboundedSender<String>| -> bool {
-        let got = live::take_steers(id);
-        for t in &got {
-            let _ = store.append(
-                id,
-                &NewMessage {
-                    role: "user".into(),
-                    content: t.clone(),
-                    meta: Some(json!({"steer": true, "approved": approved})),
-                    ..Default::default()
-                },
-                memora_state::now(),
-            );
-            send(tx, json!({"type": "steered", "text": t}));
-        }
-        !got.is_empty()
-    };
-    for step in 0..steps {
-        steer_in(tx);
+    let mut step = 0;
+    while step < steps {
         let stored = store.messages(id).unwrap_or_default();
-        let (mut history, trimmed) = history_within(&stored, budget);
+        let (mut history, trimmed) = history_within(&stored, stp.budget);
         fill_images(st, &mut history);
         if trimmed && (step == 0 || full) {
             send(
@@ -3814,14 +4101,20 @@ fn run_agent(
             );
         }
         let got = std::cell::Cell::new(false);
+        // What this step wrote so far: kept when the owner stops or cuts the reply.
+        let partial = std::cell::RefCell::new(String::new());
         let mut on = |part: providers::Stream| {
             got.set(true);
             match part {
-                providers::Stream::Text(t) => send(tx, json!({"type": "text", "delta": t})),
+                providers::Stream::Text(t) => {
+                    partial.borrow_mut().push_str(t);
+                    send(tx, json!({"type": "text", "delta": t}))
+                }
                 providers::Stream::Think(t) => send(tx, json!({"type": "thinking", "delta": t})),
             }
         };
-        let mut res = providers::run(ep, model, system, &history, tools, &opts, &mut on);
+        let (system, tools) = (&stp.system, &stp.tools);
+        let mut res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
         // A provider that is briefly down or busy (502, 503, 429, a dropped connection) is
         // asked again a few times, over about half a minute, before the owner sees an error;
         // only while nothing of this step has streamed yet, so no text is repeated.
@@ -3834,10 +4127,10 @@ fn run_agent(
                         RETRY_WAITS.len()
                     );
                     if !send(tx, json!({"type": "notice", "text": note})) {
-                        return;
+                        return Outcome::Stopped;
                     }
                     std::thread::sleep(std::time::Duration::from_secs(*wait));
-                    res = providers::run(ep, model, system, &history, tools, &opts, &mut on);
+                    res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
                 }
                 _ => break,
             }
@@ -3849,47 +4142,54 @@ fn run_agent(
                     tx,
                     json!({"type": "notice", "text": format!("{model} cannot look at images; it got their names instead. Pick a vision model to have them seen.")}),
                 );
-                res = providers::run(ep, model, system, &history, tools, &opts, &mut on);
+                res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
             }
         }
         let turn = match res {
             Ok(t) => t,
-            Err(e) if e == "stopped" => return,
-            Err(e) => {
-                let _ = store.append(
-                    id,
-                    &NewMessage {
-                        role: "assistant".into(),
-                        content: String::new(),
-                        meta: Some(json!({"error": e, "model": model})),
-                        ..Default::default()
-                    },
-                    memora_state::now(),
-                );
-                send(tx, json!({"type": "error", "message": e}));
-                // No reply to name it by: the question's first words stand in.
-                if store
-                    .session(id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|s| s.title == NEW_TITLE)
-                {
-                    let msgs = store.messages(id).unwrap_or_default();
-                    let first: String = msgs
-                        .iter()
-                        .find(|m| m.role == "user")
-                        .and_then(|m| m.content.lines().next())
-                        .unwrap_or("")
-                        .trim()
-                        .chars()
-                        .take(60)
-                        .collect();
-                    if !first.is_empty() {
-                        let _ = store.update_session(id, Some(&first), None, None, None);
+            Err(e) if e == "stopped" => {
+                // Stopped or cut for a newer message: what it wrote so far stays in the chat.
+                let text = partial.into_inner();
+                if !text.trim().is_empty() {
+                    let _ = store.append(
+                        id,
+                        &NewMessage {
+                            role: "assistant".into(),
+                            content: text.trim_end().to_string(),
+                            meta: Some(json!({"model": key, "stopped": true})),
+                            ..Default::default()
+                        },
+                        memora_state::now(),
+                    );
+                }
+                return Outcome::Stopped;
+            }
+            Err(e) if fallbacks.len() > 0 => {
+                // Carry on with the next model the owner lined up; what the failed one
+                // started writing is dropped (the new one answers the step again).
+                let mut next = None;
+                for (p, m) in fallbacks.by_ref() {
+                    if let Ok(x) = endpoint(st, store, &p) {
+                        next = Some((p, m, x));
+                        break;
                     }
                 }
-                return;
+                let Some((p, m, x)) = next else {
+                    return fail_turn(store, id, tx, &model, &e);
+                };
+                let to = format!("{p}/{m}");
+                if !send(
+                    tx,
+                    json!({"type": "fallback", "from": key, "model": to, "reason": providers::condense_error(&e)}),
+                ) {
+                    return Outcome::Stopped;
+                }
+                (provider, model, ep, key) = (p, m, x, to);
+                stp = setup(st, store, id, scope, &provider, &model);
+                opts.max_output = Some(stp.max_out);
+                continue;
             }
+            Err(e) => return fail_turn(store, id, tx, &model, &e),
         };
         tin += turn.input_tokens.unwrap_or(0);
         tout += turn.output_tokens.unwrap_or(0);
@@ -3919,10 +4219,6 @@ fn run_agent(
             memora_state::now(),
         );
         if turn.calls.is_empty() {
-            // A message that came in while it wrote: answer that too, in this reply.
-            if steer_in(tx) {
-                continue;
-            }
             break;
         }
         let mut asked = false;
@@ -3931,7 +4227,7 @@ fn run_agent(
                 tx,
                 json!({"type": "tool_start", "id": c.id, "name": c.name, "args": c.arguments}),
             ) {
-                return;
+                return Outcome::Stopped;
             }
             let started = Instant::now();
             let off = st.mcp.disabled_tools();
@@ -4020,14 +4316,15 @@ after they approve."
                 }
             }
             if !send(tx, end) {
-                return;
+                return Outcome::Stopped;
             }
         }
         // A question for the owner ends the reply: their answer is the next message.
         if asked {
             break;
         }
-        if step + 1 == steps {
+        step += 1;
+        if step == steps {
             send(
                 tx,
                 json!({"type": "notice", "text": format!("{NAME} stopped after {steps} steps; say \"continue\" to go on.")}),
@@ -4043,7 +4340,7 @@ after they approve."
         .flatten()
         .is_some_and(|s| s.title == NEW_TITLE || s.title == first_words(store, id))
     {
-        let t = chat_title(store, id, model, ep);
+        let t = chat_title(store, id, &model, &ep);
         let _ = store.update_session(id, Some(&t), None, None, None);
     }
     let title = store.session(id).ok().flatten().map(|s| s.title);
@@ -4052,6 +4349,76 @@ after they approve."
         tx,
         json!({"type": "done", "input_tokens": tin, "output_tokens": tout, "title": title, "context": context}),
     );
+    Outcome::Done
+}
+
+/// A reply that failed (no model left to try): the error is stored, so the chat shows it
+/// with Try again, and a chat with no title yet is named by its question's first words.
+fn fail_turn(
+    store: &Store,
+    id: &str,
+    tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    model: &str,
+    e: &str,
+) -> Outcome {
+    let _ = store.append(
+        id,
+        &NewMessage {
+            role: "assistant".into(),
+            content: String::new(),
+            meta: Some(json!({"error": e, "model": model})),
+            ..Default::default()
+        },
+        memora_state::now(),
+    );
+    send(tx, json!({"type": "error", "message": e}));
+    if store
+        .session(id)
+        .ok()
+        .flatten()
+        .is_some_and(|s| s.title == NEW_TITLE)
+    {
+        let first = first_words(store, id);
+        if !first.is_empty() {
+            let _ = store.update_session(id, Some(&first), None, None, None);
+        }
+    }
+    Outcome::Failed
+}
+
+/// The preference with the models to carry on with when a chat's model fails, in order
+/// (`["provider/model", …]`, five at most).
+const FALLBACKS: &str = "fallback_models";
+/// The preference with how hard models think: `auto` (the model's own), `off`, `low`,
+/// `medium` or `high`.
+const THINKING: &str = "thinking";
+
+/// The fallback models for a reply on `provider/model`: the owner's list, without that model,
+/// only providers that can be used now.
+fn fallback_chain(store: &Store, provider: &str, model: &str) -> Vec<(String, String)> {
+    let me = format!("{provider}/{model}");
+    let providers = store.providers().unwrap_or_default();
+    let mut out: Vec<(String, String)> = Vec::new();
+    for k in store
+        .prefs()
+        .unwrap_or_default()
+        .get(FALLBACKS)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        let Some((p, m)) = k.split_once('/') else {
+            continue;
+        };
+        let ok = providers
+            .iter()
+            .any(|x| x.id == p && x.enabled && (!x.api_key.is_empty() || x.kind == "custom"));
+        if k != me && ok && !m.is_empty() && !out.iter().any(|(a, b)| a == p && b == m) {
+            out.push((p.to_string(), m.to_string()));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

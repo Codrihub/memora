@@ -61,6 +61,74 @@ pub struct Options {
     pub max_output: Option<u64>,
     /// Ask for the model's thinking (summaries) where the provider offers it.
     pub think: bool,
+    /// How hard the model thinks (`low`, `medium`, `high`); `None` = the model's own default.
+    pub effort: Option<String>,
+}
+
+/// Models that refused an effort field: asked without one from then on.
+fn no_effort() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(Default::default)
+}
+
+fn takes_effort(model: &str) -> bool {
+    !no_effort().lock().is_ok_and(|s| s.contains(model))
+}
+
+fn refuse_effort(model: &str) {
+    if let Ok(mut s) = no_effort().lock() {
+        s.insert(model.to_string());
+    }
+}
+
+/// Whether a model can think (so the chat offers a thinking level): Claude models from 3.7
+/// on, OpenAI's reasoning models, and the open reasoning models known by name. A model that
+/// refused the thinking field is left out.
+pub fn can_think(kind: &str, style: &str, model: &str) -> bool {
+    if !thinks(model) {
+        return false;
+    }
+    let m = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    if kind == "anthropic" || style == "messages" || m.starts_with("claude") {
+        return !(m.starts_with("claude-3-") && !m.starts_with("claude-3-7"))
+            && !m.starts_with("claude-2")
+            && !m.starts_with("claude-instant");
+    }
+    if reasoning_model(&m) {
+        return true;
+    }
+    [
+        "think",
+        "reason",
+        "-r1",
+        "r1-",
+        "qwq",
+        "qwen3",
+        "deepseek",
+        "gemini-2.5",
+        "gemini-3",
+        "grok-3-mini",
+        "grok-4",
+        "glm-4.5",
+        "glm-4.6",
+        "glm-5",
+        "magistral",
+        "minimax-m",
+        "kimi-k2",
+        "gpt-oss",
+        "o3",
+        "o4",
+        "sonar-reasoning",
+        "phi-4-reasoning",
+        "nemotron",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
 }
 
 /// What streams out of a reply: its text, and the model's thinking where it shows it.
@@ -152,7 +220,7 @@ fn authed(ep: &Endpoint, req: ureq::Request) -> ureq::Request {
 
 /// An error body made short and readable: an HTML error page (a proxy's 502, say) becomes
 /// its title, whatever wrapped it stays, spaces are folded and the length is capped.
-fn condense_error(msg: &str) -> String {
+pub(crate) fn condense_error(msg: &str) -> String {
     let low = msg.to_ascii_lowercase();
     let mut out = msg.to_string();
     if let Some(start) = ["<!doctype", "<html"]
@@ -577,7 +645,14 @@ fn chat(
         body["temperature"] = json!(t);
     }
     if ask_reasoning {
-        body["reasoning"] = json!({"enabled": true});
+        body["reasoning"] = match &opts.effort {
+            Some(e) => json!({"effort": e}),
+            None => json!({"enabled": true}),
+        };
+    } else if ep.kind == "openai" && opts.think && reasoning_model(model) {
+        if let Some(e) = opts.effort.as_ref().filter(|_| takes_effort(model)) {
+            body["reasoning_effort"] = json!(e);
+        }
     }
     if let Some(n) = opts.max_output {
         // OpenAI's newer models only take max_completion_tokens; compatible servers take max_tokens.
@@ -751,6 +826,9 @@ fn responses(
     }
     if think {
         body["reasoning"] = json!({"summary": "auto"});
+        if let Some(e) = &opts.effort {
+            body["reasoning"]["effort"] = json!(e);
+        }
     }
     let resp = authed(ep, agent().post(&url(ep, "responses")))
         .set("Accept", "text/event-stream")
@@ -894,10 +972,21 @@ fn anthropic(
 ) -> Result<Turn, String> {
     let mut think = opts.think && thinks(model);
     let mut replay = true;
-    for _ in 0..3 {
-        match anthropic_once(ep, model, system, history, tools, opts, think, replay, on) {
+    let mut opts = opts.clone();
+    if !takes_effort(model) {
+        opts.effort = None;
+    }
+    for _ in 0..4 {
+        match anthropic_once(ep, model, system, history, tools, &opts, think, replay, on) {
             Err(e) if replay && e.contains("answered 400") && e.contains("signature") => {
                 replay = false
+            }
+            Err(e)
+                if opts.effort.is_some()
+                    && (rejects_field(&e, "effort") || rejects_field(&e, "output_config")) =>
+            {
+                refuse_effort(model);
+                opts.effort = None;
             }
             Err(e) if think && rejects_field(&e, "thinking") => {
                 refuse_thinking(model);
@@ -906,7 +995,7 @@ fn anthropic(
             other => return other,
         }
     }
-    anthropic_once(ep, model, system, history, tools, opts, false, false, on)
+    anthropic_once(ep, model, system, history, tools, &opts, false, false, on)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -936,6 +1025,9 @@ fn anthropic_once(
     }
     if think {
         body["thinking"] = json!({"type": "adaptive", "display": "summarized"});
+        if let Some(e) = &opts.effort {
+            body["output_config"] = json!({"effort": e});
+        }
     } else if let Some(t) = opts.temperature {
         body["temperature"] = json!(t.min(1.0));
     }

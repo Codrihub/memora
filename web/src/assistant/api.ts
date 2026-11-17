@@ -30,7 +30,12 @@ export interface Model {
   pinned: boolean;
   hidden: boolean;
   fetched: boolean;
+  /** The model can think: the chat offers a thinking level. */
+  thinks?: boolean;
 }
+
+/** How hard models think: the model's own default, off, or a level. */
+export type ThinkLevel = 'auto' | 'off' | 'low' | 'medium' | 'high';
 
 export interface Prefs {
   default_model?: string | null;
@@ -42,6 +47,9 @@ export interface Prefs {
   launcher?: boolean | null;
   /** "ask": changes wait for the owner's OK; "auto": Mnemo goes ahead. */
   permission?: 'ask' | 'auto' | null;
+  thinking?: ThinkLevel | null;
+  /** Models to carry on with when a chat's model fails, in order (`provider/model`, 5 at most). */
+  fallback_models?: string[] | null;
 }
 
 /** A question Mnemo asks with options to tap. */
@@ -150,7 +158,9 @@ export type ChatEvent =
   | ({ type: 'ask' } & Ask)
   | { type: 'compacting' }
   | { type: 'steered'; text: string }
-  | { type: 'compacted'; messages: number; tokens: number }
+  | { type: 'compacted'; messages: number; tokens: number; summary?: string }
+  | { type: 'compact_text'; delta: string }
+  | { type: 'fallback'; from: string; model: string; reason: string }
   | { type: 'notice'; text: string }
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
@@ -259,9 +269,9 @@ export const searchChats = (q: string): Promise<{ query: string; hits: SearchHit
   apiGet(`/api/assistant/search?q=${encodeURIComponent(q)}&limit=80`);
 /** Title prefix of the chats that answer an `@mnemo:` request written in a note. */
 export const NOTE_TASK_PREFIX = '@mnemo · ';
-export const compactSession = (id: string): Promise<{ ok: boolean; messages?: number; tokens?: number; reason?: string; context: ChatContext }> =>
+export const compactSession = (id: string): Promise<{ ok: boolean; messages?: number; tokens?: number; summary?: string; reason?: string; context: ChatContext }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/compact`, {});
-export const getSession = (id: string): Promise<{ session: Session; messages: Message[]; context: ChatContext | null; running?: boolean }> =>
+export const getSession = (id: string): Promise<{ session: Session; messages: Message[]; context: ChatContext | null; running?: boolean; queue?: QueueState }> =>
   apiGet(`/api/assistant/sessions/${encodeURIComponent(id)}`);
 export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean }): Promise<{ session: Session }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}`, b);
@@ -288,6 +298,67 @@ export const markSessionSeen = (id: string, messages: number): Promise<{ ok: boo
 export const deleteSession = (id: string): Promise<{ ok: boolean }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/delete`, {});
 
+/** This tab, so it can tell its own messages from other devices' in a chat's watch events. */
+export const CLIENT = Math.random().toString(36).slice(2, 10);
+
+/** The request a message goes with (time zone, attachments, model, answer). */
+export function chatBody(text: string, model: string | undefined, attach: Attach[], answer?: Answer): Record<string, unknown> {
+  // The device's time zone goes along, so Mnemo can tell the owner's local time.
+  let tz = '';
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    /* no Intl: the offset alone */
+  }
+  return {
+    text,
+    client: CLIENT,
+    ...(model ? { model } : {}),
+    ...(attach.length ? { attach: attach.map((a) => ({ kind: a.kind, path: a.path, title: a.title })) } : {}),
+    ...(tz ? { tz } : {}),
+    ...(answer ? { answer } : {}),
+    tz_offset: -new Date().getTimezoneOffset(),
+  };
+}
+
+/** A message waiting for the reply running in its chat (kept on the server, every device sees it). */
+export interface Queued {
+  id: number;
+  text: string;
+  attach: { kind: string; path: string; title?: string }[];
+  at: number;
+}
+export interface QueueState {
+  items: Queued[];
+  /** Paused after a reply failed: nothing goes out until a message is sent or the queue resumes. */
+  held: boolean;
+}
+const qurl = (id: string, rest = ''): string => `/api/assistant/sessions/${encodeURIComponent(id)}/queue${rest}`;
+/** Queue a message: it goes out when the reply running ends (at once when none runs). */
+export const queueAdd = (id: string, body: Record<string, unknown>): Promise<{ id: number; queue: QueueState }> => apiPost(qurl(id), body);
+/** Change a queued message: remove, move, or send it now (the reply running is cut for it). */
+export const queueOp = (id: string, qid: number, op: 'del' | 'up' | 'down' | 'move' | 'send', to = 0): Promise<QueueState> =>
+  apiPost(qurl(id, `/${qid}`), { op, to });
+export const queueClear = (id: string): Promise<QueueState> => apiPost(qurl(id, '/clear'), {});
+export const queueResume = (id: string): Promise<QueueState> => apiPost(qurl(id, '/resume'), {});
+
+/** What happens in a chat, as every device with it open hears it. */
+export type WatchEvent =
+  | { type: 'hello'; running: boolean }
+  | { type: 'user'; via: string; client: string | null; message: Message }
+  | { type: 'running' }
+  | { type: 'idle'; outcome: string }
+  | ({ type: 'queue' } & QueueState)
+  | { type: 'queue_error'; message: string }
+  | { type: 'compacted' }
+  | { type: 'reload' };
+
+/** Follow chat `id` until `signal` aborts (resolves when the stream ends). */
+export async function watchChat(id: string, signal: AbortSignal, onEvent: (e: WatchEvent) => void): Promise<void> {
+  const res = await fetch(`/api/assistant/sessions/${encodeURIComponent(id)}/watch`, { credentials: 'same-origin', headers: { accept: 'text/event-stream' }, signal, cache: 'no-store' });
+  await readEvents(res, onEvent as unknown as (e: ChatEvent) => void);
+}
+
 /** Send a message and read the reply as it streams. Resolves when the stream ends. */
 export function streamChat(
   id: string,
@@ -298,29 +369,16 @@ export function streamChat(
   onEvent: (e: ChatEvent) => void,
   answer?: Answer,
 ): Promise<void> {
-  // The device's time zone goes along, so Mnemo can tell the owner's local time.
-  let tz = '';
-  try {
-    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-  } catch {
-    /* no Intl: the offset alone */
-  }
-  const body = {
-    text,
-    ...(model ? { model } : {}),
-    ...(attach.length ? { attach: attach.map((a) => ({ kind: a.kind, path: a.path })) } : {}),
-    ...(tz ? { tz } : {}),
-    ...(answer ? { answer } : {}),
-    tz_offset: -new Date().getTimezoneOffset(),
-  };
+  const body = chatBody(text, model, attach, answer);
   return streamPost(`/api/assistant/sessions/${encodeURIComponent(id)}/chat`, body, signal, onEvent);
 }
 
 /** Address of a chat as a Markdown file (`GET` downloads it). */
 export const exportUrl = (id: string): string => `/api/assistant/sessions/${encodeURIComponent(id)}/export`;
 
-/** Give the reply running in chat `id` a message it reads before its next step. */
-export const steerChat = (id: string, text: string): Promise<{ ok: boolean }> => apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/steer`, { text });
+/** Send a message now: the reply running is cut where it is and Mnemo answers this one. */
+export const steerChat = (id: string, body: Record<string, unknown>): Promise<{ ok: boolean; queue: QueueState }> =>
+  apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/steer`, body);
 
 /** Stop the reply running in chat `id` (leaving a chat does not stop it). */
 export const stopChat = (id: string): Promise<{ stopped: boolean }> => apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/stop`, {});

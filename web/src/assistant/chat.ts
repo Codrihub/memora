@@ -229,6 +229,15 @@ export interface ChatOptions {
   onMessages?: () => void;
 }
 
+/** Thinking levels, for models that can think. */
+const THINK_LEVELS: { v: A.ThinkLevel; label: string; hint: string }[] = [
+  { v: 'auto', label: 'Auto', hint: 'The model decides how much to think' },
+  { v: 'off', label: 'Off', hint: 'Answer straight away' },
+  { v: 'low', label: 'Low', hint: 'A little thinking, quick' },
+  { v: 'medium', label: 'Medium', hint: 'Balanced' },
+  { v: 'high', label: 'High', hint: 'Think it through, slower' },
+];
+
 export class ChatView {
   readonly el: HTMLElement;
   private downBtn!: HTMLButtonElement;
@@ -245,11 +254,20 @@ export class ChatView {
     if (v && !document.hidden && this.el.getClientRects().length) markSeen(v.id, v.messages);
   }
   private messages: A.Message[] = [];
-  /** Messages typed while Mnemo works: sent one by one when each reply ends. */
-  private queue: { id: number; text: string; attach: A.Attach[] }[] = [];
-  private qid = 0;
-  /** The owner pressed Stop: the queue waits instead of going out. */
-  private halted = false;
+  /** Messages typed while Mnemo works, kept on the server (every device sees the same
+   *  queue): sent one by one as each reply ends, whether it finished, was stopped or cut. */
+  private queue: A.Queued[] = [];
+  /** The queue is paused after a failed reply (Try again comes first). */
+  private qHeld = false;
+  /** The whole queue is shown (otherwise three rows, the rest by scrolling). */
+  private qAll = false;
+  /** Following this chat for other devices' messages, replies and queue changes. */
+  private watchCtrl: AbortController | null = null;
+  private watchSid = '';
+  /** The owner sent a message now: the reply running ends as "cut", not "stopped". */
+  private cutting = false;
+  /** A reply was asked to stop: the button waits for it to end. */
+  private stopping = false;
   /** The question an "Other" answer goes to (set by tapping Other). */
   /** Bumped by every reply watched and every detach, so a left reply cannot touch this view. */
   private run = 0;
@@ -297,6 +315,7 @@ export class ChatView {
             <button type="button" class="mn-plus" aria-label="Attach notes or folders from your vault" title="Attach notes or folders from your vault">${icon('plus')}</button>
             <button type="button" class="mn-perm" hidden></button>
             <span class="mn-grow"></span>
+            <span class="mn-think-slot"></span>
             <span class="mn-model-slot"></span>
             <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
             <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
@@ -413,21 +432,28 @@ export class ChatView {
     const qbox = this.el.querySelector<HTMLElement>('.mn-queue')!;
     qbox.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-qa]');
-      const row = b?.closest<HTMLElement>('[data-q]');
-      if (!b || !row) return;
-      const id = Number(row.dataset.q);
-      const i = this.queue.findIndex((q) => q.id === id);
-      if (i < 0) return;
-      const act = b.dataset.qa;
-      if (act === 'del') this.queue.splice(i, 1);
-      else if (act === 'up' && i > 0) [this.queue[i - 1], this.queue[i]] = [this.queue[i], this.queue[i - 1]];
-      else if (act === 'down' && i < this.queue.length - 1) [this.queue[i + 1], this.queue[i]] = [this.queue[i], this.queue[i + 1]];
-      else if (act === 'steer') {
-        void this.steerNow(this.queue[i].text, id);
+      if (!b || !this.session) return;
+      const sid = this.session.id;
+      const act = b.dataset.qa!;
+      const done = (q: A.QueueState): void => this.setQueue(q);
+      const fail = (err: unknown): void => toast((err as Error).message, 'err');
+      if (act === 'all') {
+        this.qAll = !this.qAll;
+        this.paintQueue();
         return;
       }
-      this.paintQueue();
+      if (act === 'clear') return void A.queueClear(sid).then(done, fail);
+      if (act === 'resume') return void A.queueResume(sid).then(done, fail);
+      const row = b.closest<HTMLElement>('[data-q]');
+      if (!row) return;
+      const qid = Number(row.dataset.q);
+      if (act === 'send') {
+        if (this.busy) this.cutting = true;
+        return void A.queueOp(sid, qid, 'send').then(done, fail);
+      }
+      if (act === 'del' || act === 'up' || act === 'down') void A.queueOp(sid, qid, act).then(done, fail);
     });
+    qbox.addEventListener('scroll', () => this.fadeQueue(), { capture: true, passive: true });
     // Drag a queued message onto another to reorder.
     let dragQ = 0;
     qbox.addEventListener('dragstart', (e) => {
@@ -438,13 +464,14 @@ export class ChatView {
     });
     qbox.addEventListener('drop', (e) => {
       const to = Number((e.target as HTMLElement).closest<HTMLElement>('[data-q]')?.dataset.q || 0);
-      if (!dragQ || !to || to === dragQ) return;
+      if (!dragQ || !to || to === dragQ || !this.session) return;
       e.preventDefault();
-      const from = this.queue.findIndex((q) => q.id === dragQ);
-      const item = this.queue.splice(from, 1)[0];
-      this.queue.splice(this.queue.findIndex((q) => q.id === to), 0, item);
+      const at = this.queue.findIndex((q) => q.id === to);
+      void A.queueOp(this.session.id, dragQ, 'move', Math.max(0, at)).then(
+        (q) => this.setQueue(q),
+        (err) => toast((err as Error).message, 'err'),
+      );
       dragQ = 0;
-      this.paintQueue();
     });
     this.attEl.addEventListener('click', (e) => {
       const arrow = (e.target as HTMLElement).closest<HTMLElement>('[data-car]');
@@ -499,6 +526,8 @@ export class ChatView {
 
   destroy(): void {
     this.detach();
+    this.unwatch();
+    this.thinkSel?.close();
     this.offOutside();
     this.offState();
     this.select?.close();
@@ -524,67 +553,215 @@ export class ChatView {
     return artifactsOf(this.messages);
   }
 
-  /** Put what is typed in the queue (Mnemo is busy). */
+  /** Put what is typed in the queue (Mnemo is busy): it goes out when the reply ends. */
   private enqueue(): void {
     const text = this.input.value.trim();
-    if (!text) return;
-    this.queue.push({ id: ++this.qid, text, attach: this.attach.slice() });
+    if (!text || !this.session) return;
+    const body = A.chatBody(text, this.model || undefined, this.attach);
+    const att = this.attach.slice();
     this.input.value = '';
     this.attach = [];
     this.paintAtt();
     this.grow();
+    this.paintSend();
+    void A.queueAdd(this.session.id, body).then(
+      (r) => this.setQueue(r.queue),
+      (e) => {
+        toast((e as Error).message, 'err');
+        this.input.value = text;
+        this.attach = att;
+        this.paintAtt();
+        this.grow();
+      },
+    );
+  }
+
+  /** Send a message now: a reply running is cut where it is and this one is answered as a new
+   *  message (Ctrl/Cmd+Enter while Mnemo works). */
+  private async steerNow(raw: string): Promise<void> {
+    const text = raw.trim();
+    if (!text || !this.session) return;
+    const body = A.chatBody(text, this.model || undefined, this.attach);
+    this.input.value = '';
+    this.attach = [];
+    this.paintAtt();
+    this.grow();
+    if (this.busy) this.cutting = true;
+    try {
+      const r = await A.steerChat(this.session.id, body);
+      this.setQueue(r.queue);
+    } catch (e) {
+      this.cutting = false;
+      toast((e as Error).message, 'warn');
+      this.input.value = text;
+      this.grow();
+    }
+    this.paintSend();
+  }
+
+  private setQueue(q: A.QueueState | undefined): void {
+    this.queue = q?.items || [];
+    this.qHeld = !!q?.held;
     this.paintQueue();
     this.paintSend();
   }
 
-  private sendQueued(): void {
-    if (this.busy) return;
-    const next = this.queue.shift();
-    this.paintQueue();
-    if (!next) return;
-    this.attach = next.attach;
-    this.paintAtt();
-    void this.send(next.text);
-  }
-
-  /** Give the running reply a message it reads before its next step. */
-  private async steerNow(raw: string, fromQueue?: number): Promise<void> {
-    const text = raw.trim();
-    if (!text || !this.session) return;
-    try {
-      await A.steerChat(this.session.id, text);
-      if (fromQueue) this.queue = this.queue.filter((q) => q.id !== fromQueue);
-      else {
-        this.input.value = '';
-        this.grow();
-      }
-      this.paintQueue();
-      this.paintSend();
-    } catch (e) {
-      toast(`${(e as Error).message}`, 'warn');
-      if (!fromQueue) this.enqueue();
-    }
-  }
-
-  /** The queue above the prompt: reorder, steer now, or drop each message. */
+  /** The queue above the prompt: three rows (scroll for more, or Show all), each with Send
+   *  now (cuts the reply running), move up and down, and remove. */
   private paintQueue(): void {
     const box = this.el.querySelector<HTMLElement>('.mn-queue')!;
     box.hidden = !this.queue.length;
     if (!this.queue.length) {
       box.innerHTML = '';
+      this.qAll = false;
       return;
     }
-    box.innerHTML = `<div class="mn-queue-h">${icon('chat')}<span>Queued: goes out when ${A.MNEMO} finishes</span></div>${this.queue
+    const n = this.queue.length;
+    const head = this.qHeld
+      ? `<span class="mn-queue-ht warn">${icon('alert')}Paused after an error · ${n} waiting</span>`
+      : `<span class="mn-queue-ht">${icon('chat')}${n} queued · ${this.busy ? `goes out when ${A.MNEMO} finishes` : 'sending…'}</span>`;
+    const tools = [
+      this.qHeld ? `<button type="button" class="mn-qh-b acc" data-qa="resume" title="Send the queue now">${icon('send')}<span>Resume</span></button>` : '',
+      n > 3 ? `<button type="button" class="mn-qh-b" data-qa="all" aria-expanded="${this.qAll}">${this.qAll ? 'Show less' : `Show all (${n})`}</button>` : '',
+      `<button type="button" class="mn-qh-b" data-qa="clear" title="Remove every queued message">${icon('trash')}<span>Clear</span></button>`,
+    ].join('');
+    const sendTitle = this.busy ? 'Send now: cuts the reply where it is and answers this message' : 'Send now';
+    box.innerHTML = `<div class="mn-queue-h">${head}<span class="mn-grow"></span>${tools}</div><div class="mn-q-list${this.qAll ? ' all' : ''}">${this.queue
       .map(
         (q, i) => `<div class="mn-q-i" data-q="${q.id}" draggable="true"><span class="mn-q-n">${i + 1}</span><span class="mn-q-t" title="${attr(q.text)}">${esc(q.text)}${
           q.attach.length ? ` <small>+${q.attach.length}</small>` : ''
-        }</span><span class="mn-q-a">${
-          this.busy ? `<button type="button" class="mn-ibtn" data-qa="steer" title="Steer this reply now: Mnemo reads it before its next step" aria-label="Steer now">${icon('enter')}</button>` : ''
-        }<button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
-          i === this.queue.length - 1 ? ' disabled' : ''
+        }</span><span class="mn-q-a"><button type="button" class="mn-ibtn" data-qa="send" title="${sendTitle}" aria-label="Send now">${icon('enter')}</button><button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
+          i === n - 1 ? ' disabled' : ''
         }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="Remove" aria-label="Remove">${icon('close')}</button></span></div>`,
       )
-      .join('')}`;
+      .join('')}</div>`;
+    requestAnimationFrame(() => this.fadeQueue());
+  }
+
+  /** Fade the queue's top or bottom edge while more rows are that way. */
+  private fadeQueue(): void {
+    const l = this.el.querySelector<HTMLElement>('.mn-q-list');
+    if (!l) return;
+    const max = l.scrollHeight - l.clientHeight;
+    l.classList.toggle('ft', l.scrollTop > 2);
+    l.classList.toggle('fb', max - l.scrollTop > 2);
+  }
+
+  // ---- following the chat on every device ----
+
+  /** Follow chat `sid`: messages sent from other devices (or out of the queue) show up, their
+   *  replies stream here too, and the queue stays the same everywhere. */
+  private watch(sid: string): void {
+    if (this.watchSid === sid && this.watchCtrl) return;
+    this.unwatch();
+    this.watchSid = sid;
+    const ctrl = new AbortController();
+    this.watchCtrl = ctrl;
+    let wait = 1000;
+    const loop = async (): Promise<void> => {
+      while (!ctrl.signal.aborted && this.watchSid === sid) {
+        const t0 = Date.now();
+        try {
+          await A.watchChat(sid, ctrl.signal, (ev) => this.onWatch(sid, ev));
+        } catch {
+          /* dropped: try again below */
+        }
+        if (ctrl.signal.aborted) return;
+        if (Date.now() - t0 > 20_000) wait = 1000;
+        await new Promise((r) => window.setTimeout(r, document.hidden ? Math.max(wait, 5000) : wait));
+        wait = Math.min(wait * 2, 30_000);
+        // Back after a gap: catch up on what happened meanwhile.
+        if (!ctrl.signal.aborted && this.watchSid === sid && !this.busy) void this.refresh(sid);
+      }
+    };
+    void loop();
+  }
+
+  private unwatch(): void {
+    this.watchCtrl?.abort();
+    this.watchCtrl = null;
+    this.watchSid = '';
+  }
+
+  private onWatch(sid: string, ev: A.WatchEvent): void {
+    if (this.session?.id !== sid) return;
+    switch (ev.type) {
+      case 'hello':
+        if (ev.running && !this.busy) this.follow(sid);
+        break;
+      case 'user': {
+        // This tab's own message is already on screen.
+        if (ev.client === A.CLIENT && ev.via === 'chat') break;
+        if (this.log.querySelector(`.mn-u[data-mid="${ev.message.id}"]`)) break;
+        if (!this.messages.some((m) => m.id === ev.message.id)) this.messages.push(ev.message);
+        this.log.querySelector('.mn-hello')?.remove();
+        const ub = this.userBubble(ev.message.content, ev.message.created_at, (ev.message.meta?.attach as A.Attach[] | undefined) || []);
+        ub.dataset.mid = String(ev.message.id);
+        this.log.append(ub);
+        this.log.querySelectorAll<HTMLElement>('.mn-ask:not(.done)').forEach(skipAsk);
+        this.paintRail();
+        this.scrollEnd(true);
+        requestAnimationFrame(() => ub.querySelectorAll<HTMLElement>('.mn-car').forEach(syncCarousel));
+        break;
+      }
+      case 'running':
+        if (!this.busy) this.follow(sid);
+        else this.runAfter = true;
+        break;
+      case 'idle':
+        // This tab's own reply ending re-reads the chat itself.
+        if (!this.busy && Date.now() - this.lastEnd > 2500) void this.refresh(sid);
+        break;
+      case 'queue':
+        this.setQueue(ev);
+        break;
+      case 'queue_error':
+        toast(`A queued message could not go out: ${ev.message}`, 'warn');
+        break;
+      case 'compacted':
+      case 'reload':
+        if (!this.busy) void this.refresh(sid);
+        break;
+    }
+  }
+
+  /** A reply started while this tab was streaming another: follow it once that one ends. */
+  private runAfter = false;
+  /** When this tab last finished streaming a reply. */
+  private lastEnd = 0;
+
+  /** Watch the reply running in this chat (started elsewhere, or out of the queue). */
+  private follow(sid: string): void {
+    if (this.busy || this.session?.id !== sid) return;
+    const lastU = [...this.log.querySelectorAll<HTMLElement>('.mn-u[data-mid]')].pop();
+    this.setBusy(true);
+    void this.stream((signal, on) => A.streamLive(sid, signal, on), Number(lastU?.dataset.mid || 0), true);
+  }
+
+  /** Read the chat again and show it as stored, without the loading screen (another device
+   *  added to it, or a reply ended while this tab was not streaming it). */
+  private async refresh(sid: string): Promise<void> {
+    try {
+      const r = await A.getSession(sid);
+      if (this.session?.id !== sid || this.busy) return;
+      const lastU = r.running ? [...r.messages].reverse().find((m) => m.role === 'user')?.id || 0 : 0;
+      const msgs = lastU ? r.messages.filter((m) => m.id <= lastU) : r.messages;
+      const same = msgs.length === this.messages.length && msgs[msgs.length - 1]?.id === this.messages[this.messages.length - 1]?.id;
+      this.session = r.session;
+      this.setQueue(r.queue);
+      if (!same) {
+        const atEnd = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 80;
+        const top = this.log.scrollTop;
+        this.messages = msgs;
+        this.renderAll();
+        if (!atEnd) this.log.scrollTop = top;
+        this.o.onMessages?.();
+      }
+      if (r.context) this.setContext(r.context);
+      if (lastU) this.follow(sid);
+    } catch {
+      /* the next event or open catches up */
+    }
   }
 
   /** A reply is streaming. */
@@ -752,12 +929,22 @@ export class ChatView {
       const live = this.compactLive();
       this.log.append(live);
       this.scrollEnd(true);
+      const sid = this.session.id;
       try {
-        const res = await A.compactSession(this.session.id);
-        live.remove();
-        toast(res.ok ? `Compacted ${res.messages} older messages into a summary` : res.reason || 'Nothing to compact yet', res.ok ? 'ok' : 'info');
-        if (res.ok) await this.open(this.session.id);
-        else this.setContext(res.context);
+        const res = await A.compactSession(sid);
+        if (res.ok) {
+          // The summary is right there: open the divider to read it.
+          live.replaceWith(this.compactNote(res.messages || 0, res.summary || '', Number(live.dataset.t0)));
+          toast(`Compacted ${res.messages} older messages into a summary`, 'ok');
+          this.setContext(res.context);
+          void A.getSession(sid).then((r) => {
+            if (this.session?.id === sid && !this.busy) this.messages = r.messages;
+          });
+        } else {
+          live.remove();
+          toast(res.reason || 'Nothing to compact yet', 'info');
+          this.setContext(res.context);
+        }
       } catch (err) {
         live.remove();
         toast((err as Error).message, 'err');
@@ -1130,6 +1317,8 @@ export class ChatView {
   blank(): void {
     this.leaveFleeting();
     this.detach();
+    this.unwatch();
+    this.setQueue(undefined);
     this.session = null;
     this.messages = [];
     this.model = '';
@@ -1143,7 +1332,11 @@ export class ChatView {
   }
 
   async open(id: string): Promise<void> {
-    if (this.session?.id !== id) this.leaveFleeting();
+    if (this.session?.id !== id) {
+      this.leaveFleeting();
+      this.unwatch();
+      this.setQueue(undefined);
+    }
     this.detach();
     this.log.innerHTML = `<div class="mn-loading">${markHTML('lg pulse')}<span>Opening the chat…</span></div>`;
     try {
@@ -1157,6 +1350,8 @@ export class ChatView {
       this.paintAtt();
       this.paintModels();
       this.renderAll();
+      this.setQueue(r.queue);
+      this.watch(id);
       this.ctx = null;
       if (r.context) this.setContext(r.context);
       else this.paintMeter(this.messages.reduce((n, m) => n + Math.ceil(m.content.length / 4), 0), this.contextWindow());
@@ -1245,13 +1440,38 @@ export class ChatView {
       });
       this.modelSlot.append(this.select.el);
     } else this.select.setOptions(opts, value);
+    this.paintThink();
     this.paintPin();
     this.paintPerm();
     if (!this.session && !this.ctx) this.paintMeter(0, this.contextWindow());
   }
 
   private async chooseModel(key: string): Promise<void> {
+    const prev = this.model || A.fallbackModel(A.mnemoState()!);
+    if (key === prev) return;
+    // A chat that has begun: another model may answer a little differently from here on.
+    if (this.session && this.messages.length) {
+      const st = A.mnemoState();
+      const name = (k: string): string => (st ? A.modelLabel(st, k) : k);
+      const ok = await new Promise<boolean>((done) => {
+        Modal.open({
+          title: 'Switch the model for this chat?',
+          body: `<p>This chat so far was answered by <b>${esc(name(prev))}</b>. From the next message on, <b>${esc(name(key))}</b> answers, with the whole chat as context. Its answers may read a little differently${
+            this.ctx && this.ctx.used > 0 ? ', and its memory for this chat may be smaller or larger' : ''
+          }.</p>`,
+          actions: [
+            { label: 'Keep ' + name(prev), cls: 'ghost', run: () => (Modal.close(), done(false)) },
+            { label: 'Switch', cls: 'primary', run: () => (Modal.close(), done(true)) },
+          ],
+        });
+      });
+      if (!ok) {
+        this.select?.set(prev, false);
+        return;
+      }
+    }
     this.model = key;
+    this.paintThink();
     // Another model has another window; the server tells the exact figure on the next answer.
     if (this.ctx) this.ctx = { ...this.ctx, window: this.contextWindow(), model: key };
     this.paintMeter(Number(this.meter.dataset.used || 0), this.contextWindow());
@@ -1264,6 +1484,47 @@ export class ChatView {
       toast((e as Error).message, 'err');
     }
   }
+
+  /** The thinking level chip, for models that can think (one level for every chat, saved
+   *  for the owner on every device). */
+  private paintThink(): void {
+    const slot = this.el.querySelector<HTMLElement>('.mn-think-slot');
+    const s = A.mnemoState();
+    if (!slot || !s) return;
+    const key = this.model || this.select?.value || A.fallbackModel(s);
+    const m = s.models.find((x) => A.modelKey(x) === key);
+    if (!m?.thinks) {
+      this.thinkSel?.close();
+      this.thinkSel = null;
+      slot.innerHTML = '';
+      return;
+    }
+    const level = (s.prefs.thinking || 'auto') as A.ThinkLevel;
+    const opts: SelectOption[] = THINK_LEVELS.map((l) => ({ value: l.v, label: l.label, hint: l.hint }));
+    if (this.thinkSel) {
+      this.thinkSel.setOptions(opts, level);
+      return;
+    }
+    this.thinkSel = createSelect({
+      options: opts,
+      value: level,
+      label: 'Thinking',
+      className: 'mn-model mn-think',
+      align: 'end',
+      minWidth: 230,
+      render: (o) => `${icon('brain')}<span class="mn-model-v">${o ? esc(o.value === 'auto' ? 'Think' : o.label) : 'Think'}</span>`,
+      onChange: (v) => {
+        void A.savePrefs({ thinking: v as A.ThinkLevel }).then(
+          () => toast(v === 'off' ? 'Thinking off: quicker, plainer answers' : v === 'auto' ? 'Thinking: the model decides how much' : `Thinking: ${v}`, 'ok'),
+          (e) => toast((e as Error).message, 'err'),
+        );
+      },
+    });
+    slot.innerHTML = '';
+    slot.append(this.thinkSel.el);
+  }
+
+  private thinkSel: Select | null = null;
 
   private paintMeter(used: number, window: number): void {
     const pct = window ? Math.min(100, (used / window) * 100) : 0;
@@ -1468,6 +1729,7 @@ export class ChatView {
           md.dataset.raw = m.content;
           md.dataset.mid = String(m.id);
           body.append(md);
+          if (meta.stopped === true) body.insertAdjacentHTML('beforeend', `<div class="mn-notice cut">${icon('stop')}<span>Stopped here</span></div>`);
         }
         for (const c of m.tool_calls || []) {
           if (c.name === ASK) body.append(askEl({ id: c.id, ...(askOf(c.arguments) || { question: '', options: [], allow_other: true }) }, answerTo(this.messages, c.id)));
@@ -1855,11 +2117,24 @@ export class ChatView {
   // ---- sending ----
 
   /** The owner pressed Stop: end the reply on the server too. */
+  /** Stop the reply: what it wrote so far stays, and the next queued message goes out. The
+   *  stream ends by itself once the server stopped it (cut loose after a few seconds). */
   stop(): void {
-    if (this.busy) this.halted = true;
-    if (this.busy && this.session) void A.stopChat(this.session.id).catch(() => undefined);
-    this.ctrl?.abort();
-    this.ctrl = null;
+    if (!this.busy || !this.session) return;
+    const ctrl = this.ctrl;
+    this.stopping = true;
+    this.paintSend();
+    void A.stopChat(this.session.id).then(
+      (r) => {
+        if (!r.stopped && this.ctrl === ctrl) ctrl?.abort();
+      },
+      () => {
+        if (this.ctrl === ctrl) ctrl?.abort();
+      },
+    );
+    window.setTimeout(() => {
+      if (this.ctrl === ctrl && this.stopping) ctrl?.abort();
+    }, 6000);
   }
 
   /** Stop watching (another chat opens, a new chat starts): the reply goes on on the
@@ -1902,7 +2177,16 @@ export class ChatView {
     const queue = this.busy && !stop;
     this.sendBtn.innerHTML = icon(stop ? 'stop' : 'send');
     this.sendBtn.classList.toggle('queue', queue);
-    const t = stop ? 'Stop' : queue ? 'Add to the queue (Enter) · Ctrl+Enter steers this reply now' : 'Send (Enter)';
+    this.sendBtn.classList.toggle('stopping', stop && this.stopping);
+    const t = stop
+      ? this.stopping
+        ? 'Stopping…'
+        : this.queue.length
+          ? 'Stop this reply (the next queued message goes out)'
+          : 'Stop'
+      : queue
+        ? 'Add to the queue (Enter) · Ctrl+Enter sends it now, cutting this reply'
+        : 'Send (Enter)';
     this.sendBtn.title = t;
     this.sendBtn.setAttribute('aria-label', stop ? 'Stop' : queue ? 'Add to the queue' : 'Send');
   }
@@ -1922,6 +2206,7 @@ export class ChatView {
         // The model the picker shows is the one the chat uses.
         if (!this.model) this.model = this.select?.value || A.fallbackModel(s);
         this.session = (await A.newSession(this.newScope(), this.model, this.fleetingOn)).session;
+        this.watch(this.session.id);
                 this.log.innerHTML = '';
         this.o.onChange?.(this.session);
       }
@@ -1942,7 +2227,23 @@ export class ChatView {
     const sid0 = this.session!.id;
     // A new message that answers no question leaves the open questions skipped.
     if (!answer) this.log.querySelectorAll<HTMLElement>('.mn-ask:not(.done)').forEach(skipAsk);
-    await this.stream((signal, on) => A.streamChat(sid0, text, this.model || undefined, att, signal, on, answer));
+    const ub = this.log.querySelector<HTMLElement>('.mn-u:last-of-type');
+    await this.stream(async (signal, on) => {
+      try {
+        await A.streamChat(sid0, text, this.model || undefined, att, signal, on, answer);
+      } catch (e) {
+        // A reply started meanwhile (from the queue or another device): this one waits its turn.
+        if (/still answering/i.test((e as Error).message)) {
+          ub?.remove();
+          const r = await A.queueAdd(sid0, A.chatBody(text, this.model || undefined, att, answer));
+          this.setQueue(r.queue);
+          const q = new Error('queued');
+          q.name = 'Queued';
+          throw q;
+        }
+        throw e;
+      }
+    });
   }
 
   /** Run the turn of the owner's message `uid` again: Regenerate on a reply, Try again on a
@@ -2021,6 +2322,9 @@ export class ChatView {
     this.ctrl = new AbortController();
     const sid = this.session!.id;
     let dropped = false;
+    let gone = false;
+    // A reply that ends without "done" or an error was stopped or cut on the server.
+    let ended = false;
     try {
       await start(this.ctrl.signal, (ev) => {
         got = true;
@@ -2046,12 +2350,46 @@ export class ChatView {
             turn.before(this.compactLive());
             this.scrollEnd();
             break;
+          case 'compact_text': {
+            // The summary shows as it is written, under the working divider.
+            const live = this.log.querySelector<HTMLElement>('.mn-compact.live');
+            if (!live) break;
+            let b = live.querySelector<HTMLElement>('.mn-compact-live-b');
+            if (!b) {
+              live.querySelector('.mn-compact-why')?.remove();
+              b = el('div', 'mn-md mn-compact-live-b');
+              b.dataset.raw = '';
+              live.append(b);
+            }
+            b.dataset.raw += ev.delta;
+            b.innerHTML = renderReply(b.dataset.raw || '', true);
+            b.scrollTop = b.scrollHeight;
+            break;
+          }
           case 'compacted': {
             const live = this.log.querySelector<HTMLElement>('.mn-compact.live');
-            const done = this.compactNote(ev.messages, '', live ? Number(live.dataset.t0) : 0);
+            const summary = ev.summary || live?.querySelector<HTMLElement>('.mn-compact-live-b')?.dataset.raw || '';
+            const done = this.compactNote(ev.messages, summary, live ? Number(live.dataset.t0) : 0);
             if (live) live.replaceWith(done);
             else turn.before(done);
             think(true);
+            break;
+          }
+          case 'fallback': {
+            // The model failed: what it began is struck out and the next one answers.
+            if (md) md.classList.add('mn-cut');
+            closeText();
+            const name = (k: string): string => {
+              const st = A.mnemoState();
+              return st ? A.modelLabel(st, k) : k;
+            };
+            body.insertAdjacentHTML(
+              'beforeend',
+              `<div class="mn-notice fb">${icon('refresh')}<span>${esc(name(ev.from))} did not answer (${esc(ev.reason)}). Carrying on with <b>${esc(name(ev.model))}</b>.</span></div>`,
+            );
+            model = ev.model;
+            think(true);
+            this.scrollEnd();
             break;
           }
           case 'notice':
@@ -2101,11 +2439,13 @@ export class ChatView {
             break;
           }
           case 'error':
+            ended = true;
             closeText();
             think(false);
             body.append(this.errorCard(ev.message));
             break;
           case 'done':
+            ended = true;
             think(false);
             closeText();
             this.footer(turn, model, ev.input_tokens, ev.output_tokens);
@@ -2116,8 +2456,13 @@ export class ChatView {
       });
     } catch (e) {
       const err = e as Error;
-      if (err.name === 'AbortError') {
-        if (my === this.run) body.insertAdjacentHTML('beforeend', `<div class="mn-notice">${icon('stop')}<span>Stopped.</span></div>`);
+      if (err.name === 'Queued') {
+        gone = true;
+      } else if (err.name === 'AbortError') {
+        if (my === this.run && this.stopping) {
+          ended = true;
+          body.insertAdjacentHTML('beforeend', `<div class="mn-notice cut">${icon('stop')}<span>Stopped</span></div>`);
+        } else if (my === this.run) ended = true;
       } else if (lostLink(err)) {
         // The connection dropped (the tab went to the background, the page was left, the
         // network blinked): the reply goes on on the server, so watch it again, no error.
@@ -2136,17 +2481,35 @@ export class ChatView {
         this.reconnect(sid);
         return;
       }
+      // Sent while a reply had just started elsewhere: the message waits in the queue.
+      if (gone) {
+        turn.remove();
+        this.ctrl = null;
+        this.setBusy(false);
+        return;
+      }
       // The reply ended just before we came to watch it: show the stored chat instead.
       if (live && !got) {
         turn.remove();
         this.ctrl = null;
+        this.stopping = false;
         this.setBusy(false);
-        void this.open(sid);
+        void this.refresh(sid);
         return;
       }
       if (frame) cancelAnimationFrame(frame);
       think(false);
       closeText();
+      if (!ended) {
+        body.insertAdjacentHTML(
+          'beforeend',
+          this.cutting
+            ? `<div class="mn-notice cut">${icon('enter')}<span>Cut here for your newer message</span></div>`
+            : `<div class="mn-notice cut">${icon('stop')}<span>Stopped</span></div>`,
+        );
+      }
+      this.cutting = false;
+      this.stopping = false;
       this.finishAct(body, Math.round(performance.now() - t0));
       turn.classList.remove('live');
       if (!body.childElementCount) body.append(this.errorCard('No reply came back.'));
@@ -2157,24 +2520,29 @@ export class ChatView {
         this.o.onChange?.(this.session);
       }
       if (wrote) void hooks.loadCore();
-      // The next queued message goes out by itself (not after Stop).
-      const halted = this.halted;
-      this.halted = false;
-      if (this.queue.length && !halted) window.setTimeout(() => this.sendQueued(), 400);
-      // Keep the stored transcript in step (the next open reads it again anyway).
+      // The next queued message goes out on the server by itself; its reply shows here
+      // through the chat's watch. Keep the stored transcript in step meanwhile.
+      const runAfter = this.runAfter;
+      this.runAfter = false;
+      this.lastEnd = Date.now();
       void A.getSession(sid)
         .then((r) => {
           if (this.session?.id === sid) {
             this.messages = r.messages;
             this.session = r.session;
             this.setContext(r.context);
+            this.setQueue(r.queue);
             this.o.onMessages?.();
-            // The new message and its turn learn their ids (Try again, Regenerate, search).
-            const lastU = [...r.messages].reverse().find((m) => m.role === 'user');
-            const ubs = this.log.querySelectorAll<HTMLElement>('.mn-u');
-            const lastB = ubs[ubs.length - 1];
-            if (lastU && lastB && !lastB.dataset.mid) lastB.dataset.mid = String(lastU.id);
-            if (lastU) turn.dataset.uid = String(lastU.id);
+            // The message sent from here and its turn learn their ids (Try again, Regenerate).
+            let prevU = turn.previousElementSibling as HTMLElement | null;
+            while (prevU && !prevU.classList.contains('mn-u')) prevU = prevU.previousElementSibling as HTMLElement | null;
+            if (prevU && !prevU.dataset.mid) {
+              const known = new Set(Array.from(this.log.querySelectorAll<HTMLElement>('.mn-u[data-mid]')).map((b) => Number(b.dataset.mid)));
+              const mine = r.messages.filter((m) => m.role === 'user' && !m.meta?.via && !known.has(m.id)).pop();
+              if (mine) prevU.dataset.mid = String(mine.id);
+            }
+            if (prevU?.dataset.mid) turn.dataset.uid = prevU.dataset.mid;
+            if ((r.running || runAfter) && !this.busy) this.follow(sid);
             // Show the summary text in the note added while streaming.
             const c = r.messages.filter((m) => m.meta?.compact === true).pop();
             const live = Array.from(this.log.querySelectorAll<HTMLElement>('.mn-compact')).pop();

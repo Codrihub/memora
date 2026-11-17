@@ -1203,6 +1203,19 @@ fn stream_reply(link: &Link, path: &str, body: Value) -> Result<()> {
             let _ = writeln!(out, "  {}", style(ev["text"].as_str().unwrap_or("")).dim());
             at_line_start = true;
         }
+        "fallback" => {
+            if !at_line_start {
+                let _ = writeln!(out);
+            }
+            let line = format!(
+                "{} did not answer ({}); carrying on with {}",
+                ev["from"].as_str().unwrap_or("the model"),
+                ev["reason"].as_str().unwrap_or("error"),
+                ev["model"].as_str().unwrap_or("the next model")
+            );
+            let _ = writeln!(out, "  {} {}", style("↪").yellow(), style(line).dim());
+            at_line_start = true;
+        }
         "error" => {
             if !at_line_start {
                 let _ = writeln!(out);
