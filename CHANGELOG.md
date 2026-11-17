@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.7] - 2026-11-17
+
+Skills, fleeting chats, suggestions that change, and a note's chats that
+follow the note.
+
+### Added
+
+- Skills: notes in the vault's `Skills` folder (file name = skill name, a
+  `description:` line, then the steps). Typing `/` in Mnemo's message box
+  lists them; `/name ...` sends the skill's steps with the message
+  (`meta.skill`). Mnemo makes, changes and removes skills with its note
+  tools. New endpoint `GET /api/assistant/skills`.
+- Fleeting chats (the eye in Mnemo's header): not kept, left out of the chat
+  list, search and Mnemo's look-back tools, and deleted with the pictures
+  sent in them when the owner leaves (or after 30 minutes idle). Changes to
+  notes stay. `POST /api/assistant/sessions` takes `fleeting: true`.
+- Suggestions on a new chat change each time: the owner's own (Your
+  suggestions, kept), ones Mnemo writes from recent notes (refreshed at most
+  every 12 hours, or now with Fresh ideas) and built-in ones; skills show as
+  chips. Endpoints `GET/POST /api/assistant/suggestions` and
+  `POST /api/assistant/suggestions/refresh`.
+- Mnemo tool `view_image`: look at a picture in the vault (a note's
+  picture by its path); a web address is refused with a note to send or add
+  the picture instead.
+- Ask Mnemo from a note's page offers that note's earlier chats
+  (`GET /api/assistant/sessions?about=<path>`).
+
+### Changed
+
+- All `@mnemo:` requests in one note go to that note's one chat (titled
+  `@mnemo · <note>`), and a note's chats follow it when it is renamed,
+  moved, sent to the Trash or restored.
+- An `@mnemo:` request Mnemo writes into a note from a chat or the console
+  is answered like the owner's; what it writes while answering a request
+  never asks again.
+- Deleting chats also deletes the pictures sent in them (pictures placed in
+  notes stay in the vault).
+- What's new: arrows show only where there is more, and a new footer with
+  the GitHub star count.
+- A page open beside the chat folds the chat list and "In this chat" away
+  so the chat keeps its room; the list comes back when the divider leaves
+  room for it, and everything returns when the page closes. When the chat
+  and the page cannot both fit, the page opens full screen.
+
+### Fixed
+
+- Pictures in notes are capped at about 60% of the screen height (480 px).
+- Leaving a chat while Mnemo answers no longer shows a network error; the
+  chat reconnects to the running reply.
+- Chats left with their question's first words as the title (the model
+  could not name them) get a proper title on the next reply; titles have
+  room for models that think first.
+
 ## [2.1.6] - 2026-11-17
 
 Mnemo's pages become versions of one file, chats can be cleaned up in bulk,
