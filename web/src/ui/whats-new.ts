@@ -26,6 +26,22 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.5',
+    title: 'Unread that agrees everywhere, and a tidier Mnemo',
+    lead: 'What you have read is remembered on the server, the chat list ends in one neat row, and phones stop sending half a message.',
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'bell', title: 'Unread on every device', text: 'A chat you read on your phone is read on your laptop too. Your own messages and the chat you are looking at never count as news.' },
+          { icon: 'sun', title: 'Appearance in one place', text: 'Theme, chat background and text size moved into an Appearance panel (a sheet on phones). The chat list ends in one row: Appearance, Activity, Settings and Memora.' },
+          { icon: 'enter', title: 'Enter on phones', text: 'On a touch keyboard Enter starts a new line; the send button sends. With a real keyboard Enter still sends and Shift+Enter is a new line.' },
+          { icon: 'chev-down', title: 'Scroll to the bottom', text: 'The button above the message box is a plain way down, with no New messages label.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.4',
     title: 'Pages open like files, and news is marked',
     lead: 'A page Mnemo writes is a card in the chat; open it and it sits beside the chat. Chats with news stand out.',

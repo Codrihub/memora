@@ -160,6 +160,7 @@ pub fn router() -> Router<AppState> {
             "/api/assistant/sessions/{id}/delete",
             post(h_session_delete),
         )
+        .route("/api/assistant/sessions/{id}/seen", post(h_seen))
         .route("/api/assistant/sessions/{id}/chat", post(h_chat))
         .route("/api/assistant/sessions/{id}/compact", post(h_compact))
         .route("/api/assistant/search", get(h_search))
@@ -506,12 +507,14 @@ async fn h_models_fetch(
 }
 
 fn state_json(store: &Store) -> Value {
+    let mut prefs = store.prefs().unwrap_or_default();
+    prefs.remove(SEEN);
     json!({
         "name": NAME,
         "ready": resolve_model(store, None, None).is_ok(),
         "providers": store.providers().unwrap_or_default(),
         "models": store.models().unwrap_or_default(),
-        "prefs": store.prefs().unwrap_or_default(),
+        "prefs": prefs,
         "tools": TOOLS,
         "defaults": {"context_tokens": DEFAULT_CONTEXT, "max_output_tokens": DEFAULT_MAX_OUTPUT, "max_steps": DEFAULT_STEPS},
     })
@@ -644,19 +647,39 @@ async fn h_prefs(
 
 // ---------------- sessions ----------------
 
+/// The preference that remembers, per chat, how many messages the owner has seen (on any
+/// device): `{chat id: count}`. Kept out of the preferences the web app edits.
+const SEEN: &str = "seen";
+
+fn seen_map(store: &Store) -> Option<serde_json::Map<String, Value>> {
+    store
+        .prefs()
+        .ok()?
+        .get(SEEN)
+        .and_then(Value::as_object)
+        .cloned()
+}
+
 async fn h_sessions(State(st): State<AppState>, key: Option<Extension<ApiKeyCaller>>) -> Response {
     if let Some(r) = browser_only(&key) {
         return r;
     }
     match store(&st) {
         Ok(s) => {
-            let list: Vec<Value> = s
-                .sessions()
-                .unwrap_or_default()
+            let all = s.sessions().unwrap_or_default();
+            // First list after the update: everything there now counts as seen.
+            let seen = seen_map(s).unwrap_or_else(|| {
+                let m: serde_json::Map<String, Value> =
+                    all.iter().map(|x| (x.id.clone(), json!(x.messages))).collect();
+                let _ = s.set_pref(SEEN, &Value::Object(m.clone()));
+                m
+            });
+            let list: Vec<Value> = all
                 .into_iter()
                 .map(|x| {
                     let mut v = json!(x);
                     v["running"] = json!(live::running(&x.id));
+                    v["seen"] = json!(seen.get(&x.id).and_then(Value::as_i64).unwrap_or(0));
                     v
                 })
                 .collect();
@@ -664,6 +687,46 @@ async fn h_sessions(State(st): State<AppState>, key: Option<Extension<ApiKeyCall
         }
         Err(r) => r,
     }
+}
+
+/// The owner has seen a chat up to `messages`: unread counts agree on every device.
+async fn h_seen(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let Some(n) = b.get("messages").and_then(Value::as_i64).filter(|n| *n >= 0) else {
+        return bad("messages is required");
+    };
+    let all = store.sessions().unwrap_or_default();
+    let Some(chat) = all.iter().find(|x| x.id == id) else {
+        return bad("no such chat");
+    };
+    let mut seen = seen_map(store).unwrap_or_default();
+    // Never past what the chat holds, never back.
+    let n = n.min(chat.messages);
+    let had = seen.get(&id).and_then(Value::as_i64).unwrap_or(0);
+    if n > had {
+        seen.insert(id.clone(), json!(n));
+        // Forget chats that are gone.
+        seen.retain(|k, _| all.iter().any(|x| &x.id == k));
+        if let Err(e) = store.set_pref(SEEN, &Value::Object(seen)) {
+            return bad(&e);
+        }
+    }
+    Json(json!({"ok": true, "seen": n.max(had)})).into_response()
 }
 
 async fn h_session_new(

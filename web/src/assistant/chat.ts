@@ -229,7 +229,7 @@ export class ChatView {
       <div class="mn-log" role="log" aria-live="polite" aria-label="Conversation with ${A.MNEMO}"></div>
       <nav class="mn-rail" aria-label="Jump to a message" hidden></nav>
       <form class="mn-comp" autocomplete="off">
-        <button type="button" class="mn-down" aria-label="Scroll to the latest message" tabindex="-1">${icon('chev-down')}<span>New messages</span></button>
+        <button type="button" class="mn-down" aria-label="Scroll to the bottom" title="Scroll to the bottom" tabindex="-1">${icon('chev-down')}</button>
         <div class="mn-comp-box">
           <div class="mn-queue" hidden></div>
           <div class="mn-att" aria-live="polite"><div class="mn-att-in"></div></div>
@@ -284,6 +284,9 @@ export class ChatView {
     };
     this.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        // On-screen keyboards: Enter is a new line (the send button sends), so a slip never
+        // sends half a message. Physical keyboards: Enter sends, Shift+Enter is a new line.
+        if (touchKeyboard() && !e.ctrlKey && !e.metaKey) return;
         e.preventDefault();
         if (!this.busy) void this.send(this.input.value);
         // While Mnemo works: Enter queues the message, Ctrl/Cmd+Enter steers the reply now.
@@ -1359,21 +1362,14 @@ export class ChatView {
   }
 
   private scrollEnd(force = false): void {
-    const near = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 140;
-    if (force || near) {
-      this.log.scrollTop = this.log.scrollHeight;
-      this.downBtn.classList.remove('new');
-    } else {
-      // Scrolled up while something new arrives: the button says so.
-      this.downBtn.classList.add('new');
-      this.paintDown(this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight);
-    }
+    const fromEnd = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight;
+    if (force || fromEnd < 140) this.log.scrollTop = this.log.scrollHeight;
+    else this.paintDown(fromEnd);
   }
 
-  /** The scroll-down button: shown when the latest message is out of sight, "New messages" when news came in. */
+  /** The scroll-to-bottom button: shown while the latest message is out of sight. */
   private paintDown(fromEnd: number): void {
     const show = fromEnd > 220;
-    if (!show) this.downBtn.classList.remove('new');
     this.downBtn.classList.toggle('on', show);
     this.downBtn.tabIndex = show ? 0 : -1;
   }
@@ -2091,4 +2087,9 @@ function pickNote(run: (paths: string[]) => void, room = 8): void {
   go = document.querySelector<HTMLButtonElement>('.modal-foot .btn.primary');
   paintGo();
   window.setTimeout(() => input.focus(), 40);
+}
+
+/** A touch screen with no mouse: its keyboard is the on-screen one. */
+function touchKeyboard(): boolean {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 }

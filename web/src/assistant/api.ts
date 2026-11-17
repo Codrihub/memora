@@ -87,6 +87,8 @@ export interface Session {
   messages: number;
   /** A reply is running in it now (on the server, watched or not). */
   running?: boolean;
+  /** How many of its messages the owner has seen, on any device (in the chat list only). */
+  seen?: number;
 }
 
 export interface StoredCall {
@@ -246,6 +248,8 @@ export const getSession = (id: string): Promise<{ session: Session; messages: Me
   apiGet(`/api/assistant/sessions/${encodeURIComponent(id)}`);
 export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean }): Promise<{ session: Session }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}`, b);
+export const markSessionSeen = (id: string, messages: number): Promise<{ ok: boolean; seen: number }> =>
+  apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/seen`, { messages });
 export const deleteSession = (id: string): Promise<{ ok: boolean }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/delete`, {});
 

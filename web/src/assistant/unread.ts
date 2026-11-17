@@ -1,41 +1,24 @@
-// Which Mnemo chats have news you have not seen yet, per device: a chat is seen up to the
-// message count it had while it was open on screen. The sidebar's Mnemo item shows how
+// Which Mnemo chats have news you have not seen yet: a chat is seen up to the message count
+// it had while it was open on screen, on any device (the server remembers the counts). The sidebar's Mnemo item shows how
 // many chats have news; the Mnemo page marks each one with how many new messages it has.
 
 import { useStyles } from '../dom';
 import * as A from './api';
 
-const LS = 'memora.mnemo.seen.v1';
-/** How often the list is checked away from the Mnemo page (only while the tab is visible). */
+/** How often the list is checked (only while the tab is visible). */
 const EVERY = 45_000;
 
-interface Seen {
-  seeded: boolean;
-  m: Record<string, number>;
-}
-
-let seen: Seen | null = null;
+/** Seen counts per chat: from the server's list, raised at once by what is read here. */
+const seen = new Map<string, number>();
 let sessions: A.Session[] = [];
 let timer = 0;
 const listeners = new Set<() => void>();
 
-function load(): Seen {
-  if (seen) return seen;
-  try {
-    const v = JSON.parse(localStorage.getItem(LS) || 'null') as Seen | null;
-    seen = v && typeof v === 'object' && v.m ? v : { seeded: false, m: {} };
-  } catch {
-    seen = { seeded: false, m: {} };
-  }
-  return seen;
-}
-
-function save(): void {
-  try {
-    localStorage.setItem(LS, JSON.stringify(load()));
-  } catch {
-    /* lasts until reload */
-  }
+// The count used to live in this browser only (2.1.4); the server keeps it now.
+try {
+  localStorage.removeItem('memora.mnemo.seen.v1');
+} catch {
+  /* nothing to tidy */
 }
 
 /** A chat shown on screen right now (in the Mnemo page, the floating chat or a note's panel). */
@@ -47,42 +30,41 @@ function onScreen(id: string): boolean {
   return false;
 }
 
-/** New messages in a chat since it was last seen here. */
+/** New messages in a chat since the owner last saw it (here or on another device). */
 export function unreadOf(s: A.Session): number {
-  const v = load();
-  if (!v.seeded || onScreen(s.id)) return 0;
-  const had = v.m[s.id];
-  // A chat started elsewhere (another device, an @mnemo request in a note) is all news.
-  return Math.max(0, s.messages - (had ?? 0));
+  const had = seen.get(s.id);
+  // A chat the server has not listed yet (just started here) has no news.
+  if (had === undefined || s.running || onScreen(s.id)) return 0;
+  return Math.max(0, s.messages - had);
 }
 
 export function unreadChats(): number {
-  return sessions.filter((s) => !s.running && unreadOf(s) > 0).length;
+  return sessions.filter((s) => unreadOf(s) > 0).length;
 }
 
-/** Count a chat as seen up to `messages`. */
+/** Count a chat as seen up to `messages`, here and on the server. */
 export function markSeen(id: string, messages: number): void {
-  const v = load();
-  if ((v.m[id] ?? -1) >= messages) return;
-  v.m[id] = messages;
-  save();
+  if ((seen.get(id) ?? -1) >= messages) return;
+  seen.set(id, messages);
   paint();
+  void A.markSessionSeen(id, messages)
+    .then((r) => {
+      if (r.seen > (seen.get(id) ?? -1)) seen.set(id, r.seen);
+    })
+    .catch(() => undefined);
 }
 
 /** The latest list of chats (from the Mnemo page or the check below). */
 export function noteSessions(list: A.Session[]): void {
   sessions = list;
-  const v = load();
-  if (!v.seeded) {
-    // First run on this device: what is there now counts as read.
-    for (const s of list) v.m[s.id] = s.messages;
-    v.seeded = true;
+  const ids = new Set<string>();
+  for (const s of list) {
+    ids.add(s.id);
+    if (typeof s.seen === 'number' && s.seen > (seen.get(s.id) ?? -1)) seen.set(s.id, s.seen);
   }
-  for (const s of list) if (onScreen(s.id)) v.m[s.id] = Math.max(v.m[s.id] ?? 0, s.messages);
-  // Forget chats that are gone.
-  const ids = new Set(list.map((s) => s.id));
-  for (const k of Object.keys(v.m)) if (!ids.has(k)) delete v.m[k];
-  save();
+  for (const k of [...seen.keys()]) if (!ids.has(k)) seen.delete(k);
+  // A chat open on screen is read as it grows.
+  for (const s of list) if (!s.running && seen.has(s.id) && onScreen(s.id)) markSeen(s.id, s.messages);
   paint();
 }
 
@@ -128,10 +110,7 @@ export function watchUnread(): void {
   if (timer) return;
   useStyles('mnemo-unread-css', UNREAD_CSS);
   void check();
-  timer = window.setInterval(() => {
-    // The Mnemo page keeps its own list fresh.
-    if (document.documentElement.dataset.page !== 'assistant') void check();
-  }, EVERY);
+  timer = window.setInterval(() => void check(), EVERY);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) void check();
   });

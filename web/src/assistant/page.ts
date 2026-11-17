@@ -100,22 +100,11 @@ function build(): void {
       <label class="mnp-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpQ" placeholder="Search everything said" autocomplete="off"></label>
       <button type="button" class="mnp-newrow" id="mnpNewRow">${icon('plus')}<span>New chat</span></button>
       <nav class="mnp-list" id="mnpList" aria-label="Chat list"></nav>
-      <div class="mnp-prefs">
-        <span class="mnp-prefs-l">Appearance</span>
-        <div class="mnp-prefs-r">
-          <div class="mnp-theme" role="radiogroup" aria-label="Theme">${(['light', 'dark', 'system'] as ThemePref[])
-            .map((t) => `<button type="button" role="radio" data-theme-pick="${t}" title="${THEME_LABEL[t]}" aria-label="${THEME_LABEL[t]}">${icon(THEME_ICON[t])}</button>`)
-            .join('')}</div>
-          <button type="button" class="mnp-bgbtn" id="mnpBg" title="Chat background" aria-label="Chat background" aria-haspopup="dialog"><i class="mnp-bgsw"></i><span id="mnpBgName">Glow</span>${icon(
-            'chev-down',
-          )}</button>
-        </div>
-        <div class="mnp-prefs-r mnp-fsrow"><span class="mnp-fsl">Text</span>${textSizeHTML('side')}</div>
-      </div>
       <nav class="mnp-sfoot" aria-label="${A.MNEMO}">
+        <button type="button" class="mnp-set" id="mnpLook" title="Theme, chat background and text size" aria-haspopup="dialog">${icon('sun')}<span>Appearance</span></button>
         <button type="button" class="mnp-set" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom">${icon('activity')}<span>Activity</span></button>
         <button type="button" class="mnp-set" id="mnpSet" title="Models, keys and instructions">${icon('settings')}<span>Settings</span></button>
-        <button type="button" class="mnp-set" id="mnpHome" title="Back to Memora">${icon('overview')}<span>Back to Memora</span></button>
+        <button type="button" class="mnp-set" id="mnpHome" title="Back to Memora">${icon('overview')}<span>Memora</span></button>
       </nav>
     </aside>
     <div class="mnp-scrim" id="mnpScrim"></div>
@@ -214,14 +203,7 @@ function build(): void {
   root.querySelector<HTMLElement>('#mnpNewRow')!.onclick = () => newChat();
   root.querySelector<HTMLElement>('#mnpSet')!.onclick = () => openMnemoSettings();
   root.querySelector<HTMLElement>('#mnpHome')!.onclick = () => leave(true);
-  root.querySelectorAll<HTMLElement>('[data-theme-pick]').forEach((b) => {
-    b.onclick = () => {
-      setThemePref(b.dataset.themePick as ThemePref);
-      paintPrefs();
-    };
-  });
-  root.querySelector<HTMLElement>('#mnpBg')!.onclick = (e) => bgMenu(e.currentTarget as HTMLElement);
-  wireTextSize(root.querySelector<HTMLElement>('.mnp-fsrow')!);
+  root.querySelector<HTMLElement>('#mnpLook')!.onclick = (e) => lookMenu(e.currentTarget as HTMLElement);
   paintPrefs();
   root.querySelector<HTMLElement>('#mnpActBtn')!.onclick = () => {
     side(false);
@@ -295,6 +277,7 @@ onNavigate((page) => {
 
 /** Leave the full-screen chat: back where you came from, or (home) to the Overview. */
 function leave(home: boolean): void {
+  closeLook();
   root?.classList.remove('side-open');
   if (home || !from) hooks.go('home');
   else if (from === 'vault' && history.length > 1) history.back();
@@ -346,67 +329,106 @@ function setBg(id: BgId): void {
   paintPrefs();
 }
 
-/** A small panel of background tiles, each a preview of itself. */
-function bgMenu(at: HTMLElement): void {
-  document.querySelector('.mnp-bgpop')?.remove();
+/** Appearance: theme, chat background and text size. A panel above the button on wide
+ *  screens, a sheet from the bottom on phones. */
+function lookMenu(at: HTMLElement): void {
+  if (closeLook()) return;
   const cur = readBg();
-  const pop = el('div', 'mnp-bgpop');
+  const sheet = isNarrow();
+  const scrim = el('div', 'mnp-lookscrim' + (sheet ? ' dim' : ''));
+  const pop = el('div', 'mnp-look' + (sheet ? ' sheet' : ''));
   pop.setAttribute('role', 'dialog');
-  pop.setAttribute('aria-label', 'Chat background');
-  pop.innerHTML = `<b class="mnp-bgpop-h">Chat background</b><div class="mnp-bgpop-g">${BGS.map(
-    (b) =>
-      `<button type="button" class="mnp-bgopt${b.id === cur ? ' on' : ''}" data-pick-bg="${b.id}" aria-pressed="${b.id === cur}"><i class="mnp-bgsw big" data-bg="${b.id}"></i><span>${esc(
-        b.label,
-      )}</span></button>`,
-  ).join('')}</div>`;
-  document.body.append(pop);
-  const r = at.getBoundingClientRect();
-  const w = Math.min(312, window.innerWidth - 24);
-  pop.style.width = w + 'px';
-  pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left)) + 'px';
-  if (r.top > 380) pop.style.bottom = window.innerHeight - r.top + 8 + 'px';
-  else pop.style.top = r.bottom + 8 + 'px';
-  const close = (): void => {
-    pop.remove();
-    document.removeEventListener('pointerdown', out, true);
-    document.removeEventListener('keydown', key, true);
-  };
-  const out = (e: Event): void => {
-    if (!pop.contains(e.target as Node) && !at.contains(e.target as Node)) close();
-  };
+  pop.setAttribute('aria-label', 'Appearance');
+  pop.innerHTML = `<div class="mnp-look-h"><b>Appearance</b><button type="button" class="mn-ibtn" data-look-x aria-label="Close" title="Close">${icon('close')}</button></div>
+    <span class="mnp-look-l">Theme</span>
+    <div class="mnp-theme" role="radiogroup" aria-label="Theme">${(['light', 'dark', 'system'] as ThemePref[])
+      .map((t) => `<button type="button" role="radio" data-theme-pick="${t}">${icon(THEME_ICON[t])}<span>${THEME_LABEL[t]}</span></button>`)
+      .join('')}</div>
+    <span class="mnp-look-l">Chat background</span>
+    <div class="mnp-bgpop-g">${BGS.map(
+      (b) =>
+        `<button type="button" class="mnp-bgopt${b.id === cur ? ' on' : ''}" data-pick-bg="${b.id}" aria-pressed="${b.id === cur}"><i class="mnp-bgsw big" data-bg="${b.id}"></i><span>${esc(
+          b.label,
+        )}</span></button>`,
+    ).join('')}</div>
+    <span class="mnp-look-l">Text size</span>
+    <div class="mnp-look-fs">${textSizeHTML('look')}</div>`;
+  document.body.append(scrim, pop);
+  if (!sheet) {
+    const r = at.getBoundingClientRect();
+    const w = Math.min(320, window.innerWidth - 24);
+    pop.style.width = w + 'px';
+    pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left)) + 'px';
+    if (r.top > 420) pop.style.bottom = window.innerHeight - r.top + 8 + 'px';
+    else pop.style.top = r.bottom + 8 + 'px';
+  }
+  at.setAttribute('aria-expanded', 'true');
+  wireTextSize(pop.querySelector<HTMLElement>('.mnp-look-fs')!);
+  pop.querySelectorAll<HTMLElement>('[data-theme-pick]').forEach((b) => {
+    b.onclick = () => {
+      setThemePref(b.dataset.themePick as ThemePref);
+      paintPrefs();
+    };
+  });
+  pop.querySelectorAll<HTMLElement>('[data-pick-bg]').forEach((b) => {
+    b.onclick = () => setBg(b.dataset.pickBg as BgId);
+  });
+  pop.querySelector<HTMLElement>('[data-look-x]')!.onclick = () => closeLook();
+  scrim.onclick = () => closeLook();
   const key = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      close();
+      e.preventDefault();
+      closeLook();
     }
   };
-  document.addEventListener('pointerdown', out, true);
   document.addEventListener('keydown', key, true);
-  pop.onclick = (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pick-bg]');
-    if (!b) return;
-    setBg(b.dataset.pickBg as BgId);
-    pop.querySelectorAll('.mnp-bgopt').forEach((x) => {
-      const on = x === b;
-      x.classList.toggle('on', on);
-      x.setAttribute('aria-pressed', String(on));
-    });
+  lookOff = () => {
+    document.removeEventListener('keydown', key, true);
+    at.setAttribute('aria-expanded', 'false');
+    pop.classList.remove('on');
+    scrim.classList.remove('on');
+    window.setTimeout(() => {
+      pop.remove();
+      scrim.remove();
+    }, 200);
+    at.focus({ preventScroll: true });
   };
+  paintPrefs();
+  void pop.offsetHeight;
+  requestAnimationFrame(() => {
+    pop.classList.add('on');
+    scrim.classList.add('on');
+  });
 }
 
-/** The theme switch and the background swatch show what is on now. */
+let lookOff: (() => void) | null = null;
+
+/** Close the Appearance panel; true when it was open. */
+function closeLook(): boolean {
+  if (!lookOff) return false;
+  const f = lookOff;
+  lookOff = null;
+  f();
+  return true;
+}
+
+/** The theme switch and the background tiles show what is on now. */
 function paintPrefs(): void {
   if (!root) return;
   const t = themePref();
-  root.querySelectorAll<HTMLElement>('[data-theme-pick]').forEach((b) => {
+  document.querySelectorAll<HTMLElement>('.mnp-look [data-theme-pick]').forEach((b) => {
     const on = b.dataset.themePick === t;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
   const bg = readBg();
   root.dataset.bg = bg;
-  root.querySelector<HTMLElement>('#mnpBg .mnp-bgsw')!.dataset.bg = bg;
-  root.querySelector('#mnpBgName')!.textContent = BGS.find((b) => b.id === bg)?.label || 'Glow';
+  document.querySelectorAll<HTMLElement>('.mnp-look [data-pick-bg]').forEach((x) => {
+    const on = x.dataset.pickBg === bg;
+    x.classList.toggle('on', on);
+    x.setAttribute('aria-pressed', String(on));
+  });
 }
 
 const LS_PANES = 'memora.mnemo.panes.v1';
@@ -679,7 +701,7 @@ function headMenu(at: HTMLElement): void {
         },
       },
       { label: `${A.MNEMO} activity`, icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
-      { label: 'Chat background', icon: icon('image', 'vx-i'), run: () => bgMenu(at) },
+      { label: 'Appearance', icon: icon('sun', 'vx-i'), run: () => lookMenu(at) },
       { label: `${A.MNEMO} settings: models and keys`, icon: icon('settings', 'vx-i'), run: () => openMnemoSettings() },
       { label: 'Back to Memora', icon: icon('overview', 'vx-i'), run: () => leave(true) },
     ],
@@ -796,7 +818,6 @@ const PAGE_CSS = `
 #view-assistant{padding:0!important;overflow:hidden}
 .mnp-hsep{width:1px;height:20px;margin:0 4px;background:var(--line)}
 .mnp-close .i{width:18px;height:18px;stroke-width:2}
-.mnp-sfoot{display:flex;flex-direction:column;gap:2px}
 .mnp{--sw:288px;--aw:0px;display:grid;grid-template-columns:var(--sw) minmax(0,1fr) var(--aw);height:100%;min-height:0;position:relative;
   transition:grid-template-columns .25s var(--ease-out,ease-out)}
 .mnp.side-closed{--sw:0px}
@@ -864,28 +885,41 @@ const PAGE_CSS = `
   .mnp:not(.side-closed) .mnp-lists{display:none}
 }
 @media (max-width:760px){.mnp-fold,.mnp-newrow{display:none}}
-.mnp-prefs{margin:8px 10px 6px;padding:9px 10px 10px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg))}
-.mnp-prefs-l{display:block;margin:0 2px 7px;font-size:11px;font-weight:650;letter-spacing:.02em;color:var(--muted)}
-.mnp-prefs-r{display:flex;align-items:center;gap:6px}
-.mnp-fsrow{margin-top:8px}
-.mnp-fsl{flex:1;min-width:0;margin-left:2px;font-size:12.5px;color:var(--text-2,var(--fg))}
-.mnp-theme{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:10px;background:var(--seg-track,color-mix(in srgb,var(--fg) 6%,transparent))}
-.mnp-theme button{display:grid;place-items:center;width:30px;height:28px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
-.mnp-theme button .i{width:15px;height:15px}
+.mnp-theme{display:flex;gap:2px;padding:3px;border-radius:11px;background:var(--seg-track,color-mix(in srgb,var(--fg) 6%,transparent))}
+.mnp-theme button{flex:1 1 0;display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;height:34px;padding:0 6px;border:0;border-radius:8px;background:none;color:var(--muted);
+  font:inherit;font-size:13px;cursor:pointer;transition:background .15s,color .15s}
+.mnp-theme button .i{width:15px;height:15px;flex:none}
 .mnp-theme button:hover{color:var(--fg)}
-.mnp-theme button.on{background:var(--seg-thumb,var(--surface-1,#fff));color:var(--fg);box-shadow:0 1px 2px rgba(15,23,42,.12)}
-.mnp-bgbtn{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:34px;padding:0 8px 0 5px;border:1px solid var(--line);border-radius:10px;background:none;
-  color:var(--fg);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}
-.mnp-bgbtn:hover{background:var(--hover);border-color:var(--line-strong)}
-.mnp-bgbtn span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left}
-.mnp-bgbtn>.i{width:14px;height:14px;flex:none;color:var(--muted)}
+.mnp-theme button.on{background:var(--seg-thumb,var(--surface-1,#fff));color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.12)}
 .mnp-bgsw{--bgz:7px;display:inline-block;flex:none;width:24px;height:24px;border-radius:7px;border:1px solid var(--line-strong);background-color:var(--bg)}
-.mnp-bgsw.big{--bgz:12px;width:100%;height:52px;border-radius:10px;filter:saturate(1.9) contrast(1.06)}
-.mnp-bgsw:not(.big){filter:saturate(1.6)}
-.mnp-sfoot{border-top:0!important;padding-top:2px!important}
-.mnp-bgpop{position:fixed;z-index:120;padding:12px;border-radius:16px;background:var(--panel,var(--surface-1));border:1px solid var(--line-strong);
-  box-shadow:0 24px 60px -20px rgba(15,23,42,.35),0 8px 20px -10px rgba(15,23,42,.18);animation:mnIn .16s var(--ease-out,ease-out) both}
-.mnp-bgpop-h{display:block;margin:0 2px 10px;font-size:13px;font-weight:650}
+.mnp-bgsw.big{--bgz:12px;width:100%;height:46px;border-radius:10px;filter:saturate(1.9) contrast(1.06)}
+/* The chat list's foot: four even tiles in one row (Appearance, Activity, Settings, Memora). */
+.mnp-sfoot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:8px 8px 10px;border-top:1px solid var(--line)}
+.mnp-sfoot .mnp-set{flex-direction:column;justify-content:center;gap:4px;height:54px;padding:0 2px;font-size:11px;font-weight:550;text-align:center;border-radius:12px;color:var(--muted)}
+.mnp-sfoot .mnp-set .i{width:19px;height:19px}
+.mnp-sfoot .mnp-set span{max-width:100%;line-height:1.2}
+.mnp-sfoot .mnp-set:hover,.mnp-sfoot .mnp-set[aria-expanded=true]{color:var(--fg)}
+.mnp-sfoot .mnp-set[aria-expanded=true]{background:var(--hover)}
+/* Appearance: a panel above its button, a bottom sheet on phones. */
+.mnp-lookscrim{position:fixed;inset:0;z-index:119;background:transparent;opacity:0;transition:opacity .2s}
+.mnp-look{position:fixed;z-index:120;display:flex;flex-direction:column;padding:6px 14px 14px;border-radius:16px;background:var(--panel,var(--surface-1));border:1px solid var(--line-strong);
+  box-shadow:0 24px 60px -20px rgba(15,23,42,.35),0 8px 20px -10px rgba(15,23,42,.18);opacity:0;transform:translateY(8px);transition:opacity .18s var(--ease-out,ease-out),transform .18s var(--ease-out,ease-out)}
+.mnp-look.on{opacity:1;transform:none}
+.mnp-look-h{display:flex;align-items:center;justify-content:space-between;min-height:42px;margin:0 -6px 0 2px}
+.mnp-look-h b{font-size:14.5px;font-weight:650}
+.mnp-look-l{display:block;margin:12px 2px 7px;font-size:11.5px;font-weight:650;letter-spacing:.02em;color:var(--muted)}
+.mnp-look-h+.mnp-look-l{margin-top:4px}
+.mnp-look-fs .mn-fs{display:flex;width:100%}
+.mnp-look-fs .mn-fs button{flex:1 1 0}
+.mnp-look.sheet{left:0;right:0;bottom:0;width:auto;max-height:86dvh;overflow:auto;padding:4px 16px calc(16px + env(safe-area-inset-bottom,0px));border-bottom:0;border-radius:20px 20px 0 0;transform:translateY(100%);
+  transition:transform .28s var(--ease-out,ease-out)}
+.mnp-look.sheet.on{transform:none;opacity:1}
+.mnp-look.sheet::before{content:"";display:block;width:36px;height:4px;margin:6px auto 2px;border-radius:99px;background:var(--line-strong)}
+.mnp-lookscrim.dim{background:var(--scrim,rgba(15,23,42,.35))}
+.mnp-lookscrim.on{opacity:1}
+.mnp-look.sheet .mnp-theme button{height:42px;font-size:14px}
+.mnp-look.sheet .mn-fs button{height:40px}
+@media (prefers-reduced-motion:reduce){.mnp-look,.mnp-look.sheet{transition:none}}
 .mnp-bgpop-g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .mnp-bgopt{display:flex;flex-direction:column;gap:5px;padding:4px 4px 6px;border:1.5px solid transparent;border-radius:13px;background:none;color:var(--text-2,var(--fg));
   font:inherit;font-size:12px;cursor:pointer;transition:border-color .15s,background .15s}
@@ -893,8 +927,8 @@ const PAGE_CSS = `
 .mnp-bgopt.on{border-color:var(--accent);color:var(--fg);font-weight:600}
 /* Chat backgrounds: light and texture behind the conversation, at whispering strength
    (a little stronger on the dark theme, where faint colour disappears). */
-.mnp,.mnp-bgpop{--bgk:1.8}
-:root[data-theme=light] .mnp,:root[data-theme=light] .mnp-bgpop{--bgk:1}
+.mnp,.mnp-look{--bgk:1.8}
+:root[data-theme=light] .mnp,:root[data-theme=light] .mnp-look{--bgk:1}
 .mnp-chat{background-color:var(--bg)}
 .mnp[data-bg=glow] .mnp-chat,.mnp-bgsw[data-bg=glow]{background-image:
   radial-gradient(60% 50% at 12% -8%,color-mix(in srgb,var(--accent) calc(14% * var(--bgk,1)),transparent),transparent 70%),
@@ -950,7 +984,6 @@ const PAGE_CSS = `
 /* Touch screens have no hover: the ⋯ is always there (iOS would spend the first tap on a hover). */
 @media (hover:none){.mnp-row-more{opacity:.7}}
 .mnp-none{margin:0;padding:18px 10px;font-size:13px;color:var(--muted);line-height:1.5}
-.mnp-sfoot{padding:8px 10px 12px;border-top:1px solid var(--line)}
 .mnp-set{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:10px;background:none;color:var(--text-2,var(--fg));font:inherit;font-size:13.5px;cursor:pointer;
   white-space:nowrap;text-align:left;outline:none;-webkit-tap-highlight-color:transparent}
 .mnp-set span{overflow:hidden;text-overflow:ellipsis}
