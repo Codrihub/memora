@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.10] - 2026-11-18
+
+Each chat keeps its own model, and a model change is always marked.
+
+### Changed
+
+- A chat keeps the model it began with or was switched to (stored with the
+  chat); the default model only applies to new chats. When a chat's model is
+  gone or cannot answer, it takes the default, then the fallback models, then
+  the first pinned model.
+- When a fallback model takes over, the chat switches to it, says so, and a
+  divider marks every change of model in the conversation (also inside a
+  reply), so it is clear which model wrote what.
+- A model that is out of quota, has its key refused or is not found goes
+  straight to the next fallback model; a provider that is only busy gets one
+  quick retry when a fallback is lined up. The reason shows in a few words.
+- The model picker and the memory ring sit under the prompt, on the right;
+  the prompt keeps the thinking level and Send.
+- The fleeting button shows only on a new chat (and in a fleeting chat, to
+  leave it).
+
+### Fixed
+
+- The thinking level was missing for models whose name gives nothing away
+  (router aliases): a model that has shown its thinking is now offered it,
+  and OpenAI-style routers get `reasoning_effort`.
+
 ## [2.1.9] - 2026-11-18
 
 Chats stay in step on every device, and the queue never gets stuck.
