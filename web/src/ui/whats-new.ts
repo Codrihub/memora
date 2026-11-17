@@ -26,6 +26,30 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.6',
+    title: 'Pages that grow, chats you can tidy',
+    lead: 'Mnemo reworks the page it made instead of starting over, chats can be cleaned up in bulk, and compacting waits until the chat is really full.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'code', title: 'Pages are versions of one file', text: 'Ask Mnemo to tidy or change a page and it rewrites that same file: the card shows v2, v3 and latest, the panel steps between versions, and on a wide screen the new one opens by itself. Pages stay with their chat (listed under In this chat) and Mnemo can reuse one from another chat.' },
+          { icon: 'expand', title: 'Drag the divider', text: 'The line between the chat and an open page can be dragged. Each side keeps a sensible minimum, the width is remembered, and a double-click resets it.' },
+          { icon: 'trash', title: 'Select, clean up or delete all', text: 'The ⋯ beside New chat picks several chats to delete, cleans up chats older than 7, 30 or 90 days, or deletes them all (pinned ones kept unless you say so).' },
+          { icon: 'chat', title: 'Chats know each other', text: 'Mnemo can list your other chats, search them by title or words and read one, so "the chat from yesterday" just works.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'refresh', title: 'Compacting only when full', text: 'A chat is compacted only once it fills the model\'s memory, and while it happens you see it working, with a clock, before the reply goes on.' },
+          { icon: 'sun', title: 'Tidier Mnemo foot and pages', text: 'Appearance is one wide button with Activity, Settings and Memora under it. Page cards stand out and fill the reply\'s width. Scrollbars are thin and show only while you scroll.' },
+          { icon: 'bolt', title: "What's new, as a carousel", text: 'Releases slide in one row with arrows, newest first, and the buttons at the bottom no longer bump into each other on a phone.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.5',
     title: 'Unread that agrees everywhere, and a tidier Mnemo',
     lead: 'What you have read is remembered on the server, the chat list ends in one neat row, and phones stop sending half a message.',
@@ -224,9 +248,21 @@ const CSS = `
 .wn-ver .pre{padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,.28);color:#cbd5e1}
 .wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2}
 .wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;color:#a3afc2}
-.wn-vers{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px}
-.wn-vers button{height:28px;padding:0 11px;border-radius:999px;border:1px solid rgba(148,163,184,.28);background:none;color:#cbd5e1;font:600 12px/1 var(--font);cursor:pointer}
+/* Releases: one row that slides, newest on the left, with arrows either side. */
+.wn-car{display:flex;align-items:center;gap:6px;margin-top:18px}
+.wn-arr{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:999px;border:1px solid rgba(148,163,184,.3);background:rgba(15,23,42,.35);color:#e6e9ef;cursor:pointer;
+  transition:background .15s,border-color .15s,opacity .15s}
+.wn-arr:hover:not(:disabled){background:rgba(148,163,184,.18);border-color:rgba(148,163,184,.5)}
+.wn-arr:disabled{opacity:.3;cursor:default}
+.wn-arr svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.wn-vers{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scroll-snap-type:x proximity;scrollbar-width:none;padding:2px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+.wn-vers::-webkit-scrollbar{display:none}
+.wn-vers button{flex:none;scroll-snap-align:center;height:34px;padding:0 15px;border-radius:999px;border:1.5px solid rgba(148,163,184,.34);background:rgba(15,23,42,.3);color:#e2e8f0;
+  font:700 13px/1 var(--font);letter-spacing:.01em;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.wn-vers button:hover{border-color:rgba(148,163,184,.6)}
 .wn-vers button[aria-pressed=true]{background:#e6e9ef;border-color:#e6e9ef;color:#0b0f17}
+.wn-vers button.latest:not([aria-pressed=true]){border-color:rgba(94,234,212,.55);color:#5eead4}
 .wn-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px 24px 12px}
 .wn-g{padding:14px 0 6px}
 .wn-g+.wn-g{border-top:1px solid var(--line)}
@@ -254,7 +290,14 @@ const CSS = `
   .wn{max-height:88dvh}
   .wn-hero{padding:18px 18px 20px}.wn-hero h2{font-size:21px}
   .wn-body{padding:4px 18px 10px}
-  .wn-foot{padding:10px 12px calc(10px + var(--safe-b,0px)) 18px}
+  .wn-foot{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;padding:12px 16px calc(12px + var(--safe-b,0px))}
+  .wn-foot .grow{display:none}
+  .wn-log{height:42px;border:1px solid var(--line-strong);border-radius:var(--r-sm,10px);font-weight:600;color:var(--fg)}
+  .wn-foot .btn.primary{height:42px;width:100%;justify-content:center}
+  .wn-star{grid-column:1/-1;order:3;justify-content:center;min-height:28px}
+  .wn-car{margin-top:16px}
+  .wn-arr{width:32px;height:32px}
+  .wn-vers button{height:32px;padding:0 13px}
 }
 `;
 
@@ -270,11 +313,14 @@ function installed(): string {
   return String(state.health.version || '');
 }
 
+const ARROW_L = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"/></svg>';
+const ARROW_R = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6 6 6-6 6"/></svg>';
 const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/></svg>';
 
 function body(r: Release): string {
   const now = installed();
   const ahead = !!now && cmp(r.version, now) > 0;
+  const at = RELEASES.findIndex((x) => x.version === r.version);
   return `<div class="wn" role="document">
     <header class="wn-hero">
       <div class="wn-top">${markSvg('wn-mark')}<span class="wn-word">Memora</span>
@@ -285,9 +331,14 @@ function body(r: Release): string {
       <h2 id="wnT">${esc(r.title)}</h2><p>${esc(r.lead)}</p>
       ${
         RELEASES.length > 1
-          ? `<div class="wn-vers" role="group" aria-label="Release">${RELEASES.map(
-              (x) => `<button type="button" data-ver="${esc(x.version)}" aria-pressed="${x.version === r.version}">${esc(x.version)}</button>`,
-            ).join('')}</div>`
+          ? `<div class="wn-car">
+          <button type="button" class="wn-arr" data-step="-1" aria-label="Newer release" title="Newer"${at <= 0 ? ' disabled' : ''}>${ARROW_L}</button>
+          <div class="wn-vers" role="group" aria-label="Release, newest first">${RELEASES.map(
+              (x, i) =>
+                `<button type="button" data-ver="${esc(x.version)}"${i === 0 ? ' class="latest" title="Latest"' : ''} aria-pressed="${x.version === r.version}">${esc(x.version)}</button>`,
+            ).join('')}</div>
+          <button type="button" class="wn-arr" data-step="1" aria-label="Older release" title="Older"${at >= RELEASES.length - 1 ? ' disabled' : ''}>${ARROW_R}</button>
+        </div>`
           : ''
       }
     </header>
@@ -326,18 +377,46 @@ export function openWhatsNew(version?: string): void {
   useStyles('brand-font-face', BRAND_FONT_CSS);
   let r = RELEASES.find((x) => x.version === version) || RELEASES[0];
   if (!r) return;
-  const wire = (b: HTMLElement): void => {
+  const wire = (b: HTMLElement, scrollFrom = -1): void => {
     b.querySelectorAll<HTMLElement>('[data-close]').forEach((x) => (x.onclick = () => Modal.close()));
     b.querySelector<HTMLElement>('[data-log]')?.addEventListener('click', () => {
       Modal.close();
       openDocs('changelog');
     });
+    const show = (next: Release | undefined, keep: number): void => {
+      if (!next || next === r) return;
+      r = next;
+      b.innerHTML = body(r);
+      wire(b, keep);
+      b.querySelector<HTMLElement>('.wn-body')?.scrollTo({ top: 0 });
+    };
     b.querySelectorAll<HTMLElement>('[data-ver]').forEach((x) => {
-      x.onclick = () => {
-        r = RELEASES.find((y) => y.version === x.dataset.ver) || r;
-        b.innerHTML = body(r);
-        wire(b);
-      };
+      x.onclick = () => show(RELEASES.find((y) => y.version === x.dataset.ver), track()?.scrollLeft ?? 0);
+    });
+    b.querySelectorAll<HTMLElement>('[data-step]').forEach((x) => {
+      x.onclick = () => show(RELEASES[RELEASES.indexOf(r) + Number(x.dataset.step)], track()?.scrollLeft ?? 0);
+    });
+    // Keep the row where it was, then slide the chosen release into view.
+    const track = (): HTMLElement | null => b.querySelector<HTMLElement>('.wn-vers');
+    const t = track();
+    const on = t?.querySelector<HTMLElement>('[aria-pressed=true]');
+    if (t && on) {
+      t.style.scrollBehavior = 'auto';
+      t.scrollLeft = scrollFrom;
+      t.style.scrollBehavior = '';
+      const want = on.offsetLeft - (t.clientWidth - on.offsetWidth) / 2;
+      requestAnimationFrame(() => t.scrollTo({ left: Math.max(0, want), behavior: scrollFrom < 0 ? 'auto' : 'smooth' }));
+    }
+    b.querySelector<HTMLElement>('.wn')?.addEventListener('keydown', (e) => {
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && (e.target as HTMLElement).closest('.wn-car')) {
+        e.preventDefault();
+        const step = e.key === 'ArrowLeft' ? -1 : 1;
+        const next = RELEASES[RELEASES.indexOf(r) + step];
+        if (next) {
+          show(next, track()?.scrollLeft ?? 0);
+          b.querySelector<HTMLElement>(`[data-ver="${next.version}"]`)?.focus({ preventScroll: true });
+        }
+      }
     });
     void paintStars(b);
   };

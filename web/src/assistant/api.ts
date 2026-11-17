@@ -248,6 +248,9 @@ export const getSession = (id: string): Promise<{ session: Session; messages: Me
   apiGet(`/api/assistant/sessions/${encodeURIComponent(id)}`);
 export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean }): Promise<{ session: Session }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}`, b);
+/** Delete many chats: the ones picked, the ones untouched for some days, or all. */
+export const pruneSessions = (b: { ids?: string[]; older_than_days?: number; all?: boolean; keep_pinned?: boolean }): Promise<{ deleted: number; skipped: number }> =>
+  apiPost('/api/assistant/sessions/prune', b);
 export const markSessionSeen = (id: string, messages: number): Promise<{ ok: boolean; seen: number }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/seen`, { messages });
 export const deleteSession = (id: string): Promise<{ ok: boolean }> =>

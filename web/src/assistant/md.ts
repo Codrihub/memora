@@ -57,7 +57,7 @@ function fileCard(lang: string, code: string): string {
   return (
     `<div class="mn-file" data-art="${kind}" data-title="${attr(title)}" role="button" tabindex="0" aria-label="Open ${attr(title)} (${KIND})">` +
     `<span class="mn-file-ic">${icon('code')}</span>` +
-    `<span class="mn-file-t"><b>${esc(title)}</b><small>${KIND} · ${lines} line${lines === 1 ? '' : 's'}</small></span>` +
+    `<span class="mn-file-t"><b>${esc(title)}</b><small>${kind === 'svg' ? 'SVG image' : 'HTML page'} · ${lines} line${lines === 1 ? '' : 's'}</small></span>` +
     `<span class="mn-file-a"><span class="mn-file-open">${icon('eye')}<span>Open</span></span>` +
     `<button type="button" class="mn-file-dl" data-file-dl title="Download the ${KIND} file" aria-label="Download the ${KIND} file">${icon('download')}</button></span>` +
     `<pre class="mn-file-src" hidden><code>${code}</code></pre></div>`

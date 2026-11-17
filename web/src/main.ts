@@ -67,6 +67,7 @@ import { initToasts, notify, toast } from './toast';
 import { markUpdateNoticeSeen, updateNoticeSeen } from './storage';
 import { installStyles } from './ui';
 import { watchUnread } from './assistant/unread';
+import { watchScrollbars } from './assistant/scrollbars';
 import type { BootSplash } from './boot-splash';
 import type { Page } from './state';
 import type { SettingsInfo } from './types';
@@ -275,6 +276,7 @@ async function boot(): Promise<void> {
   registerView('assistant', renderAssistant);
   registerView('trash', renderTrash);
   watchUnread();
+  watchScrollbars();
 
   // The tree hooks are only filled when the Vault package has not installed its own.
   hooks.openNote = (p: string) => void openNote(p);

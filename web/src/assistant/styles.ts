@@ -390,17 +390,20 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-rel .mn-att-c:hover{border-color:var(--accent-line,var(--line-strong))}
 .mn-rel-more{align-self:center;padding:0 6px;font-size:11.5px;color:var(--muted)}
 
-/* Scrollbars on the Mnemo page: a hairline that thickens a little under the pointer. */
+/* Scrollbars in Mnemo (chat, message box, chat list): a thin rounded thumb that shows only
+   while scrolling (or under the pointer) and fades away after. The track always keeps its
+   width, so nothing shifts when it appears. */
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea){--sb:transparent}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea).sb-on{--sb:color-mix(in srgb,var(--fg) 24%,transparent)}
 @supports not selector(::-webkit-scrollbar){
-  .mn-log,.mnp-list,.mnp-art-b,.mnp-act{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--fg) 16%,transparent) transparent}
+  :is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea){scrollbar-width:thin;scrollbar-color:var(--sb) transparent;transition:scrollbar-color .3s}
 }
-.mn-log::-webkit-scrollbar,.mnp-list::-webkit-scrollbar,.mnp-art-b::-webkit-scrollbar,.mnp-act::-webkit-scrollbar{width:6px;height:6px}
-.mn-log::-webkit-scrollbar-track,.mnp-list::-webkit-scrollbar-track,.mnp-art-b::-webkit-scrollbar-track,.mnp-act::-webkit-scrollbar-track{background:transparent}
-.mn-log::-webkit-scrollbar-thumb,.mnp-list::-webkit-scrollbar-thumb,.mnp-art-b::-webkit-scrollbar-thumb,.mnp-act::-webkit-scrollbar-thumb{
-  border-radius:99px;border:2px solid transparent;background:color-mix(in srgb,var(--fg) 14%,transparent) padding-box}
-.mn-log:hover::-webkit-scrollbar-thumb,.mnp-list:hover::-webkit-scrollbar-thumb,.mnp-art-b:hover::-webkit-scrollbar-thumb,.mnp-act:hover::-webkit-scrollbar-thumb{background-color:color-mix(in srgb,var(--fg) 26%,transparent)}
-.mn-log::-webkit-scrollbar-thumb:active,.mnp-list::-webkit-scrollbar-thumb:active{background-color:color-mix(in srgb,var(--fg) 38%,transparent)}
-.mn-log::-webkit-scrollbar-button,.mnp-list::-webkit-scrollbar-button,.mnp-art-b::-webkit-scrollbar-button,.mnp-act::-webkit-scrollbar-button{display:none}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar{width:8px;height:8px;background:transparent}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-track{background:transparent}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-thumb{border-radius:99px;border:2px solid transparent;background:var(--sb) padding-box;min-height:28px}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--fg) 34%,transparent)}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-thumb:active{background-color:color-mix(in srgb,var(--fg) 42%,transparent)}
+:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-button,:is(.mn-log,.mnp-list,.mnp-art-b,.mnp-act,.mn-comp textarea)::-webkit-scrollbar-corner{display:none;background:transparent}
 
 /* The prompt box scrolls without a bar: its edges fade where there is more text. */
 .mn-comp textarea{scrollbar-width:none;--ta-ft:0px;--ta-fb:0px;
@@ -496,5 +499,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-compact summary span{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:3px 12px;border-radius:99px;border:1px solid var(--line);white-space:nowrap;line-height:1.4}
 .mn-compact summary .i{width:13px;height:13px}
 .mn-compact[open] summary span{color:var(--fg);border-color:var(--line-strong)}
+.mn-compact-t{font-style:normal;font-variant-numeric:tabular-nums;color:var(--text-3,var(--muted));margin-left:2px}
+.mn-compact.live{display:flex;flex-direction:column;align-items:center;gap:6px;animation:mnIn .2s var(--ease-out,ease-out) both}
+.mn-compact-s{display:flex;align-items:center;gap:10px;width:100%}
+.mn-compact-s::before,.mn-compact-s::after{content:"";flex:1 1 0;min-width:12px;height:1px;background:linear-gradient(90deg,transparent,var(--accent-line,var(--line)),transparent)}
+.mn-compact-s span{flex:none;display:inline-flex;align-items:center;gap:8px;padding:4px 13px;border-radius:99px;border:1px solid var(--accent-line,var(--line-strong));background:var(--accent-soft,transparent);white-space:nowrap;line-height:1.4}
+.mn-compact-s b{font-weight:600;background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 1.6s linear infinite}
+.mn-compact-spin{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 30%,transparent);border-top-color:var(--accent);animation:mnSpin .8s linear infinite}
+.mn-compact-why{margin:0;max-width:46ch;text-align:center;font-size:12px;line-height:1.5;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.mn-compact-s b,.mn-compact-spin{animation:none}}
 .mn-compact-b{margin-top:10px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--fg) 4%,transparent);font-size:13px;color:var(--text-2,var(--fg))}
 `;

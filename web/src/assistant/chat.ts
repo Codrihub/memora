@@ -30,6 +30,11 @@ applyTextSize();
 /** Friendly words for each tool, and whether it changes notes. */
 const TOOL_WORDS: Record<string, [string, boolean]> = {
   search_memory: ['Searched notes', false],
+  list_chats: ['Looked through chats', false],
+  search_chats: ['Searched earlier chats', false],
+  read_chat: ['Read an earlier chat', false],
+  list_artifacts: ['Looked through pages', false],
+  read_artifact: ['Opened a page', false],
   read_memory: ['Read a note', false],
   list_memory: ['Listed notes', false],
   get_stats: ['Checked the vault', false],
@@ -684,15 +689,18 @@ export class ChatView {
       if (!this.session) return;
       b.disabled = true;
       b.textContent = 'Compacting…';
+      close();
+      const live = this.compactLive();
+      this.log.append(live);
+      this.scrollEnd(true);
       try {
         const res = await A.compactSession(this.session.id);
-        close();
+        live.remove();
         toast(res.ok ? `Compacted ${res.messages} older messages into a summary` : res.reason || 'Nothing to compact yet', res.ok ? 'ok' : 'info');
         if (res.ok) await this.open(this.session.id);
         else this.setContext(res.context);
       } catch (err) {
-        b.disabled = false;
-        b.textContent = 'Compact now';
+        live.remove();
         toast((err as Error).message, 'err');
       }
     };
@@ -1162,17 +1170,36 @@ export class ChatView {
       }
     }
     finishTurn();
+    // Number the versions of each page across the whole chat.
+    mountArt(this.log);
     this.scrollEnd(true);
     this.paintRail();
     requestAnimationFrame(() => this.log.querySelectorAll<HTMLElement>('.mn-car').forEach(syncCarousel));
   }
 
   /** Where older messages were folded into a summary (open it to read the summary). */
-  private compactNote(n: number, summary: string): HTMLElement {
+  private compactNote(n: number, summary: string, t0 = 0): HTMLElement {
     const d = el('details', 'mn-compact');
-    d.innerHTML = `<summary title="${n ? 'Open to read the summary' : ''}"><span>${icon('refresh')}${n ? 'Compacted' : 'Compacting…'}</span></summary>${
-      summary ? `<div class="mn-md mn-compact-b">${renderReply(summary)}</div>` : ''
-    }`;
+    const took = t0 ? Math.max(1, Math.round((performance.now() - t0) / 1000)) : 0;
+    d.innerHTML = `<summary title="${n ? 'Open to read the summary' : ''}"><span>${icon('refresh')}${n ? 'Compacted' : 'Compacting…'}${
+      took ? `<em class="mn-compact-t">${took}s</em>` : ''
+    }</span></summary>${summary ? `<div class="mn-md mn-compact-b">${renderReply(summary)}</div>` : ''}`;
+    return d;
+  }
+
+  /** While the older messages are being summarised: a working divider with a clock. */
+  private compactLive(): HTMLElement {
+    this.log.querySelector('.mn-compact.live')?.remove();
+    const d = el('div', 'mn-compact live');
+    const t0 = performance.now();
+    d.dataset.t0 = String(t0);
+    d.setAttribute('role', 'status');
+    d.innerHTML = `<div class="mn-compact-s"><span><i class="mn-compact-spin" aria-hidden="true"></i><b>Compacting conversation</b><em class="mn-compact-t">0s</em></span></div>
+      <p class="mn-compact-why">The chat filled ${A.MNEMO}'s memory for this model, so the older messages are being folded into a summary. The reply continues right after.</p>`;
+    const tick = window.setInterval(() => {
+      if (!d.isConnected) return window.clearInterval(tick);
+      d.querySelector('.mn-compact-t')!.textContent = `${Math.round((performance.now() - t0) / 1000)}s`;
+    }, 1000);
     return d;
   }
 
@@ -1666,12 +1693,19 @@ export class ChatView {
             this.scrollEnd();
             break;
           case 'compacting':
-            think(true, 'Compacting the chat’s memory…');
+            // The chat is full: a live divider shows the summary being written, then the reply.
+            think(false);
+            turn.before(this.compactLive());
+            this.scrollEnd();
             break;
-          case 'compacted':
-            turn.before(this.compactNote(ev.messages, ''));
+          case 'compacted': {
+            const live = this.log.querySelector<HTMLElement>('.mn-compact.live');
+            const done = this.compactNote(ev.messages, '', live ? Number(live.dataset.t0) : 0);
+            if (live) live.replaceWith(done);
+            else turn.before(done);
             think(true);
             break;
+          }
           case 'notice':
             body.insertAdjacentHTML('beforeend', `<div class="mn-notice">${icon('info')}<span>${esc(ev.text)}</span></div>`);
             break;

@@ -20,6 +20,7 @@ import { useActivityStyles } from '../control/activity';
 import { ChatView, openMnemoSettings, openShown, type Artifact } from './chat';
 import { MNEMO_CSS, markHTML } from './styles';
 import { textSizeHTML, wireTextSize } from './textsize';
+import { openPreview } from './art';
 import { noteSessions, onUnread, unreadOf } from './unread';
 
 
@@ -95,13 +96,15 @@ function build(): void {
   root.innerHTML = `
     <aside class="mnp-side" id="mnpSide" aria-label="Chats">
       <div class="mnp-brand">${markHTML('md')}<div class="mnp-bt"><b>${A.MNEMO}</b><small>Your notes agent</small></div>
+        <button type="button" class="mnp-manage" id="mnpManage" title="Select or clean up chats" aria-label="Select or clean up chats">${icon('more')}</button>
         <button type="button" class="mnp-new" id="mnpNew" title="New chat" aria-label="New chat">${icon('plus')}</button>
         <button type="button" class="mnp-fold" id="mnpFold" title="Hide the chat list" aria-label="Hide the chat list">${icon('sidebar')}</button></div>
       <label class="mnp-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpQ" placeholder="Search everything said" autocomplete="off"></label>
       <button type="button" class="mnp-newrow" id="mnpNewRow">${icon('plus')}<span>New chat</span></button>
+      <div class="mnp-selbar" id="mnpSelBar" hidden></div>
       <nav class="mnp-list" id="mnpList" aria-label="Chat list"></nav>
       <nav class="mnp-sfoot" aria-label="${A.MNEMO}">
-        <button type="button" class="mnp-set" id="mnpLook" title="Theme, chat background and text size" aria-haspopup="dialog">${icon('sun')}<span>Appearance</span></button>
+        <button type="button" class="mnp-look-btn" id="mnpLook" title="Theme, chat background and text size" aria-haspopup="dialog">${icon('sun')}<span><b>Appearance</b><small id="mnpLookSub">Theme, background, text</small></span>${icon('chev-down')}</button>
         <button type="button" class="mnp-set" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom">${icon('activity')}<span>Activity</span></button>
         <button type="button" class="mnp-set" id="mnpSet" title="Models, keys and instructions">${icon('settings')}<span>Settings</span></button>
         <button type="button" class="mnp-set" id="mnpHome" title="Back to Memora">${icon('overview')}<span>Memora</span></button>
@@ -184,6 +187,14 @@ function build(): void {
   root.querySelector<HTMLElement>('#mnpArtX')!.onclick = () => setPane('art', false);
   root.querySelector<HTMLElement>('#mnpAScrim')!.onclick = () => setPane('art', false);
   root.querySelector<HTMLElement>('#mnpArtB')!.addEventListener('click', (e) => {
+    const pg = (e.target as HTMLElement).closest<HTMLElement>('[data-page-art]');
+    if (pg) {
+      const p = chatPages()[Number(pg.dataset.pageArt)];
+      if (!p) return;
+      if (isNarrow() || window.innerWidth < 1100) setPane('art', false);
+      openPreview(p.card);
+      return;
+    }
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-card]');
     if (!b) return;
     if (isNarrow() || window.innerWidth < 1100) setPane('art', false);
@@ -223,12 +234,33 @@ function build(): void {
     leave(false);
   });
   root.querySelector<HTMLElement>('#mnpMore')!.onclick = (e) => headMenu(e.currentTarget as HTMLElement);
+  root.querySelector<HTMLElement>('#mnpManage')!.onclick = (e) => manageMenu(e.currentTarget as HTMLElement);
+  root.querySelector<HTMLElement>('#mnpSelBar')!.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-sel]');
+    if (!b) return;
+    const act = b.dataset.sel;
+    if (act === 'cancel') return select(null);
+    if (act === 'all') {
+      const ids = visibleIds();
+      const every = ids.length > 0 && ids.every((x) => picked!.has(x));
+      picked = new Set(every ? [] : ids);
+      return paintList();
+    }
+    if (act === 'delete') askDeleteMany([...(picked || [])]);
+  };
   root.querySelector<HTMLElement>('#mnpList')!.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     const more = t.closest<HTMLElement>('[data-more]');
     const row = t.closest<HTMLElement>('[data-id]');
     if (!row) return;
     const id = row.dataset.id!;
+    if (picked) {
+      e.stopPropagation();
+      if (picked.has(id)) picked.delete(id);
+      else picked.add(id);
+      paintList();
+      return;
+    }
     const s = sessions.find((x) => x.id === id);
     if (more) {
       e.stopPropagation();
@@ -424,6 +456,8 @@ function paintPrefs(): void {
   });
   const bg = readBg();
   root.dataset.bg = bg;
+  const sub = root.querySelector('#mnpLookSub');
+  if (sub) sub.textContent = `${THEME_LABEL[t]} · ${BGS.find((b) => b.id === bg)?.label || 'Glow'} background`;
   document.querySelectorAll<HTMLElement>('.mnp-look [data-pick-bg]').forEach((x) => {
     const on = x.dataset.pickBg === bg;
     x.classList.toggle('on', on);
@@ -463,18 +497,41 @@ const ART_GROUPS: { role: Artifact['role']; label: string }[] = [
 ];
 
 /** The "In this chat" panel: every note, folder, image and the vault this chat touched. */
+/** The pages (HTML and SVG files) in the chat on screen: the latest version of each. */
+function chatPages(): { card: HTMLElement; versions: number }[] {
+  const cards = Array.from(root?.querySelectorAll<HTMLElement>('#mnpChat .mn-log .mn-file') || []);
+  const last = new Map<string, { card: HTMLElement; versions: number }>();
+  for (const c of cards) {
+    const k = `${c.dataset.art}\u0000${c.dataset.title}`;
+    last.set(k, { card: c, versions: (last.get(k)?.versions || 0) + 1 });
+  }
+  return [...last.values()].reverse();
+}
+
 function paintArt(): void {
   if (!root || !chat) return;
   const items = chat.artifacts();
+  const pages = chatPages();
   const n = root.querySelector<HTMLElement>('.mnp-artn')!;
-  n.hidden = !items.length;
-  n.textContent = String(items.length);
+  const total = items.length + pages.length;
+  n.hidden = !total;
+  n.textContent = String(total);
   const body = root.querySelector<HTMLElement>('#mnpArtB')!;
-  if (!items.length) {
-    body.innerHTML = `<p class="mnp-art-none">Notes, folders and images this chat attaches, reads, changes or shows you collect here.</p>`;
+  if (!total) {
+    body.innerHTML = `<p class="mnp-art-none">Pages ${A.MNEMO} writes, and the notes, folders and images this chat attaches, reads, changes or shows you collect here.</p>`;
     return;
   }
-  body.innerHTML = ART_GROUPS.map((g) => {
+  const pageHTML = pages.length
+    ? `<section><h4>Pages<span>${pages.length}</span></h4>${pages
+        .map(
+          (p, i) =>
+            `<button type="button" class="mnp-art-i" data-page-art="${i}" title="${attr(p.card.dataset.title || 'Page')}"><span class="mnp-art-ic k-page">${icon('code')}</span><span class="mnp-art-t"><b>${esc(
+              p.card.dataset.title || 'Page',
+            )}</b><small>${p.card.dataset.art === 'svg' ? 'SVG image' : 'HTML page'}${p.versions > 1 ? ` · ${p.versions} versions` : ''}</small></span></button>`,
+        )
+        .join('')}</section>`
+    : '';
+  body.innerHTML = pageHTML + ART_GROUPS.map((g) => {
     const list = items.filter((i) => i.role === g.role);
     if (!list.length) return '';
     return `<section><h4>${esc(g.label)}<span>${list.length}</span></h4>${list
@@ -622,6 +679,7 @@ function paintFound(list: HTMLElement): boolean {
 function paintList(): void {
   const list = root?.querySelector<HTMLElement>('#mnpList');
   if (!list) return;
+  paintSelBar();
   if (query.length >= 2 && paintFound(list)) return;
   const shown = sessions
     .filter((s) => !query || s.title.toLowerCase().includes(query) || A.scopeLabel(s.scope).toLowerCase().includes(query))
@@ -641,11 +699,14 @@ function paintList(): void {
     }
     const ic = s.scope.startsWith('note:') ? 'note' : s.scope.startsWith('folder:') ? 'folder' : 'chat';
     const news = s.running || s.id === cur ? 0 : unreadOf(s);
-    html += `<div class="mnp-row${s.id === cur ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}" data-id="${attr(s.id)}" role="button" tabindex="0" aria-current="${s.id === cur}">
-      <span class="mnp-row-ic">${s.running ? `<i class="mnp-spin" title="${A.MNEMO} is working on this"></i>` : icon(ic)}</span>
+    const sel = picked ? picked.has(s.id) : false;
+    html += `<div class="mnp-row${s.id === cur && !picked ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}${sel ? ' sel' : ''}" data-id="${attr(s.id)}" role="${picked ? 'checkbox' : 'button'}" tabindex="0"${
+      picked ? ` aria-checked="${sel}"` : ` aria-current="${s.id === cur}"`
+    }>
+      ${picked ? `<span class="mnp-check" aria-hidden="true">${sel ? icon('check') : ''}</span>` : ''}<span class="mnp-row-ic">${s.running ? `<i class="mnp-spin" title="${A.MNEMO} is working on this"></i>` : icon(ic)}</span>
       <span class="mnp-row-t"><b>${titleHTML(s.title)}</b><small>${esc(A.scopeLabel(s.scope))} · ${esc(relTs(s.updated_at))}</small></span>
-      ${news ? `<span class="mnp-new" title="${news} new message${news === 1 ? '' : 's'}" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}
-      <button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button></div>`;
+      ${news ? `<span class="mnp-newn" title="${news} new message${news === 1 ? '' : 's'}" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}
+      ${picked ? '' : `<button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button>`}</div>`;
   }
   list.innerHTML = html;
   list.querySelectorAll<HTMLElement>('.mnp-row').forEach((r) => {
@@ -700,6 +761,8 @@ function headMenu(at: HTMLElement): void {
           root?.querySelector<HTMLInputElement>('#mnpQ')?.focus();
         },
       },
+      { label: 'Select chats', icon: icon('check', 'vx-i'), run: () => select(new Set()) },
+      { label: 'Clean up chats…', icon: icon('trash', 'vx-i'), run: () => cleanUp() },
       { label: `${A.MNEMO} activity`, icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
       { label: 'Appearance', icon: icon('sun', 'vx-i'), run: () => lookMenu(at) },
       { label: `${A.MNEMO} settings: models and keys`, icon: icon('settings', 'vx-i'), run: () => openMnemoSettings() },
@@ -752,6 +815,7 @@ function rowMenu(s: A.Session, at: HTMLElement): void {
         run: () => void A.updateSession(s.id, { pinned: !s.pinned }).then((r) => afterUpdate(r.session), fail),
       },
       ...exportItems(s),
+      { label: 'Select', icon: icon('check', 'vx-i'), run: () => select(new Set([s.id])) },
       { sep: true, label: '' },
       { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: true, run: () => askDelete(s) },
     ],
@@ -794,6 +858,140 @@ function rename(s: A.Session): void {
     ],
   });
   window.setTimeout(() => input.select(), 30);
+}
+
+// ---- many chats at once: pick them in the list, or clean up by age, or all ----
+
+/** The chats picked in the list while selecting; null when not selecting. */
+let picked: Set<string> | null = null;
+
+function select(start: Set<string> | null): void {
+  picked = start;
+  root?.classList.toggle('selecting', !!start);
+  if (start) {
+    if (isNarrow()) root?.classList.add('side-open');
+    else setPane('side', true);
+  }
+  paintList();
+}
+
+function visibleIds(): string[] {
+  return Array.from(root?.querySelectorAll<HTMLElement>('#mnpList .mnp-row[data-id]') || []).map((r) => r.dataset.id!);
+}
+
+function paintSelBar(): void {
+  const bar = root?.querySelector<HTMLElement>('#mnpSelBar');
+  if (!bar) return;
+  bar.hidden = !picked;
+  if (!picked) return;
+  const n = picked.size;
+  bar.innerHTML = `<span class="mnp-seln">${n ? `${n} selected` : 'Pick chats'}</span>
+    <button type="button" class="mnp-selb" data-sel="all">All</button>
+    <button type="button" class="mnp-selb danger" data-sel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>Delete</span></button>
+    <button type="button" class="mn-ibtn" data-sel="cancel" aria-label="Stop selecting" title="Done">${icon('close')}</button>`;
+}
+
+/** The ⋯ beside New chat: pick chats, clean up old ones, or delete them all. */
+function manageMenu(at: HTMLElement): void {
+  openMenu(
+    [
+      { label: 'Select chats', icon: icon('check', 'vx-i'), run: () => select(new Set()) },
+      { label: 'Clean up chats…', icon: icon('refresh', 'vx-i'), run: () => cleanUp() },
+      { sep: true, label: '' },
+      { label: 'Delete all chats…', icon: icon('trash', 'vx-i'), danger: true, disabled: !sessions.length, run: () => cleanUp(true) },
+    ],
+    at,
+  );
+}
+
+function afterPrune(r: { deleted: number; skipped: number }): void {
+  const cur = chat?.session?.id;
+  void refreshList().then(() => {
+    if (cur && !sessions.some((x) => x.id === cur)) newChat();
+    paintList();
+  });
+  Modal.close();
+  toast(
+    `${r.deleted} chat${r.deleted === 1 ? '' : 's'} deleted${r.skipped ? `, ${r.skipped} still answering left as they are` : ''}`,
+    r.deleted ? 'ok' : 'info',
+  );
+}
+
+function askDeleteMany(ids: string[]): void {
+  if (!ids.length) return;
+  Modal.confirm(
+    `Delete ${ids.length} chat${ids.length === 1 ? '' : 's'}?`,
+    'They and their messages are removed for good. Your notes are not touched.',
+    `Delete ${ids.length}`,
+    async () => {
+      try {
+        afterPrune(await A.pruneSessions({ ids }));
+        select(null);
+      } catch (e) {
+        fail(e);
+      }
+    },
+  );
+}
+
+/** Delete chats nobody has touched for a while, or all of them (pinned ones kept unless asked). */
+function cleanUp(all = false): void {
+  const DAY = 86_400;
+  const now = Date.now() / 1000;
+  const opts = [
+    { v: '7', label: 'Older than 7 days' },
+    { v: '30', label: 'Older than 30 days' },
+    { v: '90', label: 'Older than 90 days' },
+    { v: 'all', label: 'All chats' },
+  ];
+  const body = el(
+    'div',
+    'mnp-clean',
+    `<div class="mnp-clean-o" role="radiogroup" aria-label="Which chats">${opts
+      .map(
+        (o) =>
+          `<label class="mnp-clean-r"><input type="radio" name="mnpClean" value="${o.v}"${(all ? o.v === 'all' : o.v === '30') ? ' checked' : ''}><span>${o.label}</span><em data-n="${o.v}"></em></label>`,
+      )
+      .join('')}</div>
+    <label class="mnp-clean-k"><input type="checkbox" checked data-keep><span>Keep pinned chats</span></label>
+    <p class="mnp-clean-p">Deleted chats and their messages are gone for good. Your notes are not touched, and a chat that is answering right now is left alone.</p>`,
+  );
+  const count = (v: string, keep: boolean): number =>
+    sessions.filter((s) => !(keep && s.pinned) && !s.running && (v === 'all' || s.updated_at < now - Number(v) * DAY)).length;
+  const paint = (): void => {
+    const keep = body.querySelector<HTMLInputElement>('[data-keep]')!.checked;
+    body.querySelectorAll<HTMLElement>('[data-n]').forEach((e) => (e.textContent = String(count(e.dataset.n!, keep))));
+    const v = body.querySelector<HTMLInputElement>('input[name=mnpClean]:checked')!.value;
+    const n = count(v, keep);
+    const go = document.querySelector<HTMLButtonElement>('.mnp-clean-go');
+    if (go) {
+      go.disabled = !n;
+      go.textContent = n ? `Delete ${n} chat${n === 1 ? '' : 's'}` : 'Nothing to delete';
+    }
+  };
+  body.onchange = paint;
+  Modal.open({
+    title: all ? 'Delete all chats' : 'Clean up chats',
+    sub: `${sessions.length} chat${sessions.length === 1 ? '' : 's'} in ${A.MNEMO}`,
+    body,
+    onOpen: () => paint(),
+    actions: [
+      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      {
+        label: 'Delete',
+        cls: 'danger mnp-clean-go',
+        run: async () => {
+          const v = body.querySelector<HTMLInputElement>('input[name=mnpClean]:checked')!.value;
+          const keep = body.querySelector<HTMLInputElement>('[data-keep]')!.checked;
+          try {
+            afterPrune(await A.pruneSessions(v === 'all' ? { all: true, keep_pinned: keep } : { older_than_days: Number(v), keep_pinned: keep }));
+          } catch (e) {
+            fail(e);
+          }
+        },
+      },
+    ],
+  });
 }
 
 function askDelete(s: A.Session): void {
@@ -870,10 +1068,10 @@ const PAGE_CSS = `
 .mnp-new{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface-0,var(--bg));color:var(--fg);cursor:pointer;transition:background .15s,transform .15s}
 .mnp-new:hover{background:var(--hover)}.mnp-new:active{transform:scale(.95)}
 .mnp-new .i{width:17px;height:17px;stroke-width:2.1}
-.mnp-fold{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:10px;border:1px solid var(--line);background:var(--surface-0,var(--bg));
+.mnp-fold,.mnp-manage{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:10px;border:1px solid var(--line);background:var(--surface-0,var(--bg));
   color:var(--text-2,var(--fg));cursor:pointer;transition:background .15s,border-color .15s}
-.mnp-fold:hover{background:var(--hover);border-color:var(--line-strong);color:var(--fg)}
-.mnp-fold .i{width:17px;height:17px;stroke-width:1.9}
+.mnp-fold:hover,.mnp-manage:hover{background:var(--hover);border-color:var(--line-strong);color:var(--fg)}
+.mnp-fold .i,.mnp-manage .i{width:17px;height:17px;stroke-width:1.9}
 .mnp-newrow{display:flex;align-items:center;gap:8px;margin:0 12px 10px;padding:0 12px;height:38px;border-radius:10px;border:1px solid var(--line-strong);
   background:var(--surface-0,var(--bg));color:var(--fg);font:inherit;font-size:13.5px;font-weight:560;cursor:pointer;transition:background .15s,border-color .15s}
 .mnp-newrow:hover{background:var(--hover)}
@@ -893,13 +1091,22 @@ const PAGE_CSS = `
 .mnp-theme button.on{background:var(--seg-thumb,var(--surface-1,#fff));color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.12)}
 .mnp-bgsw{--bgz:7px;display:inline-block;flex:none;width:24px;height:24px;border-radius:7px;border:1px solid var(--line-strong);background-color:var(--bg)}
 .mnp-bgsw.big{--bgz:12px;width:100%;height:46px;border-radius:10px;filter:saturate(1.9) contrast(1.06)}
-/* The chat list's foot: four even tiles in one row (Appearance, Activity, Settings, Memora). */
-.mnp-sfoot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:8px 8px 10px;border-top:1px solid var(--line)}
-.mnp-sfoot .mnp-set{flex-direction:column;justify-content:center;gap:4px;height:54px;padding:0 2px;font-size:11px;font-weight:550;text-align:center;border-radius:12px;color:var(--muted)}
+/* The chat list's foot: Appearance as one wide button, then Activity, Settings and Memora. */
+.mnp-sfoot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:8px 8px 10px;border-top:1px solid var(--line)}
+.mnp-look-btn{grid-column:1/-1;display:flex;align-items:center;gap:10px;width:100%;height:46px;margin-bottom:4px;padding:0 12px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-1,var(--panel));color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:background .15s,border-color .15s;-webkit-tap-highlight-color:transparent}
+.mnp-look-btn:hover,.mnp-look-btn[aria-expanded=true]{background:var(--hover);border-color:var(--line-strong)}
+.mnp-look-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.mnp-look-btn>.i{width:18px;height:18px;flex:none;color:var(--muted)}
+.mnp-look-btn>.i:last-child{width:15px;height:15px;transform:rotate(180deg);transition:transform .2s}
+.mnp-look-btn[aria-expanded=true]>.i:last-child{transform:none}
+.mnp-look-btn>span{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.mnp-look-btn b{font-size:13.5px;font-weight:600}
+.mnp-look-btn small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-sfoot .mnp-set{flex-direction:column;justify-content:center;gap:4px;height:54px;padding:0 2px;font-size:11.5px;font-weight:550;text-align:center;border-radius:12px;color:var(--muted)}
 .mnp-sfoot .mnp-set .i{width:19px;height:19px}
 .mnp-sfoot .mnp-set span{max-width:100%;line-height:1.2}
-.mnp-sfoot .mnp-set:hover,.mnp-sfoot .mnp-set[aria-expanded=true]{color:var(--fg)}
-.mnp-sfoot .mnp-set[aria-expanded=true]{background:var(--hover)}
+.mnp-sfoot .mnp-set:hover{color:var(--fg)}
 /* Appearance: a panel above its button, a bottom sheet on phones. */
 .mnp-lookscrim{position:fixed;inset:0;z-index:119;background:transparent;opacity:0;transition:opacity .2s}
 .mnp-look{position:fixed;z-index:120;display:flex;flex-direction:column;padding:6px 14px 14px;border-radius:16px;background:var(--panel,var(--surface-1));border:1px solid var(--line-strong);
@@ -976,9 +1183,30 @@ const PAGE_CSS = `
 .mnp-row-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
 .mnp-row-t b{font-size:13.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row.unread .mnp-row-t b{font-weight:700;color:var(--fg)}
-.mnp-new{flex:none;display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg,#fff);
+.mnp-selbar{display:flex;align-items:center;gap:6px;margin:4px 10px 6px;padding:6px 6px 6px 12px;border-radius:12px;border:1px solid var(--accent-line,var(--line-strong));background:var(--accent-soft,var(--hover))}
+.mnp-selbar[hidden]{display:none}
+.mnp-seln{flex:1;min-width:0;font-size:12.5px;font-weight:650}
+.mnp-selb{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--surface-1,var(--panel));color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.mnp-selb .i{width:14px;height:14px}
+.mnp-selb.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,transparent)}
+.mnp-selb.danger:not(:disabled):hover{background:var(--danger-soft,var(--hover))}
+.mnp-selb:disabled{opacity:.45;cursor:default}
+.mnp-check{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:6px;border:1.5px solid var(--line-strong);color:#fff}
+.mnp-check .i{width:12px;height:12px;stroke-width:3}
+.mnp-row.sel{background:var(--accent-soft,var(--hover))}
+.mnp-row.sel .mnp-check{background:var(--accent);border-color:var(--accent)}
+.mnp.selecting .mnp-row-ic{display:none}
+.mnp-art-ic.k-page{background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff}
+.mnp-clean-o{display:flex;flex-direction:column;gap:6px}
+.mnp-clean-r{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
+.mnp-clean-r:has(input:checked){border-color:var(--accent);background:var(--accent-soft,transparent)}
+.mnp-clean-r span{flex:1}
+.mnp-clean-r em{font-style:normal;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--muted)}
+.mnp-clean-k{display:flex;align-items:center;gap:10px;margin:12px 2px 0;font-size:13.5px;cursor:pointer}
+.mnp-clean-p{margin:10px 2px 0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.mnp-newn{flex:none;display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg,#fff);
   font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
-.mnp-row.unread:hover .mnp-new,.mnp-row.unread:focus-within .mnp-new{display:none}
+.mnp-row.unread:hover .mnp-newn,.mnp-row.unread:focus-within .mnp-newn{display:none}
 .mnp-row-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-more{opacity:0}.mnp-row:hover .mnp-row-more,.mnp-row.on .mnp-row-more,.mnp-row-more:focus-visible{opacity:1}
 /* Touch screens have no hover: the ⋯ is always there (iOS would spend the first tap on a hover). */

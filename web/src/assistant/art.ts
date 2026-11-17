@@ -43,6 +43,41 @@ function splitMode(): boolean {
   return window.innerWidth >= SPLIT_MIN && !!mnemoPage();
 }
 
+// The split's width: dragged with the divider, kept per device, and always leaving room on
+// both sides (the panel at least PANE_MIN, the chat at least CHAT_MIN, the panel at most 75%).
+const LS_W = 'memora.mnemo.preview.w';
+const PANE_MIN = 360;
+const CHAT_MIN = 420;
+
+function savedWidth(): number {
+  try {
+    return Number(localStorage.getItem(LS_W)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function fitWidth(w: number): number {
+  const page = mnemoPage()?.getBoundingClientRect().width || window.innerWidth;
+  const max = Math.max(PANE_MIN, Math.min(page - CHAT_MIN, page * 0.75));
+  const want = w || Math.min(920, Math.max(380, window.innerWidth * 0.46));
+  return Math.round(Math.min(max, Math.max(PANE_MIN, want)));
+}
+
+function setWidth(w: number, save = false): void {
+  const fit = fitWidth(w);
+  document.documentElement.style.setProperty('--pvw', fit + 'px');
+  panel?.querySelector('.mn-pv-grip')?.setAttribute('aria-valuenow', String(fit));
+  if (save) {
+    try {
+      if (w) localStorage.setItem(LS_W, String(fit));
+      else localStorage.removeItem(LS_W);
+    } catch {
+      /* lasts until reload */
+    }
+  }
+}
+
 /** Place the panel: beside the chat (matching the Mnemo page's top and bottom) or full screen. */
 function layout(): void {
   if (!panel) return;
@@ -55,10 +90,41 @@ function layout(): void {
     const r = mnemoPage()!.getBoundingClientRect();
     panel.style.top = `${Math.max(0, r.top)}px`;
     panel.style.bottom = `${Math.max(0, window.innerHeight - r.bottom)}px`;
+    setWidth(savedWidth());
   } else {
     panel.style.top = '';
     panel.style.bottom = '';
   }
+}
+
+/** The divider between the chat and the panel: drag it, use the arrow keys, double-click to reset. */
+function wireGrip(p: HTMLElement): void {
+  const grip = p.querySelector<HTMLElement>('.mn-pv-grip')!;
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !p.classList.contains('split')) return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.documentElement.classList.add('mn-pv-drag');
+    const right = mnemoPage()?.getBoundingClientRect().right ?? window.innerWidth;
+    const move = (ev: PointerEvent): void => setWidth(right - ev.clientX);
+    const up = (ev: PointerEvent): void => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      document.documentElement.classList.remove('mn-pv-drag');
+      setWidth(right - ev.clientX, true);
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
+  grip.addEventListener('dblclick', () => setWidth(0, true));
+  grip.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const now = p.getBoundingClientRect().width;
+    setWidth(now + (e.key === 'ArrowLeft' ? 32 : -32), true);
+  });
 }
 
 function wire(): void {
@@ -105,6 +171,7 @@ function build(): HTMLElement {
   p.innerHTML =
     `<header class="mn-pv-h">` +
     `<span class="mn-pv-ic">${icon('code')}</span><div class="mn-pv-t"><b></b><small></small></div>` +
+    `<div class="mn-pv-vers" hidden></div>` +
     `<div class="mn-pv-tabs" role="tablist" aria-label="Show">` +
     `<button type="button" role="tab" data-pv-view="preview" aria-selected="true">${icon('eye')}<span>Preview</span></button>` +
     `<button type="button" role="tab" data-pv-view="code" aria-selected="false">${icon('code')}<span>Code</span></button></div>` +
@@ -112,8 +179,10 @@ function build(): HTMLElement {
     `<button type="button" class="mn-pv-b" data-pv-copy title="Copy the code" aria-label="Copy the code">${icon('copy')}<span>Copy</span></button>` +
     `<button type="button" class="mn-pv-b" data-pv-dl title="Download the file" aria-label="Download the file">${icon('download')}<span>Download</span></button>` +
     `<button type="button" class="mn-pv-b mn-pv-x" data-pv-close title="Close (Esc)" aria-label="Close">${icon('close')}</button>` +
-    `</div></header><div class="mn-pv-body"><div class="mn-pv-frame"></div><pre class="mn-pv-code"><code></code></pre></div>`;
+    `</div></header><div class="mn-pv-body"><div class="mn-pv-frame"></div><pre class="mn-pv-code"><code></code></pre></div>` +
+    `<div class="mn-pv-grip" role="separator" aria-orientation="vertical" aria-label="Resize the preview" aria-valuemin="${PANE_MIN}" tabindex="0" title="Drag to resize · double-click to reset"></div>`;
   document.body.append(p);
+  wireGrip(p);
   return p;
 }
 
@@ -141,6 +210,7 @@ export function openPreview(card: HTMLElement): void {
   panel.querySelector<HTMLElement>('.mn-pv-frame')!.replaceChildren(f);
   f.src = FRAME;
   setView('preview');
+  paintVersions(card);
   layout();
   requestAnimationFrame(() => panel?.classList.add('on'));
 }
@@ -159,7 +229,51 @@ export function mountArt(root: ParentNode, auto = false): void {
   const cards = root.querySelectorAll<HTMLElement>('.mn-file');
   if (!cards.length) return;
   wire();
-  if (auto && splitMode()) openPreview(cards[cards.length - 1]);
+  const log = (root instanceof Element && root.closest('.mn-log')) || root;
+  numberVersions(log);
+  // A page Mnemo has just written (or rewritten) opens by itself where there is room, and
+  // replaces what the panel shows when it is open anyway.
+  if (auto && (splitMode() || panel?.classList.contains('on'))) openPreview(cards[cards.length - 1]);
+}
+
+// ---- versions: a page rewritten under the same title is a new version of the same file ----
+
+function versionsOf(card: HTMLElement): HTMLElement[] {
+  const log = card.closest('.mn-log') || document;
+  return Array.from(log.querySelectorAll<HTMLElement>('.mn-file')).filter((c) => c.dataset.title === card.dataset.title && c.dataset.art === card.dataset.art);
+}
+
+function numberVersions(scope: ParentNode): void {
+  const groups = new Map<string, HTMLElement[]>();
+  scope.querySelectorAll<HTMLElement>('.mn-file').forEach((c) => {
+    const k = `${c.dataset.art}\u0000${c.dataset.title}`;
+    groups.set(k, [...(groups.get(k) || []), c]);
+  });
+  for (const list of groups.values()) {
+    list.forEach((c, i) => {
+      const last = i === list.length - 1;
+      c.classList.toggle('old', list.length > 1 && !last);
+      c.querySelector('.mn-file-v')?.remove();
+      if (list.length < 2) return;
+      const v = document.createElement('span');
+      v.className = 'mn-file-v';
+      v.textContent = last ? `v${i + 1} · latest` : `v${i + 1}`;
+      c.querySelector('.mn-file-t b')?.after(v);
+    });
+  }
+}
+
+function paintVersions(card: HTMLElement): void {
+  const box = panel?.querySelector<HTMLElement>('.mn-pv-vers');
+  if (!box) return;
+  const all = versionsOf(card);
+  const i = all.indexOf(card);
+  box.hidden = all.length < 2;
+  if (all.length < 2) return;
+  box.innerHTML =
+    `<button type="button" data-pv-ver="-1" aria-label="Earlier version" title="Earlier version"${i <= 0 ? ' disabled' : ''}>${icon('chev')}</button>` +
+    `<span>v${i + 1} of ${all.length}</span>` +
+    `<button type="button" data-pv-ver="1" aria-label="Later version" title="Later version"${i >= all.length - 1 ? ' disabled' : ''}>${icon('chev')}</button>`;
 }
 
 function fileName(card: HTMLElement): string {
@@ -201,6 +315,17 @@ function onClick(e: MouseEvent): void {
     return;
   }
   if (!panel || !t.closest('.mn-pv')) return;
+  const ver = t.closest<HTMLButtonElement>('[data-pv-ver]');
+  if (ver && current) {
+    const all = versionsOf(current);
+    const next = all[all.indexOf(current) + Number(ver.dataset.pvVer)];
+    if (next) {
+      const view = panel.dataset.view === 'code' ? 'code' : 'preview';
+      openPreview(next);
+      setView(view);
+    }
+    return;
+  }
   const view = t.closest<HTMLElement>('[data-pv-view]');
   if (view) setView(view.dataset.pvView === 'code' ? 'code' : 'preview');
   else if (t.closest('[data-pv-close]')) closePreview();
@@ -216,19 +341,44 @@ function onClick(e: MouseEvent): void {
 }
 
 export const ART_CSS = `
-.mn-file{display:flex;align-items:center;gap:12px;margin:.6em 0;padding:10px 10px 10px 12px;border:1px solid var(--line);border-radius:14px;
-  background:var(--surface-1,var(--panel));cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s;max-width:520px}
-.mn-file:hover{border-color:var(--line-strong);box-shadow:0 4px 14px -8px rgba(15,23,42,.25)}
+/* A page Mnemo wrote: a file card as wide as the reply, tinted so it stands out from text and
+   tool cards; the title shortens with an ellipsis when it is long. */
+.mn-file{position:relative;display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;margin:.7em 0;padding:12px 12px 12px 14px;
+  border:1px solid color-mix(in srgb,var(--accent) 34%,var(--line));border-radius:16px;overflow:hidden;isolation:isolate;
+  background:linear-gradient(115deg,color-mix(in srgb,var(--accent) 11%,var(--surface-1,var(--panel))),var(--surface-1,var(--panel)) 62%);
+  cursor:pointer;transition:border-color .15s,box-shadow .2s,transform .2s}
+.mn-file::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:linear-gradient(180deg,#14b8a6,#4f46e5);z-index:-1}
+.mn-file:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--line));box-shadow:0 8px 22px -12px color-mix(in srgb,var(--accent) 60%,transparent);transform:translateY(-1px)}
 .mn-file:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mn-file.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.mn-file-ic{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:10px;background:var(--accent-soft);color:var(--accent)}
-.mn-file-ic .i{width:18px;height:18px}
-.mn-file-t{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.3}
-.mn-file-t b{font-weight:650;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mn-file-t small{font-size:12px;color:var(--muted)}
+.mn-file-ic{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 4px 10px -4px rgba(79,70,229,.5)}
+.mn-file-ic .i{width:19px;height:19px;stroke-width:2}
+.mn-file-t{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;line-height:1.3}
+.mn-file-t b{display:block;font-weight:650;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-file-t small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-file-a{display:flex;align-items:center;gap:4px;flex:none}
-.mn-file-open{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:9px;background:var(--fg);color:var(--bg);font-size:13px;font-weight:600}
-.mn-file-open .i{width:14px;height:14px}
+.mn-file-open{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:10px;background:var(--accent);color:var(--accent-fg,#fff);
+  font-size:13px;font-weight:650;box-shadow:0 4px 12px -6px color-mix(in srgb,var(--accent) 80%,transparent);transition:filter .15s}
+.mn-file:hover .mn-file-open{filter:brightness(1.06)}
+.mn-file-open .i{width:15px;height:15px}
+@media (prefers-reduced-motion:reduce){.mn-file,.mn-file:hover{transition:none;transform:none}}
+.mn-file-v{align-self:flex-start;margin:1px 0 1px;padding:1px 7px;border-radius:99px;font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  background:var(--accent);color:var(--accent-fg,#fff)}
+.mn-file.old{background:var(--surface-1,var(--panel));border-color:var(--line);opacity:.78}
+.mn-file.old::before{background:var(--line-strong)}
+.mn-file.old .mn-file-ic{background:var(--accent-soft);color:var(--accent);box-shadow:none}
+.mn-file.old .mn-file-v{background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--muted)}
+.mn-file.old .mn-file-open{background:none;color:var(--fg);border:1px solid var(--line-strong);box-shadow:none}
+.mn-file.old:hover{opacity:1}
+.mn-pv-vers{display:inline-flex;align-items:center;gap:2px;flex:none;padding:2px;border-radius:10px;border:1px solid var(--line)}
+.mn-pv-vers[hidden]{display:none}
+.mn-pv-vers span{padding:0 6px;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mn-pv-vers button{display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:8px;background:none;color:var(--fg);cursor:pointer}
+.mn-pv-vers button:first-child .i{transform:rotate(180deg)}
+.mn-pv-vers button:hover:not(:disabled){background:var(--hover)}
+.mn-pv-vers button:disabled{opacity:.35;cursor:default}
+.mn-pv-vers .i{width:14px;height:14px}
 .mn-file-dl{display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:9px;background:none;color:var(--muted);cursor:pointer}
 .mn-file-dl:hover{background:var(--hover);color:var(--fg)}
 .mn-file-dl .i{width:16px;height:16px}
@@ -236,9 +386,17 @@ export const ART_CSS = `
 .mn-pv{position:fixed;z-index:300;display:flex;flex-direction:column;background:var(--surface-1,var(--panel));color:var(--fg);
   inset:0;opacity:0;pointer-events:none;transform:translateY(12px);transition:opacity .2s,transform .25s var(--ease-out,ease-out)}
 .mn-pv.on{opacity:1;pointer-events:auto;transform:none}
-.mn-pv.split{left:auto;right:0;width:clamp(380px,46vw,920px);border-left:1px solid var(--line);box-shadow:-12px 0 30px -18px rgba(15,23,42,.35);transform:translateX(24px)}
+.mn-pv.split{left:auto;right:0;width:var(--pvw,clamp(380px,46vw,920px));border-left:1px solid var(--line);box-shadow:-12px 0 30px -18px rgba(15,23,42,.35);transform:translateX(24px)}
 .mn-pv.split.on{transform:none}
-:root.mn-pv-split .mnp{padding-right:clamp(380px,46vw,920px)}
+:root.mn-pv-split .mnp{padding-right:var(--pvw,clamp(380px,46vw,920px))}
+.mn-pv-grip{display:none}
+.mn-pv.split .mn-pv-grip{display:block;position:absolute;left:-6px;top:0;bottom:0;width:12px;z-index:5;cursor:col-resize;touch-action:none;outline:none}
+.mn-pv.split .mn-pv-grip::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:44px;translate:-50% -50%;border-radius:99px;background:var(--line-strong);opacity:0;transition:opacity .15s,background .15s,height .15s}
+.mn-pv.split:hover .mn-pv-grip::after{opacity:1}
+.mn-pv.split .mn-pv-grip:hover::after,.mn-pv.split .mn-pv-grip:focus-visible::after,:root.mn-pv-drag .mn-pv-grip::after{opacity:1;height:64px;background:var(--accent)}
+:root.mn-pv-drag,:root.mn-pv-drag *{cursor:col-resize!important;user-select:none}
+:root.mn-pv-drag .mn-pv iframe{pointer-events:none}
+:root.mn-pv-drag .mnp,:root.mn-pv-drag .mn-pv{transition:none!important}
 .mnp{transition:padding-right .25s var(--ease-out,ease-out)}
 :root.mn-pv-lock,:root.mn-pv-lock body{overflow:hidden}
 .mn-pv-h{display:flex;align-items:center;gap:10px;padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top));border-bottom:1px solid var(--line);flex:none}
@@ -269,6 +427,8 @@ export const ART_CSS = `
   .mn-pv-tabs button{flex:1;justify-content:center}
   .mn-pv-acts .mn-pv-b:not(.mn-pv-x) span{display:none}
   .mn-file-open span{display:none}
-  .mn-file-open{padding:0 10px}
+  .mn-file-open{width:36px;padding:0;justify-content:center}
+  .mn-file{gap:10px;padding:10px 8px 10px 12px}
+  .mn-file-ic{width:38px;height:38px}
 }
 `;

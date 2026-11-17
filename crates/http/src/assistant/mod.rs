@@ -160,6 +160,7 @@ pub fn router() -> Router<AppState> {
             "/api/assistant/sessions/{id}/delete",
             post(h_session_delete),
         )
+        .route("/api/assistant/sessions/prune", post(h_prune))
         .route("/api/assistant/sessions/{id}/seen", post(h_seen))
         .route("/api/assistant/sessions/{id}/chat", post(h_chat))
         .route("/api/assistant/sessions/{id}/compact", post(h_compact))
@@ -669,8 +670,10 @@ async fn h_sessions(State(st): State<AppState>, key: Option<Extension<ApiKeyCall
             let all = s.sessions().unwrap_or_default();
             // First list after the update: everything there now counts as seen.
             let seen = seen_map(s).unwrap_or_else(|| {
-                let m: serde_json::Map<String, Value> =
-                    all.iter().map(|x| (x.id.clone(), json!(x.messages))).collect();
+                let m: serde_json::Map<String, Value> = all
+                    .iter()
+                    .map(|x| (x.id.clone(), json!(x.messages)))
+                    .collect();
                 let _ = s.set_pref(SEEN, &Value::Object(m.clone()));
                 m
             });
@@ -707,7 +710,11 @@ async fn h_seen(
         Ok(s) => s,
         Err(r) => return r,
     };
-    let Some(n) = b.get("messages").and_then(Value::as_i64).filter(|n| *n >= 0) else {
+    let Some(n) = b
+        .get("messages")
+        .and_then(Value::as_i64)
+        .filter(|n| *n >= 0)
+    else {
         return bad("messages is required");
     };
     let all = store.sessions().unwrap_or_default();
@@ -903,6 +910,58 @@ async fn h_session_set(
         Ok(false) => fail(StatusCode::NOT_FOUND, "chat not found"),
         Err(e) => bad(&e),
     }
+}
+
+/// Delete many chats at once: `{ids}` (the ones picked), `{older_than_days}` (not touched for
+/// that long) or `{all: true}`; `keep_pinned` (default true) spares pinned chats when deleting
+/// by age or all. A chat answering right now is left alone. `{deleted, skipped}`.
+async fn h_prune(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let all = store.sessions().unwrap_or_default();
+    let keep_pinned = b
+        .get("keep_pinned")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let picked: Vec<&memora_state::assistant::Session> =
+        if let Some(ids) = b.get("ids").and_then(Value::as_array) {
+            let ids: BTreeSet<&str> = ids.iter().filter_map(Value::as_str).collect();
+            all.iter().filter(|x| ids.contains(x.id.as_str())).collect()
+        } else if let Some(days) = b.get("older_than_days").and_then(Value::as_i64) {
+            if !(1..=3650).contains(&days) {
+                return bad("older_than_days is 1 to 3650");
+            }
+            let before = memora_state::now() - days * 86_400;
+            all.iter()
+                .filter(|x| x.updated_at < before && !(keep_pinned && x.pinned))
+                .collect()
+        } else if b.get("all").and_then(Value::as_bool) == Some(true) {
+            all.iter().filter(|x| !(keep_pinned && x.pinned)).collect()
+        } else {
+            return bad("send ids, older_than_days or all");
+        };
+    let (mut deleted, mut skipped) = (0, 0);
+    for x in picked {
+        if live::running(&x.id) {
+            skipped += 1;
+        } else if store.delete_session(&x.id).unwrap_or(false) {
+            deleted += 1;
+        }
+    }
+    Json(json!({"deleted": deleted, "skipped": skipped})).into_response()
 }
 
 async fn h_session_delete(
@@ -1276,9 +1335,127 @@ fn current_time(store: &Store, id: &str) -> Value {
 /// Mnemo's own tools over its chats: find and read earlier conversations.
 const SEARCH_CHATS: &str = "search_chats";
 const READ_CHAT: &str = "read_chat";
+const LIST_CHATS: &str = "list_chats";
+const LIST_ARTIFACTS: &str = "list_artifacts";
+const READ_ARTIFACT: &str = "read_artifact";
 
-fn chat_tool_defs() -> [ToolDef; 2] {
+/// One HTML or SVG page written in a reply (a ```html / ```svg block), as the web app shows it.
+struct Page {
+    kind: &'static str,
+    title: String,
+    code: String,
+    at: i64,
+}
+
+/// The pages in a chat's replies, oldest first. Its <title> names a page; the same title again is
+/// a newer version of the same file.
+fn pages_in(msgs: &[memora_state::assistant::Message]) -> Vec<Page> {
+    let mut out = Vec::new();
+    for m in msgs.iter().filter(|m| m.role == "assistant") {
+        let mut lines = m.content.lines();
+        while let Some(l) = lines.next() {
+            let t = l.trim_start();
+            let Some(lang) = t.strip_prefix("```") else {
+                continue;
+            };
+            let lang = lang.trim().to_ascii_lowercase();
+            let kind = match lang.as_str() {
+                "html" | "htm" => "html",
+                "svg" => "svg",
+                _ => {
+                    // Skip any other fenced block whole.
+                    for x in lines.by_ref() {
+                        if x.trim_start().starts_with("```") {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            };
+            let mut code = Vec::new();
+            for x in lines.by_ref() {
+                if x.trim_start().starts_with("```") {
+                    break;
+                }
+                code.push(x);
+            }
+            let code = code.join("\n");
+            let lower = code.to_ascii_lowercase();
+            let title = lower
+                .find("<title>")
+                .and_then(|a| {
+                    lower[a + 7..]
+                        .find("</title>")
+                        .map(|b| code[a + 7..a + 7 + b].trim().to_string())
+                })
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| {
+                    if kind == "svg" {
+                        "Image".into()
+                    } else {
+                        "Page".into()
+                    }
+                });
+            out.push(Page {
+                kind,
+                title,
+                code,
+                at: m.created_at,
+            });
+        }
+    }
+    out
+}
+
+fn chat_tool_defs() -> [ToolDef; 5] {
     [
+        ToolDef {
+            name: LIST_ARTIFACTS.into(),
+            description: "List the pages (HTML or SVG files: charts, diagrams, small pages) you wrote in the owner's \
+chats, newest first: the chat they live in, title, kind, how many versions. They belong to their chat (deleting \
+the chat deletes them). Use it to find a page to reuse or rework, from this chat or another; then read_artifact."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "chat": {"type": "string", "description": "Only this chat's pages (a chat id)"},
+                    "title": {"type": "string", "description": "Only pages whose title contains this (any case)"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Most pages (default 20)"}
+                },
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: READ_ARTIFACT.into(),
+            description: "Read one page you wrote (from list_artifacts): its full HTML or SVG source, the latest version \
+unless you ask for another. Start from it to change or tidy that page, or to build on it in another chat."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "chat": {"type": "string", "description": "The chat id the page is in"},
+                    "title": {"type": "string", "description": "The page title"},
+                    "version": {"type": "integer", "minimum": 1, "description": "1 for the first version; default the latest"}
+                },
+                "required": ["chat", "title"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: LIST_CHATS.into(),
+            description: "List your chats with the owner, most recently active first: id, title, what it is about \
+(scope), when it was last active and how many messages it has. Use it to see which other chats exist (\"the chat \
+from yesterday\", \"what else did we talk about\") and to connect this chat with earlier ones; then read_chat."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Only chats whose title contains this (any case)"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Most chats (default 20)"}
+                },
+                "additionalProperties": false
+            }),
+        },
         ToolDef {
             name: SEARCH_CHATS.into(),
             description: "Search your earlier chats with the owner (their messages and your replies, and chat titles) \
@@ -1297,12 +1474,16 @@ read_chat for the whole conversation."
         },
         ToolDef {
             name: READ_CHAT.into(),
-            description: "Read one of your earlier chats by its id (from search_chats): the owner's messages and \
-your replies, oldest first (long ones are cut)."
+            description: "Read one of your earlier chats by its id (from search_chats or list_chats): the owner's \
+messages and your replies, oldest first (long ones are cut). The newest 60 come first; page 1, 2, ... reads \
+further back."
                 .into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"id": {"type": "string", "description": "The chat id"}},
+                "properties": {
+                    "id": {"type": "string", "description": "The chat id"},
+                    "page": {"type": "integer", "minimum": 0, "description": "0 for the newest messages (default), 1 for the 60 before them, ..."}
+                },
                 "required": ["id"],
                 "additionalProperties": false
             }),
@@ -1370,6 +1551,105 @@ fn chat_tool(store: &Store, name: &str, args: &Value, current: &str) -> Result<V
         let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 30) as usize;
         return search_json(store, q, limit, Some(current));
     }
+    if name == LIST_ARTIFACTS {
+        let only = args["chat"]
+            .as_str()
+            .map(str::trim)
+            .filter(|x| !x.is_empty());
+        let want = args["title"].as_str().unwrap_or("").trim().to_lowercase();
+        let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+        let mut found: Vec<(i64, Value)> = Vec::new();
+        for x in store.sessions()? {
+            if only.is_some_and(|c| c != x.id) {
+                continue;
+            }
+            let pages = pages_in(&store.messages(&x.id)?);
+            let mut seen: Vec<(&str, &str)> = Vec::new();
+            for p in pages.iter().rev() {
+                if seen.contains(&(p.kind, p.title.as_str()))
+                    || (!want.is_empty() && !p.title.to_lowercase().contains(&want))
+                {
+                    continue;
+                }
+                seen.push((p.kind, &p.title));
+                let versions = pages
+                    .iter()
+                    .filter(|q| q.kind == p.kind && q.title == p.title)
+                    .count();
+                found.push((
+                    p.at,
+                    json!({
+                        "chat": x.id,
+                        "chat_title": x.title,
+                        "current_chat": x.id == current,
+                        "title": p.title,
+                        "kind": p.kind,
+                        "versions": versions,
+                        "lines": p.code.lines().count(),
+                        "at": p.at,
+                    }),
+                ));
+            }
+        }
+        found.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        let total = found.len();
+        let pages: Vec<Value> = found.into_iter().take(limit).map(|(_, v)| v).collect();
+        return Ok(json!({"artifacts": pages, "total": total}));
+    }
+    if name == READ_ARTIFACT {
+        let chat = args["chat"].as_str().unwrap_or("").trim();
+        let title = args["title"].as_str().unwrap_or("").trim();
+        store
+            .session(chat)?
+            .ok_or_else(|| format!("no chat with id {chat}"))?;
+        let all: Vec<Page> = pages_in(&store.messages(chat)?)
+            .into_iter()
+            .filter(|p| p.title.eq_ignore_ascii_case(title))
+            .collect();
+        if all.is_empty() {
+            return Err(format!(
+                "no page titled {title} in that chat (list_artifacts shows them)"
+            ));
+        }
+        let v = args["version"]
+            .as_u64()
+            .map(|v| v as usize)
+            .unwrap_or(all.len())
+            .clamp(1, all.len());
+        let p = &all[v - 1];
+        return Ok(json!({
+            "chat": chat,
+            "title": p.title,
+            "kind": p.kind,
+            "version": v,
+            "versions": all.len(),
+            "source": clip(&p.code, 60_000),
+        }));
+    }
+    if name == LIST_CHATS {
+        let want = args["title"].as_str().unwrap_or("").trim().to_lowercase();
+        let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+        let mut all = store.sessions()?;
+        all.sort_by_key(|x| std::cmp::Reverse(x.updated_at));
+        let total = all.len();
+        let chats: Vec<Value> = all
+            .iter()
+            .filter(|x| want.is_empty() || x.title.to_lowercase().contains(&want))
+            .take(limit)
+            .map(|x| {
+                json!({
+                    "chat": x.id,
+                    "title": x.title,
+                    "scope": x.scope,
+                    "messages": x.messages,
+                    "pinned": x.pinned,
+                    "active_at": x.updated_at,
+                    "current": x.id == current,
+                })
+            })
+            .collect();
+        return Ok(json!({"chats": chats, "total": total}));
+    }
     let id = args["id"].as_str().unwrap_or("").trim();
     let sess = store
         .session(id)?
@@ -1386,10 +1666,18 @@ fn chat_tool(store: &Store, name: &str, args: &Value, current: &str) -> Result<V
             })
         })
         .collect();
-    let skip = msgs.len().saturating_sub(60);
-    Ok(
-        json!({"chat": sess.id, "title": sess.title, "scope": sess.scope, "messages": &msgs[skip..], "older_left_out": skip}),
-    )
+    let page = args["page"].as_u64().unwrap_or(0) as usize;
+    let end = msgs.len().saturating_sub(page.saturating_mul(60));
+    let skip = end.saturating_sub(60);
+    Ok(json!({
+        "chat": sess.id,
+        "title": sess.title,
+        "scope": sess.scope,
+        "page": page,
+        "messages": &msgs[skip..end],
+        "older_left_out": skip,
+        "next_page": if skip > 0 { json!(page + 1) } else { Value::Null },
+    }))
 }
 
 const NEW_TITLE: &str = "New chat";
@@ -1723,8 +2011,8 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 6]";
-const FEATURES: &str = "[Mnemo features 6] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 8]";
+const FEATURES: &str = "[Mnemo features 8] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
 A few seconds after the note is saved you run the request in a chat of its own titled \"@mnemo · <note>: <request>\"; \
 when you are done the request is struck through (~~@mnemo: ...~~) and your reply is quoted right under it in the \
@@ -1732,10 +2020,12 @@ note. The note editor suggests `@mnemo:` when the owner types @ or /mn. Other ag
 their mention_agent tool and agent \"mnemo\". So yes: mentioning you in a note works on its own.\n\
 - Replies keep running on the server when the owner leaves the chat or the page; the chat shows a spinner and \
 they can come back to it. Regenerate and Try again run a turn again.\n\
-- Each chat keeps the whole conversation for its model; near the limit the older part is compacted into a \
+- Each chat keeps the whole conversation for its model; only when it is full the older part is compacted into a \
 summary (the memory ring in the composer shows how full it is).\n\
-- Every chat can be searched (the chat list's search box), and you can look back with search_chats and \
-read_chat. A chat can be downloaded or saved as a Markdown note from its menu.\n\
+- Chats are connected: list_chats shows the owner's other chats, search_chats finds words in any of them \
+(titles and messages) and read_chat reads one. When the owner points at another chat or something said before, \
+look it up instead of guessing, and say which chat it came from. Every chat can also be searched from the chat \
+list's search box, downloaded, or saved as a Markdown note from its menu.\n\
 - show_items puts notes, folders, images or the vault in your reply as cards that open on a tap.\n\
 - ask_owner asks the owner a question with options to tap (and Other); there are two permission modes, \
 Ask first (changes wait for an approving answer) and Auto (changes go ahead, long jobs keep going).\n\
@@ -1748,7 +2038,11 @@ mention); the Mnemo page has your own Activity view.\n\
 self-contained ```html block (inline CSS and JavaScript, or SVG; scripts from https CDNs are allowed). It cannot \
 fetch anything, so put the data in the page. Once your reply is done the web app shows it as a file card that \
 opens the page beside the chat (full screen on phones), with Preview, Code, Copy and Download. Use it only when it helps, \
-keep it light, and never in a reply written into a note.";
+keep it light, and never in a reply written into a note. Each page is a file the owner keeps working on, like an \
+artifact: its <title> names it. When they ask to change, fix, tidy or restyle a page you made in this chat, start from \
+your latest version of it (in this chat, or list_artifacts and read_artifact for one from another chat) and write the whole page again with the same \
+<title>, keeping what they did not ask to change: the app shows it as the next version of the same file and opens \
+it. Give a page a new <title> only when they ask for a new, separate one.";
 
 fn system_prompt(st: &AppState, scope: &str, extra: Option<&str>) -> String {
     let (stats, note) = {
@@ -2688,8 +2982,9 @@ fn context_json(stp: &Setup, messages: &[memora_state::assistant::Message], mode
     })
 }
 
-/// Compaction starts when the history passes this share (%) of the tokens it may use.
-const COMPACT_AT: i64 = 80;
+/// Compaction starts when the history passes this share (%) of the tokens it may use: only
+/// once the chat truly fills the model's context (what is left is kept for the reply).
+const COMPACT_AT: i64 = 100;
 const COMPACT_SYSTEM: &str = "You compact a chat between the owner of a notes vault and Mnemo, \
 the agent that looks after it. Write a faithful summary that lets Mnemo carry on without the \
 original messages: what the owner asked for and decided, their preferences, the notes and \
@@ -3079,7 +3374,15 @@ after they approve."
                 Ok(current_time(store, id))
             } else if c.name == docs::SEARCH || c.name == docs::READ {
                 docs::run(st, &c.name, &c.arguments)
-            } else if c.name == SEARCH_CHATS || c.name == READ_CHAT {
+            } else if [
+                SEARCH_CHATS,
+                READ_CHAT,
+                LIST_CHATS,
+                LIST_ARTIFACTS,
+                READ_ARTIFACT,
+            ]
+            .contains(&c.name.as_str())
+            {
                 chat_tool(store, &c.name, &c.arguments, id)
             } else if allowed {
                 st.mcp
@@ -3157,6 +3460,32 @@ after they approve."
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn pages_in_replies_are_found_with_their_titles_and_versions() {
+        let msg = |role: &str, content: &str, at: i64| memora_state::assistant::Message {
+            id: at,
+            session_id: "c1".into(),
+            role: role.into(),
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            tool_name: None,
+            meta: None,
+            created_at: at,
+        };
+        let msgs = vec![
+            msg("user", "```html\n<title>Not mine</title>\n```", 1),
+            msg("assistant", "Here:\n```html\n<html><title>Sales</title></html>\n```\n```js\nlet x = 1;\n```", 2),
+            msg("assistant", "Tidied:\n```HTML\n<TITLE> Sales </TITLE><p>v2</p>\n```\nand\n```svg\n<svg></svg>\n```", 3),
+        ];
+        let p = super::pages_in(&msgs);
+        assert_eq!(p.len(), 3);
+        assert_eq!((p[0].kind, p[0].title.as_str()), ("html", "Sales"));
+        assert_eq!((p[1].title.as_str(), p[1].at), ("Sales", 3));
+        assert!(p[1].code.contains("<p>v2</p>"));
+        assert_eq!((p[2].kind, p[2].title.as_str()), ("svg", "Image"));
+    }
 
     #[test]
     fn provider_ids_are_slugs_and_unique() {

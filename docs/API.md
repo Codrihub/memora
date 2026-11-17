@@ -439,6 +439,7 @@ four-character `key_hint`.
 | POST | `/api/assistant/sessions/{id}/steer` | Body: `{text}`. A message for the reply running in the chat: Mnemo reads it before its next step (stored as a user message with `meta.steer`, streamed as `steered {text}`). `409` when no reply is running. |
 | GET | `/api/assistant/sessions/{id}/live` | The reply running in the chat as server-sent events: every event since it began, then live, until it ends. `204` when none is running. |
 | GET | `/api/assistant/sessions/{id}/export` | The chat as a Markdown file (`text/markdown`, a download): each message with its time, Mnemo's steps, what it showed, compaction summaries. |
+| POST | `/api/assistant/sessions/prune` | Delete many chats: body `{ids}`, `{older_than_days}` (1 to 3650; not active for that long) or `{all: true}`, with `keep_pinned` (default `true`, used with age or all). Chats answering right now are skipped. `{deleted, skipped}`. |
 | POST | `/api/assistant/sessions/{id}/seen` | Body: `{messages}`. The owner has read the chat up to `messages` (capped at what it holds; never goes back). `{ok, seen}`. |
 | POST | `/api/assistant/sessions/{id}/stop` | End the reply running in the chat. `{stopped}`. |
 | POST | `/api/assistant/sessions/{id}/compact` | Fold the older turns into a summary now (the chat's model writes it; the last turn stays as it is). `{ok: true, messages, tokens, context}`, or `{ok: false, reason, context}` when there is nothing older yet. `409` while the chat is answering. |
@@ -464,9 +465,15 @@ started with (`meta.system` on its first message), so the model's earlier
 thinking stays valid. Thinking from before a compaction is not replayed, and
 when the API refuses a replayed thinking block the request is sent again
 without it. Permission (`POST /api/assistant/prefs` `{permission: "ask" | "auto"}`, default `ask`): in Ask first mode a tool call that would change notes is refused until the owner's latest message approves (an `answer` with `approve: true`, or an `@mnemo:` request from a note); Auto lets changes through and runs up to 40 steps a reply (25 otherwise; `max_steps` overrides, up to 60). Besides `place_image` it has `ask_owner` (a question with 2 to 5 options and Other), `current_time` (date, time, weekday and the owner's time zone), `search_docs` and `read_docs` (Memora's own documentation, from `mnemo-docs.json` the web build writes next to the assets; answers link `/docs/<page>#<heading>`), `show_items` (cards in the reply for notes, folders,
-images or the vault; `tool_end` carries the checked items as `shown`) and two tools of its own over its chats, `search_chats`
-(every word, newest first) and `read_chat` (one chat's messages), for when the owner
-refers to an earlier conversation. It may use 54 tools for reading and looking after notes, folders,
+images or the vault; `tool_end` carries the checked items as `shown`) and tools of its own over its chats: `list_chats` (newest first, optionally by
+title), `search_chats` (every word, newest first) and `read_chat` (one chat's
+messages, 60 at a time with `page`), for when the owner refers to an earlier
+conversation; and over the pages it wrote (```` ```html ```` / ```` ```svg ```` blocks
+in its replies, named by their `<title>`; the same title again is a newer version):
+`list_artifacts` (across chats or in one) and `read_artifact` (a page's source, the
+latest version unless `version` is given), so it reworks a page instead of starting
+over and can reuse one from another chat. Pages live in their chat's messages and
+are deleted with it. It may use 54 tools for reading and looking after notes, folders,
 tags, links, pins, history and the Trash; it never gets `delete_memory`,
 `bulk_delete`, `delete_folder`, export or import, admin or web tools. A line with `@mnemo: <request>` in a note (outside code; a struck
 `~~@mnemo: …~~` is done) is a request to Mnemo: a few seconds after the owner
@@ -478,8 +485,8 @@ the note), then saves the note with
 the request struck through and its reply quoted under it. Activity events of
 Mnemo's tool calls carry `for` ("owner · chat", "owner · console",
 "<who> · @mnemo in <note>"). A chat keeps
-its whole conversation for its model: when its history passes 80% of the tokens
-it may use, the chat's model folds the older turns into a summary (stored as a
+its whole conversation for its model: when its history fills all the tokens it
+may use (the model's context minus the room kept for the reply), the chat's model folds the older turns into a summary (stored as a
 message with `meta.compact`, sent in front of the kept turns) before the next
 reply, keeping the last one or two turns as they are. Only if that fails are the
 oldest turns left out (a reply and its tool results always stay together).
