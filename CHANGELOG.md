@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.8] - 2026-11-17
+
+`@mnemo` requests are never dropped.
+
+### Fixed
+
+- An `@mnemo:` request Mnemo could not answer (the AI provider or the
+  network down, or no model yet) is no longer struck through with "Could
+  not answer": it stays open in the note and is tried again after 1, 3, 10
+  and 30 minutes, then hourly (up to about a day; any change to the note
+  starts over). A retry runs the same message in the note's chat instead of
+  asking twice, and only the answer to that request is written back.
+- What's new: the release row starts flush left and fades only on a side
+  with more to scroll to; an arrow shows only where there is somewhere to go.
+- Opening Mnemo at `/mnemo/<id>` shows that chat's title right away instead
+  of "New chat" while it loads.
+- Fresh ideas shows a shimmer on the button and placeholder cards while
+  Mnemo writes, instead of a spinning icon.
+
 ## [2.1.7] - 2026-11-17
 
 Skills, fleeting chats, suggestions that change, and a note's chats that
