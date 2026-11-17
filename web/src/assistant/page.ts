@@ -601,6 +601,12 @@ function showActivity(on: boolean): void {
 async function openChat(id: string): Promise<void> {
   showActivity(false);
   setMnemoChat(id);
+  // The address names this chat: its title shows at once, not "New chat", while it loads.
+  const known = sessions.find((x) => x.id === id);
+  if (root && known) {
+    root.querySelector('#mnpTitle')!.textContent = known.title;
+    root.querySelector('#mnpSub')!.textContent = 'Opening…';
+  }
   await chat!.open(id);
   // A chat that is gone (deleted, another server): back to a new one.
   if (chat!.session?.id !== id) setMnemoChat(null);

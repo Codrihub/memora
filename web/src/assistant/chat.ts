@@ -1354,6 +1354,10 @@ export class ChatView {
   private async amaze(b: HTMLButtonElement): Promise<void> {
     b.disabled = true;
     b.classList.add('busy');
+    const label = b.querySelector('span')!;
+    label.textContent = 'Finding ideas…';
+    const box = this.log.querySelector<HTMLElement>('.mn-sugs');
+    box?.classList.add('loading');
     try {
       const r = await A.refreshSuggestions();
       sugCache = { own: r.own, ai: r.ai };
@@ -1364,6 +1368,8 @@ export class ChatView {
     } finally {
       b.disabled = false;
       b.classList.remove('busy');
+      label.textContent = 'Fresh ideas';
+      this.log.querySelector('.mn-sugs')?.classList.remove('loading');
     }
   }
 

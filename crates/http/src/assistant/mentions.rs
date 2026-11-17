@@ -190,6 +190,9 @@ struct Queue {
     /// Notes being answered right now, and the ones changed meanwhile (run again after).
     running: HashSet<String>,
     again: HashMap<String, String>,
+    /// Notes whose request could not be answered (the provider was down): how many tries so
+    /// far. The request stays in the note and is tried again later (see `retry_later`).
+    tries: HashMap<String, u32>,
 }
 
 fn queue() -> &'static Mutex<Queue> {
@@ -288,6 +291,33 @@ fn retitle(store: &memora_state::assistant::Store, moved: &[(String, String)]) {
     }
 }
 
+/// Waits before trying a note's unanswered request again: 1, 3, 10 and 30 minutes, then hourly
+/// (up to a day of tries; the next change of the note starts over).
+const RETRY_WAITS: [u64; 4] = [60, 180, 600, 1800];
+const RETRY_MAX: u32 = 28;
+
+fn retry_later(st: &AppState, path: &str, by: &str) {
+    let n = {
+        let mut q = lock();
+        let n = q.tries.entry(path.to_string()).or_insert(0);
+        *n += 1;
+        *n
+    };
+    if n > RETRY_MAX {
+        lock().tries.remove(path);
+        return;
+    }
+    let wait = RETRY_WAITS.get(n as usize - 1).copied().unwrap_or(3600);
+    let (st, path, by) = (st.clone(), path.to_string(), by.to_string());
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+        // Still waiting (an answer or a newer change would have cleared or restarted it).
+        if lock().tries.get(&path).copied() == Some(n) {
+            poke(&st, &path, &by);
+        }
+    });
+}
+
 /// Agents' tool calls that changed notes (from the realtime hub) are changes too.
 pub fn watch(st: &AppState) {
     let mut rx = memora_core::events::hub().subscribe();
@@ -346,11 +376,13 @@ fn answer_all(st: &AppState, path: &str, by: &str) {
         return;
     }
     let Ok(store) = store(st) else { return };
-    // No model yet: leave the mentions waiting for the next change.
+    // No usable model yet: the mentions wait and are tried again later.
     let Ok((provider, model)) = resolve_model(store, None, None) else {
+        retry_later(st, path, by);
         return;
     };
     let Ok(ep) = endpoint(st, store, &provider) else {
+        retry_later(st, path, by);
         return;
     };
     let name = path
@@ -359,7 +391,18 @@ fn answer_all(st: &AppState, path: &str, by: &str) {
         .unwrap_or(path)
         .trim_end_matches(".md");
     for p in todo {
-        let reply = ask(st, store, path, name, by, &p, &provider, &model, &ep);
+        let reply = match ask(st, store, path, name, by, &p, &provider, &model, &ep) {
+            Ok(r) => {
+                lock().tries.remove(path);
+                r
+            }
+            // The provider could not answer: the request stays open and is tried again.
+            Err(e) => {
+                tracing::warn!(path, "@mnemo request not answered yet: {e}");
+                retry_later(st, path, by);
+                return;
+            }
+        };
         // Read again: the note may have changed while Mnemo worked (also by Mnemo's tools).
         let Some(now) = note_text(st, path) else {
             return;
@@ -405,7 +448,7 @@ fn ask(
     provider: &str,
     model: &str,
     ep: &super::Endpoint,
-) -> String {
+) -> Result<String, String> {
     let now = memora_state::now();
     let scope = format!("note:{path}");
     // One chat per note: every request written in it goes to the same chat (the newest one
@@ -423,7 +466,7 @@ fn ask(
                 .create_session(&id, &title, &scope, &format!("{provider}/{model}"), now)
                 .is_err()
             {
-                return "Could not start a chat for this.".into();
+                return Err("could not start a chat for this".into());
             }
             id
         }
@@ -445,21 +488,41 @@ fn ask(
         "attach": [{"kind": "note", "path": path, "title": name}],
     });
     let text = p.request.clone();
-    if store
-        .append(
-            &sid,
-            &NewMessage {
-                role: "user".into(),
-                content: text,
-                meta: Some(meta),
-                ..Default::default()
-            },
-            now,
-        )
-        .is_err()
-    {
-        return "Could not start a chat for this.".into();
-    }
+    // Tried before and not answered (the provider was down): run that same message again
+    // instead of asking twice.
+    let msgs = store.messages(&sid).unwrap_or_default();
+    let retry = msgs
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .filter(|m| {
+            m.content == text
+                && m.meta
+                    .as_ref()
+                    .is_some_and(|v| v["mention"]["path"] == path)
+                && !msgs
+                    .iter()
+                    .any(|x| x.id > m.id && x.role == "assistant" && !x.content.trim().is_empty())
+        })
+        .map(|m| m.id);
+    let uid = match retry {
+        Some(uid) => {
+            let _ = store.delete_after(&sid, uid);
+            uid
+        }
+        None => store
+            .append(
+                &sid,
+                &NewMessage {
+                    role: "user".into(),
+                    content: text,
+                    meta: Some(meta),
+                    ..Default::default()
+                },
+                now,
+            )
+            .map_err(|_| "could not start a chat for this".to_string())?,
+    };
     if let Ok(mut b) = busy().lock() {
         b.insert(sid.clone());
     }
@@ -477,12 +540,13 @@ fn ask(
         &format!("{by} · @mnemo in {name}"),
     );
     drop(tx);
+    // Only what came after this request counts (the note's chat holds earlier ones too).
     let error = store
         .messages(&sid)
         .unwrap_or_default()
         .into_iter()
         .rev()
-        .find(|m| m.role == "assistant")
+        .find(|m| m.role == "assistant" && m.id > uid)
         .and_then(|m| m.meta.and_then(|v| v["error"].as_str().map(str::to_string)));
     if let Ok(mut b) = busy().lock() {
         b.remove(&sid);
@@ -492,12 +556,12 @@ fn ask(
         .unwrap_or_default()
         .into_iter()
         .rev()
-        .find(|m| m.role == "assistant" && !m.content.trim().is_empty())
+        .find(|m| m.role == "assistant" && m.id > uid && !m.content.trim().is_empty())
         .map(|m| m.content);
     match (last, error) {
-        (Some(t), _) => t,
-        (None, Some(e)) => format!("Could not answer: {e}"),
-        (None, None) => "Done.".into(),
+        (Some(t), _) => Ok(t),
+        (None, Some(e)) => Err(e),
+        (None, None) => Ok("Done.".into()),
     }
 }
 

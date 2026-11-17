@@ -165,7 +165,21 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-sug-act:hover{border-color:var(--accent-line,var(--line-strong));color:var(--fg);background:var(--hover)}
 .mn-sug-act .i{width:14px;height:14px}
 .mn-sug-act[data-amaze] .i{color:var(--accent)}
-.mn-sug-act.busy .i{animation:mnSpin 1s linear infinite}
+/* Fresh ideas at work: a sheen runs across the button and the cards wait as soft placeholders. */
+.mn-sug-act{position:relative;overflow:hidden;isolation:isolate}
+.mn-sug-act.busy{border-color:var(--accent-line,var(--accent));color:var(--fg);cursor:progress}
+.mn-sug-act.busy::after{content:"";position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(100deg,transparent 20%,color-mix(in srgb,var(--accent) 22%,transparent) 50%,transparent 80%);background-size:220% 100%;animation:mnSheen 1.3s ease-in-out infinite}
+.mn-sug-act.busy span{background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 1.4s linear infinite}
+.mn-sug-act.busy .i{animation:mnTwinkle 1.4s ease-in-out infinite}
+@keyframes mnSheen{from{background-position:120% 0}to{background-position:-120% 0}}
+@keyframes mnTwinkle{0%,100%{transform:scale(1) rotate(0);opacity:1}50%{transform:scale(1.18) rotate(18deg);opacity:.7}}
+.mn-sugs.loading .mn-sug{position:relative;overflow:hidden;color:transparent;pointer-events:none;border-color:var(--line)}
+.mn-sugs.loading .mn-sug>*{visibility:hidden}
+.mn-sugs.loading .mn-sug::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(100deg,color-mix(in srgb,var(--fg) 4%,transparent) 30%,color-mix(in srgb,var(--accent) 14%,transparent) 50%,color-mix(in srgb,var(--fg) 4%,transparent) 70%);
+  background-size:240% 100%;animation:mnSheen 1.4s ease-in-out infinite;animation-delay:calc(var(--i) * 90ms)}
+@media (prefers-reduced-motion:reduce){.mn-sug-act.busy::after,.mn-sug-act.busy span,.mn-sug-act.busy .i,.mn-sugs.loading .mn-sug::after{animation:none}}
 .mn-sk-row{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;margin-top:14px;font-size:12px;color:var(--muted)}
 .mn-sk-row[hidden]{display:none}
 .mn-sk-row>span{margin-right:2px}

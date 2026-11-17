@@ -26,6 +26,22 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.8',
+    title: '@mnemo requests are never dropped',
+    lead: 'A request in a note that Mnemo could not answer stays open and is tried again until it goes through.',
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'refresh', title: 'Tried again, not dropped', text: 'When the AI provider or the network is down, an @mnemo request is no longer struck through with an error: it stays in the note and Mnemo tries again after 1, 3, 10 and 30 minutes, then every hour, in the same chat.' },
+          { icon: 'chat', title: 'The right chat at its address', text: 'Opening a chat by its address shows its title at once, never New chat while it loads.' },
+          { icon: 'sparkle', title: 'Fresh ideas, smoother', text: 'While Mnemo writes new suggestions the button shimmers and the cards wait as soft placeholders.' },
+          { icon: 'bolt', title: "What's new, neater", text: 'The release row starts flush left and only fades on a side with more to see; the arrows show only where you can go.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.7',
     title: 'Skills, fleeting chats and chats that follow their note',
     lead: 'Teach Mnemo a skill once and run it with a slash, chat without keeping anything, and find a note\'s chats wherever the note goes.',
@@ -279,10 +295,16 @@ const CSS = `
 .wn-arr{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:999px;border:1px solid rgba(148,163,184,.3);background:rgba(15,23,42,.35);color:#e6e9ef;cursor:pointer;
   transition:background .15s,border-color .15s,opacity .15s}
 .wn-arr:hover:not(:disabled){background:rgba(148,163,184,.18);border-color:rgba(148,163,184,.5)}
-.wn-arr:disabled{visibility:hidden}
+.wn-arr:disabled{display:none}
 .wn-arr svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+/* The row fades only on a side that has more to scroll to. */
 .wn-vers{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scroll-snap-type:x proximity;scrollbar-width:none;padding:2px;
-  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+  --fl:0px;--fr:0px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
+.wn-vers.more-l{--fl:24px}
+.wn-vers.more-r{--fr:24px}
+.wn-vers:not(.more-l){-webkit-mask-image:linear-gradient(90deg,#000,#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(90deg,#000,#000 calc(100% - var(--fr)),transparent)}
+.wn-vers:not(.more-l):not(.more-r){-webkit-mask-image:none;mask-image:none}
 .wn-vers::-webkit-scrollbar{display:none}
 .wn-vers button{flex:none;scroll-snap-align:center;height:34px;padding:0 15px;border-radius:999px;border:1.5px solid rgba(148,163,184,.34);background:rgba(15,23,42,.3);color:#e2e8f0;
   font:700 13px/1 var(--font);letter-spacing:.01em;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
@@ -431,13 +453,23 @@ export function openWhatsNew(version?: string): void {
     // Keep the row where it was, then slide the chosen release into view.
     const track = (): HTMLElement | null => b.querySelector<HTMLElement>('.wn-vers');
     const t = track();
+    const edges = (): void => {
+      if (!t) return;
+      t.classList.toggle('more-l', t.scrollLeft > 2);
+      t.classList.toggle('more-r', t.scrollLeft + t.clientWidth < t.scrollWidth - 2);
+    };
+    t?.addEventListener('scroll', edges, { passive: true });
+    requestAnimationFrame(edges);
     const on = t?.querySelector<HTMLElement>('[aria-pressed=true]');
     if (t && on) {
       t.style.scrollBehavior = 'auto';
       t.scrollLeft = scrollFrom;
       t.style.scrollBehavior = '';
       const want = on.offsetLeft - (t.clientWidth - on.offsetWidth) / 2;
-      requestAnimationFrame(() => t.scrollTo({ left: Math.max(0, want), behavior: scrollFrom < 0 ? 'auto' : 'smooth' }));
+      requestAnimationFrame(() => {
+        t.scrollTo({ left: Math.max(0, want), behavior: scrollFrom < 0 ? 'auto' : 'smooth' });
+        edges();
+      });
     }
     b.querySelector<HTMLElement>('.wn')?.addEventListener('keydown', (e) => {
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && (e.target as HTMLElement).closest('.wn-car')) {
