@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.6] - 2026-11-17
+
+Mnemo's pages become versions of one file, chats can be cleaned up in bulk,
+and a chat is compacted only once it is full.
+
+### Added
+
+- Page versions: an HTML or SVG page Mnemo rewrites under the same title is
+  the next version of the same file. Cards show v1, v2 and latest (older
+  ones dimmed), the preview panel steps between versions, and the newest
+  opens beside the chat by itself on a wide screen (or replaces what an open
+  panel shows). Mnemo is told to rework its latest version when asked to
+  change or tidy a page, and to start a new page only when asked.
+- A draggable divider between the chat and an open page (keyboard arrows
+  too; double-click resets). The page keeps at least 360 px, the chat at
+  least 420 px, and the page at most 75% of the width; the width is
+  remembered per device.
+- Deleting many chats: Select chats (pick several, then Delete), Clean up
+  chats (untouched for 7, 30 or 90 days) and Delete all chats, from the ⋯
+  beside New chat and the chat menu. Pinned chats are kept unless asked; a
+  chat answering right now is left alone. New endpoint
+  `POST /api/assistant/sessions/prune` (`ids`, `older_than_days` or `all`,
+  with `keep_pinned`).
+- Mnemo tool `list_chats` (the owner's chats, newest first, optionally by
+  title) and paging for `read_chat`, so Mnemo can connect a chat with
+  earlier ones.
+- Mnemo tools `list_artifacts` and `read_artifact`: the pages Mnemo wrote,
+  across chats, and a page's full source by version, so a page can be
+  reworked or reused from another chat. Pages live in their chat's messages
+  and are deleted with it; the "In this chat" panel lists them under Pages.
+
+### Changed
+
+- Auto-compaction starts only when a chat's history fills all the tokens it
+  may use (the model's context minus the room kept for the reply), instead
+  of at 80%. While it runs, a working divider with a clock shows in the
+  chat; it turns into Compacted (with how long it took) and the reply goes
+  on. Compact now shows the same divider.
+- Page cards are as wide as the reply, tinted with an accent edge and an
+  accent Open button, and long titles end in an ellipsis.
+- Mnemo's chat list foot: Appearance is one wide button (showing the theme
+  and background in use) above Activity, Settings and Memora.
+- Thin rounded scrollbars in the chat, the message box and the chat list
+  that show only while scrolling; the track keeps its width, so nothing
+  shifts.
+- What's new: releases slide in one row with arrows (newest first) and the
+  footer stacks neatly on phones.
+
+### Fixed
+
+- The New chat button in Mnemo's chat list header on phones no longer takes
+  the unread badge's look.
+
 ## [2.1.5] - 2026-11-17
 
 Unread chats agree on every device, Mnemo's chat list ends in one tidy row,
