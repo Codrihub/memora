@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.5] - 2026-11-17
+
+Unread chats agree on every device, Mnemo's chat list ends in one tidy row,
+and phones no longer send a message on Enter.
+
+### Changed
+
+- Unread chats are remembered on the server instead of per browser: a chat
+  read on one device is read on all of them. New endpoint
+  `POST /api/assistant/sessions/{id}/seen`; the chat list carries each
+  chat's `seen` count. The first list after updating counts everything
+  there as read.
+- The scroll-down button in Mnemo's chat is a plain scroll to the bottom;
+  the "New messages" label is gone (it also showed for older messages).
+- On touch keyboards Enter adds a new line in Mnemo's message box and the
+  send button sends; on physical keyboards Enter still sends and
+  Shift+Enter adds a line.
+- Mnemo's chat list: theme, chat background and text size moved into an
+  Appearance panel (a bottom sheet on phones), and the foot of the list is
+  one row of four tiles: Appearance, Activity, Settings and Memora.
+
 ## [2.1.4] - 2026-11-17
 
 Mnemo's pages open like files, a button takes you back to the latest
