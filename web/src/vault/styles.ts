@@ -544,7 +544,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-prose th{font-size:.86em;font-weight:600;color:var(--muted);background:none;border-bottom-color:var(--line-strong);white-space:nowrap}
 .vx-prose tr:last-child td{border-bottom:0}
 .vx-prose hr{border:0;height:1px;background:var(--line);margin:2.2em 0}
-.vx-prose img{max-width:100%;border-radius:10px}
+.vx-prose img{max-width:100%;height:auto;max-height:min(480px,60vh);object-fit:contain;border-radius:10px}
 .vx-prose .task,.vx-prose li:has(>input[type=checkbox]){list-style:none;position:relative;margin-left:-1.35em;padding-left:1.75em}
 .vx-prose input[type=checkbox]{appearance:none;-webkit-appearance:none;position:absolute;left:0;top:calc(.5lh - 8px);width:16px;height:16px;margin:0;
   border:1.5px solid var(--line-strong);border-radius:5px;background:transparent;opacity:1;cursor:default}

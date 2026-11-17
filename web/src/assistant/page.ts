@@ -20,7 +20,7 @@ import { useActivityStyles } from '../control/activity';
 import { ChatView, openMnemoSettings, openShown, type Artifact } from './chat';
 import { MNEMO_CSS, markHTML } from './styles';
 import { textSizeHTML, wireTextSize } from './textsize';
-import { openPreview } from './art';
+import { closePreview, openPreview } from './art';
 import { noteSessions, onUnread, unreadOf } from './unread';
 
 
@@ -115,6 +115,7 @@ function build(): void {
       <header class="mnp-head">
         <button type="button" class="mnp-lists" id="mnpLists" aria-label="Show or hide the chat list" title="Chats" aria-controls="mnpSide">${icon('sidebar')}</button>
         <div class="mnp-title"><b id="mnpTitle">New chat</b><small id="mnpSub"></small></div>
+        <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="Fleeting chat" title="Fleeting chat: not kept, gone when you leave it">${icon('eye')}</button>
         <button type="button" class="mn-ibtn" id="mnpNew2" aria-label="New chat" title="New chat">${icon('plus')}</button>
         <button type="button" class="mn-ibtn mnp-artbtn" id="mnpArtBtn" aria-label="Notes, folders and images in this chat" title="In this chat" aria-controls="mnpArt">${icon(
           'sidebar',
@@ -134,8 +135,16 @@ function build(): void {
   chat = new ChatView({
     scope: () => 'global',
     onChange: (s) => {
-      setMnemoChat(s.id);
-      upsert(s);
+      // A fleeting chat is never listed, linked or remembered.
+      if (!chat?.fleeting) {
+        setMnemoChat(s.id);
+        upsert(s);
+      }
+      paintHead();
+    },
+    onForget: (id) => {
+      sessions = sessions.filter((x) => x.id !== id);
+      paintList();
       paintHead();
     },
     onNew: () => {
@@ -180,6 +189,12 @@ function build(): void {
   };
   // Phones: the chat list slides over the chat. Wider screens: it folds away and back.
   root.querySelector<HTMLElement>('#mnpLists')!.onclick = () => {
+    // A page open beside the chat hides the list: close the page to get it back.
+    if (document.documentElement.classList.contains('mn-pv-split') && !document.documentElement.classList.contains('mn-pv-roomy')) {
+      closePreview();
+      setPane('side', true);
+      return;
+    }
     if (isNarrow()) side(true);
     else setPane('side', root!.classList.contains('side-closed'));
   };
@@ -209,6 +224,19 @@ function build(): void {
     newChat();
   };
   root.querySelector<HTMLElement>('#mnpNew2')!.onclick = () => newChat();
+  // Fleeting: on a new chat it turns the mode on or off; in a fleeting chat it leaves it
+  // (deleted) for a new, kept chat.
+  root.querySelector<HTMLElement>('#mnpFleet')!.onclick = () => {
+    if (chat!.fleeting && chat!.session) {
+      newChat();
+      toast('Fleeting chat left and deleted', 'ok');
+      return;
+    }
+    if (chat!.session) newChat();
+    chat!.setFleeting(!chat!.fleeting);
+    paintHead();
+    chat!.focus();
+  };
   // Wide screens: the chat list folds from its own corner; New chat sits under the search.
   root.querySelector<HTMLElement>('#mnpFold')!.onclick = () => setPane('side', false);
   root.querySelector<HTMLElement>('#mnpNewRow')!.onclick = () => newChat();
@@ -727,6 +755,17 @@ function paintHead(): void {
     return;
   }
   const s = chat?.session;
+  const fleet = !!chat?.fleeting;
+  root.classList.toggle('fleeting', fleet);
+  const fb = root.querySelector<HTMLElement>('#mnpFleet')!;
+  fb.setAttribute('aria-pressed', String(fleet));
+  fb.title = fleet ? (s ? 'Leave this fleeting chat (it is deleted)' : 'Turn fleeting off') : 'Fleeting chat: not kept, gone when you leave it';
+  if (fleet) {
+    root.querySelector('#mnpTitle')!.textContent = 'Fleeting chat';
+    root.querySelector('#mnpTitle')!.classList.remove('task');
+    root.querySelector('#mnpSub')!.textContent = 'Not kept · gone when you leave it';
+    return;
+  }
   root.querySelector('#mnpTitle')!.textContent = s?.title || 'New chat';
   root.querySelector('#mnpTitle')!.classList.toggle('task', !!s?.title.startsWith(A.NOTE_TASK_PREFIX));
   root.querySelector('#mnpSub')!.textContent = s
@@ -1014,6 +1053,13 @@ const PAGE_CSS = `
 :root[data-page=assistant] :is(#sidebar,#topbar,#tabbar,#sideScrim){display:none!important}
 :root[data-page=assistant] #view-assistant{position:fixed;inset:0;z-index:40;background:var(--bg);padding:var(--safe-t,0px) 0 var(--safe-b,0px)!important}
 #view-assistant{padding:0!important;overflow:hidden}
+/* A page open beside the chat: the chat list and "In this chat" fold away so the chat keeps
+   its room (the list comes back when the divider leaves room for it). */
+:root.mn-pv-split:not(.mn-pv-roomy) .mnp{--sw:0px}
+:root.mn-pv-split:not(.mn-pv-roomy) .mnp-side{visibility:hidden}
+:root.mn-pv-split .mnp{--aw:0px}
+:root.mn-pv-split .mnp-art,:root.mn-pv-split .mnp-ascrim{visibility:hidden}
+:root.mn-pv-split:not(.mn-pv-roomy) .mnp .mnp-lists{display:inline-grid}
 .mnp-hsep{width:1px;height:20px;margin:0 4px;background:var(--line)}
 .mnp-close .i{width:18px;height:18px;stroke-width:2}
 .mnp{--sw:288px;--aw:0px;display:grid;grid-template-columns:var(--sw) minmax(0,1fr) var(--aw);height:100%;min-height:0;position:relative;
@@ -1196,6 +1242,9 @@ const PAGE_CSS = `
 .mnp-row.sel{background:var(--accent-soft,var(--hover))}
 .mnp-row.sel .mnp-check{background:var(--accent);border-color:var(--accent)}
 .mnp.selecting .mnp-row-ic{display:none}
+.mnp-fleet[aria-pressed=true]{background:color-mix(in srgb,#8b5cf6 16%,transparent);color:#8b5cf6;box-shadow:inset 0 0 0 1px color-mix(in srgb,#8b5cf6 45%,transparent)}
+.mnp.fleeting .mnp-head{background:linear-gradient(90deg,color-mix(in srgb,#8b5cf6 7%,transparent),transparent 60%)}
+.mnp.fleeting #mnpTitle{color:#8b5cf6}
 .mnp-art-ic.k-page{background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff}
 .mnp-clean-o{display:flex;flex-direction:column;gap:6px}
 .mnp-clean-r{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}

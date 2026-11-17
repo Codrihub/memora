@@ -31,6 +31,7 @@ applyTextSize();
 const TOOL_WORDS: Record<string, [string, boolean]> = {
   search_memory: ['Searched notes', false],
   list_chats: ['Looked through chats', false],
+  view_image: ['Looked at a picture', false],
   search_chats: ['Searched earlier chats', false],
   read_chat: ['Read an earlier chat', false],
   list_artifacts: ['Looked through pages', false],
@@ -123,16 +124,63 @@ function pretty(v: unknown, max = 2400): string {
   return s.length > max ? s.slice(0, max) + '\n…' : s;
 }
 
+/** Built-in suggestions on a new chat; four are picked at random each time. */
 const SUGGEST: Record<'global' | 'note' | 'folder', string[]> = {
   global: [
     'What did I write about this week?',
     'Find notes with no links and suggest where they belong',
     'Look for tags that mean the same thing',
     'List my open to-dos by project',
+    'Which notes have I not touched in months but still matter?',
+    'Summarise what changed in my vault today',
+    'Find notes that say almost the same thing',
+    'Make an index note for my biggest folder',
+    'Which ideas keep coming back in my notes?',
+    'Show broken links and how to fix them',
+    'Draw a chart of how many notes I write each week',
+    'Plan my week from my open to-dos',
   ],
-  note: ['Summarise this note in five bullets', 'Suggest links to related notes', 'Fix typos and tidy the formatting', 'Turn this note into a checklist'],
-  folder: ['What is in this folder?', 'Find near-duplicate notes here', 'Write an index note for this folder', 'Which notes here look out of date?'],
+  note: [
+    'Summarise this note in five bullets',
+    'Suggest links to related notes',
+    'Fix typos and tidy the formatting',
+    'Turn this note into a checklist',
+    'What is missing from this note?',
+    'Suggest tags for this note',
+    'Draw this note as a diagram',
+    'Write three questions this note leaves open',
+  ],
+  folder: [
+    'What is in this folder?',
+    'Find near-duplicate notes here',
+    'Write an index note for this folder',
+    'Which notes here look out of date?',
+    'Suggest sub folders for these notes',
+    'Which notes here have no links?',
+  ],
 };
+
+let sugCache: A.Suggestions | null = null;
+let skillCache: { at: number; list: A.Skill[] } | null = null;
+
+function shuffled<T>(a: T[]): T[] {
+  const b = a.slice();
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+
+async function skillsList(): Promise<A.Skill[]> {
+  if (skillCache && Date.now() - skillCache.at < 30_000) return skillCache.list;
+  try {
+    skillCache = { at: Date.now(), list: (await A.listSkills()).skills };
+  } catch {
+    skillCache = { at: Date.now(), list: skillCache?.list || [] };
+  }
+  return skillCache.list;
+}
 
 /** Per Activity block: what the turn did. */
 interface ActStats {
@@ -169,6 +217,8 @@ export interface ChatOptions {
   compact?: boolean;
   /** Scope for a chat started here, read when the first message is sent. */
   scope: () => string;
+  /** A fleeting chat was left and deleted. */
+  onForget?: (id: string) => void;
   /** A chat was created, renamed, pinned or got a reply. */
   onChange?: (s: A.Session) => void;
   /** A reply started or ended. */
@@ -216,6 +266,10 @@ export class ChatView {
   private attach: A.Attach[] = [];
   /** The composer is a one-line capsule until it is focused (or holds something). */
   private focused = false;
+  /** A fleeting chat: not kept; deleted (with its images) when the owner leaves it. */
+  private fleetingOn = false;
+  /** The slash menu of skills while a /name is being typed. */
+  private slash: { box: HTMLElement; list: A.Skill[]; at: number } | null = null;
   private offOutside: () => void = () => {};
   private meter: HTMLElement;
   private pinBtn: HTMLButtonElement;
@@ -288,6 +342,7 @@ export class ChatView {
       } else void this.send(this.input.value);
     };
     this.input.addEventListener('keydown', (e) => {
+      if (this.slash && this.slashKey(e)) return;
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         // On-screen keyboards: Enter is a new line (the send button sends), so a slip never
         // sends half a message. Physical keyboards: Enter sends, Shift+Enter is a new line.
@@ -300,11 +355,15 @@ export class ChatView {
       }
     });
     this.input.addEventListener('input', () => {
+      void this.paintSlash();
       this.grow();
       this.paintOpen();
       this.paintSend();
     });
     this.input.addEventListener('scroll', () => this.fadeInput(), { passive: true });
+    this.input.addEventListener('blur', () => window.setTimeout(() => this.closeSlash(), 150));
+    // Leaving the page (closing the tab, reloading) leaves a fleeting chat too.
+    window.addEventListener('pagehide', () => this.leaveFleeting());
     // Capsule <-> full composer: open on focus, fold back when the owner taps or tabs away
     // (menus and pickers the composer opened do not count as away).
     const away = (t: EventTarget | null): boolean =>
@@ -906,6 +965,51 @@ export class ChatView {
   attachScope(scope: string): void {
     if (scope.startsWith('note:')) this.addAttach({ kind: 'note', path: scope.slice(5), title: A.scopeLabel(scope) });
     else if (scope.startsWith('folder:')) this.addAttach({ kind: 'folder', path: scope.slice(7), title: A.scopeLabel(scope) });
+    // Ask Mnemo from a note's page: offer that note's earlier chats.
+    if (scope.startsWith('note:')) void this.offerEarlier();
+  }
+
+  /** A new chat about a note or folder that already has chats: offer to carry on in one of
+   *  them (typing starts a new chat as usual). */
+  private async offerEarlier(): Promise<void> {
+    if (this.session || this.messages.length) return;
+    const about = this.attach.length === 1 && this.attach[0].kind === 'note' ? this.attach[0] : null;
+    if (!about || !about.path) return;
+    let list: A.Session[] = [];
+    try {
+      list = (await A.sessionsAbout(about.path)).sessions;
+    } catch {
+      return;
+    }
+    const hello = this.log.querySelector<HTMLElement>('.mn-hello');
+    if (!list.length || !hello || this.session || this.messages.length) return;
+    hello.querySelector('.mn-earlier')?.remove();
+    const box = el(
+      'div',
+      'mn-earlier',
+      `<div class="mn-earlier-h">${icon('chat')}<span><b>${list.length === 1 ? 'There is a chat' : `There are ${list.length} chats`} about ${esc(
+        about.title,
+      )}</b><small>Carry on in one, or just type below to start a new chat.</small></span></div>
+      <div class="mn-earlier-l">${list
+        .slice(0, 3)
+        .map(
+          (x) =>
+            `<button type="button" class="mn-earlier-i" data-earlier="${attr(x.id)}"><span class="mn-earlier-t"><b>${esc(x.title)}</b><small>${esc(
+              relTs(x.updated_at),
+            )} · ${x.messages} message${x.messages === 1 ? '' : 's'}</small></span><span class="mn-earlier-go">Continue${icon('chev')}</span></button>`,
+        )
+        .join('')}</div>`,
+    );
+    box.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-earlier]');
+      if (!b) return;
+      void this.open(b.dataset.earlier!).then(() => {
+        if (this.session) this.o.onChange?.(this.session);
+      });
+    });
+    const sugs = hello.querySelector('.mn-sugs');
+    if (sugs) sugs.before(box);
+    else hello.append(box);
   }
 
   /** A new chat opened from a note or folder starts with it attached (removable). */
@@ -918,7 +1022,113 @@ export class ChatView {
   }
 
   /** Start over with no chat (one is made with the first message). */
+  get fleeting(): boolean {
+    return this.fleetingOn;
+  }
+
+  /** Make the new chat fleeting (or not). Only before its first message. */
+  setFleeting(on: boolean): void {
+    if (this.session) return;
+    this.fleetingOn = on;
+    this.el.classList.toggle('fleeting', on);
+    this.paintEmpty();
+  }
+
+  /** Leave a fleeting chat: it is deleted on the server, images and all. */
+  leaveFleeting(): void {
+    if (!this.fleetingOn) return;
+    const id = this.session?.id;
+    this.fleetingOn = false;
+    this.el.classList.remove('fleeting');
+    if (id) {
+      this.detach();
+      A.forgetSession(id);
+      this.o.onForget?.(id);
+    }
+  }
+
+  // ---- the slash menu: /name runs one of the owner's skills ----
+
+  private async paintSlash(): Promise<void> {
+    const m = /^\/([\p{L}\p{N}_.-]*)$/u.exec(this.input.value);
+    if (!m) return this.closeSlash();
+    const list = await skillsList();
+    if (!/^\/[\p{L}\p{N}_.-]*$/u.test(this.input.value)) return this.closeSlash();
+    const q = m[1].toLowerCase();
+    const found = list.filter((k) => k.name.toLowerCase().includes(q)).sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)));
+    let box = this.slash?.box;
+    if (!box) {
+      box = el('div', 'mn-slash');
+      box.setAttribute('role', 'listbox');
+      box.setAttribute('aria-label', 'Skills');
+      this.el.querySelector('form.mn-comp')!.append(box);
+      box.addEventListener('mousedown', (e) => e.preventDefault());
+      box.addEventListener('click', (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>('[data-slash]');
+        if (b) this.pickSlash(b.dataset.slash!);
+      });
+    }
+    this.slash = { box, list: found, at: Math.min(this.slash?.at ?? 0, Math.max(0, found.length - 1)) };
+    box.innerHTML =
+      `<div class="mn-slash-h">${icon('bolt')}<span>Skills</span><small>kept in the Skills folder</small></div>` +
+      (found.length
+        ? found
+            .slice(0, 8)
+            .map(
+              (k, i) =>
+                `<button type="button" role="option" class="mn-slash-i${i === this.slash!.at ? ' on' : ''}" data-slash="${attr(k.name)}" aria-selected="${i === this.slash!.at}"><b>/${esc(k.name)}</b><small>${esc(
+                  k.description || k.path,
+                )}</small></button>`,
+            )
+            .join('')
+        : `<p class="mn-slash-none">${
+            list.length ? 'No skill by that name.' : `No skills yet. Ask ${A.MNEMO}, for example: “make a skill that tidies my meeting notes”.`
+          }</p>`);
+  }
+
+  private closeSlash(): void {
+    this.slash?.box.remove();
+    this.slash = null;
+  }
+
+  private pickSlash(name: string): void {
+    this.input.value = `/${name} `;
+    this.closeSlash();
+    this.grow();
+    this.paintSend();
+    this.input.focus();
+  }
+
+  /** Keys while the slash menu is open; true when the key was used here. */
+  private slashKey(e: KeyboardEvent): boolean {
+    const sl = this.slash!;
+    const n = Math.min(sl.list.length, 8);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeSlash();
+      return true;
+    }
+    if (!n) return false;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      sl.at = (sl.at + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      sl.box.querySelectorAll<HTMLElement>('.mn-slash-i').forEach((b, i) => {
+        b.classList.toggle('on', i === sl.at);
+        b.setAttribute('aria-selected', String(i === sl.at));
+      });
+      return true;
+    }
+    if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+      e.preventDefault();
+      this.pickSlash(sl.list[sl.at].name);
+      return true;
+    }
+    return false;
+  }
+
   blank(): void {
+    this.leaveFleeting();
     this.detach();
     this.session = null;
     this.messages = [];
@@ -933,6 +1143,7 @@ export class ChatView {
   }
 
   async open(id: string): Promise<void> {
+    if (this.session?.id !== id) this.leaveFleeting();
     this.detach();
     this.log.innerHTML = `<div class="mn-loading">${markHTML('lg pulse')}<span>Opening the chat…</span></div>`;
     try {
@@ -1075,17 +1286,119 @@ export class ChatView {
     const about =
       kind === 'note' ? `Ask about <b>${esc(A.scopeLabel(sc))}</b>, or anything in your vault.` : kind === 'folder' ? `Ask about the folder <b>${esc(A.scopeLabel(sc))}</b>, or anything in your vault.` : 'I find, read, write, tag, link and tidy your notes. No web, no shell: only your vault.';
     this.log.innerHTML = `<div class="mn-hello">
+        ${
+          this.fleetingOn
+            ? `<div class="mn-fleet">${icon('eye')}<span><b>Fleeting chat</b><small>Not kept: this chat and the pictures you send in it are gone once you leave it. It stays out of search and of ${A.MNEMO}'s memory of your chats. Changes to notes stay.</small></span></div>`
+            : ''
+        }
         <div class="mn-hello-mark">${markHTML('xl')}</div>
         <h2>${this.o.compact ? `Hi, I'm ${A.MNEMO}` : `${A.MNEMO} looks after your notes`}</h2>
         <p>${about}</p>
         ${
           ready
-            ? `<div class="mn-sugs">${SUGGEST[kind].map((t, i) => `<button type="button" class="mn-sug" style="--i:${i}" data-sug="${attr(t)}">${icon('sparkle')}<span>${esc(t)}</span></button>`).join('')}</div>`
+            ? `<div class="mn-sugs" data-kind="${kind}"></div>${
+                kind === 'global'
+                  ? `<div class="mn-sug-bar"><button type="button" class="mn-sug-act" data-amaze title="${A.MNEMO} writes new suggestions from your recent notes (yours stay)">${icon('sparkle')}<span>Fresh ideas</span></button><button type="button" class="mn-sug-act" data-own-sugs title="Your own suggestions, kept until you change them">${icon('edit')}<span>Your suggestions</span></button></div><div class="mn-sk-row" hidden></div>`
+                  : ''
+              }`
             : s
               ? `<div class="mn-setup"><b>Connect a model first</b><span>Add an OpenAI, Anthropic or OpenAI-compatible API key in Settings. The key stays sealed on your server.</span><button type="button" class="btn primary sm" data-setup>${icon('settings')}<span>Set up ${A.MNEMO}</span></button></div>`
               : ''
         }
       </div>`;
+    if (ready) this.fillSugs(kind);
+  }
+
+  /** Four suggestions: some of yours and some of Mnemo's (on a vault-wide chat), the rest picked
+   *  from the built-in ones; different each time. */
+  private fillSugs(kind: 'global' | 'note' | 'folder', aiFirst = false): void {
+    const box = this.log.querySelector<HTMLElement>('.mn-sugs');
+    if (!box) return;
+    const picked: { t: string; k: 'own' | 'ai' | 'base' }[] = [];
+    const has = (t: string): boolean => picked.some((p) => p.t.toLowerCase() === t.toLowerCase());
+    if (kind === 'global' && sugCache) {
+      for (const t of shuffled(sugCache.own).slice(0, aiFirst ? 1 : 2)) if (!has(t)) picked.push({ t, k: 'own' });
+      for (const t of shuffled(sugCache.ai).slice(0, aiFirst ? 3 : 2)) if (!has(t) && picked.length < 4) picked.push({ t, k: 'ai' });
+    }
+    for (const t of shuffled(SUGGEST[kind])) if (picked.length < 4 && !has(t)) picked.push({ t, k: 'base' });
+    const ic = { own: 'pin', ai: 'sparkle', base: 'chat' } as const;
+    const tag = { own: 'Yours', ai: 'For you', base: '' } as const;
+    box.innerHTML = picked
+      .map(
+        (p, i) =>
+          `<button type="button" class="mn-sug k-${p.k}" style="--i:${i}" data-sug="${attr(p.t)}">${icon(ic[p.k])}<span>${esc(p.t)}${
+            tag[p.k] ? `<em>${tag[p.k]}</em>` : ''
+          }</span></button>`,
+      )
+      .join('');
+    if (kind !== 'global') return;
+    if (!sugCache) {
+      void A.getSuggestions()
+        .then((r) => {
+          sugCache = r;
+          if (r.own.length || r.ai.length) this.fillSugs(kind);
+        })
+        .catch(() => undefined);
+    }
+    void skillsList().then((list) => {
+      const row = this.log.querySelector<HTMLElement>('.mn-sk-row');
+      if (!row || !list.length) return;
+      row.hidden = false;
+      row.innerHTML = `<span>Your skills</span>${list
+        .slice(0, 6)
+        .map((k) => `<button type="button" class="mn-sk-chip" data-skill="/${attr(k.name)} " title="${attr(k.description || k.path)}">/${esc(k.name)}</button>`)
+        .join('')}`;
+    });
+  }
+
+  private async amaze(b: HTMLButtonElement): Promise<void> {
+    b.disabled = true;
+    b.classList.add('busy');
+    try {
+      const r = await A.refreshSuggestions();
+      sugCache = { own: r.own, ai: r.ai };
+      this.fillSugs('global', true);
+      if (!r.fresh) toast(`${A.MNEMO} could not write new ones just now. Check the model in Settings.`, 'info');
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      b.disabled = false;
+      b.classList.remove('busy');
+    }
+  }
+
+  /** Your own suggestions: one per line, kept until you change them (Fresh ideas leaves them). */
+  private editOwnSugs(): void {
+    const body = el(
+      'div',
+      'mn-own-sugs',
+      `<p>One per line. They show among the suggestions on a new chat, marked Yours, and stay until you change them.</p><textarea rows="8" placeholder="Summarise my meeting notes from this week&#10;What should I write about next?"></textarea>`,
+    );
+    const ta = body.querySelector('textarea')!;
+    ta.value = (sugCache?.own || []).join('\n');
+    Modal.open({
+      title: 'Your suggestions',
+      body,
+      actions: [
+        { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+        {
+          label: 'Save',
+          cls: 'primary',
+          run: async () => {
+            try {
+              const r = await A.saveSuggestions(ta.value.split('\n'));
+              sugCache = { own: r.own, ai: sugCache?.ai || [] };
+              Modal.close();
+              this.fillSugs('global');
+              toast('Suggestions saved', 'ok');
+            } catch (e) {
+              toast((e as Error).message, 'err');
+            }
+          },
+        },
+      ],
+    });
+    window.setTimeout(() => ta.focus(), 30);
   }
 
   // ---- transcript ----
@@ -1403,6 +1716,20 @@ export class ChatView {
 
   private onLogClick(e: MouseEvent): void {
     const t = e.target as HTMLElement;
+    const skill = t.closest<HTMLElement>('[data-skill]');
+    if (skill) {
+      this.prefill(skill.dataset.skill || '');
+      return;
+    }
+    const amaze = t.closest<HTMLButtonElement>('[data-amaze]');
+    if (amaze) {
+      void this.amaze(amaze);
+      return;
+    }
+    if (t.closest('[data-own-sugs]')) {
+      this.editOwnSugs();
+      return;
+    }
     const sug = t.closest<HTMLElement>('[data-sug]');
     if (sug) {
       this.prefill(sug.dataset.sug || '', true);
@@ -1531,7 +1858,21 @@ export class ChatView {
 
   /** Stop watching (another chat opens, a new chat starts): the reply goes on on the
    *  server and shows again when this chat is opened. */
-  detach(): void {
+/** Open the chat again once the page is visible and online (it shows the reply live if it
+   *  is still running, or as stored when it has ended). */
+  private reconnect(sid: string): void {
+    const go = (): void => {
+      if (document.hidden || !navigator.onLine) return;
+      document.removeEventListener('visibilitychange', go);
+      window.removeEventListener('online', go);
+      if (this.session?.id === sid && !this.ctrl) void this.open(sid);
+    };
+    document.addEventListener('visibilitychange', go);
+    window.addEventListener('online', go);
+    window.setTimeout(go, 600);
+  }
+
+    detach(): void {
     if (!this.ctrl) return;
     this.run++;
     this.ctrl.abort();
@@ -1574,7 +1915,7 @@ export class ChatView {
       if (!this.session) {
         // The model the picker shows is the one the chat uses.
         if (!this.model) this.model = this.select?.value || A.fallbackModel(s);
-        this.session = (await A.newSession(this.newScope(), this.model)).session;
+        this.session = (await A.newSession(this.newScope(), this.model, this.fleetingOn)).session;
                 this.log.innerHTML = '';
         this.o.onChange?.(this.session);
       }
@@ -1673,6 +2014,7 @@ export class ChatView {
     };
     this.ctrl = new AbortController();
     const sid = this.session!.id;
+    let dropped = false;
     try {
       await start(this.ctrl.signal, (ev) => {
         got = true;
@@ -1767,12 +2109,25 @@ export class ChatView {
         }
       });
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') body.append(this.errorCard((e as Error).message));
-      else if (my === this.run) body.insertAdjacentHTML('beforeend', `<div class="mn-notice">${icon('stop')}<span>Stopped.</span></div>`);
+      const err = e as Error;
+      if (err.name === 'AbortError') {
+        if (my === this.run) body.insertAdjacentHTML('beforeend', `<div class="mn-notice">${icon('stop')}<span>Stopped.</span></div>`);
+      } else if (lostLink(err)) {
+        // The connection dropped (the tab went to the background, the page was left, the
+        // network blinked): the reply goes on on the server, so watch it again, no error.
+        dropped = true;
+      } else body.append(this.errorCard(err.message));
     } finally {
       // Left for another chat: the reply goes on on the server; nothing here is ours now.
       if (my !== this.run) {
         if (frame) cancelAnimationFrame(frame);
+        return;
+      }
+      if (dropped) {
+        if (frame) cancelAnimationFrame(frame);
+        this.ctrl = null;
+        this.setBusy(false);
+        this.reconnect(sid);
         return;
       }
       // The reply ended just before we came to watch it: show the stored chat instead.
@@ -2126,4 +2481,10 @@ function pickNote(run: (paths: string[]) => void, room = 8): void {
 /** A touch screen with no mouse: its keyboard is the on-screen one. */
 function touchKeyboard(): boolean {
   return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+/** A dropped connection rather than an answer from the server ("Failed to fetch", "network
+ *  error", Safari's "Load failed", a body cut off part way). */
+function lostLink(e: Error): boolean {
+  return e.name === 'TypeError' || /network|failed to fetch|load failed|connection|terminated|aborted/i.test(e.message || '');
 }

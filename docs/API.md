@@ -431,14 +431,18 @@ four-character `key_hint`.
 | POST | `/api/assistant/models` | Body: `{provider, model, label?, context_window?, max_output?, pinned?, hidden?}`. Adds a model by hand or changes it; `null` clears a limit. The app sets only pinned, hidden and new models; limits normally come from the provider. |
 | POST | `/api/assistant/models/delete` | Body: `{provider, model}`. |
 | POST | `/api/assistant/prefs` | Any of `default_model` (`provider/model`), `system_prompt` (up to 4000 characters), `temperature` (0-2), `max_output_tokens` (64-200000), `context_tokens` (2000-2000000, for models without a window), `max_steps` (1-30 tool rounds per reply), `launcher` (the floating button); `null` resets one. |
-| GET | `/api/assistant/sessions` | `{sessions: [{id, title, scope, model, pinned, created_at, updated_at, messages, running, seen}]}`. `messages` counts the owner's and Mnemo's messages (not tool results); `seen` is how many of them the owner has read on any device (the unread count is `messages - seen`). The first list after 2.1.5 counts every existing chat as read. |
-| POST | `/api/assistant/sessions` | Body: `{scope?, model?, title?}`. `scope` is `global`, `note:<path>` or `folder:<path>`. Returns `{session}`. |
+| GET | `/api/assistant/sessions` | `{sessions: [{id, title, scope, model, pinned, created_at, updated_at, messages, running, seen}]}`. `messages` counts the owner's and Mnemo's messages (not tool results); `?about=<path>` lists only the chats about that note or folder (kept for it, with it attached, or naming it in a tool call). `seen` is how many of them the owner has read on any device (the unread count is `messages - seen`). The first list after 2.1.5 counts every existing chat as read. |
+| POST | `/api/assistant/sessions` | Body: `{scope?, model?, title?, fleeting?}`. A fleeting chat is left out of lists, search and Mnemo's look-back tools and is deleted (with the pictures sent in it) by `.../delete` when the owner leaves, or after 30 minutes idle. `scope` is `global`, `note:<path>` or `folder:<path>`. Returns `{session}`. |
 | GET | `/api/assistant/sessions/{id}` | `{session, messages: [{id, role, content, tool_calls, tool_call_id, tool_name, meta, created_at}], context}`. `context` is `{used, window, reserved_output, compact_at, compactions, model}` for the model the chat would use now (approximate tokens), or `null` without a usable model. A message with `meta.compact: true` is a summary that stands in for every message before `meta.keep_from`. |
 | GET | `/api/assistant/search` | Query `q` (every word must appear, any case), `limit` (default 60, at most 200). `{query, hits: [{chat, title, scope, message_id, role, snippet, at}]}`, newest first: the owner's messages and Mnemo's replies whose text or chat title holds the words; `message_id` is `null` for a chat matched by its title alone. |
 | POST | `/api/assistant/sessions/{id}/rerun` | Body: `{message_id?, model?}` (default: the last of the owner's messages). Runs that message's turn again: every message after it is removed, then the reply streams as for `/chat`. `400` when `message_id` is not one of the owner's messages in the chat, `409` while it answers. |
 | POST | `/api/assistant/sessions/{id}/steer` | Body: `{text}`. A message for the reply running in the chat: Mnemo reads it before its next step (stored as a user message with `meta.steer`, streamed as `steered {text}`). `409` when no reply is running. |
 | GET | `/api/assistant/sessions/{id}/live` | The reply running in the chat as server-sent events: every event since it began, then live, until it ends. `204` when none is running. |
 | GET | `/api/assistant/sessions/{id}/export` | The chat as a Markdown file (`text/markdown`, a download): each message with its time, Mnemo's steps, what it showed, compaction summaries. |
+| GET | `/api/assistant/skills` | `{folder: "Skills", skills: [{name, path, description}]}`: the owner's skills (notes in `Skills/`). A message starting `/name` sends that skill's steps with it (`meta.skill`). |
+| GET | `/api/assistant/suggestions` | `{own, ai}`: the owner's suggestions and Mnemo's (from recent notes; written again in the background when older than 12 hours). |
+| POST | `/api/assistant/suggestions` | Body `{own: [text]}` (up to 30): the owner's own suggestions. |
+| POST | `/api/assistant/suggestions/refresh` | Mnemo writes its suggestions again now. `{own, ai, fresh}`. |
 | POST | `/api/assistant/sessions/prune` | Delete many chats: body `{ids}`, `{older_than_days}` (1 to 3650; not active for that long) or `{all: true}`, with `keep_pinned` (default `true`, used with age or all). Chats answering right now are skipped. `{deleted, skipped}`. |
 | POST | `/api/assistant/sessions/{id}/seen` | Body: `{messages}`. The owner has read the chat up to `messages` (capped at what it holds; never goes back). `{ok, seen}`. |
 | POST | `/api/assistant/sessions/{id}/stop` | End the reply running in the chat. `{stopped}`. |
@@ -478,9 +482,11 @@ tags, links, pins, history and the Trash; it never gets `delete_memory`,
 `bulk_delete`, `delete_folder`, export or import, admin or web tools. A line with `@mnemo: <request>` in a note (outside code; a struck
 `~~@mnemo: …~~` is done) is a request to Mnemo: a few seconds after the owner
 saves the note (`POST /api/save` or `/api/create`), or after an agent's tool
-call changes it, Mnemo runs it as a chat of its own (one per request, titled
-`@mnemo · <note>: <request>`, scope `note:<path>`; the first message holds the
-request as written, `meta.mention` says `{path, line, by}` and `meta.attach` names
+call changes it (Mnemo's own changes from a chat or the console too; not those
+it makes while answering a request), Mnemo runs it in the note's chat (one per
+note, titled `@mnemo · <note>`, scope `note:<path>`; every later request in the
+note joins it, unless it is answering right now; each request's message holds it
+as written, `meta.mention` says `{path, line, by}` and `meta.attach` names
 the note), then saves the note with
 the request struck through and its reply quoted under it. Activity events of
 Mnemo's tool calls carry `for` ("owner · chat", "owner · console",

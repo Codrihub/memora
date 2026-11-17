@@ -14,7 +14,7 @@ pub mod providers;
 pub mod uploads;
 
 use axum::{
-    extract::{Path as UrlPath, State},
+    extract::{Path as UrlPath, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
@@ -161,6 +161,15 @@ pub fn router() -> Router<AppState> {
             post(h_session_delete),
         )
         .route("/api/assistant/sessions/prune", post(h_prune))
+        .route("/api/assistant/skills", get(h_skills))
+        .route(
+            "/api/assistant/suggestions",
+            get(h_suggestions).post(h_suggestions_set),
+        )
+        .route(
+            "/api/assistant/suggestions/refresh",
+            post(h_suggestions_refresh),
+        )
         .route("/api/assistant/sessions/{id}/seen", post(h_seen))
         .route("/api/assistant/sessions/{id}/chat", post(h_chat))
         .route("/api/assistant/sessions/{id}/compact", post(h_compact))
@@ -509,7 +518,9 @@ async fn h_models_fetch(
 
 fn state_json(store: &Store) -> Value {
     let mut prefs = store.prefs().unwrap_or_default();
-    prefs.remove(SEEN);
+    for k in [SEEN, FLEETING, OWN_SUGGESTIONS, AI_SUGGESTIONS] {
+        prefs.remove(k);
+    }
     json!({
         "name": NAME,
         "ready": resolve_model(store, None, None).is_ok(),
@@ -661,13 +672,104 @@ fn seen_map(store: &Store) -> Option<serde_json::Map<String, Value>> {
         .cloned()
 }
 
-async fn h_sessions(State(st): State<AppState>, key: Option<Extension<ApiKeyCaller>>) -> Response {
+/// Fleeting chats (`{chat id: started}`): kept only while the owner is in them. They are left
+/// out of the chat list, search and Mnemo's look-back tools, and deleted (with the images
+/// sent in them) when the owner leaves, or after half an hour without activity.
+const FLEETING: &str = "fleeting";
+const FLEETING_IDLE: i64 = 30 * 60;
+
+fn fleeting_ids(store: &Store) -> BTreeSet<String> {
+    store
+        .prefs()
+        .ok()
+        .and_then(|p| p.get(FLEETING).and_then(Value::as_object).cloned())
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn set_fleeting(store: &Store, id: &str, on: bool) {
+    let mut m = store
+        .prefs()
+        .ok()
+        .and_then(|p| p.get(FLEETING).and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+    if on {
+        m.insert(id.to_string(), json!(memora_state::now()));
+    } else if m.remove(id).is_none() {
+        return;
+    }
+    let v = if m.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(m)
+    };
+    let _ = store.set_pref(FLEETING, &v);
+}
+
+/// Delete a chat with the images sent in it (a picture already placed in a note is a copy in
+/// the vault and stays).
+fn drop_chat(st: &AppState, store: &Store, id: &str) -> bool {
+    for m in store.messages(id).unwrap_or_default() {
+        // Pictures Mnemo opened from the vault were staged copies; the vault keeps its own.
+        if m.tool_name.as_deref() == Some(VIEW_IMAGE) {
+            if let Some(up) = serde_json::from_str::<Value>(&m.content)
+                .ok()
+                .and_then(|v| v["image"].as_str().map(str::to_string))
+            {
+                uploads::remove(st, &up);
+            }
+        }
+        for a in m
+            .meta
+            .as_ref()
+            .and_then(|v| v["attach"].as_array())
+            .into_iter()
+            .flatten()
+        {
+            if a["kind"] == "image" {
+                if let Some(up) = a["path"].as_str() {
+                    uploads::remove(st, up);
+                }
+            }
+        }
+    }
+    set_fleeting(store, id, false);
+    store.delete_session(id).unwrap_or(false)
+}
+
+/// Fleeting chats nobody is in any more: gone after FLEETING_IDLE without activity.
+fn sweep_fleeting(st: &AppState, store: &Store) {
+    let ids = fleeting_ids(store);
+    if ids.is_empty() {
+        return;
+    }
+    let all = store.sessions().unwrap_or_default();
+    let stale = memora_state::now() - FLEETING_IDLE;
+    for id in ids {
+        match all.iter().find(|x| x.id == id) {
+            None => set_fleeting(store, &id, false),
+            Some(x) if x.updated_at < stale && !live::running(&x.id) => {
+                drop_chat(st, store, &id);
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn h_sessions(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
     if let Some(r) = browser_only(&key) {
         return r;
     }
     match store(&st) {
         Ok(s) => {
-            let all = s.sessions().unwrap_or_default();
+            sweep_fleeting(&st, s);
+            let hidden = fleeting_ids(s);
+            let mut all = s.sessions().unwrap_or_default();
+            all.retain(|x| !hidden.contains(&x.id));
             // First list after the update: everything there now counts as seen.
             let seen = seen_map(s).unwrap_or_else(|| {
                 let m: serde_json::Map<String, Value> = all
@@ -677,6 +779,12 @@ async fn h_sessions(State(st): State<AppState>, key: Option<Extension<ApiKeyCall
                 let _ = s.set_pref(SEEN, &Value::Object(m.clone()));
                 m
             });
+            // `?about=<path>`: only the chats about that note or folder, newest first.
+            if let Some(p) = q.get("about").map(|p| p.trim()).filter(|p| !p.is_empty()) {
+                let ids = s.sessions_about(p).unwrap_or_default();
+                all.retain(|x| ids.contains(&x.id));
+                all.sort_by_key(|x| ids.iter().position(|i| i == &x.id));
+            }
             let list: Vec<Value> = all
                 .into_iter()
                 .map(|x| {
@@ -770,7 +878,14 @@ async fn h_session_new(
         &model,
         memora_state::now(),
     ) {
-        Ok(()) => Json(json!({"session": store.session(&id).ok().flatten()})).into_response(),
+        Ok(()) => {
+            let fleeting = b.get("fleeting").and_then(Value::as_bool) == Some(true);
+            if fleeting {
+                set_fleeting(store, &id, true);
+            }
+            Json(json!({"session": store.session(&id).ok().flatten(), "fleeting": fleeting}))
+                .into_response()
+        }
         Err(e) => bad(&e),
     }
 }
@@ -796,7 +911,8 @@ async fn h_session(
                 .unwrap_or(Value::Null);
             let sess = store.session(&id).ok().flatten();
             let running = live::running(&id);
-            Json(json!({"session": sess, "messages": messages, "context": context, "running": running}))
+            let fleeting = fleeting_ids(store).contains(&id);
+            Json(json!({"session": sess, "messages": messages, "context": context, "running": running, "fleeting": fleeting}))
                 .into_response()
         }
         _ => fail(StatusCode::NOT_FOUND, "chat not found"),
@@ -957,7 +1073,7 @@ async fn h_prune(
     for x in picked {
         if live::running(&x.id) {
             skipped += 1;
-        } else if store.delete_session(&x.id).unwrap_or(false) {
+        } else if drop_chat(&st, store, &x.id) {
             deleted += 1;
         }
     }
@@ -977,7 +1093,7 @@ async fn h_session_delete(
         return csrf_fail();
     }
     match store(&st) {
-        Ok(s) => Json(json!({"ok": s.delete_session(&id).unwrap_or(false)})).into_response(),
+        Ok(s) => Json(json!({"ok": drop_chat(&st, s, &id)})).into_response(),
         Err(r) => r,
     }
 }
@@ -1060,6 +1176,85 @@ fn caller() -> Caller {
 
 /// Mnemo's own tool: put an image the owner attached in a chat beside a note.
 const PLACE_IMAGE: &str = "place_image";
+
+const VIEW_IMAGE: &str = "view_image";
+
+fn view_image_def() -> ToolDef {
+    ToolDef {
+        name: VIEW_IMAGE.into(),
+        description: "Look at a picture in the vault, for example one shown in a note (![alt](path)), to describe it, \
+read text in it or compare it. Give its vault path, or the path as the note writes it together with the note's path. \
+A picture on the web (an http or https address) cannot be opened: you have no browser."
+            .into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The picture's path in the vault (or as the note writes it)"},
+                "note": {"type": "string", "description": "The note that shows it, when the path is relative to the note's folder"}
+            },
+            "required": ["path"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+/// Open a picture from the vault for the model: it is staged like an image the owner sent and
+/// goes to the model with the next step (see `history_within`).
+fn view_image(st: &AppState, args: &Value) -> Result<Value, String> {
+    let raw = args["path"].as_str().unwrap_or("").trim();
+    let raw = raw
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .split(['#', '?'])
+        .next()
+        .unwrap_or("");
+    if raw.is_empty() {
+        return Err("path is required".into());
+    }
+    let lower = raw.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("//") {
+        return Ok(json!({
+            "ok": false,
+            "url": raw,
+            "message": "This picture is on the web (a URL), not in the vault, and I have no browser or web access, so I \
+        cannot open it. Tell the owner: download it and send it here in the chat, or put it in the note (paste or drop it), \
+        then ask again."
+        }));
+    }
+    let decoded = raw.replace("%20", " ");
+    let path = decoded.trim_start_matches("./").trim_start_matches('/');
+    let note_dir = args["note"]
+        .as_str()
+        .and_then(|n| n.trim().rsplit_once('/').map(|(d, _)| d.to_string()))
+        .unwrap_or_default();
+    let candidates: Vec<String> =
+        if note_dir.is_empty() || path.starts_with(&format!("{note_dir}/")) {
+            vec![path.to_string()]
+        } else {
+            vec![format!("{note_dir}/{path}"), path.to_string()]
+        };
+    let found = candidates.iter().find_map(|p| {
+        let full = crate::store_as(st, None).resolve(p).ok()?;
+        full.is_file().then(|| (p.clone(), full))
+    });
+    let Some((rel, full)) = found else {
+        return Err(format!(
+            "no picture at {raw} in the vault (list_images shows the pictures there)"
+        ));
+    };
+    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+    let Some((ext, _)) = uploads::sniff(&bytes) else {
+        return Err("only PNG, JPEG, WebP or GIF pictures can be looked at".into());
+    };
+    if bytes.len() > 20 * 1_048_576 {
+        return Err("the picture is larger than 20 MB".into());
+    }
+    let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
+    let (id, _) = uploads::stage(st, &name, ext, &bytes)?;
+    Ok(
+        json!({"ok": true, "path": rel, "image": id, "bytes": bytes.len(), "message": "The picture comes with this result for you to look at."}),
+    )
+}
 
 fn place_image_def() -> ToolDef {
     ToolDef {
@@ -1525,7 +1720,14 @@ fn search_json(
     limit: usize,
     current: Option<&str>,
 ) -> Result<Value, String> {
-    let hits = store.search(q, limit)?;
+    // Fleeting chats stay out of search (the one asking may find itself).
+    let hidden = fleeting_ids(store);
+    let hits: Vec<_> = store
+        .search(q, limit + hidden.len().min(20))?
+        .into_iter()
+        .filter(|h| !hidden.contains(&h.session_id) || current == Some(h.session_id.as_str()))
+        .take(limit)
+        .collect();
     Ok(json!({
         "query": q,
         "hits": hits.iter().map(|h| json!({
@@ -1559,8 +1761,9 @@ fn chat_tool(store: &Store, name: &str, args: &Value, current: &str) -> Result<V
         let want = args["title"].as_str().unwrap_or("").trim().to_lowercase();
         let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
         let mut found: Vec<(i64, Value)> = Vec::new();
+        let hidden = fleeting_ids(store);
         for x in store.sessions()? {
-            if only.is_some_and(|c| c != x.id) {
+            if only.is_some_and(|c| c != x.id) || (hidden.contains(&x.id) && x.id != current) {
                 continue;
             }
             let pages = pages_in(&store.messages(&x.id)?);
@@ -1629,7 +1832,9 @@ fn chat_tool(store: &Store, name: &str, args: &Value, current: &str) -> Result<V
     if name == LIST_CHATS {
         let want = args["title"].as_str().unwrap_or("").trim().to_lowercase();
         let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+        let hidden = fleeting_ids(store);
         let mut all = store.sessions()?;
+        all.retain(|x| !hidden.contains(&x.id) || x.id == current);
         all.sort_by_key(|x| std::cmp::Reverse(x.updated_at));
         let total = all.len();
         let chats: Vec<Value> = all
@@ -1685,6 +1890,22 @@ const TITLE_SYSTEM: &str = "You name chats. Write a short title (2 to 6 words) f
 language the owner wrote in, saying what it is about. Plain words only: no quotes, no trailing punctuation, \
 no emoji, nothing else.";
 
+/// The first line of a chat's first question (at most 60 characters): its title until the
+/// model names it.
+fn first_words(store: &Store, id: &str) -> String {
+    store
+        .messages(id)
+        .unwrap_or_default()
+        .iter()
+        .find(|m| m.role == "user")
+        .and_then(|m| m.content.lines().next())
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(60)
+        .collect()
+}
+
 /// A short title for a chat from its first exchange (the model writes it).
 fn chat_title(store: &Store, id: &str, model: &str, ep: &Endpoint) -> String {
     let msgs = store.messages(id).unwrap_or_default();
@@ -1712,9 +1933,11 @@ fn chat_title(store: &Store, id: &str, model: &str, ep: &Endpoint) -> String {
         .find(|m| m.role == "assistant" && !m.content.trim().is_empty() && !is_compact(m))
         .map(|m| m.content.clone())
         .unwrap_or_default();
+    // Room for models that think before they answer (a small budget can end before the
+    // title is written); the title itself stays a few words.
     let opts = Options {
         temperature: None,
-        max_output: Some(40),
+        max_output: Some(600),
         think: false,
     };
     let prompt = format!(
@@ -1722,15 +1945,25 @@ fn chat_title(store: &Store, id: &str, model: &str, ep: &Endpoint) -> String {
         clip(&ask, 800),
         clip(&reply, 800)
     );
-    match providers::run(
-        ep,
-        model,
-        TITLE_SYSTEM,
-        &[Msg::User(prompt)],
-        &[],
-        &opts,
-        &mut |_| true,
-    ) {
+    for _ in 0..2 {
+        if let Some(t) = title_from(providers::run(
+            ep,
+            model,
+            TITLE_SYSTEM,
+            &[Msg::User(prompt.clone())],
+            &[],
+            &opts,
+            &mut |_| true,
+        )) {
+            return t;
+        }
+    }
+    fallback
+}
+
+/// The title in a model's answer, cleaned; None when it wrote nothing usable.
+fn title_from(r: Result<providers::Turn, String>) -> Option<String> {
+    match r {
         Ok(t) => {
             let line = t
                 .text
@@ -1748,12 +1981,12 @@ fn chat_title(store: &Store, id: &str, model: &str, ep: &Endpoint) -> String {
                 .take(60)
                 .collect();
             if clean.is_empty() || clean.eq_ignore_ascii_case(NEW_TITLE) {
-                fallback
+                None
             } else {
-                clean
+                Some(clean)
             }
         }
-        Err(_) => fallback,
+        Err(_) => None,
     }
 }
 
@@ -2001,6 +2234,7 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
         defs.push(place_image_def());
     }
     defs.extend(chat_tool_defs());
+    defs.push(view_image_def());
     defs.push(show_items_def());
     defs.push(current_time_def());
     defs.push(ask_owner_def());
@@ -2011,10 +2245,12 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 8]";
-const FEATURES: &str = "[Mnemo features 8] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 11]";
+const FEATURES: &str = "[Mnemo features 11] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
-A few seconds after the note is saved you run the request in a chat of its own titled \"@mnemo · <note>: <request>\"; \
+A few seconds after the note is saved you run the request in that note's chat, titled \"@mnemo · <note>\" (one chat \
+per note: later requests in the same note join it); writing `@mnemo: <request>` into a note yourself (from a chat) asks \
+you there too; \
 when you are done the request is struck through (~~@mnemo: ...~~) and your reply is quoted right under it in the \
 note. The note editor suggests `@mnemo:` when the owner types @ or /mn. Other agents ask you the same way with \
 their mention_agent tool and agent \"mnemo\". So yes: mentioning you in a note works on its own.\n\
@@ -2026,6 +2262,16 @@ summary (the memory ring in the composer shows how full it is).\n\
 (titles and messages) and read_chat reads one. When the owner points at another chat or something said before, \
 look it up instead of guessing, and say which chat it came from. Every chat can also be searched from the chat \
 list's search box, downloaded, or saved as a Markdown note from its menu.\n\
+- Skills: reusable instructions kept as notes in the folder \"Skills\" (one note per skill; the file name is \
+the skill's name, e.g. Skills/tidy-meeting.md, then a line `description: <what it is for>`, then the steps). The \
+owner runs one by typing /<name> in the chat (the composer lists them after a slash); its steps then come with \
+the message. When asked, make, change or remove skills with your note tools (create_memory, save_memory, \
+rename_memory, soft_delete moves one to the Trash); write steps that are clear and reusable.\n\
+- Fleeting chats: the owner can start a chat that is not kept; it disappears (with the images sent in it) when \
+they leave it, and it is left out of search and of list_chats. Changes you make to notes in it stay.\n\
+- Pictures: view_image lets you look at a picture in the vault (one a note shows: its path, or the path as written \
+plus the note). A picture on the web (an http address) cannot be opened, as you have no browser: say so, and ask the \
+owner to download it and send it in the chat or put it in the note.\n\
 - show_items puts notes, folders, images or the vault in your reply as cards that open on a tap.\n\
 - ask_owner asks the owner a question with options to tap (and Other); there are two permission modes, \
 Ask first (changes wait for an approving answer) and Auto (changes go ahead, long jobs keep going).\n\
@@ -2279,6 +2525,27 @@ const COMPACT_INTRO: &str =
 /// The stored chat as provider-neutral history: after the latest compaction (its summary goes
 /// in front of the first kept message), oldest turns dropped until it fits `budget` tokens
 /// (a turn starts at a user message, so calls and their results stay together).
+/// The pictures view_image opened, as a message with the images (after the tool results).
+fn opened_pictures(seen: &mut Vec<(String, String)>) -> Msg {
+    let names: Vec<String> = seen.iter().map(|(p, _)| p.clone()).collect();
+    let images = seen
+        .drain(..)
+        .map(|(_, id)| providers::Img {
+            id,
+            media: String::new(),
+            data: String::new(),
+        })
+        .collect();
+    Msg::UserImages {
+        text: format!(
+            "(The picture{} you opened with view_image: {}.)",
+            if names.len() == 1 { "" } else { "s" },
+            names.join(", ")
+        ),
+        images,
+    }
+}
+
 fn history_within(messages: &[memora_state::assistant::Message], budget: i64) -> (Vec<Msg>, bool) {
     let (summary, keep_from, marker_id) = match messages.iter().rev().find(|m| is_compact(m)) {
         Some(c) => (
@@ -2291,6 +2558,7 @@ fn history_within(messages: &[memora_state::assistant::Message], budget: i64) ->
         ),
         None => (String::new(), 0, 0),
     };
+    let mut seen_images: Vec<(String, String)> = Vec::new();
     let mut prefixed = summary.is_empty();
     let mut turns: Vec<Vec<Msg>> = Vec::new();
     for m in messages {
@@ -2312,6 +2580,20 @@ read_memory gives the current text):\n{ctx}\n\n{}",
                     ),
                     None => m.content.clone(),
                 };
+                if let Some(sk) = m
+                    .meta
+                    .as_ref()
+                    .map(|v| &v["skill"])
+                    .filter(|v| v.is_object())
+                {
+                    text = format!(
+                        "(The owner ran the skill /{} kept in the note {}. Follow its steps for this request; \
+the rest of the message after the skill name is what to apply it to.)\n<skill>\n{}\n</skill>\n\n{text}",
+                        sk["name"].as_str().unwrap_or(""),
+                        sk["path"].as_str().unwrap_or(""),
+                        sk["text"].as_str().unwrap_or("")
+                    );
+                }
                 match m.meta.as_ref().and_then(|v| v["mode"].as_str()) {
                     Some("auto") => text.push_str("\n\n(Mode: Auto. Go ahead with changes without asking, and keep going until the job is done; report what you changed.)"),
                     Some("ask") => text.push_str("\n\n(Mode: Ask first. Read and look freely, but before changing notes ask me with ask_owner and an option marked approve.)"),
@@ -2377,16 +2659,43 @@ read_memory gives the current text):\n{ctx}\n\n{}",
                     .map(|v| v["raw"].clone())
                     .filter(|r| r.is_array() && m.id > marker_id),
             },
-            _ => Msg::Tool {
-                call_id: m.tool_call_id.clone().unwrap_or_default(),
-                name: m.tool_name.clone().unwrap_or_default(),
-                output: m.content.clone(),
-            },
+            _ => {
+                // A picture view_image opened goes to the model after this step's results.
+                if m.tool_name.as_deref() == Some(VIEW_IMAGE) {
+                    if let Ok(v) = serde_json::from_str::<Value>(&m.content) {
+                        if let Some(id) = v["image"].as_str() {
+                            seen_images.push((
+                                v["path"].as_str().unwrap_or("").to_string(),
+                                id.to_string(),
+                            ));
+                        }
+                    }
+                }
+                Msg::Tool {
+                    call_id: m.tool_call_id.clone().unwrap_or_default(),
+                    name: m.tool_name.clone().unwrap_or_default(),
+                    output: m.content.clone(),
+                }
+            }
         };
         if turns.is_empty() {
             turns.push(Vec::new());
         }
-        turns.last_mut().expect("pushed").push(msg);
+        let is_tool = matches!(msg, Msg::Tool { .. });
+        let turn = turns.last_mut().expect("pushed");
+        if !is_tool && !seen_images.is_empty() {
+            turn.push(opened_pictures(&mut seen_images));
+        }
+        turn.push(msg);
+    }
+    if !seen_images.is_empty() {
+        if turns.is_empty() {
+            turns.push(Vec::new());
+        }
+        turns
+            .last_mut()
+            .expect("pushed")
+            .push(opened_pictures(&mut seen_images));
     }
     let size = |t: &Vec<Msg>| -> i64 { t.iter().map(msg_tokens).sum() };
     let mut total: i64 = turns.iter().map(size).sum();
@@ -2570,6 +2879,282 @@ fn summary(v: &Value) -> String {
     String::new()
 }
 
+// ---------------- skills ----------------
+
+/// Skills are notes in this folder of the vault, one per skill: the file name is the name the
+/// owner types after a slash (`/tidy-meeting`), a `description:` line (or the first line) says
+/// what it is for, and the rest are the steps. Mnemo makes and keeps them with its note tools.
+pub const SKILLS: &str = "Skills";
+
+struct Skill {
+    name: String,
+    path: String,
+    description: String,
+}
+
+fn vault_dir(st: &AppState) -> Option<std::path::PathBuf> {
+    st.vault.read().ok()?.as_ref().map(std::path::PathBuf::from)
+}
+
+fn skills(st: &AppState) -> Vec<Skill> {
+    let Some(dir) = vault_dir(st).map(|v| v.join(SKILLS)) else {
+        return Vec::new();
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Skill> = rd
+        .flatten()
+        .filter_map(|e| {
+            let file = e.file_name().to_string_lossy().to_string();
+            let name = file.strip_suffix(".md")?.to_string();
+            if name.starts_with('.') || !e.path().is_file() {
+                return None;
+            }
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            Some(Skill {
+                description: skill_description(&text),
+                path: format!("{SKILLS}/{file}"),
+                name,
+            })
+        })
+        .collect();
+    out.sort_by_key(|s| s.name.to_lowercase());
+    out
+}
+
+/// A skill's `description:` (front matter or a line of its own), else its first plain line.
+fn skill_description(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    if let Some(d) = lines.iter().find_map(|l| l.strip_prefix("description:")) {
+        return clip(d.trim().trim_matches('"'), 140);
+    }
+    // Past the front matter, the first line that is not a heading.
+    let body = match lines.first() {
+        Some(&"---") => lines
+            .iter()
+            .skip(1)
+            .position(|l| *l == "---")
+            .map_or(&lines[..0], |end| &lines[end + 2..]),
+        _ => &lines[..],
+    };
+    let line = body
+        .iter()
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .copied()
+        .unwrap_or("");
+    clip(line, 140)
+}
+
+/// `/name rest` at the start of a message: the skill it runs, with its text.
+fn skill_for(st: &AppState, text: &str) -> Option<(Skill, String)> {
+    let name = text.strip_prefix('/')?.split_whitespace().next()?;
+    let sk = skills(st)
+        .into_iter()
+        .find(|s| s.name.eq_ignore_ascii_case(name))?;
+    let body = crate::store_as(st, None)
+        .read_note_impl(&sk.path)
+        .ok()
+        .and_then(|v| v["content"].as_str().map(str::to_string))?;
+    Some((sk, body))
+}
+
+async fn h_skills(State(st): State<AppState>, key: Option<Extension<ApiKeyCaller>>) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    let st2 = st.clone();
+    let list = crate::blocking(move || skills(&st2)).await;
+    Json(json!({
+        "folder": SKILLS,
+        "skills": list.iter().map(|s| json!({"name": s.name, "path": s.path, "description": s.description})).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+// ---------------- suggestions on a new chat ----------------
+
+/// The owner's own suggestions (`suggestions`: a list of strings) and Mnemo's (`ai_suggestions`:
+/// `{at, items}`, written from the vault's recent notes at most every SUGGEST_EVERY seconds).
+const OWN_SUGGESTIONS: &str = "suggestions";
+const AI_SUGGESTIONS: &str = "ai_suggestions";
+const SUGGEST_EVERY: i64 = 12 * 3600;
+
+async fn h_suggestions(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let prefs = store.prefs().unwrap_or_default();
+    let own = prefs.get(OWN_SUGGESTIONS).cloned().unwrap_or(json!([]));
+    let ai = prefs.get(AI_SUGGESTIONS).cloned().unwrap_or(json!({}));
+    let stale = ai["at"].as_i64().unwrap_or(0) < memora_state::now() - SUGGEST_EVERY;
+    if stale {
+        // Write new ones in the background; this answer has the ones from before.
+        let st2 = st.clone();
+        tokio::task::spawn_blocking(move || {
+            refresh_suggestions(&st2);
+        });
+    }
+    Json(json!({"own": own, "ai": ai["items"].clone()})).into_response()
+}
+
+async fn h_suggestions_set(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let Some(list) = b.get("own").and_then(Value::as_array) else {
+        return bad("send {own: [text, ...]}");
+    };
+    let own: Vec<String> = list
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|t| t.trim().chars().take(200).collect::<String>())
+        .filter(|t| !t.is_empty())
+        .take(30)
+        .collect();
+    let v = if own.is_empty() {
+        Value::Null
+    } else {
+        json!(own)
+    };
+    if let Err(e) = store.set_pref(OWN_SUGGESTIONS, &v) {
+        return bad(&e);
+    }
+    Json(json!({"own": own})).into_response()
+}
+
+/// The names of the notes changed most recently (skills left out).
+fn recent_titles(st: &AppState, n: usize) -> Vec<String> {
+    let notes = crate::store_as(st, None).walk();
+    let mut dated: Vec<(std::time::SystemTime, String)> = notes
+        .into_iter()
+        .filter(|(rel, _, _)| !rel.starts_with(&format!("{SKILLS}/")))
+        .filter_map(|(_, name, full)| Some((std::fs::metadata(&full).ok()?.modified().ok()?, name)))
+        .collect();
+    dated.sort_by_key(|d| std::cmp::Reverse(d.0));
+    dated.into_iter().take(n).map(|(_, name)| name).collect()
+}
+
+/// "Fresh ideas": write Mnemo's suggestions again now (the owner's own stay as they are).
+async fn h_suggestions_refresh(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let st2 = st.clone();
+    let fresh = crate::blocking(move || refresh_suggestions(&st2)).await;
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let prefs = store.prefs().unwrap_or_default();
+    Json(json!({
+        "own": prefs.get(OWN_SUGGESTIONS).cloned().unwrap_or(json!([])),
+        "ai": prefs.get(AI_SUGGESTIONS).map(|v| v["items"].clone()).unwrap_or(json!([])),
+        "fresh": fresh,
+    }))
+    .into_response()
+}
+
+static SUGGESTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask the default model for a few things worth asking, from the titles of recent notes.
+fn refresh_suggestions(st: &AppState) -> bool {
+    use std::sync::atomic::Ordering;
+    if SUGGESTING.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let run = || -> Option<Vec<String>> {
+        let store = store(st).ok()?;
+        let (provider, model) = resolve_model(store, None, None).ok()?;
+        let ep = endpoint(st, store, &provider).ok()?;
+        let recent = recent_titles(st, 40);
+        if recent.is_empty() {
+            return None;
+        }
+        let prompt = format!(
+            "Recently changed notes in the owner's vault:\n{}\n\nWrite 6 short requests (at most 12 words each) the owner \
+might ask {NAME}, their notes agent, about these notes right now: finding, summarising, linking, tidying, planning. \
+Write them in the language most of the titles are in. One per line, no numbers, no quotes, nothing else.",
+            recent.join("\n")
+        );
+        let opts = Options {
+            temperature: None,
+            max_output: Some(800),
+            think: false,
+        };
+        let t = providers::run(
+            &ep,
+            &model,
+            "You suggest useful requests. Plain lines only.",
+            &[Msg::User(prompt)],
+            &[],
+            &opts,
+            &mut |_| true,
+        )
+        .ok()?;
+        let items: Vec<String> = t
+            .text
+            .lines()
+            .map(|l| {
+                l.trim()
+                    .trim_start_matches(['-', '*', '•', ' '])
+                    .trim_matches('"')
+                    .trim()
+            })
+            .filter(|l| l.len() > 6 && l.chars().count() <= 120)
+            .take(6)
+            .map(str::to_string)
+            .collect();
+        (!items.is_empty()).then_some(items)
+    };
+    let items = run();
+    let fresh = items.is_some();
+    if let Ok(store) = store(st) {
+        let old = store
+            .prefs()
+            .unwrap_or_default()
+            .get(AI_SUGGESTIONS)
+            .cloned()
+            .unwrap_or(json!({}));
+        // Tried either way, so a model that fails is not asked on every new chat.
+        let items = items
+            .map(|i| json!(i))
+            .unwrap_or_else(|| old["items"].clone());
+        let _ = store.set_pref(
+            AI_SUGGESTIONS,
+            &json!({"at": memora_state::now(), "items": items}),
+        );
+    }
+    SUGGESTING.store(false, Ordering::SeqCst);
+    fresh
+}
+
 async fn h_chat(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
@@ -2671,6 +3256,14 @@ async fn h_chat(
         }
         if let Some(o) = off {
             m["tz_offset"] = json!(o);
+        }
+    }
+    // `/name ...` runs one of the owner's skills: its steps go with this message.
+    {
+        let (st5, t5) = (st.clone(), text.clone());
+        if let Some((sk, body)) = crate::blocking(move || skill_for(&st5, &t5)).await {
+            meta.get_or_insert_with(|| json!({}))["skill"] =
+                json!({"name": sk.name, "path": sk.path, "text": clip(&body, 20_000)});
         }
     }
     // The chat's first message carries the system prompt it will keep for its whole life.
@@ -3366,6 +3959,8 @@ after they approve."
                     }
                     Err(e) => Err(e),
                 }
+            } else if c.name == VIEW_IMAGE {
+                view_image(st, &c.arguments)
             } else if c.name == PLACE_IMAGE && !off.contains("upload_image") {
                 place_image(st, &who, &c.arguments)
             } else if c.name == SHOW_ITEMS {
@@ -3439,13 +4034,14 @@ after they approve."
             );
         }
     }
-    // A chat still called "New chat" gets a short title from the model (what it is about,
-    // in the owner's language); the first words of the question if that fails.
+    // A chat still called "New chat", or still named by the first words of its question (the
+    // model could not name it before), gets a short title from the model: what it is about,
+    // in the owner's language. The first words stand in only while that fails.
     if store
         .session(id)
         .ok()
         .flatten()
-        .is_some_and(|s| s.title == NEW_TITLE)
+        .is_some_and(|s| s.title == NEW_TITLE || s.title == first_words(store, id))
     {
         let t = chat_title(store, id, model, ep);
         let _ = store.update_session(id, Some(&t), None, None, None);
@@ -3460,6 +4056,21 @@ after they approve."
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_skill_says_what_it_is_for() {
+        use super::skill_description as d;
+        assert_eq!(
+            d("---\ntags: x\ndescription: Tidy a meeting note\n---\n# Steps\n1. a"),
+            "Tidy a meeting note"
+        );
+        assert_eq!(d("description: \"Short\"\nsteps"), "Short");
+        assert_eq!(
+            d("---\ntags: x\n---\n# Tidy\n\nMake it neat.\n"),
+            "Make it neat."
+        );
+        assert_eq!(d("# Only a heading"), "");
+    }
 
     #[test]
     fn pages_in_replies_are_found_with_their_titles_and_versions() {

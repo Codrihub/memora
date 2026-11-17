@@ -26,6 +26,32 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.7',
+    title: 'Skills, fleeting chats and chats that follow their note',
+    lead: 'Teach Mnemo a skill once and run it with a slash, chat without keeping anything, and find a note\'s chats wherever the note goes.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'bolt', title: 'Skills', text: 'Skills are notes in the Skills folder. Ask Mnemo to make one ("a skill that tidies meeting notes"), then type / in the chat to pick it. Mnemo can change or remove them too.' },
+          { icon: 'eye', title: 'Fleeting chats', text: 'The eye in Mnemo\'s header starts a chat that is not kept: it and the pictures sent in it are gone when you leave it, and it stays out of search. Changes to notes stay.' },
+          { icon: 'sparkle', title: 'Suggestions that change', text: 'A new chat shows different suggestions each time: some of yours (Your suggestions), some Mnemo wrote from your recent notes (Fresh ideas writes new ones) and some built in. Your skills are one tap away.' },
+          { icon: 'image', title: 'Mnemo sees your pictures', text: 'Mnemo can open a picture shown in a note to describe it or read it. A picture that is only a web address it cannot open, and it tells you to send or add it instead.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'note', title: 'One chat per note', text: 'Every @mnemo request in a note goes to that note\'s one chat, which follows the note when it is renamed, moved or sent to the Trash. Asking about a note offers its earlier chats.' },
+          { icon: 'enter', title: '@mnemo from Mnemo works', text: 'When Mnemo writes an @mnemo request into a note for you, it is answered like one you wrote.' },
+          { icon: 'refresh', title: 'Steadier chats', text: 'Leaving a chat while Mnemo answers no longer shows a network error: it picks the reply up again. Chats get a proper title even when the first try fails, and deleting a chat also deletes the pictures sent in it.' },
+          { icon: 'expand', title: 'Room for the chat', text: 'A page open beside the chat folds the chat list away (it comes back when you drag the divider to give the chat more room). If both cannot fit, the page opens full screen.' },
+          { icon: 'image', title: 'Pictures fit the note', text: 'Pictures in notes are at most about 60% of the screen tall; tap one for the full size.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.6',
     title: 'Pages that grow, chats you can tidy',
     lead: 'Mnemo reworks the page it made instead of starting over, chats can be cleaned up in bulk, and compacting waits until the chat is really full.',
@@ -253,7 +279,7 @@ const CSS = `
 .wn-arr{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:999px;border:1px solid rgba(148,163,184,.3);background:rgba(15,23,42,.35);color:#e6e9ef;cursor:pointer;
   transition:background .15s,border-color .15s,opacity .15s}
 .wn-arr:hover:not(:disabled){background:rgba(148,163,184,.18);border-color:rgba(148,163,184,.5)}
-.wn-arr:disabled{opacity:.3;cursor:default}
+.wn-arr:disabled{visibility:hidden}
 .wn-arr svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .wn-vers{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scroll-snap-type:x proximity;scrollbar-width:none;padding:2px;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
@@ -274,15 +300,21 @@ const CSS = `
 .wn-ic .i{width:18px;height:18px}
 .wn-it b{font-size:14px;font-weight:600;color:var(--fg);line-height:1.4}
 .wn-it p{margin:0;font-size:13px;line-height:1.55;color:var(--muted)}
-.wn-foot{flex:none;display:flex;align-items:center;gap:12px;padding:12px 16px 12px 24px;border-top:1px solid var(--line);background:var(--surface-1)}
-.wn-star{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);text-decoration:none}
-.wn-star svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
-.wn-star:hover{color:var(--fg)}
+/* Footer: the GitHub star (with its count) on the left as a quiet pill, Changelog and Got it
+   on the right; on phones the two buttons share a row and the star sits under them. */
+.wn-foot{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px 12px 20px;border-top:1px solid var(--line);background:var(--surface-1)}
+.wn-star{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 11px;border:1px solid var(--line);border-radius:999px;
+  font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg));text-decoration:none;transition:border-color .15s,background .15s,color .15s}
+.wn-star svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;transition:fill .15s,stroke .15s}
+.wn-star:hover{color:var(--fg);border-color:color-mix(in srgb,#f5c451 60%,var(--line));background:color-mix(in srgb,#f5c451 8%,transparent)}
 .wn-star:hover svg{fill:#f5c451;stroke:#f5c451}
-.wn-star em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--text-3)}
+.wn-star em{display:inline-grid;place-items:center;min-width:24px;height:22px;padding:0 7px;border-radius:999px;font-style:normal;font-size:11.5px;font-weight:700;
+  font-variant-numeric:tabular-nums;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
+.wn-star em:empty{display:none}
 .wn-foot .grow{flex:1}
-.wn-log{border:0;background:none;padding:0 6px;height:36px;font:500 13px/1 var(--font);color:var(--text-2);cursor:pointer}
-.wn-log:hover{color:var(--fg)}
+.wn-log{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:none;
+  font:600 13px/1 var(--font);color:var(--text-2);cursor:pointer;transition:border-color .15s,color .15s}
+.wn-log:hover{color:var(--fg);border-color:var(--line-strong)}
 .wn :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:760px){
   .modal:has(.wn){border-radius:var(--r) var(--r) 0 0}
@@ -290,11 +322,11 @@ const CSS = `
   .wn{max-height:88dvh}
   .wn-hero{padding:18px 18px 20px}.wn-hero h2{font-size:21px}
   .wn-body{padding:4px 18px 10px}
-  .wn-foot{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;padding:12px 16px calc(12px + var(--safe-b,0px))}
+  .wn-foot{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px calc(12px + var(--safe-b,0px))}
   .wn-foot .grow{display:none}
-  .wn-log{height:42px;border:1px solid var(--line-strong);border-radius:var(--r-sm,10px);font-weight:600;color:var(--fg)}
-  .wn-foot .btn.primary{height:42px;width:100%;justify-content:center}
-  .wn-star{grid-column:1/-1;order:3;justify-content:center;min-height:28px}
+  .wn-log{height:44px;font-size:14px;color:var(--fg)}
+  .wn-foot .btn.primary{height:44px;width:100%;justify-content:center;font-size:14px}
+  .wn-star{grid-column:1/-1;order:3;justify-self:center;height:32px}
   .wn-car{margin-top:16px}
   .wn-arr{width:32px;height:32px}
   .wn-vers button{height:32px;padding:0 13px}
@@ -350,7 +382,7 @@ function body(r: Release): string {
       )
       .join('')}</div>
     <footer class="wn-foot">
-      <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="Memora is free and open source. A star helps others find it.">${STAR}<span>Star Memora on GitHub</span><em data-stars></em></a>
+      <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="Memora is free and open source. A star helps others find it.">${STAR}<span>Star on GitHub</span><em data-stars></em></a>
       <span class="grow"></span>
       <button type="button" class="wn-log" data-log>Changelog</button>
       <button type="button" class="btn primary" data-close>Got it</button>
@@ -364,7 +396,7 @@ async function paintStars(b: HTMLElement): Promise<void> {
     const c = await api<{ update?: { stars?: number | null; repo?: string } }>('/api/config');
     const n = c?.update?.stars;
     const el = b.querySelector<HTMLElement>('[data-stars]');
-    if (el && typeof n === 'number') el.textContent = '· ' + n.toLocaleString('en-US');
+    if (el && typeof n === 'number') el.textContent = n.toLocaleString('en-US');
     const a = b.querySelector<HTMLAnchorElement>('[data-star]');
     if (a && c?.update?.repo) a.href = c.update.repo;
   } catch {

@@ -135,20 +135,9 @@ async fn h_upload(
     let Some((ext, _)) = sniff(&bytes) else {
         return bad("only PNG, JPEG, WebP or GIF images");
     };
-    let d = dir(&st);
+    let st2 = st.clone();
     let res = crate::blocking(move || -> Result<Value, String> {
-        std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700));
-        }
-        prune(&d);
-        let id = format!("u{}", &memora_gateway::hash_api_key(&memora_gateway::generate_key())[..12]);
-        let file = clean_name(&name, ext);
-        std::fs::write(d.join(format!("{id}.{ext}")), &bytes).map_err(|e| e.to_string())?;
-        std::fs::write(d.join(format!("{id}.json")), json!({"name": file, "ext": ext, "bytes": bytes.len()}).to_string())
-            .map_err(|e| e.to_string())?;
+        let (id, file) = stage(&st2, &name, ext, &bytes)?;
         Ok(json!({"id": id, "name": file, "bytes": bytes.len(), "url": format!("/api/assistant/uploads/{id}")}))
     })
     .await;
@@ -159,6 +148,36 @@ async fn h_upload(
             &format!("could not keep the image: {e}"),
         ),
     }
+}
+
+/// Keep an image for a chat (sent by the owner, or opened from the vault for Mnemo to look at);
+/// returns `(id, file name)`.
+pub fn stage(
+    st: &AppState,
+    name: &str,
+    ext: &str,
+    bytes: &[u8],
+) -> Result<(String, String), String> {
+    let d = dir(st);
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700));
+    }
+    prune(&d);
+    let id = format!(
+        "u{}",
+        &memora_gateway::hash_api_key(&memora_gateway::generate_key())[..12]
+    );
+    let file = clean_name(name, ext);
+    std::fs::write(d.join(format!("{id}.{ext}")), bytes).map_err(|e| e.to_string())?;
+    std::fs::write(
+        d.join(format!("{id}.json")),
+        json!({"name": file, "ext": ext, "bytes": bytes.len()}).to_string(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok((id, file))
 }
 
 /// A staged image: `(file name, extension, bytes)`.

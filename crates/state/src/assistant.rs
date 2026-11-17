@@ -536,6 +536,64 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Chats about a note or folder: kept for it (scope), or with it attached to a message or
+    /// named in one of Mnemo's tool calls. Ids, most recently active first.
+    pub fn sessions_about(&self, path: &str) -> Result<Vec<String>> {
+        let esc = |x: &str| {
+            x.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        };
+        let attached = format!(
+            "%\"path\":{}%",
+            esc(&serde_json::to_string(path).unwrap_or_default())
+        );
+        let named = format!("%{}%", esc(path));
+        let c = self.c();
+        let mut st = c
+            .prepare(
+                "SELECT s.id FROM sessions s WHERE s.scope='note:'||?1 OR s.scope='folder:'||?1
+                   OR EXISTS (SELECT 1 FROM messages m WHERE m.session_id=s.id AND
+                     (m.meta LIKE ?2 ESCAPE '\\' OR (m.role='assistant' AND m.tool_calls LIKE ?3 ESCAPE '\\')))
+                 ORDER BY s.updated_at DESC",
+            )
+            .map_err(db_err)?;
+        let rows = st
+            .query_map(params![path, attached, named], |r| r.get::<_, String>(0))
+            .map_err(db_err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(db_err)
+    }
+
+    /// Chats follow their note or folder: `from` (a note or a folder with everything in it) is
+    /// now at `to`. Returns the chats whose scope changed, with their new scope.
+    pub fn move_scopes(&self, from: &str, to: &str) -> Result<Vec<(String, String)>> {
+        let mut moved = Vec::new();
+        for s in self.sessions()? {
+            let Some((kind, path)) = s.scope.split_once(':') else {
+                continue;
+            };
+            if kind != "note" && kind != "folder" {
+                continue;
+            }
+            let new = if path == from {
+                to.to_string()
+            } else if let Some(rest) = path.strip_prefix(&format!("{from}/")) {
+                format!("{to}/{rest}")
+            } else {
+                continue;
+            };
+            let scope = format!("{kind}:{new}");
+            self.c()
+                .execute(
+                    "UPDATE sessions SET scope=?2 WHERE id=?1",
+                    params![s.id, scope],
+                )
+                .map_err(db_err)?;
+            moved.push((s.id, scope));
+        }
+        Ok(moved)
+    }
+
     pub fn delete_session(&self, id: &str) -> Result<bool> {
         Ok(self
             .c()
@@ -696,6 +754,54 @@ impl Store {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn chats_follow_their_note_and_are_found_by_it() {
+        let s = Store::open_memory().unwrap();
+        s.create_session("n", "@mnemo · Plan", "note:Work/Plan.md", "", 1)
+            .unwrap();
+        s.create_session("f", "Folder", "folder:Work", "", 2)
+            .unwrap();
+        s.create_session("g", "Global", "global", "", 3).unwrap();
+        s.create_session("o", "Other", "note:Workshop.md", "", 4)
+            .unwrap();
+        let user = |meta: serde_json::Value| NewMessage {
+            role: "user".into(),
+            content: "hi".into(),
+            meta: Some(meta),
+            ..Default::default()
+        };
+        s.append(
+            "g",
+            &user(json!({"attach": [{"kind": "note", "path": "Work/Plan.md"}]})),
+            5,
+        )
+        .unwrap();
+        let mut about = s.sessions_about("Work/Plan.md").unwrap();
+        about.sort();
+        assert_eq!(about, vec!["g".to_string(), "n".to_string()]);
+        // A folder moved: the note inside it and the folder's chat follow; a look-alike does not.
+        let mut moved = s.move_scopes("Work", "Archive/Work").unwrap();
+        moved.sort();
+        assert_eq!(
+            moved,
+            vec![
+                ("f".to_string(), "folder:Archive/Work".to_string()),
+                ("n".to_string(), "note:Archive/Work/Plan.md".to_string())
+            ]
+        );
+        assert_eq!(s.session("o").unwrap().unwrap().scope, "note:Workshop.md");
+        assert_eq!(
+            s.move_scopes("Archive/Work/Plan.md", "Archive/Work/Roadmap.md")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            s.session("n").unwrap().unwrap().scope,
+            "note:Archive/Work/Roadmap.md"
+        );
+    }
 
     #[test]
     fn a_turn_can_be_run_again_from_its_message() {

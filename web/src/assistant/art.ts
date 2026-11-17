@@ -40,7 +40,9 @@ function mnemoPage(): HTMLElement | null {
 }
 
 function splitMode(): boolean {
-  return window.innerWidth >= SPLIT_MIN && !!mnemoPage();
+  const p = mnemoPage();
+  // Beside the chat only when both fit (the chat list folds away meanwhile); else full screen.
+  return window.innerWidth >= SPLIT_MIN && !!p && p.getBoundingClientRect().width >= CHAT_MIN + PANE_MIN;
 }
 
 // The split's width: dragged with the divider, kept per device, and always leaving room on
@@ -48,6 +50,8 @@ function splitMode(): boolean {
 const LS_W = 'memora.mnemo.preview.w';
 const PANE_MIN = 360;
 const CHAT_MIN = 420;
+/** The Mnemo chat list's width (it folds away while a page is open beside the chat). */
+const LIST_W = 288;
 
 function savedWidth(): number {
   try {
@@ -66,7 +70,11 @@ function fitWidth(w: number): number {
 
 function setWidth(w: number, save = false): void {
   const fit = fitWidth(w);
-  document.documentElement.style.setProperty('--pvw', fit + 'px');
+  const root = document.documentElement;
+  root.style.setProperty('--pvw', fit + 'px');
+  // The chat list comes back only when the chat keeps its room beside it.
+  const page = mnemoPage()?.getBoundingClientRect().width || window.innerWidth;
+  root.classList.toggle('mn-pv-roomy', page - fit - LIST_W >= CHAT_MIN);
   panel?.querySelector('.mn-pv-grip')?.setAttribute('aria-valuenow', String(fit));
   if (save) {
     try {
@@ -219,7 +227,7 @@ export function closePreview(): void {
   if (!panel) return;
   panel.classList.remove('on');
   panel.querySelector('.mn-pv-frame')?.replaceChildren();
-  document.documentElement.classList.remove('mn-pv-split', 'mn-pv-lock');
+  document.documentElement.classList.remove('mn-pv-split', 'mn-pv-lock', 'mn-pv-roomy');
   current?.classList.remove('on');
   current = null;
 }

@@ -219,8 +219,25 @@ export const savePrefs = (p: Prefs): Promise<MnemoState> => postState('/api/assi
 // ---- chats ----
 
 export const listSessions = (): Promise<{ sessions: Session[] }> => apiGet('/api/assistant/sessions');
-export const newSession = (scope: string, model = ''): Promise<{ session: Session }> =>
-  apiPost('/api/assistant/sessions', { scope, model });
+/** Chats about a note or folder (kept for it, with it attached, or touching it), newest first. */
+export const sessionsAbout = (path: string): Promise<{ sessions: Session[] }> =>
+  apiGet(`/api/assistant/sessions?about=${encodeURIComponent(path)}`);
+export const newSession = (scope: string, model = '', fleeting = false): Promise<{ session: Session; fleeting?: boolean }> =>
+  apiPost('/api/assistant/sessions', { scope, model, ...(fleeting ? { fleeting: true } : {}) });
+/** Delete a chat while the page goes away (a fleeting chat being left): survives the unload. */
+export function forgetSession(id: string): void {
+  try {
+    void fetch(`/api/assistant/sessions/${encodeURIComponent(id)}/delete`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: '{}',
+    }).catch(() => undefined);
+  } catch {
+    /* the server forgets it after a while anyway */
+  }
+}
 /** Something from the vault Mnemo handed over in a reply (`show_items`), drawn as a card. */
 export interface Shown {
   kind: 'note' | 'folder' | 'image' | 'vault';
@@ -251,6 +268,21 @@ export const updateSession = (id: string, b: { title?: string; model?: string; p
 /** Delete many chats: the ones picked, the ones untouched for some days, or all. */
 export const pruneSessions = (b: { ids?: string[]; older_than_days?: number; all?: boolean; keep_pinned?: boolean }): Promise<{ deleted: number; skipped: number }> =>
   apiPost('/api/assistant/sessions/prune', b);
+export interface Skill {
+  name: string;
+  path: string;
+  description: string;
+}
+/** The owner's skills: notes in the Skills folder, run with /name. */
+export const listSkills = (): Promise<{ folder: string; skills: Skill[] }> => apiGet('/api/assistant/skills');
+export interface Suggestions {
+  own: string[];
+  ai: string[];
+}
+export const getSuggestions = (): Promise<Suggestions> => apiGet('/api/assistant/suggestions');
+export const saveSuggestions = (own: string[]): Promise<{ own: string[] }> => apiPost('/api/assistant/suggestions', { own });
+/** "Fresh ideas": Mnemo writes its suggestions again (the owner's own stay). */
+export const refreshSuggestions = (): Promise<Suggestions & { fresh: boolean }> => apiPost('/api/assistant/suggestions/refresh', {});
 export const markSessionSeen = (id: string, messages: number): Promise<{ ok: boolean; seen: number }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/seen`, { messages });
 export const deleteSession = (id: string): Promise<{ ok: boolean }> =>

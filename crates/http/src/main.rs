@@ -326,6 +326,7 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     );
     cache::spawn_background(&app_state);
     memora_http::assistant::mentions::watch(&app_state);
+    memora_http::assistant::mentions::follow_moves(&app_state);
     memora_http::images::load_media_settings(&app_state);
     memora_http::release::spawn();
 

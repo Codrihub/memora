@@ -3,8 +3,8 @@
 //! A line with `@mnemo: <request>` (anywhere in the line, also inside a quote or a list
 //! item, never in code) is a pending mention. A few seconds after the note is saved by the
 //! owner in the browser, or changed by an agent's tool call (`mention_agent` with agent
-//! `mnemo` writes one), Mnemo runs the request as a chat of its own (listed with the other
-//! chats), then answers in the note: the request is struck through (`~~@mnemo: …~~`) and its
+//! `mnemo` writes one, and so do Mnemo's own edits from a chat or the console), Mnemo runs the request in the note's own chat (one per note,
+//! listed with the other chats), then answers in the note: the request is struck through (`~~@mnemo: …~~`) and its
 //! reply goes right under it as a quote. A struck mention is done and never runs again.
 
 use serde_json::{json, Value};
@@ -203,7 +203,7 @@ fn lock() -> std::sync::MutexGuard<'static, Queue> {
 
 /// A note changed (`by` changed it): look for mentions once it settles.
 pub fn poke(st: &AppState, path: &str, by: &str) {
-    if !path.to_ascii_lowercase().ends_with(".md") || by == NAME {
+    if !path.to_ascii_lowercase().ends_with(".md") {
         return;
     }
     let g = {
@@ -240,6 +240,54 @@ pub fn poke(st: &AppState, path: &str, by: &str) {
     });
 }
 
+/// Chats follow their note: when a note (or its folder) is renamed, moved, sent to the Trash
+/// or restored, the chats about it point at the new place, and a note's @mnemo chat takes the
+/// note's new name. Installed beside the store's own hook (privacy rules and pins).
+pub fn follow_moves(st: &AppState) {
+    let state = st.clone();
+    let mut g = crate::cache::lock(&st.store);
+    let inner = g.path_hook();
+    g.set_path_hook(Some(std::sync::Arc::new(
+        move |ev: &memora_core::privacy::PathEvent| {
+            if let Some(h) = &inner {
+                h(ev);
+            }
+            if let memora_core::privacy::PathEvent::Moved { from, to, .. } = ev {
+                let Ok(store) = store(&state) else { return };
+                match store.move_scopes(from, to) {
+                    Ok(moved) => retitle(store, &moved),
+                    Err(e) => tracing::warn!("chats did not follow {from} -> {to}: {e}"),
+                }
+            }
+        },
+    )));
+}
+
+/// A note's @mnemo chat is titled after the note: keep it so after a rename.
+fn retitle(store: &memora_state::assistant::Store, moved: &[(String, String)]) {
+    let Ok(all) = store.sessions() else { return };
+    for (id, scope) in moved {
+        let Some(path) = scope.strip_prefix("note:") else {
+            continue;
+        };
+        let Some(s) = all.iter().find(|x| &x.id == id) else {
+            continue;
+        };
+        if !s.title.starts_with(TITLE_PREFIX) {
+            continue;
+        }
+        let name = path
+            .rsplit('/')
+            .next()
+            .unwrap_or(path)
+            .trim_end_matches(".md");
+        let title: String = format!("{TITLE_PREFIX}{name}").chars().take(80).collect();
+        if title != s.title {
+            let _ = store.update_session(id, Some(&title), None, None, None);
+        }
+    }
+}
+
 /// Agents' tool calls that changed notes (from the realtime hub) are changes too.
 pub fn watch(st: &AppState) {
     let mut rx = memora_core::events::hub().subscribe();
@@ -259,7 +307,7 @@ pub fn watch(st: &AppState) {
             }
             let actor = ev["actor"].as_str().unwrap_or("");
             let tool = ev["action"].as_str().unwrap_or("");
-            if actor == NAME || memora_mcp::activity::is_read_only(tool) {
+            if memora_mcp::activity::is_read_only(tool) || !asks_again(actor, ev["for"].as_str()) {
                 continue;
             }
             for p in ev["paths"]
@@ -272,6 +320,13 @@ pub fn watch(st: &AppState) {
             }
         }
     });
+}
+
+/// Whether a change can ask Mnemo: anyone's, Mnemo's own too (a chat or the console asking it
+/// to write `@mnemo:` into a note works like the owner writing it), except Mnemo's work on a
+/// note's request, so a request never sets off another one by itself.
+fn asks_again(actor: &str, on_behalf: Option<&str>) -> bool {
+    actor != NAME || !on_behalf.is_some_and(|f| f.contains("@mnemo in "))
 }
 
 fn note_text(st: &AppState, path: &str) -> Option<String> {
@@ -326,7 +381,19 @@ fn answer_all(st: &AppState, path: &str, by: &str) {
     }
 }
 
-/// Run one mention as a chat of its own; the reply text (or why there is none).
+/// The note's own @mnemo chat (the newest), unless it is answering right now.
+fn note_chat(store: &memora_state::assistant::Store, scope: &str) -> Option<String> {
+    store
+        .sessions()
+        .ok()?
+        .into_iter()
+        .filter(|x| x.scope == scope && x.title.starts_with(TITLE_PREFIX))
+        .max_by_key(|x| x.updated_at)
+        .filter(|x| !super::live::running(&x.id))
+        .map(|x| x.id)
+}
+
+/// Run one mention in the note's chat; the reply text (or why there is none).
 #[allow(clippy::too_many_arguments)]
 fn ask(
     st: &AppState,
@@ -341,17 +408,26 @@ fn ask(
 ) -> String {
     let now = memora_state::now();
     let scope = format!("note:{path}");
-    let title: String = format!("{TITLE_PREFIX}{name}: {}", p.request)
-        .chars()
-        .take(80)
-        .collect();
-    let sid = new_id();
-    if store
-        .create_session(&sid, &title, &scope, &format!("{provider}/{model}"), now)
-        .is_err()
-    {
-        return "Could not start a chat for this.".into();
-    }
+    // One chat per note: every request written in it goes to the same chat (the newest one
+    // for this note), so the requests and answers read as one conversation. A new one starts
+    // only when there is none yet or that chat is answering something else right now.
+    let title: String = format!("{TITLE_PREFIX}{name}").chars().take(80).collect();
+    let sid = match note_chat(store, &scope) {
+        Some(id) => {
+            let _ = store.update_session(&id, Some(&title), None, None, Some(now));
+            id
+        }
+        None => {
+            let id = new_id();
+            if store
+                .create_session(&id, &title, &scope, &format!("{provider}/{model}"), now)
+                .is_err()
+            {
+                return "Could not start a chat for this.".into();
+            }
+            id
+        }
+    };
     let extra = store
         .prefs()
         .unwrap_or_default()
@@ -441,6 +517,10 @@ mod tests {
 
     #[test]
     fn a_reply_strikes_the_request_and_sits_under_it() {
+        assert!(super::asks_again("claude", None));
+        assert!(super::asks_again(NAME, Some("owner · chat")));
+        assert!(super::asks_again(NAME, Some("owner · console")));
+        assert!(!super::asks_again(NAME, Some("owner · @mnemo in Plan")));
         let t = "intro\n@mnemo: what is due?\nafter\n";
         let p = &pending(t)[0];
         let out = answered(t, p, "Two tasks.\n\n- A\n- B").unwrap();

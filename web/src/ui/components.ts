@@ -210,12 +210,14 @@ export const COMPONENTS_CSS = `
 
 .note-body table{display:block;width:max-content;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;border-collapse:collapse}
 .note-body table th,.note-body table td{min-width:7em;max-width:clamp(28em,40vw,56em);vertical-align:top}
-.note-body img{max-width:100%;height:auto}
+/* Pictures in a note never take over the page: at most ~60% of the screen tall (480 px), the
+   full size is one tap away in the lightbox. */
+.note-body img{max-width:100%;height:auto;max-height:min(480px,60vh);max-height:min(480px,60dvh);object-fit:contain}
 .note-body figure.md-img{margin:1.1em 0;display:flex;flex-direction:column;align-items:flex-start;gap:7px;max-width:100%}
 .note-body figure.md-img img,.note-body img.md-img-i{max-width:100%;height:auto;border-radius:var(--r-sm,10px);
   border:1px solid var(--line);background:var(--surface-2);cursor:zoom-in;
   transition:border-color var(--dur-2) var(--ease),box-shadow var(--dur-2) var(--ease),transform var(--dur-2) var(--ease)}
-.note-body figure.md-img img{display:block;min-height:48px;min-width:48px;box-shadow:none}
+.note-body figure.md-img img{display:block;width:auto;min-height:48px;min-width:48px;box-shadow:none}
 .note-body figure.md-img img:hover{border-color:var(--accent-line,var(--line-strong));box-shadow:none}
 .note-body figure.md-img figcaption{font-size:12px;line-height:1.45;color:var(--muted);padding:0 2px;max-width:100%}
 .note-body img.md-img-i{display:inline-block;vertical-align:middle;max-height:12em;margin:2px 3px}
