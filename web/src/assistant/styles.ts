@@ -281,9 +281,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-send .i{width:17px;height:17px;stroke-width:2.3}
 .mn-chat.busy .mn-send:not(.queue) .i{fill:currentColor;stroke-width:0;width:14px;height:14px}
 .mn-send.queue{background:var(--accent);color:var(--on-accent,#fff)}
-.mn-fine{margin:8px auto 0;max-width:780px;text-align:center;font-size:11.5px;color:var(--text-3,var(--muted))}
+/* Under the prompt: the fine print on the left, the chat's model and its memory ring on the
+   right (the prompt itself keeps the thinking level and Send). */
+.mn-under{display:flex;align-items:center;justify-content:flex-end;gap:4px;max-width:780px;min-height:30px;margin:6px auto 0;padding:0 4px 0 10px}
+.mn-fine{flex:1 1 auto;min-width:0;margin:0;font-size:11.5px;color:var(--text-3,var(--muted));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-under .mn-grow{flex:0 0 8px}
 .mn-chat.compact .mn-fine{display:none}
-@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}}
+.mn-chat.compact .mn-under{margin-top:4px;padding-left:4px}
+@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}.mn-under{padding-left:4px;margin-top:4px}}
 @media (prefers-reduced-motion:reduce){.mn-u,.mn-turn,.mn-tool,.mn-sug{animation:none}.mn-hello-mark::before,.mn-mark.pulse,.mn-turn.live .mn-av .mn-mark{animation:none}.mn-think i,.mn-think span,.mn-caret{animation:none}}
 
 /* Composer: + attach, chips that grow the box, the model pill once there is something to send. */
@@ -555,6 +560,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-notice b{font-weight:600;color:var(--fg)}
 .mn-md.mn-cut{opacity:.5;text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--fg) 35%,transparent)}
 .mn-compact-live-b{align-self:stretch;max-height:220px;overflow:auto;margin:2px 0 4px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--fg) 2.5%,transparent);font-size:13px;color:var(--fg);-webkit-mask-image:linear-gradient(transparent,#000 18px);mask-image:linear-gradient(transparent,#000 18px)}
+.mn-modelchg{display:flex;align-items:center;gap:10px;align-self:stretch;margin:6px 0;font-size:12px;color:var(--muted)}
+.mn-modelchg::before,.mn-modelchg::after{content:"";flex:1 1 0;min-width:12px;height:1px;background:var(--line)}
+.mn-modelchg span{flex:none;display:inline-flex;align-items:center;gap:6px;max-width:86%;padding:3px 12px;border-radius:99px;border:1px solid var(--line);background:var(--bg);white-space:nowrap;overflow:hidden}
+.mn-modelchg b{font-weight:600;color:var(--fg)}
+.mn-modelchg em{font-style:normal;overflow:hidden;text-overflow:ellipsis}
+.mn-modelchg .i{width:13px;height:13px;flex:none}
+.mn-modelchg.fb span{border-color:color-mix(in srgb,var(--warn,#d97706) 45%,var(--line));color:var(--warn,#d97706)}
+.mn-tb .mn-modelchg{margin:10px 0}
 .mn-think-slot{display:inline-flex;min-width:0}
 .ui-sel.mn-think{max-width:120px}
 .ui-sel.mn-think>.i{width:14px;height:14px;flex:none;color:var(--accent)}

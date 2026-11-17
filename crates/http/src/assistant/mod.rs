@@ -524,9 +524,10 @@ async fn h_models_fetch(
 
 fn state_json(store: &Store) -> Value {
     let mut prefs = store.prefs().unwrap_or_default();
-    for k in [SEEN, FLEETING, OWN_SUGGESTIONS, AI_SUGGESTIONS] {
+    for k in [SEEN, FLEETING, OWN_SUGGESTIONS, AI_SUGGESTIONS, THINKERS] {
         prefs.remove(k);
     }
+    let seen_thinking = thinkers(store);
     let provs = store.providers().unwrap_or_default();
     // Each model says whether it can think (the chat then offers a thinking level).
     let models: Vec<Value> = store
@@ -535,11 +536,12 @@ fn state_json(store: &Store) -> Value {
         .into_iter()
         .map(|m| {
             let p = provs.iter().find(|p| p.id == m.provider_id);
-            let thinks = providers::can_think(
-                p.map_or("", |p| p.kind.as_str()),
-                p.map_or("", |p| p.api_style.as_str()),
-                &m.model_id,
-            );
+            let thinks = seen_thinking.contains(&format!("{}/{}", m.provider_id, m.model_id))
+                || providers::can_think(
+                    p.map_or("", |p| p.kind.as_str()),
+                    p.map_or("", |p| p.api_style.as_str()),
+                    &m.model_id,
+                );
             let mut v = serde_json::to_value(&m).unwrap_or(Value::Null);
             v["thinks"] = json!(thinks);
             v
@@ -909,7 +911,16 @@ async fn h_session_new(
     let title = s(&b, "title")
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| "New chat".into());
-    let model = s(&b, "model").unwrap_or_default();
+    // Every chat remembers its model from the start, so changing the default later only
+    // changes new chats.
+    let model = s(&b, "model")
+        .filter(|m| !m.is_empty())
+        .or_else(|| {
+            resolve_model(store, None, None)
+                .ok()
+                .map(|(p, m)| format!("{p}/{m}"))
+        })
+        .unwrap_or_default();
     let id = new_id();
     match store.create_session(
         &id,
@@ -945,6 +956,17 @@ async fn h_session(
     match store.session(&id) {
         Ok(Some(sess)) => {
             let messages = store.messages(&id).unwrap_or_default();
+            if sess.model.is_empty() {
+                if let Some(m) = messages
+                    .iter()
+                    .rev()
+                    .filter(|m| m.role == "assistant")
+                    .find_map(|m| m.meta.as_ref()?["model"].as_str().map(str::to_string))
+                    .filter(|m| m.contains('/'))
+                {
+                    let _ = store.update_session(&id, None, Some(&m), None, None);
+                }
+            }
             let st2 = st.clone();
             let context = crate::blocking(move || session_context(&st2, store, &sess.id))
                 .await
@@ -1154,10 +1176,22 @@ fn resolve_model(
             .any(|x| x.id == p && x.enabled && (!x.api_key.is_empty() || x.kind == "custom"))
     };
     let prefs = store.prefs()?;
+    let known = store.models()?;
+    // A chat keeps the model it was given (picked by hand, or the default when it began);
+    // only when that model is gone or its provider cannot answer does it take the default,
+    // then the fallback models, then the first pinned or visible model.
+    let is_known = |p: &str, m: &str| known.iter().any(|x| x.provider_id == p && x.model_id == m);
     let default = prefs
         .get("default_model")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let fallbacks: Vec<String> = prefs
+        .get(FALLBACKS)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
     for cand in [
         asked.map(str::to_string),
         session.map(str::to_string),
@@ -1165,9 +1199,10 @@ fn resolve_model(
     ]
     .into_iter()
     .flatten()
+    .chain(fallbacks)
     {
         if let Some((p, m)) = cand.split_once('/') {
-            if !m.is_empty() && usable(p) {
+            if !m.is_empty() && usable(p) && is_known(p, m) {
                 return Ok((p.to_string(), m.to_string()));
             }
         }
@@ -2510,6 +2545,10 @@ const RETRY_WAITS: [u64; 3] = [3, 8, 20];
 /// A failure worth trying again: the provider busy or down for a moment, or the connection lost.
 fn transient(e: &str) -> bool {
     let m = e.to_ascii_lowercase();
+    // A router may wrap a refusal in a 5xx: no amount of waiting fixes a quota or a key.
+    if hopeless(&m) {
+        return false;
+    }
     if let Some(code) = m
         .split("answered ")
         .nth(1)
@@ -2530,6 +2569,55 @@ fn transient(e: &str) -> bool {
         ]
         .iter()
         .any(|w| m.contains(w))
+}
+
+/// Errors no retry fixes: quota or package run out, key refused, model not there.
+fn hopeless(lower: &str) -> bool {
+    [
+        "insufficient_quota",
+        "quota",
+        "package",
+        "billing",
+        "credit",
+        "[401]",
+        "[403]",
+        "[404]",
+        "answered 401",
+        "answered 403",
+        "answered 404",
+        "no active credentials",
+        "model_not_found",
+        "does not exist",
+        "invalid api key",
+        "invalid_api_key",
+    ]
+    .iter()
+    .any(|w| lower.contains(w))
+}
+
+/// A few words on why a model failed, for the line where another model takes over.
+fn why_failed(e: &str) -> String {
+    let m = e.to_ascii_lowercase();
+    let short = if m.contains("quota")
+        || m.contains("package")
+        || m.contains("billing")
+        || m.contains("credit")
+    {
+        "out of quota"
+    } else if m.contains("401") || m.contains("403") || m.contains("api key") {
+        "its key was refused"
+    } else if m.contains("404") || m.contains("not found") || m.contains("does not exist") {
+        "model not found"
+    } else if m.contains("429") || m.contains("rate") {
+        "too busy"
+    } else if m.contains("timed out") || m.contains("timeout") {
+        "no answer in time"
+    } else if m.starts_with("could not reach") {
+        "unreachable"
+    } else {
+        "the provider failed"
+    };
+    short.to_string()
 }
 
 fn refuses_images(e: &str) -> bool {
@@ -3332,9 +3420,12 @@ fn prepare_turn(
                 "could not store the message".to_string(),
             )
         })?;
-    // The title stays "New chat" until the first reply: Mnemo names the chat then.
+    // The title stays "New chat" until the first reply: Mnemo names the chat then. A chat
+    // with no model of its own keeps the one that answers now.
     if let Some(a) = &asked {
         let _ = store.update_session(id, None, Some(a), None, None);
+    } else if sess.model.is_empty() {
+        let _ = store.update_session(id, None, Some(&format!("{provider}/{model}")), None, None);
     }
     live::notify(
         id,
@@ -4037,6 +4128,8 @@ fn run_agent(
     };
     // Models to carry on with when this one fails, in the owner's order.
     let mut fallbacks = fallback_chain(store, &provider, &model).into_iter();
+    // The model that failed before a fallback took over (noted on the next stored reply).
+    let mut fell_from: Option<String> = None;
     let auto = prefs.get("permission").and_then(Value::as_str) == Some("auto");
     let steps = prefs
         .get("max_steps")
@@ -4118,13 +4211,20 @@ fn run_agent(
         // A provider that is briefly down or busy (502, 503, 429, a dropped connection) is
         // asked again a few times, over about half a minute, before the owner sees an error;
         // only while nothing of this step has streamed yet, so no text is repeated.
-        for (n, wait) in RETRY_WAITS.iter().enumerate() {
+        // With a fallback model lined up, one quick retry, then the next model takes over.
+        let waits: &[u64] = if fallbacks.len() > 0 {
+            &RETRY_WAITS[..1]
+        } else {
+            &RETRY_WAITS
+        };
+        for (n, wait) in waits.iter().enumerate() {
             match &res {
                 Err(e) if transient(e) && !got.get() => {
                     let note = format!(
-                        "The AI provider did not answer; trying again in {wait} s ({}/{})…",
+                        "{model} did not answer ({}); trying again in {wait} s ({}/{})…",
+                        why_failed(e),
                         n + 1,
-                        RETRY_WAITS.len()
+                        waits.len()
                     );
                     if !send(tx, json!({"type": "notice", "text": note})) {
                         return Outcome::Stopped;
@@ -4180,10 +4280,13 @@ fn run_agent(
                 let to = format!("{p}/{m}");
                 if !send(
                     tx,
-                    json!({"type": "fallback", "from": key, "model": to, "reason": providers::condense_error(&e)}),
+                    json!({"type": "fallback", "from": key, "model": to, "reason": why_failed(&e), "detail": providers::condense_error(&e)}),
                 ) {
                     return Outcome::Stopped;
                 }
+                // The chat keeps the model that answered from now on.
+                let _ = store.update_session(id, None, Some(&to), None, None);
+                fell_from = Some(key.clone());
                 (provider, model, ep, key) = (p, m, x, to);
                 stp = setup(st, store, id, scope, &provider, &model);
                 opts.max_output = Some(stp.max_out);
@@ -4201,6 +4304,13 @@ fn run_agent(
                 .collect::<Vec<_>>())
         });
         let mut meta = json!({"model": format!("{provider}/{model}"), "input_tokens": turn.input_tokens, "output_tokens": turn.output_tokens});
+        if let Some(f) = fell_from.take() {
+            meta["fallback_from"] = json!(f);
+        }
+        // A model that showed its thinking can think: the chat offers it a thinking level.
+        if !turn.thinking.trim().is_empty() {
+            learn_thinker(store, &key);
+        }
         if !turn.thinking.trim().is_empty() {
             meta["thinking"] = json!(turn.thinking.trim());
         }
@@ -4384,6 +4494,46 @@ fn fail_turn(
         }
     }
     Outcome::Failed
+}
+
+/// The preference with the models seen thinking (`["provider/model", …]`): their chat offers
+/// a thinking level even when the name says nothing.
+const THINKERS: &str = "thinkers";
+
+/// Models known to think: the ones seen thinking (learned once from the stored chats).
+fn thinkers(store: &Store) -> BTreeSet<String> {
+    let prefs = store.prefs().unwrap_or_default();
+    if let Some(a) = prefs.get(THINKERS).and_then(Value::as_array) {
+        return a
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+    }
+    let mut out = BTreeSet::new();
+    for sess in store.sessions().unwrap_or_default() {
+        for m in store.messages(&sess.id).unwrap_or_default() {
+            if let Some(meta) = m.meta.as_ref() {
+                if meta["thinking"]
+                    .as_str()
+                    .is_some_and(|t| !t.trim().is_empty())
+                {
+                    if let Some(k) = meta["model"].as_str() {
+                        out.insert(k.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let _ = store.set_pref(THINKERS, &json!(out.iter().collect::<Vec<_>>()));
+    out
+}
+
+fn learn_thinker(store: &Store, key: &str) {
+    let mut t = thinkers(store);
+    if t.insert(key.to_string()) {
+        let list: Vec<&String> = t.iter().rev().take(300).collect();
+        let _ = store.set_pref(THINKERS, &json!(list));
+    }
 }
 
 /// The preference with the models to carry on with when a chat's model fails, in order

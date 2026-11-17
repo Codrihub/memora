@@ -160,7 +160,7 @@ export type ChatEvent =
   | { type: 'steered'; text: string }
   | { type: 'compacted'; messages: number; tokens: number; summary?: string }
   | { type: 'compact_text'; delta: string }
-  | { type: 'fallback'; from: string; model: string; reason: string }
+  | { type: 'fallback'; from: string; model: string; reason: string; detail?: string }
   | { type: 'notice'; text: string }
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }

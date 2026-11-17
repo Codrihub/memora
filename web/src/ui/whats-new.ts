@@ -26,6 +26,23 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.10',
+    title: 'Every chat keeps its model',
+    lead: 'The default model is for new chats only, a fallback that takes over stays, and a divider shows each change of model.',
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'pin', title: 'A chat keeps its model', text: 'The model a chat began with, or the one you switched it to, stays with that chat. Changing the default only changes new chats.' },
+          { icon: 'refresh', title: 'Fallbacks you can see', text: 'When a model fails and a fallback takes over, the chat switches to it and a divider says so. Every change of model is marked, even inside one reply.' },
+          { icon: 'bolt', title: 'Straight to the fallback', text: 'A model out of quota, with its key refused or not found is skipped at once; a busy one gets one quick retry before the next model.' },
+          { icon: 'brain', title: 'Thinking level for more models', text: 'A model that has shown its thinking gets the Think chip, whatever its name.' },
+          { icon: 'send', title: 'A calmer prompt', text: 'The model and its memory ring sit under the prompt; inside it, just the thinking level and Send. The fleeting eye shows on new chats only.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.9',
     title: 'Chats in step everywhere, a queue that never sticks',
     lead: 'Every device shows the same chat live, queued messages always go out, and Mnemo can fall back to another model or think harder when you ask.',

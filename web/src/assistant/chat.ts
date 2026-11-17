@@ -316,13 +316,16 @@ export class ChatView {
             <button type="button" class="mn-perm" hidden></button>
             <span class="mn-grow"></span>
             <span class="mn-think-slot"></span>
-            <span class="mn-model-slot"></span>
-            <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
-            <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
             <button type="submit" class="mn-send" aria-label="Send">${icon('send')}</button>
           </div>
         </div>
-        <p class="mn-fine">${A.MNEMO} only works in your notes. Each change shows in Activity and can be undone from History.</p>
+        <div class="mn-under">
+          <p class="mn-fine">${A.MNEMO} only works in your notes. Each change shows in Activity and can be undone from History.</p>
+          <span class="mn-grow"></span>
+          <span class="mn-model-slot"></span>
+          <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
+          <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
+        </div>
       </form>`;
     this.log = this.el.querySelector('.mn-log')!;
     this.input = this.el.querySelector('textarea')!;
@@ -729,6 +732,19 @@ export class ChatView {
   private runAfter = false;
   /** When this tab last finished streaming a reply. */
   private lastEnd = 0;
+  /** The model that wrote the last reply on screen (a divider marks every change). */
+  private shownModel = '';
+
+  /** A line across the chat where another model takes over (`why`: it was a fallback). */
+  private modelLine(key: string, why = ''): HTMLElement {
+    const st = A.mnemoState();
+    const name = st ? A.modelLabel(st, key) : key;
+    const d = el('div', 'mn-modelchg' + (why ? ' fb' : ''));
+    d.setAttribute('role', 'note');
+    d.innerHTML = `<span>${icon(why ? 'refresh' : 'bolt')}<b>${esc(name)}</b>${why ? `<em>${esc(why)}</em>` : '<em>answers from here</em>'}</span>`;
+    d.title = key;
+    return d;
+  }
 
   /** Watch the reply running in this chat (started elsewhere, or out of the queue). */
   private follow(sid: string): void {
@@ -1423,6 +1439,9 @@ export class ChatView {
         ? `<span class="mn-star">${icon('star')}</span>`
         : `<span class="mn-pdot" data-p="${attr(A.providerOf(s, m.provider_id)?.kind || '')}"></span>`,
     }));
+    // The chat's own model stays shown even when it is hidden from the picker.
+    const own = this.model && !opts.some((x) => x.value === this.model) ? s.models.find((x) => A.modelKey(x) === this.model) : undefined;
+    if (own) opts.unshift({ value: this.model, label: own.label || own.model_id, hint: 'This chat · hidden', group: 'This chat' });
     const value = this.model && opts.some((x) => x.value === this.model) ? this.model : A.fallbackModel(s);
     if (!this.select) {
       this.modelSlot.innerHTML = '';
@@ -1680,6 +1699,7 @@ export class ChatView {
     let turn: HTMLElement | null = null;
     let tokens = { in: 0, out: 0, model: '' };
     let lastUser = 0;
+    let lastModel = '';
     const finishTurn = (): void => {
       if (turn) this.finishAct(turn.querySelector<HTMLElement>('.mn-tb')!);
       if (turn) this.footer(turn, tokens.model, tokens.in, tokens.out);
@@ -1713,6 +1733,16 @@ export class ChatView {
       const body = turn.querySelector<HTMLElement>('.mn-tb')!;
       if (m.role === 'assistant') {
         const meta = m.meta || {};
+        // Another model took over: a divider says which (inside the reply when it changed
+        // mid-way, as after a fallback).
+        if (typeof meta.model === 'string' && meta.model) {
+          if (lastModel && meta.model !== lastModel) {
+            const why = typeof meta.fallback_from === 'string' ? `took over: ${A.modelLabel(A.mnemoState(), meta.fallback_from)} did not answer` : '';
+            if (body.childElementCount) body.append(this.modelLine(meta.model, why));
+            else turn.before(this.modelLine(meta.model, why));
+          }
+          lastModel = meta.model;
+        }
         if (typeof meta.model === 'string') tokens.model = meta.model;
         tokens.in += Number(meta.input_tokens || 0);
         tokens.out += Number(meta.output_tokens || 0);
@@ -1751,6 +1781,7 @@ export class ChatView {
       }
     }
     finishTurn();
+    this.shownModel = lastModel;
     // Number the versions of each page across the whole chat.
     mountArt(this.log);
     this.scrollEnd(true);
@@ -2331,6 +2362,8 @@ export class ChatView {
         switch (ev.type) {
           case 'start':
             model = ev.model;
+            if (this.shownModel && ev.model !== this.shownModel) turn.before(this.modelLine(ev.model));
+            this.shownModel = ev.model;
             this.setContext(ev.context);
             break;
           case 'ask':
@@ -2383,11 +2416,22 @@ export class ChatView {
               const st = A.mnemoState();
               return st ? A.modelLabel(st, k) : k;
             };
-            body.insertAdjacentHTML(
-              'beforeend',
-              `<div class="mn-notice fb">${icon('refresh')}<span>${esc(name(ev.from))} did not answer (${esc(ev.reason)}). Carrying on with <b>${esc(name(ev.model))}</b>.</span></div>`,
-            );
+            {
+              const line = this.modelLine(ev.model, `took over: ${name(ev.from)} did not answer (${ev.reason})`);
+              if (ev.detail) line.title = ev.detail;
+              body.append(line);
+            }
             model = ev.model;
+            this.shownModel = ev.model;
+            // The chat keeps the model that answered from now on.
+            if (this.session?.id === sid) {
+              this.model = ev.model;
+              this.select?.set(ev.model, false);
+              this.paintThink();
+              this.paintPin();
+              this.session = { ...this.session, model: ev.model };
+              toast(`${name(ev.from)} did not answer, so this chat now uses ${name(ev.model)}`, 'info');
+            }
             think(true);
             this.scrollEnd();
             break;

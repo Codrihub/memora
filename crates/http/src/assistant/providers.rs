@@ -397,15 +397,31 @@ pub fn run(
             // OpenAI-compatible servers (OpenRouter, LiteLLM routers…) send a model's raw
             // reasoning when asked; one that refuses the field is not asked again.
             let ask = opts.think && ep.kind == "custom" && thinks(model);
-            match chat(ep, model, system, history, tools, opts, ask, on) {
-                // Any 400 while asking: once more without the field; remember it when that works.
+            let mut o = opts.clone();
+            if !opts.think || !takes_effort(model) {
+                o.effort = None;
+            }
+            match chat(ep, model, system, history, tools, &o, ask, on) {
+                // Any 400 while asking: once more without the fields; remember which when that
+                // works (the effort first, when one was sent).
                 Err(e)
-                    if ask
+                    if (ask || o.effort.is_some())
                         && (rejects_field(&e, "reasoning")
                             || e.to_ascii_lowercase().contains("answered 400")) =>
                 {
-                    let again = chat(ep, model, system, history, tools, opts, false, on);
-                    if again.is_ok() {
+                    if o.effort.is_some() {
+                        let mut o2 = o.clone();
+                        o2.effort = None;
+                        let again = chat(ep, model, system, history, tools, &o2, ask, on);
+                        if again.is_ok() {
+                            refuse_effort(model);
+                            return again;
+                        }
+                    }
+                    let mut o3 = o.clone();
+                    o3.effort = None;
+                    let again = chat(ep, model, system, history, tools, &o3, false, on);
+                    if again.is_ok() && ask {
                         refuse_thinking(model);
                     }
                     again
@@ -649,10 +665,9 @@ fn chat(
             Some(e) => json!({"effort": e}),
             None => json!({"enabled": true}),
         };
-    } else if ep.kind == "openai" && opts.think && reasoning_model(model) {
-        if let Some(e) = opts.effort.as_ref().filter(|_| takes_effort(model)) {
-            body["reasoning_effort"] = json!(e);
-        }
+    } else if let Some(e) = &opts.effort {
+        // OpenAI and OpenAI-style routers: the standard field.
+        body["reasoning_effort"] = json!(e);
     }
     if let Some(n) = opts.max_output {
         // OpenAI's newer models only take max_completion_tokens; compatible servers take max_tokens.

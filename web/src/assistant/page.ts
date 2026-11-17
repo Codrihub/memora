@@ -764,6 +764,8 @@ function paintHead(): void {
   const fleet = !!chat?.fleeting;
   root.classList.toggle('fleeting', fleet);
   const fb = root.querySelector<HTMLElement>('#mnpFleet')!;
+  // Only a new chat can become fleeting (and a fleeting chat shows it, to leave it).
+  fb.hidden = !!s && !fleet;
   fb.setAttribute('aria-pressed', String(fleet));
   fb.title = fleet ? (s ? 'Leave this fleeting chat (it is deleted)' : 'Turn fleeting off') : 'Fleeting chat: not kept, gone when you leave it';
   if (fleet) {
