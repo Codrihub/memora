@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.9] - 2026-11-18
+
+Chats stay in step on every device, and the queue never gets stuck.
+
+### Added
+
+- Live chats on every device: a message sent from one device shows on every
+  other device that has the chat open, and Mnemo's reply streams on all of
+  them (`GET /api/assistant/sessions/{id}/watch`).
+- Fallback models (Settings, Mnemo): up to five models, in order. When a
+  reply's model fails after its retries, the next one carries on by itself;
+  with none left the error stands and the owner tries again by hand
+  (`@mnemo` requests keep their own retries).
+- Thinking level next to the model, for models that can think: Auto, Off,
+  Low, Medium or High (Anthropic `output_config.effort`, OpenAI
+  `reasoning.effort` / `reasoning_effort`, OpenRouter-style `reasoning.effort`).
+- Switching the model of a chat that has begun asks first.
+
+### Changed
+
+- The queue lives on the server, shared by every device: queued messages go
+  out one by one as each reply ends, whether it finished, was stopped or was
+  cut. A failed reply pauses the queue until a message is sent now or the
+  queue resumes. Send now, Clear and Resume are always available
+  (`/api/assistant/sessions/{id}/queue`).
+- Send now (a queued message, or Ctrl/Cmd+Enter) no longer slips the message
+  into the running reply: the reply is cut where it is and the message is
+  answered as a new turn of its own (`/steer`).
+- Stop keeps what the reply wrote so far in the chat (`meta.stopped`).
+- A long queue shows three rows with a fade and scrolls; Show all opens it.
+
+### Fixed
+
+- The compaction summary shows as it is written and can always be opened,
+  instead of an empty divider until the chat was opened again.
+- After Stop, queued messages could lose their buttons and never go out.
+
 ## [2.1.8] - 2026-11-17
 
 `@mnemo` requests are never dropped.
