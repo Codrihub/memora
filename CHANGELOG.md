@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.11] - 2026-11-18
+
+### Changed
+
+- The Think chip shows for every model that is not an old Claude model,
+  router aliases included, so the thinking level can be set even when the
+  model's name says nothing. It hides once the provider refuses both the
+  effort and the thinking fields.
+
 ## [2.1.10] - 2026-11-18
 
 Each chat keeps its own model, and a model change is always marked.
