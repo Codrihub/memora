@@ -1,6 +1,6 @@
 (() => {
-  const BUILD = "memora-build:a214006c89ab".slice("memora-build:".length);
-  const APP_JS = "/app.js?v=336ea81b4544";
+  const BUILD = "memora-build:75cfe0ce37c0".slice("memora-build:".length);
+  const APP_JS = "/app.js?v=4fcf9b101623";
   const VERSION = BUILD;
   const SHELL = "memora-" + BUILD;
   const sw = self;

@@ -28,6 +28,8 @@ const P: Record<string, string> = {
   'chev-right': '<path d="m9.5 6 6 6-6 6"/>',
   'chev-down': '<path d="m6 9.5 6 6 6-6"/>',
   'chev-up': '<path d="m6 14.5 6-6 6 6"/>',
+  incognito:
+    '<path d="M2.5 11.5h19"/><path d="M5.5 11.5 7.6 5.6a1 1 0 0 1 1.2-.6l3.2.9 3.2-.9a1 1 0 0 1 1.2.6l2.1 5.9"/><circle cx="7.5" cy="16.5" r="2.8"/><circle cx="16.5" cy="16.5" r="2.8"/><path d="M10.3 16.3a2.6 2.6 0 0 1 3.4 0"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   note: '<path d="M7 3.5h7l4.5 4.5v11a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M13.5 3.5V8h4.5M8.5 13h7M8.5 16.5h5"/>',

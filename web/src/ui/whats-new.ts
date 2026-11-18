@@ -6,6 +6,7 @@ import { openDocs } from '../router';
 import { markSvg } from '../brand';
 import { BRAND_FONT, BRAND_FONT_CSS } from '../brand-font';
 import { icon } from './icons';
+import { createSelect } from './select';
 
 type Kind = 'new' | 'better' | 'admin';
 
@@ -25,6 +26,22 @@ interface Release {
 
 /** Newest first. */
 const RELEASES: Release[] = [
+  {
+    version: '2.1.12',
+    title: 'Private fleeting chats',
+    lead: "Fleeting chats look the part, the timeline rail answers a hold on phones, and What's new picks versions from a dropdown.",
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'bolt', title: 'Pick a release from a list', text: 'The row of versions is now one dropdown, newest first, with the latest selected.' },
+          { icon: 'incognito', title: 'Fleeting chats look private', text: 'A fleeting chat turns into a dark, incognito room in either theme and says plainly what is and is not kept.' },
+          { icon: 'chev-up', title: 'Timeline rail on phones', text: 'Press and hold the bars on the right to scrub through your questions; no swipe needed first.' },
+          { icon: 'refresh', title: 'Model divider centred', text: 'The line that marks a change of model sits in the middle of the chat again.' },
+        ],
+      },
+    ],
+  },
   {
     version: '2.1.11',
     title: 'Thinking level for every model',
@@ -349,27 +366,15 @@ const CSS = `
 .wn-ver .pre{padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,.28);color:#cbd5e1}
 .wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2;height:2.4em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;height:4.8em;color:#a3afc2;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
-/* Releases: one row that slides, newest on the left, with arrows either side. */
-.wn-car{display:flex;align-items:center;gap:6px;margin-top:18px}
-.wn-arr{flex:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:999px;border:1px solid rgba(148,163,184,.3);background:rgba(15,23,42,.35);color:#e6e9ef;cursor:pointer;
-  transition:background .15s,border-color .15s,opacity .15s}
-.wn-arr:hover:not(:disabled){background:rgba(148,163,184,.18);border-color:rgba(148,163,184,.5)}
-.wn-arr:disabled{display:none}
-.wn-arr svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-/* The row fades only on a side that has more to scroll to. */
-.wn-vers{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scroll-snap-type:x proximity;scrollbar-width:none;padding:2px;
-  --fl:0px;--fr:0px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);
-  mask-image:linear-gradient(90deg,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
-.wn-vers.more-l{--fl:24px}
-.wn-vers.more-r{--fr:24px}
-.wn-vers:not(.more-l){-webkit-mask-image:linear-gradient(90deg,#000,#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(90deg,#000,#000 calc(100% - var(--fr)),transparent)}
-.wn-vers:not(.more-l):not(.more-r){-webkit-mask-image:none;mask-image:none}
-.wn-vers::-webkit-scrollbar{display:none}
-.wn-vers button{flex:none;scroll-snap-align:center;height:34px;padding:0 15px;border-radius:999px;border:1.5px solid rgba(148,163,184,.34);background:rgba(15,23,42,.3);color:#e2e8f0;
-  font:700 13px/1 var(--font);letter-spacing:.01em;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
-.wn-vers button:hover{border-color:rgba(148,163,184,.6)}
-.wn-vers button[aria-pressed=true]{background:#e6e9ef;border-color:#e6e9ef;color:#0b0f17}
-.wn-vers button.latest:not([aria-pressed=true]){border-color:rgba(94,234,212,.55);color:#5eead4}
+/* Releases: one dropdown, newest first, the latest picked by default. */
+.wn-pick{display:flex;align-items:center;gap:10px;margin-top:18px}
+.wn-pick>span{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8b98ad}
+.ui-sel.wn-sel{height:38px;min-width:220px;max-width:min(360px,100%);border-radius:999px;padding:0 12px 0 15px;border:1.5px solid rgba(148,163,184,.34);
+  background:rgba(15,23,42,.35);color:#e6e9ef;font:700 13.5px/1 var(--font);font-variant-numeric:tabular-nums}
+.ui-sel.wn-sel:hover:not(:disabled){border-color:rgba(148,163,184,.6)}
+.ui-sel.wn-sel .ui-sel-chev{stroke:#cbd5e1}
+.ui-sel.wn-sel .ui-sel-v small{margin-left:8px;padding:2px 7px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:#5eead4;border:1px solid rgba(94,234,212,.45)}
 .wn-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px 24px 12px}
 .wn-g{padding:14px 0 6px}
 .wn-g+.wn-g{border-top:1px solid var(--line)}
@@ -409,9 +414,8 @@ const CSS = `
   .wn-log{height:44px;font-size:14px;color:var(--fg)}
   .wn-foot .btn.primary{height:44px;width:100%;justify-content:center;font-size:14px}
   .wn-star{grid-column:1/-1;order:3;justify-self:center;height:32px}
-  .wn-car{margin-top:16px}
-  .wn-arr{width:32px;height:32px}
-  .wn-vers button{height:32px;padding:0 13px}
+  .wn-pick{margin-top:16px}
+  .ui-sel.wn-sel{flex:1;min-width:0;max-width:none;height:42px}
 }
 `;
 
@@ -427,14 +431,11 @@ function installed(): string {
   return String(state.health.version || '');
 }
 
-const ARROW_L = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"/></svg>';
-const ARROW_R = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6 6 6-6 6"/></svg>';
 const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/></svg>';
 
 function body(r: Release): string {
   const now = installed();
   const ahead = !!now && cmp(r.version, now) > 0;
-  const at = RELEASES.findIndex((x) => x.version === r.version);
   return `<div class="wn" role="document">
     <header class="wn-hero">
       <div class="wn-top">${markSvg('wn-mark')}<span class="wn-word">Memora</span>
@@ -443,18 +444,7 @@ function body(r: Release): string {
         ahead ? `<span class="pre">Coming next · you run ${esc(now)}</span>` : ''
       }</div>
       <h2 id="wnT" title="${attr(r.title)}">${esc(r.title)}</h2><p title="${attr(r.lead)}">${esc(r.lead)}</p>
-      ${
-        RELEASES.length > 1
-          ? `<div class="wn-car">
-          <button type="button" class="wn-arr" data-step="-1" aria-label="Newer release" title="Newer"${at <= 0 ? ' disabled' : ''}>${ARROW_L}</button>
-          <div class="wn-vers" role="group" aria-label="Release, newest first">${RELEASES.map(
-              (x, i) =>
-                `<button type="button" data-ver="${esc(x.version)}"${i === 0 ? ' class="latest" title="Latest"' : ''} aria-pressed="${x.version === r.version}">${esc(x.version)}</button>`,
-            ).join('')}</div>
-          <button type="button" class="wn-arr" data-step="1" aria-label="Older release" title="Older"${at >= RELEASES.length - 1 ? ' disabled' : ''}>${ARROW_R}</button>
-        </div>`
-          : ''
-      }
+      ${RELEASES.length > 1 ? '<div class="wn-pick"><span id="wnV">Version</span><i class="wn-slot"></i></div>' : ''}
     </header>
     <div class="wn-body">${r.groups
       .map(
@@ -491,60 +481,37 @@ export function openWhatsNew(version?: string): void {
   useStyles('brand-font-face', BRAND_FONT_CSS);
   let r = RELEASES.find((x) => x.version === version) || RELEASES[0];
   if (!r) return;
-  const wire = (b: HTMLElement, scrollFrom = -1): void => {
+  const wire = (b: HTMLElement, focus = false): void => {
     b.querySelectorAll<HTMLElement>('[data-close]').forEach((x) => (x.onclick = () => Modal.close()));
     b.querySelector<HTMLElement>('[data-log]')?.addEventListener('click', () => {
       Modal.close();
       openDocs('changelog');
     });
-    const show = (next: Release | undefined, keep: number): void => {
+    const show = (next: Release | undefined): void => {
       if (!next || next === r) return;
       r = next;
       b.innerHTML = body(r);
-      wire(b, keep);
+      wire(b, true);
       b.querySelector<HTMLElement>('.wn-body')?.scrollTo({ top: 0 });
     };
-    b.querySelectorAll<HTMLElement>('[data-ver]').forEach((x) => {
-      x.onclick = () => show(RELEASES.find((y) => y.version === x.dataset.ver), track()?.scrollLeft ?? 0);
-    });
-    b.querySelectorAll<HTMLElement>('[data-step]').forEach((x) => {
-      x.onclick = () => show(RELEASES[RELEASES.indexOf(r) + Number(x.dataset.step)], track()?.scrollLeft ?? 0);
-    });
-    // Keep the row where it was, then slide the chosen release into view.
-    const track = (): HTMLElement | null => b.querySelector<HTMLElement>('.wn-vers');
-    const t = track();
-    const edges = (): void => {
-      if (!t) return;
-      t.classList.toggle('more-l', t.scrollLeft > 2);
-      t.classList.toggle('more-r', t.scrollLeft + t.clientWidth < t.scrollWidth - 2);
-    };
-    t?.addEventListener('scroll', edges, { passive: true });
-    requestAnimationFrame(edges);
-    const on = t?.querySelector<HTMLElement>('[aria-pressed=true]');
-    if (t && on) {
-      t.style.scrollBehavior = 'auto';
-      t.scrollLeft = scrollFrom;
-      t.style.scrollBehavior = '';
-      const want = on.offsetLeft - (t.clientWidth - on.offsetWidth) / 2;
-      requestAnimationFrame(() => {
-        t.scrollTo({ left: Math.max(0, want), behavior: scrollFrom < 0 ? 'auto' : 'smooth' });
-        edges();
+    const slot = b.querySelector<HTMLElement>('.wn-slot');
+    if (slot) {
+      const pick = createSelect({
+        className: 'wn-sel',
+        label: 'Version',
+        labelledBy: 'wnV',
+        options: RELEASES.map((x, i) => ({ value: x.version, label: x.version, hint: (i === 0 ? 'Latest · ' : '') + x.title })),
+        value: r.version,
+        render: (o) =>
+          `<span class="ui-sel-v">${esc(o?.value || '')}${o?.value === RELEASES[0]?.version ? '<small>Latest</small>' : ''}</span><svg class="ui-sel-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`,
+        onChange: (v) => show(RELEASES.find((y) => y.version === v)),
       });
+      slot.replaceWith(pick.el);
+      if (focus) pick.el.focus({ preventScroll: true });
     }
-    b.querySelector<HTMLElement>('.wn')?.addEventListener('keydown', (e) => {
-      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && (e.target as HTMLElement).closest('.wn-car')) {
-        e.preventDefault();
-        const step = e.key === 'ArrowLeft' ? -1 : 1;
-        const next = RELEASES[RELEASES.indexOf(r) + step];
-        if (next) {
-          show(next, track()?.scrollLeft ?? 0);
-          b.querySelector<HTMLElement>(`[data-ver="${next.version}"]`)?.focus({ preventScroll: true });
-        }
-      }
-    });
     void paintStars(b);
   };
-  Modal.open({ title: "What's new", body: body(r), onOpen: wire });
+  Modal.open({ title: "What's new", body: body(r), onOpen: (b: HTMLElement) => wire(b) });
   markSeen(r.version);
 }
 

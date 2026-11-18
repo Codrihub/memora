@@ -198,13 +198,26 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-slash-i small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .mn-slash-i.on,.mn-slash-i:hover{background:var(--accent-soft,var(--hover))}
 .mn-slash-none{margin:0;padding:8px 10px 10px;font-size:12.5px;color:var(--muted);line-height:1.5}
-.mn-fleet{display:flex;align-items:flex-start;gap:10px;width:100%;margin-bottom:18px;padding:12px 14px;border-radius:14px;text-align:left;
-  border:1px dashed color-mix(in srgb,#8b5cf6 55%,transparent);background:color-mix(in srgb,#8b5cf6 8%,transparent)}
-.mn-fleet>.i{width:18px;height:18px;flex:none;margin-top:2px;color:#8b5cf6}
-.mn-fleet span{display:flex;flex-direction:column;gap:2px;line-height:1.45}
-.mn-fleet b{font-size:14px;color:#8b5cf6}
-.mn-fleet small{font-size:12.5px;color:var(--text-2,var(--fg))}
-.mn-chat.fleeting .mn-comp-box{border-style:dashed;border-color:color-mix(in srgb,#8b5cf6 55%,var(--line-strong))}
+.mn-chat:not(:has(.mn-hello)) .mn-fine{display:none}
+/* Fleeting chat: an incognito room, dark in either theme, nothing of the usual brightness. */
+.mn-chat.fleeting{--bg:#13111c;--surface-0:#1a1726;--surface-1:#211d30;--panel:#211d30;--field-bg:#1a1726;--fg:#ece9f5;--text-2:#c4bfd6;--text-3:#8d87a3;--muted:#9a94b0;
+  --line:rgba(167,139,250,.15);--line-strong:rgba(167,139,250,.28);--hover:rgba(167,139,250,.10);--accent:#a78bfa;--accent-soft:rgba(167,139,250,.16);--accent-line:rgba(167,139,250,.5);
+  color-scheme:dark;color:var(--fg);
+  background:radial-gradient(120% 70% at 50% 0%,rgba(139,92,246,.16),transparent 60%),radial-gradient(80% 60% at 100% 100%,rgba(79,70,229,.12),transparent 70%),#13111c}
+.mn-incog{display:grid;place-items:center;width:76px;height:76px;margin-bottom:18px;border-radius:50%;color:#ddd6fe;
+  background:radial-gradient(circle at 30% 25%,#3b3357,#1d1930);border:1px solid rgba(167,139,250,.35);box-shadow:0 0 0 8px rgba(139,92,246,.07),0 18px 40px -16px rgba(139,92,246,.55)}
+.mn-incog .i{width:38px;height:38px;stroke-width:1.6}
+.mn-fleet{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;margin:20px 0 0;padding:0;text-align:left}
+.mn-chat.compact .mn-fleet{grid-template-columns:1fr}
+.mn-fleet li{display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+.mn-fleet li>.i{width:17px;height:17px;flex:none;margin-top:1px;color:#a78bfa}
+.mn-fleet span{display:flex;flex-direction:column;gap:2px;line-height:1.4;min-width:0}
+.mn-fleet b{font-size:13px;color:var(--fg)}
+.mn-fleet small{font-size:12px;color:var(--muted)}
+@media (max-width:640px){.mn-fleet{grid-template-columns:1fr}}
+.mn-chat.fleeting .mn-comp-box{border-style:dashed;border-color:rgba(167,139,250,.45);background:#1a1726}
+.mn-chat.fleeting .mn-ub{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.3);color:var(--fg)}
+.mn-chat.fleeting .mn-turn .mn-tb{background:rgba(255,255,255,.035)}
 .mn-sugs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin-top:22px}
 .mn-chat.compact .mn-sugs{grid-template-columns:1fr;margin-top:16px}
 .mn-sug{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg));
@@ -393,7 +406,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 
 /* Timeline rail, top right: one bar per question; the one in view is longer and darker. */
 .mn-rail{position:absolute;top:50%;right:2px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:6px 0;width:40px;
-  max-height:60%;transform:translateY(-50%);touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer}
+  max-height:60%;transform:translateY(-50%);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:pointer}
 .mn-rail[hidden]{display:none}
 .mn-rb{position:relative;display:flex;align-items:center;justify-content:flex-end;width:40px;height:var(--rh,10px);padding:0 6px;border:0;background:none;cursor:pointer;flex:none;pointer-events:none}
 .mn-rb i{display:block;width:calc(var(--w,12px) * var(--m,1));height:2px;border-radius:2px;background:var(--line-strong);
@@ -415,8 +428,9 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   .mn-turn{grid-template-columns:minmax(0,1fr);gap:0}
   .mn-turn>.mn-av{display:none}
   .mn-ub{max-width:88%}
-  .mn-rail{right:0;width:12px}
-  .mn-rb{width:12px;padding:0 1px}
+  /* The bars stay thin, but the finger gets a wider strip to land on. */
+  .mn-rail{right:0;width:28px}
+  .mn-rb{width:28px;padding:0 1px}
   .mn-rb i{width:calc(var(--w,12px) * .45 * var(--m,1))}
   .mn-rb.on i{width:10px}
 }
@@ -560,7 +574,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-notice b{font-weight:600;color:var(--fg)}
 .mn-md.mn-cut{opacity:.5;text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--fg) 35%,transparent)}
 .mn-compact-live-b{align-self:stretch;max-height:220px;overflow:auto;margin:2px 0 4px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--fg) 2.5%,transparent);font-size:13px;color:var(--fg);-webkit-mask-image:linear-gradient(transparent,#000 18px);mask-image:linear-gradient(transparent,#000 18px)}
-.mn-modelchg{display:flex;align-items:center;gap:10px;align-self:stretch;margin:6px 0;font-size:12px;color:var(--muted)}
+.mn-modelchg{display:flex;align-items:center;gap:10px;align-self:stretch;margin:6px auto;font-size:12px;color:var(--muted)}
 .mn-modelchg::before,.mn-modelchg::after{content:"";flex:1 1 0;min-width:12px;height:1px;background:var(--line)}
 .mn-modelchg span{flex:none;display:inline-flex;align-items:center;gap:6px;max-width:86%;padding:3px 12px;border-radius:99px;border:1px solid var(--line);background:var(--bg);white-space:nowrap;overflow:hidden}
 .mn-modelchg b{font-weight:600;color:var(--fg)}

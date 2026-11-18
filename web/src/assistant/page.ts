@@ -115,7 +115,7 @@ function build(): void {
       <header class="mnp-head">
         <button type="button" class="mnp-lists" id="mnpLists" aria-label="Show or hide the chat list" title="Chats" aria-controls="mnpSide">${icon('sidebar')}</button>
         <div class="mnp-title"><b id="mnpTitle">New chat</b><small id="mnpSub"></small></div>
-        <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="Fleeting chat" title="Fleeting chat: not kept, gone when you leave it">${icon('eye')}</button>
+        <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="Fleeting chat" title="Fleeting chat: not kept, gone when you leave it">${icon('incognito')}</button>
         <button type="button" class="mn-ibtn" id="mnpNew2" aria-label="New chat" title="New chat">${icon('plus')}</button>
         <button type="button" class="mn-ibtn mnp-artbtn" id="mnpArtBtn" aria-label="Notes, folders and images in this chat" title="In this chat" aria-controls="mnpArt">${icon(
           'sidebar',
@@ -1251,8 +1251,11 @@ const PAGE_CSS = `
 .mnp-row.sel .mnp-check{background:var(--accent);border-color:var(--accent)}
 .mnp.selecting .mnp-row-ic{display:none}
 .mnp-fleet[aria-pressed=true]{background:color-mix(in srgb,#8b5cf6 16%,transparent);color:#8b5cf6;box-shadow:inset 0 0 0 1px color-mix(in srgb,#8b5cf6 45%,transparent)}
-.mnp.fleeting .mnp-head{background:linear-gradient(90deg,color-mix(in srgb,#8b5cf6 7%,transparent),transparent 60%)}
-.mnp.fleeting #mnpTitle{color:#8b5cf6}
+.mnp.fleeting .mnp-head{--fg:#ece9f5;--muted:#9a94b0;--line:rgba(167,139,250,.15);--hover:rgba(167,139,250,.10);color-scheme:dark;color:var(--fg);background:#13111c}
+.mnp.fleeting .mnp-head :is(button,a){color:#c4bfd6}
+.mnp.fleeting #mnpTitle{color:#ddd6fe}
+.mnp.fleeting #mnpSub{color:#9a94b0}
+.mnp.fleeting .mnp-fleet[aria-pressed=true]{background:rgba(167,139,250,.2);color:#ddd6fe}
 .mnp-art-ic.k-page{background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff}
 .mnp-clean-o{display:flex;flex-direction:column;gap:6px}
 .mnp-clean-r{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}

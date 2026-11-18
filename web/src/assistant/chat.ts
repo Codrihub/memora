@@ -1113,8 +1113,13 @@ export class ChatView {
       cur = at(e.clientY);
       swell(cur);
       label(cur);
+      // Touch: the press alone shows where the finger is (no swipe needed first).
+      if (e.pointerType !== 'mouse') navigator.vibrate?.(8);
       e.preventDefault();
     });
+    // A long press must not open the browser's own menu or select text.
+    this.rail.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.rail.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     this.rail.addEventListener('pointermove', (e) => {
       if (!pressed && e.pointerType !== 'mouse') return;
       const i = at(e.clientY);
@@ -1234,7 +1239,14 @@ export class ChatView {
     if (this.session) return;
     this.fleetingOn = on;
     this.el.classList.toggle('fleeting', on);
+    this.paintPlaceholder();
     this.paintEmpty();
+  }
+
+  /** The prompt's hint says a fleeting chat is private. */
+  private paintPlaceholder(): void {
+    const ta = this.el.querySelector<HTMLTextAreaElement>('.mn-comp textarea, textarea');
+    if (ta) ta.placeholder = this.fleetingOn ? 'Ask privately… nothing here is kept' : `Ask ${A.MNEMO} about your notes…`;
   }
 
   /** Leave a fleeting chat: it is deleted on the server, images and all. */
@@ -1243,6 +1255,7 @@ export class ChatView {
     const id = this.session?.id;
     this.fleetingOn = false;
     this.el.classList.remove('fleeting');
+    this.paintPlaceholder();
     if (id) {
       this.detach();
       A.forgetSession(id);
@@ -1568,12 +1581,18 @@ export class ChatView {
     this.log.innerHTML = `<div class="mn-hello">
         ${
           this.fleetingOn
-            ? `<div class="mn-fleet">${icon('eye')}<span><b>Fleeting chat</b><small>Not kept: this chat and the pictures you send in it are gone once you leave it. It stays out of search and of ${A.MNEMO}'s memory of your chats. Changes to notes stay.</small></span></div>`
-            : ''
-        }
-        <div class="mn-hello-mark">${markHTML('xl')}</div>
+            ? `<div class="mn-incog" aria-hidden="true">${icon('incognito')}</div>
+        <h2>You're in a fleeting chat</h2>
+        <p>Private and not kept. ${esc(A.MNEMO)} still works in your notes as usual.</p>
+        <ul class="mn-fleet">
+          <li>${icon('eye-off')}<span><b>Gone when you leave</b><small>This chat and the pictures you send in it are deleted.</small></span></li>
+          <li>${icon('search')}<span><b>Out of sight</b><small>Not in the chat list, search or ${esc(A.MNEMO)}'s memory of your chats.</small></span></li>
+          <li>${icon('edit')}<span><b>Note changes stay</b><small>Anything ${esc(A.MNEMO)} changes in your notes is kept, in Activity and History.</small></span></li>
+        </ul>`
+            : `<div class="mn-hello-mark">${markHTML('xl')}</div>
         <h2>${this.o.compact ? `Hi, I'm ${A.MNEMO}` : `${A.MNEMO} looks after your notes`}</h2>
-        <p>${about}</p>
+        <p>${about}</p>`
+        }
         ${
           ready
             ? `<div class="mn-sugs" data-kind="${kind}"></div>${
