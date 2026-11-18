@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.12] - 2026-11-18
+
+### Changed
+
+- What's new picks the release from a dropdown (newest first, the latest
+  selected) instead of a sliding row of versions.
+- A fleeting chat looks like a private room: dark in either theme, an
+  incognito mark, and what is and is not kept spelled out.
+- The line under the prompt about notes, Activity and History shows on a new
+  chat only.
+
+### Fixed
+
+- On phones the timeline rail answers a press and hold at once (a wider strip
+  to land on, no swipe needed first, no long-press menu).
+- The divider that marks a change of model sits centred in the chat column
+  instead of hugging the left edge.
+
 ## [2.1.11] - 2026-11-18
 
 ### Changed
