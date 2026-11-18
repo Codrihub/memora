@@ -26,6 +26,19 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.1.11',
+    title: 'Thinking level for every model',
+    lead: 'The Think chip no longer waits for a model to show its thinking first.',
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'brain', title: 'Think chip on router models', text: 'Models behind a router alias get the thinking level right away. It hides only when the provider refuses it.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.10',
     title: 'Every chat keeps its model',
     lead: 'The default model is for new chats only, a fallback that takes over stays, and a divider shows each change of model.',

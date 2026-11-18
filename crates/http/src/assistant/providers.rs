@@ -131,6 +131,21 @@ pub fn can_think(kind: &str, style: &str, model: &str) -> bool {
     .any(|k| m.contains(k))
 }
 
+/// Whether the chat offers a thinking level for a model. Claude models go by name (old ones
+/// cannot think). Anything else may sit behind a router alias whose name says nothing, so it
+/// gets the level until its provider refuses both the effort and the thinking fields.
+pub fn may_think(kind: &str, style: &str, model: &str) -> bool {
+    let m = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    if kind == "anthropic" || style == "messages" || m.starts_with("claude") {
+        return can_think(kind, style, model);
+    }
+    can_think(kind, style, model) || takes_effort(model) || thinks(model)
+}
+
 /// What streams out of a reply: its text, and the model's thinking where it shows it.
 pub enum Stream<'a> {
     Text(&'a str),
@@ -1164,6 +1179,17 @@ fn anthropic_once(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn router_aliases_get_a_thinking_level_until_refused() {
+        assert!(may_think("openai", "chat", "hai-test-alias"));
+        assert!(!may_think("anthropic", "messages", "claude-3-5-sonnet"));
+        assert!(may_think("anthropic", "messages", "claude-opus-5-5"));
+        refuse_effort("hai-refuser");
+        assert!(may_think("openai", "chat", "hai-refuser"));
+        refuse_thinking("hai-refuser");
+        assert!(!may_think("openai", "chat", "hai-refuser"));
+    }
 
     #[test]
     fn model_lists_give_limits_in_every_common_shape() {

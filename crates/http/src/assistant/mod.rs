@@ -537,7 +537,7 @@ fn state_json(store: &Store) -> Value {
         .map(|m| {
             let p = provs.iter().find(|p| p.id == m.provider_id);
             let thinks = seen_thinking.contains(&format!("{}/{}", m.provider_id, m.model_id))
-                || providers::can_think(
+                || providers::may_think(
                     p.map_or("", |p| p.kind.as_str()),
                     p.map_or("", |p| p.api_style.as_str()),
                     &m.model_id,
