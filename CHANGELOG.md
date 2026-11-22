@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-22
+
+Mnemo gets a model for each job, sub-agents, its own notes about you, and a
+rebuilt chat list.
+
+### Added
+
+- Models for each job (Settings, Mnemo): one that reads images
+  (`describe_image`; it also describes attached pictures for a chat model that
+  cannot see), one that makes images (`generate_image`, shown in the chat and
+  kept in a note on request), one that reads replies aloud (Listen under a
+  reply, with a voice) and one that listens (the mic in the composer). The mic
+  and Listen show only once their model is set. Images, speech and
+  transcription use OpenAI-compatible providers.
+- Sub-agents: other model runs with a name and a job, or a general helper with
+  no set up. Mnemo hands each a self-contained task with `delegate`, several at
+  the same time, and answers from what they report. A sub-agent picks its model
+  the way a chat does (the one you asked for, else its own, else the default
+  model, then the fallbacks), can ask Mnemo a question (`ask_mnemo`), takes
+  follow-ups, and summarises its own work when its context fills up. Switch a
+  sub-agent's model from the Agents panel, like the chat's own.
+- The Agents panel (header, top right): every sub-agent of the chat, live, like
+  the chat itself: running (its tools, its text, its tokens and context),
+  idle, done. A reply shows only one line ("3 sub-agents · 2 working · 1 done").
+- A live status while Mnemo works: what it is doing and for how long
+  (thinking, a tool, a retry, a fallback, compacting, sub-agents at work).
+- Permission modes: Ask first (asks before changing notes and before running
+  sub-agents, with a rough token estimate), Auto (changes and sub-agents go
+  ahead without asking) and Read only (Mnemo reads and answers, never changes
+  notes).
+- What Mnemo knows about you: short notes Mnemo keeps by itself on how you like
+  answers, who you are and what you like (`remember_owner`,
+  `update_owner_memory`, `forget_owner_memory`). Not a system prompt: each
+  message carries them when they changed. See, add, edit and delete them in
+  Settings, or turn learning off. Nothing is learned in a fleeting chat.
+- Storage health: notes, images and chats are each measured against their own
+  room (a limit you set in Settings, or the free disk space). At 90% a banner
+  says it is almost full and at 99% full, with a way to tidy up; MCP tool
+  results then carry a `storage` notice, so any agent knows and tells you.
+- A gallery of every image in Settings: where each is used, its folder, size
+  and link, the ones nothing uses, and the pictures sent in Mnemo chats.
+- Archive chats, and All chats at `/mnemo/chats` with Pinned, Chats and
+  Archived.
+- Chat width in Appearance: Compact, Wide or Full, per device.
+
+### Changed
+
+- The chat list is rebuilt: actions sit on an icon rail (new chat, search, all
+  chats, Activity, Appearance, Settings, Memora) that stays on desktop when the
+  list is hidden; pinned chats have a list of their own; every chat shows an
+  icon for its kind (chat, note, folder), its title and time and a line of its
+  last message, under Today, Yesterday, Previous 7 days, Previous 30 days, then
+  months. All, Chats and Notes filter the list.
+- Send now and Stop take over at once: the reply ends where it is (its text
+  stays) and the next message starts right away, whatever the reply was doing.
+  Send now in the queue has its own icon.
+- Fleeting chats look anonymous and quiet in any theme.
+- What's new picks the release from a dropdown, with a new footer.
+- The timeline rail keeps a fixed height with a knob for where you are.
+- A chat sends the model only its newest 3 pictures (older ones by name).
+- The line under the prompt about notes, Activity and History shows on a new
+  chat only.
+
+### Fixed
+
+- A message sent with Send now could wait until the cut reply's model call
+  ended, or stay queued for good after a compaction.
+- A model behind a router that cannot take pictures (it times out or fails
+  without saying why) no longer stalls a chat for minutes: the request goes
+  again at once with the pictures described by the image model, or by name,
+  that model is remembered, and the chat says so with a button to set a model
+  that reads images.
+- A chat no longer switches back to an old model because a page open since
+  before the change still had it picked.
+- Restarting or updating the server while Mnemo answers keeps what it wrote,
+  with Try again, and the server stops at once instead of hanging for a minute
+  and a half.
+- Pictures in a chat no longer turn into "not found"; a removed queued message
+  takes its pictures with it.
+- A reply cut while a tool ran left a tool call without its result, which some
+  providers refuse.
+- On phones the timeline rail answers a press and hold at once; the model
+  divider is centred; the Rename field for a chat is styled.
+
 ## [2.1.12] - 2026-11-18
 
 ### Changed
