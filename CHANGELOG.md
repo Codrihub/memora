@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-22
+
+### Changed
+
+- Sub-agents need no setup: the named sub-agents in Settings are gone (typing a
+  name there redrew the whole page). Mnemo names each sub-agent as it starts
+  it; the settings keep only "Ask before sub-agents run".
+
+### Fixed
+
+- Mnemo saw only the first 40 models for sub-agents, so a model such as the
+  default one could be missing from its list. It now gets every model, with
+  the default and fallback models named, and a model asked for by its short
+  name (`hai-gpt` for `9r/hai-gpt`) or label is found; a name that is not a
+  model here is refused instead of running on another model.
+- Saying yes to sub-agents and then writing again ("where are they?") made
+  Mnemo ask again. The yes now holds until the sub-agents ran on it.
+
 ## [2.2.0] - 2026-11-22
 
 Mnemo gets a model for each job, sub-agents, its own notes about you, and a
