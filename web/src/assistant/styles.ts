@@ -199,25 +199,21 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-slash-i.on,.mn-slash-i:hover{background:var(--accent-soft,var(--hover))}
 .mn-slash-none{margin:0;padding:8px 10px 10px;font-size:12.5px;color:var(--muted);line-height:1.5}
 .mn-chat:not(:has(.mn-hello)) .mn-fine{display:none}
-/* Fleeting chat: an incognito room, dark in either theme, nothing of the usual brightness. */
-.mn-chat.fleeting{--bg:#13111c;--surface-0:#1a1726;--surface-1:#211d30;--panel:#211d30;--field-bg:#1a1726;--fg:#ece9f5;--text-2:#c4bfd6;--text-3:#8d87a3;--muted:#9a94b0;
-  --line:rgba(167,139,250,.15);--line-strong:rgba(167,139,250,.28);--hover:rgba(167,139,250,.10);--accent:#a78bfa;--accent-soft:rgba(167,139,250,.16);--accent-line:rgba(167,139,250,.5);
-  color-scheme:dark;color:var(--fg);
-  background:radial-gradient(120% 70% at 50% 0%,rgba(139,92,246,.16),transparent 60%),radial-gradient(80% 60% at 100% 100%,rgba(79,70,229,.12),transparent 70%),#13111c}
-.mn-incog{display:grid;place-items:center;width:76px;height:76px;margin-bottom:18px;border-radius:50%;color:#ddd6fe;
-  background:radial-gradient(circle at 30% 25%,#3b3357,#1d1930);border:1px solid rgba(167,139,250,.35);box-shadow:0 0 0 8px rgba(139,92,246,.07),0 18px 40px -16px rgba(139,92,246,.55)}
-.mn-incog .i{width:38px;height:38px;stroke-width:1.6}
-.mn-fleet{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;margin:20px 0 0;padding:0;text-align:left}
-.mn-chat.compact .mn-fleet{grid-template-columns:1fr}
-.mn-fleet li{display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
-.mn-fleet li>.i{width:17px;height:17px;flex:none;margin-top:1px;color:#a78bfa}
-.mn-fleet span{display:flex;flex-direction:column;gap:2px;line-height:1.4;min-width:0}
-.mn-fleet b{font-size:13px;color:var(--fg)}
-.mn-fleet small{font-size:12px;color:var(--muted)}
-@media (max-width:640px){.mn-fleet{grid-template-columns:1fr}}
-.mn-chat.fleeting .mn-comp-box{border-style:dashed;border-color:rgba(167,139,250,.45);background:#1a1726}
-.mn-chat.fleeting .mn-ub{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.3);color:var(--fg)}
-.mn-chat.fleeting .mn-turn .mn-tb{background:rgba(255,255,255,.035)}
+/* Fleeting chat: anonymous, not loud. Neutral greys from the theme (light, dark, any backdrop the
+   owner picked in Appearance); colour drains from the marks, bubbles go plain, the prompt is dashed. */
+.mn-chat.fleeting{--fl-ink:color-mix(in srgb,var(--fg) 82%,transparent);--fl-tint:color-mix(in srgb,var(--fg) 6%,transparent);--fl-edge:color-mix(in srgb,var(--fg) 22%,transparent)}
+.mn-incog{display:grid;place-items:center;margin-bottom:14px;color:var(--fl-ink)}
+.mn-incog .i{width:44px;height:44px;stroke-width:1.4}
+.mn-chat.fleeting .mn-hello h2{font-weight:600;letter-spacing:-.01em}
+.mn-chat.fleeting .mn-hello>p{color:var(--muted)}
+/* What is and is not kept: plain lines, like the small print of a private window. */
+.mn-fleet{display:flex;flex-direction:column;width:100%;max-width:440px;margin:22px auto 0;padding:0;text-align:left;border-top:1px solid var(--line)}
+.mn-fleet>div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:10px 2px;border-bottom:1px solid var(--line)}
+.mn-fleet dt{font:600 11px/1.6 var(--font-mono,ui-monospace,monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--fg)}
+.mn-fleet dd{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
+.mn-chat.fleeting .mn-comp-box{border-style:dashed;border-color:var(--fl-edge)}
+.mn-chat.fleeting .mn-ub{background:var(--fl-tint);border-color:var(--fl-edge);color:var(--fg)}
+.mn-chat.fleeting :is(.mn-av,.mn-hello-mark){filter:grayscale(1);opacity:.85}
 .mn-sugs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin-top:22px}
 .mn-chat.compact .mn-sugs{grid-template-columns:1fr;margin-top:16px}
 .mn-sug{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg));
@@ -404,17 +400,30 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-chat.fade-top .mn-log{--fa:0px}
 .mn-chat.fade-bot .mn-log{--fb:28px}
 
-/* Timeline rail, top right: one bar per question; the one in view is longer and darker. */
-.mn-rail{position:absolute;top:50%;right:2px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:6px 0;width:40px;
-  max-height:60%;transform:translateY(-50%);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:pointer}
+/* Timeline rail, right: one bar per question at a fixed spacing; the one in view is longer and darker.
+   More bars than fit: a window of them glides with the chat, fading at the edge that hides more. */
+.mn-rail{position:absolute;top:50%;right:2px;z-index:3;display:block;padding:6px 0;width:40px;
+  transform:translateY(-50%);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:pointer}
 .mn-rail[hidden]{display:none}
-.mn-rb{position:relative;display:flex;align-items:center;justify-content:flex-end;width:40px;height:var(--rh,10px);padding:0 6px;border:0;background:none;cursor:pointer;flex:none;pointer-events:none}
+.mn-rwin{position:relative;height:var(--rwin,120px);overflow:hidden;--mt:0px;--mb:0px;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--mt),#000 calc(100% - var(--mb)),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 var(--mt),#000 calc(100% - var(--mb)),transparent 100%)}
+.mn-rwin.more-top{--mt:28px}
+.mn-rwin.more-bot{--mb:28px}
+.mn-rtrack{display:flex;flex-direction:column;align-items:flex-end;will-change:transform;transition:transform .18s var(--ease-out,ease-out)}
+.mn-rail.scrub .mn-rtrack{transition-duration:.07s}
+.mn-rb{position:relative;display:flex;align-items:center;justify-content:flex-end;width:40px;height:var(--rh,8px);padding:0 8px 0 6px;border:0;background:none;cursor:pointer;flex:none;pointer-events:none}
 .mn-rb i{display:block;width:calc(var(--w,12px) * var(--m,1));height:2px;border-radius:2px;background:var(--line-strong);
   transition:width .14s cubic-bezier(.2,.9,.3,1.3),background .12s,height .12s}
 .mn-rb.on i{background:var(--fg);width:calc((var(--w,12px) + 8px) * var(--m,1));height:3px}
 .mn-rb.hot i{background:var(--accent);height:3px}
 .mn-rail.scrub .mn-rb i{background:color-mix(in srgb,var(--fg) 45%,transparent)}
 .mn-rail.scrub .mn-rb.hot i{background:var(--accent)}
+/* The knob: where the view is in the whole chat, like a scrollbar thumb. */
+.mn-rknob{position:absolute;top:6px;right:1px;width:3px;height:18px;border-radius:3px;background:color-mix(in srgb,var(--fg) 30%,transparent);pointer-events:none;
+  transition:transform .12s linear,background .15s}
+.mn-rail:hover .mn-rknob,.mn-rail.scrub .mn-rknob{background:color-mix(in srgb,var(--fg) 50%,transparent)}
+@media (prefers-reduced-motion:reduce){.mn-rtrack,.mn-rknob,.mn-rb i{transition:none}}
 .mn-rlab{position:absolute;right:calc(100% + 2px);top:50%;transform:translate(8px,-50%);display:flex;gap:7px;align-items:baseline;max-width:min(260px,70vw);padding:6px 10px;border-radius:10px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--fg);background:var(--panel,var(--surface-1));border:1px solid var(--line-strong);
   box-shadow:0 10px 28px -12px rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .12s,transform .16s var(--ease-out,ease-out),top .08s linear}
@@ -430,7 +439,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   .mn-ub{max-width:88%}
   /* The bars stay thin, but the finger gets a wider strip to land on. */
   .mn-rail{right:0;width:28px}
-  .mn-rb{width:28px;padding:0 1px}
+  .mn-rb{width:28px;padding:0 5px 0 1px}
+  .mn-rknob{right:0;width:2.5px;height:14px}
   .mn-rb i{width:calc(var(--w,12px) * .45 * var(--m,1))}
   .mn-rb.on i{width:10px}
 }
@@ -526,14 +536,19 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-ask.done .mn-ask-b.on{opacity:1;border-color:var(--accent);background:var(--accent-soft)}
 .mn-ask.skipped{background:none;border-color:var(--line)}
 .mn-ask.skipped .mn-ask-q{color:var(--muted)}
-/* Permission chip in the composer. */
-.mn-perm{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 10px 0 8px;border:1px solid var(--line);border-radius:999px;background:none;color:var(--text-2,var(--fg));
-  font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
-.mn-perm[hidden]{display:none}
-.mn-perm:hover{background:var(--hover)}
-.mn-perm .i{width:14px;height:14px}
-.mn-perm.auto{color:#b45309;border-color:color-mix(in srgb,#f59e0b 45%,transparent);background:color-mix(in srgb,#f59e0b 9%,transparent)}
-@media (max-width:640px){.mn-perm span{display:none}.mn-perm{padding:0 7px}}
+/* Permission picker in the composer: Ask first (accent), Auto (warm), Read only (neutral). */
+.mn-perm-slot{display:inline-flex;min-width:0}
+.mn-perm-slot[hidden]{display:none}
+.ui-sel.mn-perm{padding:0 6px 0 8px;gap:5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.ui-sel.mn-perm>.i{width:14px;height:14px;flex:none}
+.ui-sel.mn-perm .ui-sel-chev{stroke:currentColor;opacity:.7}
+.ui-sel.mn-perm.p-ask{color:var(--accent);border-color:var(--accent-line,color-mix(in srgb,var(--accent) 40%,transparent));background:var(--accent-soft)}
+.ui-sel.mn-perm.p-auto{color:var(--warn,#d97706);border-color:color-mix(in srgb,var(--warn,#d97706) 45%,transparent);background:color-mix(in srgb,var(--warn,#d97706) 9%,transparent)}
+.ui-sel.mn-perm.p-read{color:var(--text-2,var(--fg));border-color:var(--line-strong);background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.ui-sel.mn-perm:hover{filter:brightness(.98)}
+.mn-perm-ld{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;color:var(--muted);background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mn-perm-ld .i{width:15px;height:15px}
+@media (max-width:640px){.ui-sel.mn-perm .mn-model-v{display:none}.ui-sel.mn-perm{padding:0 5px 0 7px}}
 
 /* Mnemo's replies sit on a frosted card, readable over any background. */
 .mn-turn .mn-tb{min-width:0;padding:12px 14px;border-radius:16px;border:1px solid color-mix(in srgb,var(--line) 75%,transparent);
@@ -583,6 +598,18 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-modelchg.fb span{border-color:color-mix(in srgb,var(--warn,#d97706) 45%,var(--line));color:var(--warn,#d97706)}
 .mn-tb .mn-modelchg{margin:10px 0}
 .mn-think-slot{display:inline-flex;min-width:0}
+.mn-sub-model{display:inline-flex;align-items:center;gap:3px;padding:0 4px 0 6px;height:20px;border:1px solid var(--line);border-radius:999px;background:none;color:var(--text-2,var(--fg));
+  font:inherit;font-size:11.5px;cursor:pointer;transition:border-color .12s,background .12s}
+.mn-sub-model:hover{border-color:var(--line-strong);background:var(--hover)}
+.mn-sub-model .i{width:12px;height:12px}
+.ui-sel.mn-sub-sel{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+/* A notice with something to do about it (set a model for a job, switch this chat's model). */
+.mn-notice{flex-wrap:wrap}
+.mn-notice-a{flex:none;height:26px;padding:0 11px;border:1px solid var(--accent-line,var(--line-strong));border-radius:999px;background:var(--accent-soft);color:var(--accent);
+  font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+.mn-notice-a:hover{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.mn-notice-a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-think{flex-wrap:wrap;height:auto;min-height:26px}
 .ui-sel.mn-think{max-width:120px}
 .ui-sel.mn-think>.i{width:14px;height:14px;flex:none;color:var(--accent)}
 .mn-send.stopping{opacity:.55;animation:mnPulse 1s ease-in-out infinite}
@@ -625,4 +652,146 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-compact-why{margin:0;max-width:46ch;text-align:center;font-size:12px;line-height:1.5;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.mn-compact-s b,.mn-compact-spin{animation:none}}
 .mn-compact-b{margin-top:10px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--fg) 4%,transparent);font-size:13px;color:var(--text-2,var(--fg))}
+
+/* Mic in the composer: a pulsing dot and the seconds while recording. */
+.mn-mic{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:999px;background:none;color:var(--fg);cursor:pointer;
+  font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums;transition:background .15s,border-color .15s,padding .15s}
+.mn-mic[hidden]{display:none}
+.mn-mic:hover{background:var(--hover);border-color:var(--line-strong)}
+.mn-mic .i{width:17px;height:17px;stroke-width:2}
+.mn-mic-dot{display:none;width:8px;height:8px;border-radius:50%;background:var(--danger)}
+.mn-mic.rec{padding:0 12px 0 10px;border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 9%,transparent)}
+.mn-mic.rec .i{display:none}
+.mn-mic.rec .mn-mic-dot{display:block;animation:mnRec 1.1s ease-in-out infinite}
+.mn-mic.wait{opacity:.6;cursor:progress}
+@keyframes mnRec{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+@media (prefers-reduced-motion:reduce){.mn-mic.rec .mn-mic-dot{animation:none}}
+/* Listen under a reply: only when a speech model is set. */
+.mn-chat:not(.can-tts) .mn-listen{display:none}
+.mn-foot-a .mn-listen.on{color:var(--accent);background:var(--accent-soft)}
+/* Results drawn in a tool card: a sub-agent's answer, what an image shows. */
+.mn-tool-ans{max-height:320px;overflow:auto;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface-0,var(--bg));font-size:13px}
+/* A picture Mnemo made: in the reply (and small in its card); tap for the full view. */
+.mn-gen-row{display:flex;margin:6px 0}
+.mn-gen{display:block;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:color-mix(in srgb,var(--fg) 4%,transparent);cursor:zoom-in;max-width:min(100%,420px)}
+.mn-gen img{display:block;width:100%;height:auto;max-height:420px;object-fit:contain}
+.mn-gen.sm{max-width:160px;border-radius:10px}
+.mn-gen.sm img{max-height:160px}
+.mn-gen.gone{display:none}
+/* Mnemo noted something about the owner: one quiet line. */
+.mn-memline{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12.5px;color:var(--muted);min-width:0}
+.mn-memline .i{width:14px;height:14px;flex:none}
+.mn-memline span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-memline.err{color:var(--danger)}
+.mn-memline-a{flex:none;padding:2px 4px;border:0;border-radius:6px;background:none;color:var(--accent);font:inherit;font-size:12.5px;cursor:pointer}
+.mn-memline-a:hover{background:var(--accent-soft)}
+
+/* Chat width (per device). Phones always use the full width. */
+@media (min-width:641px){
+  .mn-chat.w-wide:not(.compact) .mn-log>*{max-width:1100px}
+  .mn-chat.w-wide:not(.compact) .mn-ub,.mn-chat.w-wide:not(.compact) .mn-u-att{max-width:70%}
+  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash){max-width:1100px}
+  .mn-chat.w-full:not(.compact) .mn-log{padding-left:32px;padding-right:32px}
+  .mn-chat.w-full.has-rail:not(.compact) .mn-log{padding-right:48px}
+  .mn-chat.w-full:not(.compact) .mn-log>*{max-width:none}
+  .mn-chat.w-full:not(.compact) .mn-log>.mn-hello{max-width:620px}
+  .mn-chat.w-full:not(.compact) .mn-ub,.mn-chat.w-full:not(.compact) .mn-u-att{max-width:70%}
+  .mn-chat.w-full:not(.compact) .mn-md>:is(p,ul,ol,blockquote,h1,h2,h3,h4,h5,h6,dl){max-width:90ch}
+  .mn-chat.w-full:not(.compact) .mn-comp{padding-left:32px;padding-right:32px}
+  .mn-chat.w-full:not(.compact) :is(.mn-comp-box,.mn-under){max-width:none}
+  .mn-chat.w-full:not(.compact) .mn-slash{max-width:none;left:32px;right:32px}
+}
+
+/* Sub-agents: a reply keeps one line per group; their work shows in the Agents panel. */
+.mn-team-line{display:flex;align-items:center;gap:8px;width:100%;max-width:520px;margin:8px 0;padding:7px 10px 7px 8px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-1,var(--panel));color:var(--text-2,var(--fg));font:inherit;font-size:calc(var(--mn-fs,14.5px) - 1.5px);text-align:left;cursor:pointer;
+  transition:background .15s,border-color .15s;animation:mnIn .25s var(--ease-out,ease-out) both}
+.mn-team-line:hover{background:var(--hover);border-color:var(--line-strong)}
+.mn-team-line:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-team-ic{display:grid;place-items:center;flex:none;width:24px;height:24px;border-radius:7px;color:var(--accent);background:var(--accent-soft)}
+.mn-team-ic .i{width:13px;height:13px;stroke-width:2.2}
+.mn-team-line.err .mn-team-ic{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
+.mn-team-line.stop .mn-team-ic{color:var(--muted);background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mn-team-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+.mn-team-go{display:inline-flex;align-items:center;gap:2px;flex:none;font-size:12.5px;font-weight:600;color:var(--accent)}
+.mn-team-go .i{width:13px;height:13px}
+/* The Agents panel: Running, Idle, and Done (folded under its count). */
+.mn-agents{display:flex;flex-direction:column;gap:16px;min-width:0;padding:12px}
+.modal-body .mn-agents{padding:0}
+.mn-ag-none{margin:4px 2px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.mn-ag-none[hidden],.mn-ag-sec[hidden]{display:none}
+.mn-ag-sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.mn-ag-sec h4{display:flex;align-items:center;gap:6px;margin:0 2px;font-size:11.5px;font-weight:650;color:var(--muted);text-transform:none;letter-spacing:0}
+.mn-ag-sec h4>span{min-width:18px;height:18px;padding:0 5px;border-radius:99px;font-size:11px;line-height:18px;text-align:center;font-weight:600;
+  color:var(--text-2,var(--fg));background:color-mix(in srgb,var(--fg) 7%,transparent)}
+.mn-ag-sec[data-sec=run] h4>span{color:var(--accent);background:var(--accent-soft)}
+.mn-ag-sec h4 small{margin-left:auto;font-size:11.5px;font-weight:500}
+.mn-ag-l{display:flex;flex-direction:column;gap:8px;min-width:0}
+details.mn-ag-done{display:block}
+.mn-ag-done>summary{display:flex;align-items:center;gap:6px;min-height:32px;padding:0 4px 0 0;border-radius:8px;list-style:none;cursor:pointer;user-select:none}
+.mn-ag-done>summary::-webkit-details-marker{display:none}
+.mn-ag-done>summary:hover h4{color:var(--fg)}
+.mn-ag-done>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-ag-chev{width:13px;height:13px;flex:none;color:var(--muted);transition:transform .15s}
+.mn-ag-done[open] .mn-ag-chev{transform:rotate(90deg)}
+.mn-ag-done>.mn-ag-l{margin-top:8px}
+.mn-ag-done .mn-sub{background:none}
+.mn-agents .mn-tool[open]>summary{position:static;box-shadow:none}
+.mn-agents .mn-tool-s{max-width:42%}
+.mn-sub{display:flex;flex-direction:column;gap:8px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg))}
+.mn-sub:is([data-state=run],[data-state=ask]){border-color:var(--accent-line,var(--line-strong))}
+.mn-sub-h{display:flex;align-items:center;gap:10px;min-width:0}
+.mn-sub-av{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:8px;font-size:12.5px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
+.mn-sub-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.mn-sub-t b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-sub-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-sub-t small:empty{display:none}
+.mn-sub-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:52%;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:550;color:var(--muted);
+  background:color-mix(in srgb,var(--fg) 6%,transparent);white-space:nowrap}
+.mn-sub-chip span{overflow:hidden;text-overflow:ellipsis}
+.mn-sub-chip .i{width:13px;height:13px;flex:none}
+.mn-sub-chip .mn-spin{width:11px;height:11px}
+.mn-sub[data-state=ask] .mn-sub-chip{color:var(--accent);background:var(--accent-soft)}
+.mn-sub[data-state=done] .mn-sub-chip .i{color:var(--accent)}
+.mn-sub[data-state=err] .mn-sub-chip{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
+.mn-sub-m{display:flex;align-items:center;gap:10px;min-width:0}
+.mn-sub-m[hidden]{display:none}
+.mn-sub-bar{flex:1;min-width:40px;height:4px;border-radius:99px;overflow:hidden;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.mn-sub-bar[hidden]{display:none}
+.mn-sub-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--accent);transition:width .3s var(--ease-out,ease-out)}
+.mn-sub-bar.hi i{background:var(--danger)}
+.mn-sub-tok{flex:none;margin-left:auto;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mn-sub-task{display:block;width:100%;padding:0;border:0;background:none;text-align:left;font:inherit;font-size:12.5px;line-height:1.45;color:var(--text-2,var(--fg));cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-sub-task[aria-expanded=true]{white-space:pre-wrap;overflow-wrap:anywhere}
+.mn-sub-act>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg));user-select:none}
+.mn-sub-act>summary::-webkit-details-marker{display:none}
+.mn-sub-act>summary em{font-style:normal;font-weight:500;color:var(--muted)}
+.mn-sub-act>summary em:not(:empty)::before{content:"· "}
+.mn-sub-act[open] .mn-sub-chev{transform:rotate(90deg)}
+.mn-sub:is([data-state=run],[data-state=ask]) .mn-sub-act>summary{display:none}
+.mn-sub-act:has(.mn-sub-log:empty){display:none}
+.mn-sub-log{display:flex;flex-direction:column;gap:6px;margin:0;padding:0 0 0 12px;border-left:2px solid var(--line);list-style:none}
+.mn-sub:not([data-state=run]):not([data-state=ask]) .mn-sub-log{margin-top:8px}
+.mn-sub-log:empty{display:none}
+.mn-sub-li{display:flex;align-items:flex-start;gap:7px;min-width:0;font-size:12px;line-height:1.45;color:var(--muted)}
+.mn-sub-li>.i,.mn-sub-li>.mn-spin{flex:none;width:12px;height:12px;margin-top:2px}
+.mn-sub-li>span{min-width:0;overflow-wrap:anywhere}
+.mn-sub-li b{font-weight:600;color:var(--text-2,var(--fg))}
+.mn-sub-li em{font-style:normal;margin-left:6px;opacity:.85}
+.mn-sub-li em::before{content:"· "}
+.mn-sub-li.ok>.i{color:var(--accent)}
+.mn-sub-li.err,.mn-sub-li.err>.i{color:var(--danger)}
+.mn-sub-x{display:flex;flex-direction:column;gap:2px}
+.mn-sub-x>span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mn-sub-pre{font-size:12px;line-height:1.45;color:var(--muted);opacity:.75;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-sub-pre[hidden]{display:none}
+.mn-sub-ans{border-top:1px solid var(--line);padding-top:6px}
+.mn-sub-ans>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg))}
+.mn-sub-ans>summary::-webkit-details-marker{display:none}
+.mn-sub-chev{width:13px;height:13px;color:var(--muted);transition:transform .15s}
+.mn-sub-ans[open] .mn-sub-chev{transform:rotate(90deg)}
+.mn-sub-ans .mn-md{margin-top:6px;max-height:360px;overflow:auto;font-size:13px}
+@media (max-width:640px){.mn-sub{padding:9px 10px}.mn-sub-chip{max-width:46%}.mn-agents{padding:10px}.mn-agents .mn-tool-s{max-width:38%}}
+@media (prefers-reduced-motion:reduce){.mn-sub-bar i,.mn-sub-chev,.mn-ag-chev{transition:none}.mn-team-line{animation:none}}
 `;

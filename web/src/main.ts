@@ -71,6 +71,7 @@ import { watchScrollbars } from './assistant/scrollbars';
 import type { BootSplash } from './boot-splash';
 import type { Page } from './state';
 import type { SettingsInfo } from './types';
+import { initStorageBanner } from './views/storage';
 
 // Styles first, so nothing paints unstyled once the splash fades.
 installStyles();
@@ -372,6 +373,7 @@ async function boot(): Promise<void> {
   PWA.init();
   initMnemoLauncher();
   initKeepAlive();
+  initStorageBanner();
 }
 
 function start(): void {

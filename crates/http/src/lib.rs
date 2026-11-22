@@ -35,6 +35,7 @@ pub mod privacy;
 pub mod release;
 pub mod secrets;
 pub mod shutdown;
+pub mod storage;
 
 use cache::rd;
 pub use cache::{session_of, Caches, WebSession};
@@ -1660,6 +1661,7 @@ pub fn build_router(st: AppState) -> Router {
         .merge(privacy::router())
         .merge(pins::router())
         .merge(images::router())
+        .merge(storage::router())
         .merge(assistant::router())
         .merge(shutdown::router())
         .merge(oauth::router())

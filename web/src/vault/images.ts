@@ -82,6 +82,8 @@ export async function uploadImage(note: string, file: Blob, name?: string): Prom
   });
   const data = (await res.json().catch(() => ({}))) as Partial<Uploaded> & { error?: string };
   if (!res.ok) throw new Error(data.error || `could not upload (HTTP ${res.status})`);
+  // Storage health is checked again (the banner follows).
+  window.dispatchEvent(new Event('memora:storage-check'));
   return data as Uploaded;
 }
 

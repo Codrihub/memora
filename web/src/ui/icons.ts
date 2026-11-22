@@ -28,6 +28,9 @@ const P: Record<string, string> = {
   'chev-right': '<path d="m9.5 6 6 6-6 6"/>',
   'chev-down': '<path d="m6 9.5 6 6 6-6"/>',
   'chev-up': '<path d="m6 14.5 6-6 6 6"/>',
+  'send-now': '<path d="m5 6 6 6-6 6"/><path d="m12.5 6 6 6-6 6"/>',
+  palette:
+    '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.9-.8 1.9-1.8 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.3 0-1 .8-1.8 1.9-1.8h2.2a3.9 3.9 0 0 0 3.9-3.9C20.9 6.9 16.9 3.5 12 3.5z"/><circle cx="7.6" cy="11.4" r="1.1"/><circle cx="10.3" cy="7.6" r="1.1"/><circle cx="14.6" cy="7.6" r="1.1"/>',
   incognito:
     '<path d="M2.5 11.5h19"/><path d="M5.5 11.5 7.6 5.6a1 1 0 0 1 1.2-.6l3.2.9 3.2-.9a1 1 0 0 1 1.2.6l2.1 5.9"/><circle cx="7.5" cy="16.5" r="2.8"/><circle cx="16.5" cy="16.5" r="2.8"/><path d="M10.3 16.3a2.6 2.6 0 0 1 3.4 0"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -61,6 +64,9 @@ const P: Record<string, string> = {
   x_circle: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
   mnemo: '<path d="M4 18v-8a2.6 2.6 0 0 1 5.2 0v4.2a2.8 2.8 0 0 0 5.6 0V10a2.6 2.6 0 0 1 5.2 0v8"/><path d="M12 2.8v2.6M10.7 4.1h2.6"/>',
   send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  archive: '<rect x="3.5" y="4.5" width="17" height="4.5" rx="1.2"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4"/>',
+  mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>',
+  volume: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>',
   edit: '<path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-4-4l-10 10z"/><path d="m13.5 6.5 4 4"/>',

@@ -206,10 +206,24 @@ pub fn kind_name(kind: &str) -> &'static str {
     }
 }
 
+thread_local! {
+    /// How long a read may wait on this thread (seconds); see [`with_read_timeout`].
+    static READ_SECS: std::cell::Cell<u64> = const { std::cell::Cell::new(180) };
+}
+
+/// Run `f` with a shorter wait for the provider's answer (a request with pictures to a model
+/// that cannot take them may hang until a proxy gives up; better to find out sooner).
+pub fn with_read_timeout<T>(secs: u64, f: impl FnOnce() -> T) -> T {
+    let before = READ_SECS.with(|c| c.replace(secs));
+    let out = f();
+    READ_SECS.with(|c| c.set(before));
+    out
+}
+
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
-        .timeout_read(Duration::from_secs(180))
+        .timeout_read(Duration::from_secs(READ_SECS.with(|c| c.get())))
         .user_agent(concat!("Memora/", env!("CARGO_PKG_VERSION")))
         .build()
 }
@@ -283,6 +297,125 @@ fn call_error(e: ureq::Error) -> String {
         }
         ureq::Error::Transport(t) => format!("could not reach the provider: {t}"),
     }
+}
+
+fn media_only(ep: &Endpoint, what: &str) -> Result<(), String> {
+    if ep.kind == "anthropic" || ep.style == "messages" {
+        return Err(format!(
+            "this provider has no {what} API; pick a model from an OpenAI or OpenAI-compatible provider"
+        ));
+    }
+    Ok(())
+}
+
+fn read_body(resp: ureq::Response, max: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    resp.into_reader()
+        .take(max)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("the provider's answer broke off: {e}"))?;
+    Ok(out)
+}
+
+/// A picture made by an OpenAI-style image model (`images/generations`): its bytes.
+pub fn image(ep: &Endpoint, model: &str, prompt: &str, size: &str) -> Result<Vec<u8>, String> {
+    media_only(ep, "image")?;
+    let resp = authed(ep, agent().post(&url(ep, "images/generations")))
+        .set("Content-Type", "application/json")
+        .send_string(&json!({"model": model, "prompt": prompt, "n": 1, "size": size}).to_string())
+        .map_err(call_error)?;
+    let v: Value = serde_json::from_slice(&read_body(resp, 64 * 1_048_576)?)
+        .map_err(|_| "the image model did not answer with JSON".to_string())?;
+    let d = &v["data"][0];
+    let decode = |b: &str| {
+        let clean: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+        crate::oauth::base64_decode(&clean)
+            .ok_or_else(|| "the image model sent a broken picture".to_string())
+    };
+    if let Some(b) = d["b64_json"].as_str() {
+        return decode(b);
+    }
+    if let Some(u) = d["url"].as_str() {
+        if let Some(rest) = u.strip_prefix("data:") {
+            return decode(rest.split_once(',').map(|x| x.1).unwrap_or(""));
+        }
+        if !u.starts_with("https://") && !u.starts_with("http://") {
+            return Err("the image model sent no picture".into());
+        }
+        let r = agent().get(u).call().map_err(call_error)?;
+        return read_body(r, 32 * 1_048_576);
+    }
+    Err("the image model sent no picture".into())
+}
+
+/// Text read aloud by an OpenAI-style speech model (`audio/speech`): `(bytes, media type)`.
+pub fn speech(
+    ep: &Endpoint,
+    model: &str,
+    voice: &str,
+    text: &str,
+) -> Result<(Vec<u8>, String), String> {
+    media_only(ep, "speech")?;
+    let resp = authed(ep, agent().post(&url(ep, "audio/speech")))
+        .set("Content-Type", "application/json")
+        .send_string(
+            &json!({"model": model, "input": text, "voice": voice, "response_format": "mp3"})
+                .to_string(),
+        )
+        .map_err(call_error)?;
+    let mime = resp
+        .header("content-type")
+        .filter(|m| m.starts_with("audio/"))
+        .unwrap_or("audio/mpeg")
+        .to_string();
+    Ok((read_body(resp, 32 * 1_048_576)?, mime))
+}
+
+/// A recording written out by an OpenAI-style transcription model (`audio/transcriptions`).
+pub fn transcribe(ep: &Endpoint, model: &str, audio: &[u8], mime: &str) -> Result<String, String> {
+    media_only(ep, "transcription")?;
+    let ext = match mime {
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" | "audio/aac" => "m4a",
+        "audio/ogg" => "ogg",
+        "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
+        _ => "webm",
+    };
+    let boundary: String = format!("memora{}", memora_gateway::generate_key())
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(40)
+        .collect();
+    let mut body = Vec::with_capacity(audio.len() + 512);
+    let model = model.replace(['\r', '\n', '"'], "");
+    for (k, v) in [("model", model.as_str()), ("response_format", "json")] {
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n")
+                .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.{ext}\"\r\nContent-Type: {mime}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(audio);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let resp = authed(ep, agent().post(&url(ep, "audio/transcriptions")))
+        .set(
+            "Content-Type",
+            &format!("multipart/form-data; boundary={boundary}"),
+        )
+        .send_bytes(&body)
+        .map_err(call_error)?;
+    let raw = read_body(resp, 4 * 1_048_576)?;
+    let text = serde_json::from_slice::<Value>(&raw)
+        .ok()
+        .and_then(|v| v["text"].as_str().map(str::to_string))
+        .unwrap_or_else(|| String::from_utf8_lossy(&raw).to_string());
+    Ok(text.trim().to_string())
 }
 
 /// The first whole number found at any of these paths (`a.b` = nested field).

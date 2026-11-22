@@ -6,7 +6,7 @@ import { $, attr, el, esc, useStyles } from '../dom';
 import { relTs } from '../format';
 import { Modal } from '../modal';
 import { hooks } from '../hooks';
-import { onNavigate, setMnemoChat, takeMnemoChat } from '../router';
+import { closeMnemoAll, mnemoAllOn, onNavigate, openMnemoAll, setMnemoChat, takeMnemoChat } from '../router';
 import { setThemePref, THEME_ICON, THEME_LABEL, themePref, type ThemePref } from '../theme';
 import { state, type Page } from '../state';
 import { notify, toast } from '../toast';
@@ -17,7 +17,7 @@ import * as A from './api';
 import { leaveAgentActivity, mountAgentActivity } from '../views/activity-agent';
 import { useAgentPageStyles } from '../views/agent-page';
 import { useActivityStyles } from '../control/activity';
-import { ChatView, openMnemoSettings, openShown, type Artifact } from './chat';
+import { ChatView, chatWidth, openMnemoSettings, openShown, setChatWidth, type Artifact, type ChatWidth } from './chat';
 import { MNEMO_CSS, markHTML } from './styles';
 import { textSizeHTML, wireTextSize } from './textsize';
 import { closePreview, openPreview } from './art';
@@ -66,6 +66,12 @@ export async function renderAssistant(): Promise<void> {
   pendingWith = null;
   const fresh = arriving;
   arriving = false;
+  // /mnemo/chats: the list of every chat over the page.
+  showAll(mnemoAllOn(), false);
+  if (mnemoAllOn()) {
+    if (!chat!.session && fresh) newChat();
+    return;
+  }
   // The address names a chat (a reload, a link, Back): open that one.
   const linked = takeMnemoChat();
   if (linked && !want && chat!.session?.id !== linked) {
@@ -95,20 +101,27 @@ function build(): void {
   root = el('div', 'mnp');
   root.innerHTML = `
     <aside class="mnp-side" id="mnpSide" aria-label="Chats">
-      <div class="mnp-brand">${markHTML('md')}<div class="mnp-bt"><b>${A.MNEMO}</b><small>Your notes agent</small></div>
-        <button type="button" class="mnp-manage" id="mnpManage" title="Select or clean up chats" aria-label="Select or clean up chats">${icon('more')}</button>
-        <button type="button" class="mnp-new" id="mnpNew" title="New chat" aria-label="New chat">${icon('plus')}</button>
-        <button type="button" class="mnp-fold" id="mnpFold" title="Hide the chat list" aria-label="Hide the chat list">${icon('sidebar')}</button></div>
-      <label class="mnp-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpQ" placeholder="Search everything said" autocomplete="off"></label>
-      <button type="button" class="mnp-newrow" id="mnpNewRow">${icon('plus')}<span>New chat</span></button>
-      <div class="mnp-selbar" id="mnpSelBar" hidden></div>
-      <nav class="mnp-list" id="mnpList" aria-label="Chat list"></nav>
-      <nav class="mnp-sfoot" aria-label="${A.MNEMO}">
-        <button type="button" class="mnp-look-btn" id="mnpLook" title="Theme, chat background and text size" aria-haspopup="dialog">${icon('sun')}<span><b>Appearance</b><small id="mnpLookSub">Theme, background, text</small></span>${icon('chev-down')}</button>
-        <button type="button" class="mnp-set" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom">${icon('activity')}<span>Activity</span></button>
-        <button type="button" class="mnp-set" id="mnpSet" title="Models, keys and instructions">${icon('settings')}<span>Settings</span></button>
-        <button type="button" class="mnp-set" id="mnpHome" title="Back to Memora">${icon('overview')}<span>Memora</span></button>
+      <nav class="mnp-rail" aria-label="${A.MNEMO}">
+        <span class="mnp-rail-mark" title="${A.MNEMO}, your notes agent">${markHTML('sm')}</span>
+        <button type="button" class="mnp-rb-new" id="mnpNewRow" title="New chat" aria-label="New chat">${icon('plus')}</button>
+        <button type="button" class="mnp-rb" id="mnpSearchBtn" title="Search chats" aria-label="Search chats">${icon('search')}</button>
+        <button type="button" class="mnp-rb" id="mnpAllBtn" title="All chats: pinned, recent and archived" aria-label="All chats">${icon('chat')}</button>
+        <button type="button" class="mnp-rb" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom" aria-label="Activity">${icon('activity')}</button>
+        <span class="mnp-grow"></span>
+        <button type="button" class="mnp-rb mnp-look-btn" id="mnpLook" title="Appearance: theme, background, text size and width" aria-label="Appearance" aria-haspopup="dialog">${icon('palette')}<i class="mnp-bgsw mnp-look-sw" id="mnpLookSw" hidden aria-hidden="true"></i><small id="mnpLookSub" hidden></small></button>
+        <button type="button" class="mnp-rb" id="mnpSet" title="Models, keys and instructions" aria-label="Settings">${icon('settings')}</button>
+        <button type="button" class="mnp-rb" id="mnpHome" title="Back to Memora" aria-label="Back to Memora">${icon('overview')}</button>
+        <button type="button" class="mnp-rb mnp-fold" id="mnpFold" title="Hide the chat list" aria-label="Hide the chat list">${icon('sidebar')}</button>
       </nav>
+      <div class="mnp-panel">
+        <div class="mnp-ph"><b>Chats</b><small id="mnpCount"></small><span class="mnp-grow"></span>
+          <button type="button" class="mnp-manage" id="mnpManage" title="Select or clean up chats" aria-label="Select or clean up chats">${icon('more')}</button>
+          <button type="button" class="mnp-new" id="mnpNew" title="New chat" aria-label="New chat">${icon('plus')}</button></div>
+        <label class="mnp-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpQ" placeholder="Search" autocomplete="off"></label>
+        <div class="mnp-chips" id="mnpChips" role="tablist" aria-label="Show"></div>
+        <div class="mnp-selbar" id="mnpSelBar" hidden></div>
+        <nav class="mnp-list" id="mnpList" aria-label="Chat list"></nav>
+      </div>
     </aside>
     <div class="mnp-scrim" id="mnpScrim"></div>
     <main class="mnp-main">
@@ -117,6 +130,9 @@ function build(): void {
         <div class="mnp-title"><b id="mnpTitle">New chat</b><small id="mnpSub"></small></div>
         <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="Fleeting chat" title="Fleeting chat: not kept, gone when you leave it">${icon('incognito')}</button>
         <button type="button" class="mn-ibtn" id="mnpNew2" aria-label="New chat" title="New chat">${icon('plus')}</button>
+        <button type="button" class="mn-ibtn mnp-agbtn" id="mnpAgBtn" aria-label="Agents in this chat" title="Agents" aria-controls="mnpAgents" hidden>${icon(
+          'agents',
+        )}<span class="mnp-agn" hidden></span></button>
         <button type="button" class="mn-ibtn mnp-artbtn" id="mnpArtBtn" aria-label="Notes, folders and images in this chat" title="In this chat" aria-controls="mnpArt">${icon(
           'sidebar',
         )}<span class="mnp-artn" hidden></span></button>
@@ -131,7 +147,20 @@ function build(): void {
       <div class="mnp-art-h"><b>In this chat</b><button type="button" class="mn-ibtn" id="mnpArtX" aria-label="Close" title="Close">${icon('close')}</button></div>
       <div class="mnp-art-b" id="mnpArtB"></div>
     </aside>
-    <div class="mnp-ascrim" id="mnpAScrim"></div>`;
+    <aside class="mnp-agp" id="mnpAgents" aria-label="Agents">
+      <div class="mnp-art-h"><b>Agents</b><small id="mnpAgSub"></small><span class="mnp-grow"></span><button type="button" class="mn-ibtn" id="mnpAgX" aria-label="Close" title="Close">${icon('close')}</button></div>
+      <div class="mnp-agp-b" id="mnpAgB"></div>
+    </aside>
+    <div class="mnp-ascrim" id="mnpAScrim"></div>
+    <section class="mnp-all" id="mnpAll" aria-label="All chats" hidden>
+      <div class="mnp-all-in">
+        <header class="mnp-all-h"><button type="button" class="mn-ibtn" id="mnpAllBack" aria-label="Back to the chat" title="Back">${icon('chev-left')}</button><b>All chats</b>
+          <span class="mnp-grow"></span><button type="button" class="mnp-selb" id="mnpAllSel">${icon('check')}<span>Select</span></button></header>
+        <label class="mnp-q mnp-all-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpAllQ" placeholder="Search chats" autocomplete="off"></label>
+        <div class="mnp-selbar mnp-all-bar" id="mnpAllBar" hidden></div>
+        <div class="mnp-all-list" id="mnpAllList"></div>
+      </div>
+    </section>`;
   chat = new ChatView({
     scope: () => 'global',
     onChange: (s) => {
@@ -153,6 +182,8 @@ function build(): void {
       paintHead();
     },
     onMessages: () => paintArt(),
+    onAgents: () => paintAgents(),
+    openAgents: () => setPane('agents', true),
     // The chat on screen started or finished a reply: its row spins meanwhile.
     onBusy: (on) => {
       const s = chat?.session && sessions.find((x) => x.id === chat!.session!.id);
@@ -163,6 +194,8 @@ function build(): void {
     },
   });
   root.querySelector('#mnpChat')!.append(chat.el);
+  root.querySelector('#mnpAgB')!.append(chat.agents.el);
+  paintAgents();
   const q = root.querySelector<HTMLInputElement>('#mnpQ')!;
   q.oninput = () => {
     query = q.value.trim().toLowerCase();
@@ -200,7 +233,12 @@ function build(): void {
   };
   root.querySelector<HTMLElement>('#mnpArtBtn')!.onclick = () => setPane('art', !root!.classList.contains('art-open'));
   root.querySelector<HTMLElement>('#mnpArtX')!.onclick = () => setPane('art', false);
-  root.querySelector<HTMLElement>('#mnpAScrim')!.onclick = () => setPane('art', false);
+  root.querySelector<HTMLElement>('#mnpAScrim')!.onclick = () => {
+    setPane('art', false);
+    setPane('agents', false);
+  };
+  root.querySelector<HTMLElement>('#mnpAgBtn')!.onclick = () => setPane('agents', !root!.classList.contains('ag-open'));
+  root.querySelector<HTMLElement>('#mnpAgX')!.onclick = () => setPane('agents', false);
   root.querySelector<HTMLElement>('#mnpArtB')!.addEventListener('click', (e) => {
     const pg = (e.target as HTMLElement).closest<HTMLElement>('[data-page-art]');
     if (pg) {
@@ -217,6 +255,7 @@ function build(): void {
   });
   const panes = readPanes();
   root.classList.toggle('side-closed', !panes.side);
+  paintFold();
   root.classList.toggle('art-open', panes.art && window.innerWidth >= 1100);
   root.querySelector<HTMLElement>('#mnpScrim')!.onclick = () => side(false);
   root.querySelector<HTMLElement>('#mnpNew')!.onclick = () => {
@@ -237,8 +276,23 @@ function build(): void {
     paintHead();
     chat!.focus();
   };
-  // Wide screens: the chat list folds from its own corner; New chat sits under the search.
-  root.querySelector<HTMLElement>('#mnpFold')!.onclick = () => setPane('side', false);
+  // Wide screens: the chat list folds from its own corner. New chat sits above the search.
+  // Desktop keeps the rail when the list is hidden: the same button brings the list back.
+  root.querySelector<HTMLElement>('#mnpFold')!.onclick = () => setPane('side', root!.classList.contains('side-closed'));
+  // With the list hidden, a click on the rail's empty space brings it back.
+  root.querySelector<HTMLElement>('.mnp-rail')!.addEventListener('click', (e) => {
+    if (root!.classList.contains('side-closed') && !(e.target as HTMLElement).closest('button, a')) setPane('side', true);
+  });
+  // Search opens the list first when it is hidden (the rail alone on desktop, or a phone).
+  root.querySelector<HTMLElement>('#mnpSearchBtn')!.onclick = () => {
+    if (root!.classList.contains('side-closed')) setPane('side', true);
+    if (isNarrow()) side(true);
+    requestAnimationFrame(() => root?.querySelector<HTMLInputElement>('#mnpQ')?.focus());
+  };
+  root.querySelector<HTMLElement>('#mnpAllBtn')!.onclick = () => {
+    side(false);
+    showAll(true, true);
+  };
   root.querySelector<HTMLElement>('#mnpNewRow')!.onclick = () => newChat();
   root.querySelector<HTMLElement>('#mnpSet')!.onclick = () => openMnemoSettings();
   root.querySelector<HTMLElement>('#mnpHome')!.onclick = () => leave(true);
@@ -253,8 +307,17 @@ function build(): void {
     if (e.key !== 'Escape' || state.page !== 'assistant' || e.defaultPrevented) return;
     // Esc first closes whatever is open on top (a menu, a picker, a dialog, the chat list).
     if (document.querySelector('.ui-sel-pop,.vx-menu') || !$('#modalHost').classList.contains('hidden')) return;
+    if (root!.classList.contains('all-open')) {
+      closeAll();
+      return;
+    }
     if (root!.classList.contains('side-open')) {
       root!.classList.remove('side-open');
+      return;
+    }
+    // The Agents sheet covers the chat on tablets and phones: Esc closes it first.
+    if (root!.classList.contains('ag-open') && window.innerWidth < 1100) {
+      setPane('agents', false);
       return;
     }
     const box = root!.querySelector<HTMLTextAreaElement>('.mn-comp textarea');
@@ -276,8 +339,14 @@ function build(): void {
     }
     if (act === 'delete') askDeleteMany([...(picked || [])]);
   };
+  wireAll();
   root.querySelector<HTMLElement>('#mnpList')!.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
+    if (t.closest('[data-allchats]')) {
+      side(false);
+      showAll(true, true);
+      return;
+    }
     const more = t.closest<HTMLElement>('[data-more]');
     const row = t.closest<HTMLElement>('[data-id]');
     if (!row) return;
@@ -412,7 +481,11 @@ function lookMenu(at: HTMLElement): void {
         )}</span></button>`,
     ).join('')}</div>
     <span class="mnp-look-l">Text size</span>
-    <div class="mnp-look-fs">${textSizeHTML('look')}</div>`;
+    <div class="mnp-look-fs">${textSizeHTML('look')}</div>
+    <span class="mnp-look-l mnp-look-wl">Chat width</span>
+    <div class="mnp-theme mnp-look-w" role="radiogroup" aria-label="Chat width">${(Object.keys(WIDTH_LABEL) as ChatWidth[])
+      .map((w) => `<button type="button" role="radio" data-width-pick="${w}"><span>${WIDTH_LABEL[w]}</span></button>`)
+      .join('')}</div>`;
   document.body.append(scrim, pop);
   if (!sheet) {
     const r = at.getBoundingClientRect();
@@ -432,6 +505,12 @@ function lookMenu(at: HTMLElement): void {
   });
   pop.querySelectorAll<HTMLElement>('[data-pick-bg]').forEach((b) => {
     b.onclick = () => setBg(b.dataset.pickBg as BgId);
+  });
+  pop.querySelectorAll<HTMLElement>('[data-width-pick]').forEach((b) => {
+    b.onclick = () => {
+      setChatWidth(b.dataset.widthPick as ChatWidth);
+      paintPrefs();
+    };
   });
   pop.querySelector<HTMLElement>('[data-look-x]')!.onclick = () => closeLook();
   scrim.onclick = () => closeLook();
@@ -464,6 +543,8 @@ function lookMenu(at: HTMLElement): void {
 
 let lookOff: (() => void) | null = null;
 
+const WIDTH_LABEL: Record<ChatWidth, string> = { compact: 'Compact', wide: 'Wide', full: 'Full' };
+
 /** Close the Appearance panel; true when it was open. */
 function closeLook(): boolean {
   if (!lookOff) return false;
@@ -482,8 +563,16 @@ function paintPrefs(): void {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
+  const w = chatWidth();
+  document.querySelectorAll<HTMLElement>('.mnp-look [data-width-pick]').forEach((b) => {
+    const on = b.dataset.widthPick === w;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
   const bg = readBg();
   root.dataset.bg = bg;
+  const sw = root.querySelector<HTMLElement>('#mnpLookSw');
+  if (sw) sw.dataset.bg = bg;
   const sub = root.querySelector('#mnpLookSub');
   if (sub) sub.textContent = `${THEME_LABEL[t]} · ${BGS.find((b) => b.id === bg)?.label || 'Glow'} background`;
   document.querySelectorAll<HTMLElement>('.mnp-look [data-pick-bg]').forEach((x) => {
@@ -505,10 +594,34 @@ function readPanes(): { side: boolean; art: boolean } {
 }
 
 /** Open or close the chat list (wide screens) or the "In this chat" panel; remembered here. */
-function setPane(which: 'side' | 'art', open: boolean): void {
+/** The rail's hide/show button says what it will do. */
+function paintFold(): void {
+  const b = root?.querySelector<HTMLElement>('#mnpFold');
+  if (!b) return;
+  const closed = !!root?.classList.contains('side-closed');
+  const t = closed ? 'Show the chat list' : 'Hide the chat list';
+  b.title = t;
+  b.setAttribute('aria-label', t);
+  b.setAttribute('aria-expanded', String(!closed));
+}
+
+function setPane(which: 'side' | 'art' | 'agents', open: boolean): void {
   if (!root) return;
-  if (which === 'side') root.classList.toggle('side-closed', !open);
-  else root.classList.toggle('art-open', open);
+  if (which === 'agents') {
+    // The Agents panel takes the place of "In this chat": never both open at once. It is not
+    // remembered (it follows the chat's sub-agents).
+    if (open) root.classList.remove('art-open');
+    root.classList.toggle('ag-open', open);
+    root.querySelector('#mnpAgBtn')?.setAttribute('aria-expanded', String(open));
+    return;
+  }
+  if (which === 'side') {
+    root.classList.toggle('side-closed', !open);
+    paintFold();
+  } else {
+    root.classList.toggle('art-open', open);
+    if (open) root.classList.remove('ag-open');
+  }
   if (which === 'art' && open) paintArt();
   try {
     localStorage.setItem(LS_PANES, JSON.stringify({ ...readPanes(), [which]: open }));
@@ -577,6 +690,28 @@ function paintArt(): void {
       })
       .join('')}</section>`;
   }).join('');
+}
+
+/** The Agents button: shown once the chat has had sub-agents, with how many run now. */
+function paintAgents(): void {
+  if (!root || !chat) return;
+  const { running, total } = chat.agents.counts();
+  const b = root.querySelector<HTMLElement>('#mnpAgBtn')!;
+  b.hidden = !total;
+  b.classList.toggle('run', running > 0);
+  const n = b.querySelector<HTMLElement>('.mnp-agn')!;
+  n.hidden = !running;
+  n.textContent = String(running);
+  const t = running ? `Agents: ${running} working` : 'Agents in this chat';
+  b.title = t;
+  b.setAttribute('aria-label', t);
+  root.querySelector('#mnpAgSub')!.textContent = total ? (running ? `${running} working · ${total} in this chat` : `${total} in this chat`) : '';
+  // A chat without sub-agents has nothing to show: the panel closes with its button.
+  // (Checked a frame later: a chat drawn again empties the panel for a moment.)
+  if (!total && root.classList.contains('ag-open'))
+    requestAnimationFrame(() => {
+      if (chat && !chat.agents.counts().total) setPane('agents', false);
+    });
 }
 
 /** Swap the chat for Mnemo's activity (every tool call, and who it was for), or back. */
@@ -652,17 +787,274 @@ function upsert(s: A.Session): void {
   paintList();
 }
 
+/** How many chats the side list shows; the rest are in All chats. */
+const RECENT = 30;
+
+/** Which chats the list shows: all, the owner's own chats, or the ones asked from notes. */
+type ListFilter = 'all' | 'chats' | 'notes';
+let listFilter: ListFilter = 'all';
+const LS_PINS = 'memora.mnemo.pins.open';
+function pinsOpen(): boolean {
+  try {
+    return localStorage.getItem(LS_PINS) !== '0';
+  } catch {
+    return true;
+  }
+}
+function fromNote(s: A.Session): boolean {
+  return s.title.startsWith(A.NOTE_TASK_PREFIX) || s.scope.startsWith('note:') || s.scope.startsWith('folder:');
+}
+function paintChips(): void {
+  const box = root?.querySelector<HTMLElement>('#mnpChips');
+  if (!box) return;
+  const live = sessions.filter((s) => !s.archived);
+  const notes = live.filter(fromNote).length;
+  // Only worth showing once there are chats of both kinds.
+  box.hidden = !notes || notes === live.length;
+  if (box.hidden && listFilter !== 'all') listFilter = 'all';
+  const chip = (f: ListFilter, label: string, n: number): string =>
+    `<button type="button" role="tab" class="mnp-chip${listFilter === f ? ' on' : ''}" aria-selected="${listFilter === f}" data-filter="${f}">${label}<small>${n}</small></button>`;
+  box.innerHTML = chip('all', 'All', live.length) + chip('chats', 'Chats', live.length - notes) + chip('notes', 'Notes', notes);
+  box.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => {
+    b.onclick = () => {
+      listFilter = b.dataset.filter as ListFilter;
+      paintList();
+    };
+  });
+}
+
+/** One chat row (side list and All chats); `sel` is null when not selecting. */
+/** What a chat is, at a glance: a chat, one about a note (or asked from it), or about a
+ *  folder; a spinner while Mnemo works in it. */
+function kindIcon(s: A.Session): string {
+  if (s.running) return `<span class="mnp-kind run" title="${A.MNEMO} is working on this"><i class="mnp-spin"></i></span>`;
+  const note = s.title.startsWith(A.NOTE_TASK_PREFIX) || s.scope.startsWith('note:');
+  const folder = s.scope.startsWith('folder:');
+  const k = note ? 'note' : folder ? 'folder' : 'chat';
+  const tip = note ? 'About a note' : folder ? 'About a folder' : 'Chat';
+  return `<span class="mnp-kind ${k}" title="${tip}" aria-label="${tip}">${icon(k)}</span>`;
+}
+
+function rowHTML(s: A.Session, cur: string | undefined, sel: boolean | null): string {
+  const news = s.running || s.id === cur ? 0 : s.archived ? 0 : unreadOf(s);
+  const picking = sel !== null;
+  const pv = s.preview?.text
+    ? `${s.preview.role === 'user' ? '<em>You:</em> ' : ''}${esc(s.preview.text)}`
+    : s.scope !== 'global'
+      ? esc(A.scopeLabel(s.scope))
+      : 'No messages yet';
+  const title = s.title.startsWith(A.NOTE_TASK_PREFIX) ? s.title.slice(A.NOTE_TASK_PREFIX.length) : s.title;
+  return `<div class="mnp-row${s.id === cur && !picking ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}${sel ? ' sel' : ''}" data-id="${attr(s.id)}" role="${picking ? 'checkbox' : 'button'}" tabindex="0"${
+    picking ? ` aria-checked="${sel}"` : ` aria-current="${s.id === cur}"`
+  } title="${attr(s.scope.startsWith('note:') ? `From the note ${s.scope.slice(5)}` : title)}">
+      ${picking ? `<span class="mnp-check" aria-hidden="true">${sel ? icon('check') : ''}</span>` : kindIcon(s)}
+      <span class="mnp-row-t"><span class="mnp-row-l1"><b>${esc(title)}</b><time class="mnp-row-ts" datetime="${new Date(s.updated_at * 1000).toISOString()}">${esc(shortAgo(s.updated_at))}</time></span>
+        <span class="mnp-row-l2"><small>${pv}</small>${news ? `<span class="mnp-newn" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}</span></span>
+      ${picking ? '' : `<button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button>`}</div>`;
+}
+
+
+/** How long ago, in a few characters: now, 5m, 3h, 2d, 3w, then the date. */
+function shortAgo(ts: number): string {
+  const sec = Math.max(0, Date.now() / 1000 - ts);
+  if (sec < 60) return 'now';
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86_400) return `${Math.floor(sec / 3600)}h`;
+  if (sec < 7 * 86_400) return `${Math.floor(sec / 86_400)}d`;
+  if (sec < 30 * 86_400) return `${Math.floor(sec / (7 * 86_400))}w`;
+  const d = new Date(ts * 1000);
+  const same = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-US', same ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' });
+}
+
+function rowKeys(list: HTMLElement): void {
+  list.querySelectorAll<HTMLElement>('.mnp-row, .mnp-pin').forEach((r) => {
+    r.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        r.click();
+      }
+    };
+  });
+}
+
+/** Archive or bring back a chat; archiving offers Undo. */
+async function setArchived(s: A.Session, on: boolean): Promise<void> {
+  try {
+    afterUpdate((await A.updateSession(s.id, { archived: on })).session);
+    if (on) notify('Chat archived', 'ok', 6000, { label: 'Undo', run: () => void setArchived(s, false) });
+    else toast('Chat back in the list', 'ok');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// ---- All chats (/mnemo/chats): every chat, archived ones too ----
+
+let allQuery = '';
+let allPicked: Set<string> | null = null;
+let archOpen = false;
+/** The page was opened from here (Back returns), not from the address. */
+let allPushed = false;
+
+function showAll(on: boolean, push = false): void {
+  if (!root) return;
+  const box = root.querySelector<HTMLElement>('#mnpAll')!;
+  if (on && push) {
+    openMnemoAll();
+    allPushed = true;
+  }
+  if (!on) {
+    allPicked = null;
+    if (!mnemoAllOn()) allPushed = false;
+  }
+  box.hidden = !on;
+  root.classList.toggle('all-open', on);
+  if (on) {
+    paintAll();
+    if (window.matchMedia('(min-width: 761px)').matches) box.querySelector<HTMLInputElement>('#mnpAllQ')?.focus({ preventScroll: true });
+  }
+}
+
+/** Leave All chats: Back when it was opened here, else straight to the chat. */
+function closeAll(): void {
+  if (allPushed && history.length > 1) {
+    allPushed = false;
+    history.back();
+    return;
+  }
+  closeMnemoAll(chat?.session?.id ?? null, false);
+  showAll(false);
+}
+
+function paintAll(): void {
+  const list = root?.querySelector<HTMLElement>('#mnpAllList');
+  if (!list || root?.querySelector<HTMLElement>('#mnpAll')!.hidden) return;
+  const q = allQuery;
+  const match = (s: A.Session): boolean => !q || s.title.toLowerCase().includes(q) || A.scopeLabel(s.scope).toLowerCase().includes(q);
+  const all = sessions.filter(match).sort((a, b) => b.updated_at - a.updated_at);
+  const pinned = all.filter((s) => s.pinned && !s.archived);
+  const rest = all.filter((s) => !s.pinned && !s.archived);
+  const arch = all.filter((s) => s.archived);
+  const cur = chat?.session?.id;
+  const sel = (s: A.Session): boolean | null => (allPicked ? allPicked.has(s.id) : null);
+  // Chats under a divider per time span (Today, Yesterday, Previous 7 days, months).
+  const dated = (items: A.Session[]): string => {
+    let out = '';
+    let last = '';
+    for (const s of items) {
+      const b = bucket(s);
+      if (b !== last) {
+        out += `<div class="mnp-g mnp-day" role="separator"><span>${esc(b)}</span></div>`;
+        last = b;
+      }
+      out += rowHTML(s, cur, sel(s));
+    }
+    return out;
+  };
+  const group = (title: string, items: A.Session[]): string =>
+    items.length
+      ? `<div class="mnp-all-g${title === 'Pinned' ? ' mnp-pins' : ''}"><div class="mnp-g head">${title === 'Pinned' ? icon('pin') : ''}<span>${title}</span><small>${items.length}</small></div>${
+          title === 'Pinned' ? items.map((s) => rowHTML(s, cur, sel(s))).join('') : dated(items)
+        }</div>`
+      : '';
+  const archived = arch.length
+    ? `<details class="mnp-all-g mnp-all-arch"${archOpen || (q && !pinned.length && !rest.length) ? ' open' : ''}><summary class="mnp-g">${icon('chev', 'i mnp-all-chev')}Archived <span>${arch.length}</span></summary>${arch
+        .map((s) => rowHTML(s, cur, sel(s)))
+        .join('')}</details>`
+    : '';
+  list.innerHTML =
+    group('Pinned', pinned) + group('Chats', rest) + archived ||
+    `<p class="mnp-none">${q ? 'No chat matches.' : `No chats yet. Ask ${A.MNEMO} something to start one.`}</p>`;
+  list.querySelector<HTMLDetailsElement>('.mnp-all-arch')?.addEventListener('toggle', (e) => {
+    archOpen = (e.currentTarget as HTMLDetailsElement).open;
+  });
+  rowKeys(list);
+  const bar = root!.querySelector<HTMLElement>('#mnpAllBar')!;
+  bar.hidden = !allPicked;
+  root!.querySelector<HTMLElement>('#mnpAllSel')!.hidden = !!allPicked;
+  if (allPicked) {
+    const n = allPicked.size;
+    bar.innerHTML = `<span class="mnp-seln">${n ? `${n} selected` : 'Pick chats'}</span>
+      <button type="button" class="mnp-selb" data-asel="archive"${n ? '' : ' disabled'}>${icon('archive')}<span>Archive</span></button>
+      <button type="button" class="mnp-selb danger" data-asel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>Delete</span></button>
+      <button type="button" class="mn-ibtn" data-asel="cancel" aria-label="Stop selecting" title="Done">${icon('close')}</button>`;
+  }
+}
+
+function wireAll(): void {
+  const box = root!.querySelector<HTMLElement>('#mnpAll')!;
+  box.querySelector<HTMLElement>('#mnpAllBack')!.onclick = () => closeAll();
+  const q = box.querySelector<HTMLInputElement>('#mnpAllQ')!;
+  q.oninput = () => {
+    allQuery = q.value.trim().toLowerCase();
+    paintAll();
+  };
+  box.querySelector<HTMLElement>('#mnpAllSel')!.onclick = () => {
+    allPicked = new Set();
+    paintAll();
+  };
+  box.querySelector<HTMLElement>('#mnpAllBar')!.onclick = async (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-asel]');
+    if (!b || !allPicked) return;
+    const ids = [...allPicked];
+    if (b.dataset.asel === 'cancel') {
+      allPicked = null;
+      return paintAll();
+    }
+    if (b.dataset.asel === 'delete') {
+      allPicked = null;
+      return askDeleteMany(ids);
+    }
+    try {
+      const done = await Promise.all(ids.map((id) => A.updateSession(id, { archived: true })));
+      done.forEach((r) => upsert(r.session));
+      allPicked = null;
+      paintAll();
+      notify(`${ids.length} chat${ids.length === 1 ? '' : 's'} archived`, 'ok', 6000, {
+        label: 'Undo',
+        run: () => void Promise.all(ids.map((id) => A.updateSession(id, { archived: false }))).then((rs) => rs.forEach((r) => upsert(r.session)), fail),
+      });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  box.querySelector<HTMLElement>('#mnpAllList')!.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const row = t.closest<HTMLElement>('.mnp-row[data-id]');
+    if (!row) return;
+    const id = row.dataset.id!;
+    if (allPicked) {
+      if (allPicked.has(id)) allPicked.delete(id);
+      else allPicked.add(id);
+      return paintAll();
+    }
+    const s = sessions.find((x) => x.id === id);
+    const more = t.closest<HTMLElement>('[data-more]');
+    if (more) {
+      if (s) rowMenu(s, more);
+      return;
+    }
+    allPushed = false;
+    closeMnemoAll(id, true);
+    showAll(false);
+    void openChat(id);
+  });
+}
+
 function bucket(s: A.Session): string {
   if (s.pinned) return 'Pinned';
   const d = new Date(s.updated_at * 1000);
   const now = new Date();
   const day = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = (day(now) - day(d)) / 86_400_000;
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
   if (diff < 1) return 'Today';
   if (diff < 2) return 'Yesterday';
-  if (diff < 7) return 'This week';
-  if (diff < 31) return 'This month';
-  return 'Older';
+  if (diff < 7) return 'Previous 7 days';
+  if (diff < 30) return 'Previous 30 days';
+  // Older chats by month: "October", or "October 2025" in an earlier year.
+  const month = d.toLocaleString('en-US', { month: 'long' });
+  return d.getFullYear() === now.getFullYear() ? month : `${month} ${d.getFullYear()}`;
 }
 
 /** `text` with each word of the query marked. */
@@ -675,9 +1067,12 @@ function marked(text: string, q: string): string {
   return out;
 }
 
-/** A chat's title, with the prefix of note tasks shown as a tag. */
-function titleHTML(t: string, q = ''): string {
-  if (t.startsWith(A.NOTE_TASK_PREFIX)) return `<span class="mnp-tag" title="Asked with @mnemo in a note">@ note</span>${marked(t.slice(A.NOTE_TASK_PREFIX.length), q)}`;
+/** A chat's title; a chat asked with @mnemo in a note gets a small @ (the note's path as its tip). */
+function titleHTML(t: string, q = '', scope = ''): string {
+  if (t.startsWith(A.NOTE_TASK_PREFIX)) {
+    const tip = scope.startsWith('note:') ? scope.slice(5) : 'Asked with @mnemo in a note';
+    return `<span class="mnp-at" title="${attr(tip)}" aria-label="${attr('From a note: ' + tip)}">@</span>${marked(t.slice(A.NOTE_TASK_PREFIX.length), q)}`;
+  }
   return marked(t, q);
 }
 
@@ -699,8 +1094,7 @@ function paintFound(list: HTMLElement): boolean {
     const s = sessions.find((x) => x.id === id);
     const h0 = found.hits.find((h) => h.chat === id)!;
     html += `<div class="mnp-row mnp-res" data-id="${attr(id)}" role="button" tabindex="0">
-      <span class="mnp-row-ic">${icon(h0.scope.startsWith('note:') ? 'note' : 'chat')}</span>
-      <span class="mnp-row-t"><b>${titleHTML(s?.title || h0.title, query)}</b><small>${esc(relTs(s?.updated_at || h0.at))}</small></span></div>`;
+      <span class="mnp-row-t"><b>${titleHTML(s?.title || h0.title, query, s?.scope || h0.scope)}</b><small>${esc(relTs(s?.updated_at || h0.at))}</small></span></div>`;
     for (const h of hits.slice(0, 3)) {
       html += `<button type="button" class="mnp-hit" data-id="${attr(id)}" data-mid="${h.message_id}"><em>${h.role === 'user' ? 'You' : A.MNEMO}</em>${marked(h.snippet, query)}</button>`;
     }
@@ -715,42 +1109,55 @@ function paintList(): void {
   if (!list) return;
   paintSelBar();
   if (query.length >= 2 && paintFound(list)) return;
-  const shown = sessions
-    .filter((s) => !query || s.title.toLowerCase().includes(query) || A.scopeLabel(s.scope).toLowerCase().includes(query))
+  // Archived chats stay out of the list (search still finds them); the newest few show.
+  paintChips();
+  const cnt = root?.querySelector('#mnpCount');
+  if (cnt) cnt.textContent = String(sessions.filter((x) => !x.archived).length || '');
+  const kind = (s: A.Session): boolean => listFilter === 'all' || (listFilter === 'notes' ? fromNote(s) : !fromNote(s));
+  const matching = sessions
+    .filter((s) => (query ? s.title.toLowerCase().includes(query) || A.scopeLabel(s.scope).toLowerCase().includes(query) : !s.archived && kind(s)))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated_at - a.updated_at);
+  // Pinned chats always show, apart; then the newest others.
+  const shown = query || picked ? matching : [...matching.filter((x) => x.pinned), ...matching.filter((x) => !x.pinned).slice(0, RECENT)];
+  const allRow = sessions.length
+    ? `<button type="button" class="mnp-allrow" data-allchats>${icon('chat')}<span>View all chats</span><small>${sessions.length}</small>${icon('chev')}</button>`
+    : '';
+  paintAll();
   if (!shown.length) {
-    list.innerHTML = `<p class="mnp-none">${query ? 'No chat matches.' : `No chats yet. Ask ${A.MNEMO} something to start one.`}</p>`;
+    list.innerHTML = `<p class="mnp-none">${query ? 'No chat matches.' : sessions.length ? 'Every chat is archived.' : `No chats yet. Ask ${A.MNEMO} something to start one.`}</p>${query ? '' : allRow}`;
     return;
   }
   const cur = chat?.session?.id;
-  let html = '';
+  // Pinned chats sit in their own block; the rest fall under a divider per time span.
+  const pins = shown.filter((x) => x.pinned);
+  const rest = shown.filter((x) => !x.pinned);
+  const open = pinsOpen() || !!query;
+  // Pinned chats: their own list above the others.
+  let html = pins.length
+    ? `<section class="mnp-pins${open ? '' : ' shut'}" aria-label="Pinned chats"><button type="button" class="mnp-g pin" data-pins aria-expanded="${open}"><span>Pinned</span><small>${pins.length}</small>${icon('chev-down', 'i mnp-g-chev')}</button>${
+        !open ? '' : pins.map((s) => rowHTML(s, cur, picked ? picked.has(s.id) : null)).join('')
+      }</section>`
+    : '';
   let last = '';
-  for (const s of shown) {
+  for (const s of rest) {
     const b = bucket(s);
     if (b !== last) {
-      html += `<div class="mnp-g">${esc(b)}</div>`;
+      html += `<div class="mnp-g" role="separator"><span>${esc(b)}</span></div>`;
       last = b;
     }
-    const ic = s.scope.startsWith('note:') ? 'note' : s.scope.startsWith('folder:') ? 'folder' : 'chat';
-    const news = s.running || s.id === cur ? 0 : unreadOf(s);
-    const sel = picked ? picked.has(s.id) : false;
-    html += `<div class="mnp-row${s.id === cur && !picked ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}${sel ? ' sel' : ''}" data-id="${attr(s.id)}" role="${picked ? 'checkbox' : 'button'}" tabindex="0"${
-      picked ? ` aria-checked="${sel}"` : ` aria-current="${s.id === cur}"`
-    }>
-      ${picked ? `<span class="mnp-check" aria-hidden="true">${sel ? icon('check') : ''}</span>` : ''}<span class="mnp-row-ic">${s.running ? `<i class="mnp-spin" title="${A.MNEMO} is working on this"></i>` : icon(ic)}</span>
-      <span class="mnp-row-t"><b>${titleHTML(s.title)}</b><small>${esc(A.scopeLabel(s.scope))} · ${esc(relTs(s.updated_at))}</small></span>
-      ${news ? `<span class="mnp-newn" title="${news} new message${news === 1 ? '' : 's'}" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}
-      ${picked ? '' : `<button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button>`}</div>`;
+    html += rowHTML(s, cur, picked ? picked.has(s.id) : null);
   }
-  list.innerHTML = html;
-  list.querySelectorAll<HTMLElement>('.mnp-row').forEach((r) => {
-    r.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        r.click();
-      }
-    };
+  list.innerHTML = html + (query || picked ? '' : allRow);
+  list.querySelector<HTMLElement>('[data-pins]')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    try {
+      localStorage.setItem(LS_PINS, pinsOpen() ? '0' : '1');
+    } catch {
+      /* stays as it is */
+    }
+    paintList();
   });
+  rowKeys(list);
 }
 
 function paintHead(): void {
@@ -783,7 +1190,8 @@ function paintHead(): void {
 
 /** The ⋯ in the header: this chat's actions (once it has started), the chat list and settings. */
 function headMenu(at: HTMLElement): void {
-  const s = chat?.session;
+  const s0 = chat?.session;
+  const s = s0 ? (sessions.find((x) => x.id === s0.id) ?? s0) : s0;
   openMenu(
     [
       ...(s
@@ -796,18 +1204,16 @@ function headMenu(at: HTMLElement): void {
         disabled: !s,
         run: () => s && void A.updateSession(s.id, { pinned: !s.pinned }).then((r) => afterUpdate(r.session), fail),
       },
+      {
+        label: s?.archived ? 'Unarchive' : 'Archive',
+        icon: icon('archive', 'vx-i'),
+        disabled: !s,
+        run: () => s && void setArchived(s, !s.archived),
+      },
       ...exportItems(s),
       { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: !!s, disabled: !s, run: () => s && askDelete(s) },
       { sep: true, label: '' },
-      {
-        label: 'All chats',
-        icon: icon('chat', 'vx-i'),
-        run: () => {
-          if (isNarrow()) root?.classList.add('side-open');
-          else setPane('side', true);
-          root?.querySelector<HTMLInputElement>('#mnpQ')?.focus();
-        },
-      },
+      { label: 'All chats', icon: icon('chat', 'vx-i'), run: () => showAll(true, true) },
       { label: 'Select chats', icon: icon('check', 'vx-i'), run: () => select(new Set()) },
       { label: 'Clean up chats…', icon: icon('trash', 'vx-i'), run: () => cleanUp() },
       { label: `${A.MNEMO} activity`, icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
@@ -861,8 +1267,18 @@ function rowMenu(s: A.Session, at: HTMLElement): void {
         icon: icon('pin', 'vx-i'),
         run: () => void A.updateSession(s.id, { pinned: !s.pinned }).then((r) => afterUpdate(r.session), fail),
       },
+      { label: s.archived ? 'Unarchive' : 'Archive', icon: icon('archive', 'vx-i'), run: () => void setArchived(s, !s.archived) },
       ...exportItems(s),
-      { label: 'Select', icon: icon('check', 'vx-i'), run: () => select(new Set([s.id])) },
+      {
+        label: 'Select',
+        icon: icon('check', 'vx-i'),
+        run: () => {
+          if (root?.classList.contains('all-open')) {
+            allPicked = new Set([s.id]);
+            paintAll();
+          } else select(new Set([s.id]));
+        },
+      },
       { sep: true, label: '' },
       { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: true, run: () => askDelete(s) },
     ],
@@ -1066,7 +1482,7 @@ const PAGE_CSS = `
 :root.mn-pv-split:not(.mn-pv-roomy) .mnp{--sw:0px}
 :root.mn-pv-split:not(.mn-pv-roomy) .mnp-side{visibility:hidden}
 :root.mn-pv-split .mnp{--aw:0px}
-:root.mn-pv-split .mnp-art,:root.mn-pv-split .mnp-ascrim{visibility:hidden}
+:root.mn-pv-split .mnp-art,:root.mn-pv-split .mnp-agp,:root.mn-pv-split .mnp-ascrim{visibility:hidden}
 :root.mn-pv-split:not(.mn-pv-roomy) .mnp .mnp-lists{display:inline-grid}
 .mnp-hsep{width:1px;height:20px;margin:0 4px;background:var(--line)}
 .mnp-close .i{width:18px;height:18px;stroke-width:2}
@@ -1115,7 +1531,46 @@ const PAGE_CSS = `
   .mnp-ascrim{display:block;position:absolute;inset:0;z-index:5;background:var(--scrim,rgba(15,23,42,.3));opacity:0;pointer-events:none;transition:opacity .2s}
   .mnp.art-open .mnp-ascrim{opacity:1;pointer-events:auto}
 }
-.mnp-side{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:color-mix(in srgb,var(--surface-1,var(--panel)) 60%,transparent)}
+/* Agents: a side panel in the place of "In this chat" on wide screens, a full-screen sheet on
+   tablets and phones. */
+.mnp-agbtn{position:relative}
+.mnp-agbtn.run{color:var(--accent)}
+.mnp.ag-open .mnp-agbtn{color:var(--accent);background:var(--accent-soft)}
+.mnp-agn{position:absolute;top:-3px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;font-size:10px;font-weight:700;line-height:16px;text-align:center;
+  color:var(--on-accent,#fff);background:var(--accent)}
+.mnp-agn[hidden]{display:none}
+.mnp.ag-open{--aw:380px}
+/* One row only: the list, the chat and one side pane (In this chat or Agents, stacked in the
+   same cell). Anything left to auto-placement would open a second row and halve the page. */
+@media (min-width:761px){
+  .mnp>.mnp-side{grid-column:1;grid-row:1}
+  .mnp>.mnp-main{grid-column:2;grid-row:1}
+  .mnp>.mnp-art{grid-column:3;grid-row:1}
+}
+.mnp{grid-template-rows:minmax(0,1fr)}
+.mnp-agp{grid-column:3;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border-left:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface-1,var(--panel)) 60%,transparent)}
+.mnp:not(.ag-open) .mnp-agp{visibility:hidden}
+.mnp-agp .mnp-art-h{justify-content:flex-start}
+.mnp-agp .mnp-art-h small{min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-agp-b{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.mnp-agp-b>.mn-agents{padding-bottom:24px}
+@media (max-width:1099px){
+  .mnp.ag-open{--aw:0px}
+  .mnp-agp{position:absolute;inset:0;z-index:8;border-left:0;background:var(--surface-0,var(--bg));visibility:hidden;transform:translateY(100%);
+    transition:transform .28s var(--ease-out,ease-out),visibility 0s linear .28s}
+  .mnp.ag-open .mnp-agp{visibility:visible;transform:none;transition:transform .28s var(--ease-out,ease-out)}
+  .mnp-agp-b>.mn-agents{max-width:760px;margin:0 auto;padding:14px 16px 32px}
+}
+@media (max-width:760px){
+  .mnp-agp{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  .mnp-agp .mnp-art-h{min-height:50px;padding:6px 8px 6px 16px}
+  .mnp-agp .mnp-art-h .mn-ibtn{width:40px;height:40px}
+  .mnp-agp .mnp-art-h .mn-ibtn .i{width:19px;height:19px}
+  .mnp-agp-b>.mn-agents{padding:12px 12px 28px}
+}
+@media (prefers-reduced-motion:reduce){.mnp-agp{transition:none!important}}
+.mnp-side{--side-bg:color-mix(in srgb,var(--surface-1,var(--panel)) 60%,var(--bg));display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--side-bg)}
 .mnp-brand{display:flex;align-items:center;gap:10px;padding:16px 14px 12px 16px}
 .mnp-bt{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
 .mnp-bt b{font-size:15px;font-weight:680;letter-spacing:-.01em}.mnp-bt small{font-size:12px;color:var(--muted)}
@@ -1126,17 +1581,20 @@ const PAGE_CSS = `
   color:var(--text-2,var(--fg));cursor:pointer;transition:background .15s,border-color .15s}
 .mnp-fold:hover,.mnp-manage:hover{background:var(--hover);border-color:var(--line-strong);color:var(--fg)}
 .mnp-fold .i,.mnp-manage .i{width:17px;height:17px;stroke-width:1.9}
-.mnp-newrow{display:flex;align-items:center;gap:8px;margin:0 12px 10px;padding:0 12px;height:38px;border-radius:10px;border:1px solid var(--line-strong);
-  background:var(--surface-0,var(--bg));color:var(--fg);font:inherit;font-size:13.5px;font-weight:560;cursor:pointer;transition:background .15s,border-color .15s}
-.mnp-newrow:hover{background:var(--hover)}
-.mnp-newrow .i{width:16px;height:16px;stroke-width:2.1}
-/* Wide screens: fold button where + was, New chat under the search, the header button only
-   to bring a folded list back. Phones keep + in the list and the header button. */
+.mnp-newrow{display:flex;align-items:center;justify-content:center;gap:7px;margin:0 12px 8px;padding:0 12px;height:36px;border-radius:10px;border:1px solid transparent;
+  background:var(--accent);color:var(--accent-fg,var(--on-accent,#fff));font:inherit;font-size:13.5px;font-weight:620;cursor:pointer;transition:background .15s,transform .15s}
+.mnp-newrow:hover{background:color-mix(in srgb,var(--accent) 88%,var(--fg))}
+.mnp-newrow:active{transform:scale(.985)}
+.mnp-newrow:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mnp-newrow .i{width:16px;height:16px;stroke-width:2.3}
+.mnp-grow{flex:1}
+/* Wide screens: the header button only brings a folded list back. */
 @media (min-width:761px){
-  .mnp-new{display:none!important}
   .mnp:not(.side-closed) .mnp-lists{display:none}
 }
-@media (max-width:760px){.mnp-fold,.mnp-newrow{display:none}}
+/* New chat is the filled button above the search on every screen. */
+.mnp-new{display:none!important}
+@media (max-width:760px){.mnp-fold{display:none}}
 .mnp-theme{display:flex;gap:2px;padding:3px;border-radius:11px;background:var(--seg-track,color-mix(in srgb,var(--fg) 6%,transparent))}
 .mnp-theme button{flex:1 1 0;display:flex;align-items:center;justify-content:center;gap:6px;min-width:0;height:34px;padding:0 6px;border:0;border-radius:8px;background:none;color:var(--muted);
   font:inherit;font-size:13px;cursor:pointer;transition:background .15s,color .15s}
@@ -1145,19 +1603,12 @@ const PAGE_CSS = `
 .mnp-theme button.on{background:var(--seg-thumb,var(--surface-1,#fff));color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.12)}
 .mnp-bgsw{--bgz:7px;display:inline-block;flex:none;width:24px;height:24px;border-radius:7px;border:1px solid var(--line-strong);background-color:var(--bg)}
 .mnp-bgsw.big{--bgz:12px;width:100%;height:46px;border-radius:10px;filter:saturate(1.9) contrast(1.06)}
-/* The chat list's foot: Appearance as one wide button, then Activity, Settings and Memora. */
-.mnp-sfoot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:8px 8px 10px;border-top:1px solid var(--line)}
-.mnp-look-btn{grid-column:1/-1;display:flex;align-items:center;gap:10px;width:100%;height:46px;margin-bottom:4px;padding:0 12px;border:1px solid var(--line);border-radius:12px;
-  background:var(--surface-1,var(--panel));color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:background .15s,border-color .15s;-webkit-tap-highlight-color:transparent}
-.mnp-look-btn:hover,.mnp-look-btn[aria-expanded=true]{background:var(--hover);border-color:var(--line-strong)}
-.mnp-look-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.mnp-look-btn>.i{width:18px;height:18px;flex:none;color:var(--muted)}
-.mnp-look-btn>.i:last-child{width:15px;height:15px;transform:rotate(180deg);transition:transform .2s}
-.mnp-look-btn[aria-expanded=true]>.i:last-child{transform:none}
-.mnp-look-btn>span{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
-.mnp-look-btn b{font-size:13.5px;font-weight:600}
-.mnp-look-btn small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mnp-sfoot .mnp-set{flex-direction:column;justify-content:center;gap:4px;height:54px;padding:0 2px;font-size:11.5px;font-weight:550;text-align:center;border-radius:12px;color:var(--muted)}
+/* The chat list's foot: one row of four, Appearance (with a swatch of the backdrop) first. */
+.mnp-sfoot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:6px 6px 8px;border-top:1px solid var(--line)}
+.mnp-sfoot .mnp-set{flex-direction:column;justify-content:center;gap:4px;height:50px;padding:0 2px;font-size:11px;font-weight:550;text-align:center;border-radius:10px;color:var(--muted)}
+.mnp-sfoot .mnp-look-btn .mnp-bgsw{display:none}
+.mnp-sfoot .mnp-look-btn .i{color:var(--accent)}
+.mnp-sfoot .mnp-look-btn[aria-expanded=true]{background:var(--hover);color:var(--fg)}
 .mnp-sfoot .mnp-set .i{width:19px;height:19px}
 .mnp-sfoot .mnp-set span{max-width:100%;line-height:1.2}
 .mnp-sfoot .mnp-set:hover{color:var(--fg)}
@@ -1171,6 +1622,8 @@ const PAGE_CSS = `
 .mnp-look-l{display:block;margin:12px 2px 7px;font-size:11.5px;font-weight:650;letter-spacing:.02em;color:var(--muted)}
 .mnp-look-h+.mnp-look-l{margin-top:4px}
 .mnp-look-fs .mn-fs{display:flex;width:100%}
+/* Phones always use the full width: the choice is not offered there. */
+@media (max-width:640px){.mnp-look-wl,.mnp-look-w{display:none}}
 .mnp-look-fs .mn-fs button{flex:1 1 0}
 .mnp-look.sheet{left:0;right:0;bottom:0;width:auto;max-height:86dvh;overflow:auto;padding:4px 16px calc(16px + env(safe-area-inset-bottom,0px));border-bottom:0;border-radius:20px 20px 0 0;transform:translateY(100%);
   transition:transform .28s var(--ease-out,ease-out)}
@@ -1221,22 +1674,57 @@ const PAGE_CSS = `
 .mnp[data-bg=waves] .mnp-chat,.mnp-bgsw[data-bg=waves]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='120' viewBox='0 0 240 120' fill='none' stroke='%238a94a6' stroke-opacity='.22'%3E%3Cpath d='M0 20c40-16 80 16 120 0s80-16 120 0M0 50c40-16 80 16 120 0s80-16 120 0M0 80c40-16 80 16 120 0s80-16 120 0M0 110c40-16 80 16 120 0s80-16 120 0'/%3E%3C/svg%3E"),radial-gradient(60% 45% at 50% -10%,color-mix(in srgb,var(--accent) calc(8% * var(--bgk,1)),transparent),transparent 70%);background-size:240px 120px,auto}
 .mnp-bgsw[data-bg=waves]{background-size:80px 40px,auto}
 .mnp[data-bg=grain] .mnp-chat,.mnp-bgsw[data-bg=grain]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),radial-gradient(60% 50% at 15% -8%,color-mix(in srgb,var(--accent) calc(10% * var(--bgk,1)),transparent),transparent 70%)}
-.mnp-q{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:0 10px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface-0,var(--bg))}
-.mnp-q:focus-within{border-color:var(--accent-line,var(--accent))}
-.mnp-q .i{width:15px;height:15px;flex:none;color:var(--muted)}
+.mnp-q{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:0 11px;height:38px;border-radius:10px;border:1px solid var(--line-strong);background:var(--field-bg,var(--surface-0,var(--bg)));
+  transition:border-color .15s,box-shadow .15s}
+.mnp-q:hover{border-color:color-mix(in srgb,var(--fg) 26%,transparent)}
+.mnp-q:focus-within{border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft)}
+.mnp-q .i{width:16px;height:16px;flex:none;color:var(--text-2,var(--fg));opacity:.8}
 .mnp-q input{flex:1;min-width:0;border:0;outline:0;background:none;box-shadow:none;padding:0;font:inherit;font-size:13.5px;color:var(--fg)}
-.mnp-list{flex:1;min-height:0;overflow-y:auto;padding:2px 8px 12px}
-.mnp-g{padding:12px 8px 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
-.mnp-row{display:flex;align-items:center;gap:10px;padding:7px 4px 7px 8px;border-radius:10px;cursor:pointer;color:var(--fg);transition:background .12s}
+.mnp-q input::placeholder{color:var(--text-2,var(--fg));opacity:.7}
+@media (max-width:760px){.mnp-q input{font-size:16px}}
+.mnp-list{flex:1;min-height:0;overflow-y:auto;padding:0 8px 12px}
+/* Show: All, Chats, From notes. */
+.mnp-chips{display:flex;gap:4px;margin:0 12px 6px;overflow-x:auto;scrollbar-width:none}
+.mnp-chips[hidden]{display:none}
+.mnp-chip{flex:none;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:none;color:var(--muted);
+  font:inherit;font-size:12px;font-weight:550;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.mnp-chip small{font-size:11px;opacity:.75;font-variant-numeric:tabular-nums}
+.mnp-chip:hover{color:var(--fg);border-color:var(--line-strong)}
+.mnp-chip.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.mnp-g{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:6px;width:100%;margin:6px 0 1px;padding:9px 8px 5px;border:0;
+  font:inherit;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;text-align:left;color:var(--muted);
+  background:var(--side-bg,var(--bg))}
+.mnp-g::after{display:none}
+button.mnp-g{cursor:pointer}
+button.mnp-g:hover{color:var(--fg)}
+.mnp-g-chev{width:12px!important;height:12px!important;color:var(--muted)!important;transition:transform .15s}
+.mnp-pins.shut .mnp-g-chev{transform:rotate(-90deg)}
+.mnp-g.pin{color:var(--text-2,var(--fg))}
+.mnp-g.pin::after{display:none}
+.mnp-g.pin{padding-bottom:3px}
+.mnp-g.pin .i{width:13px;height:13px;color:var(--accent)}
+.mnp-g.pin small,.mnp-g.head small{margin-left:auto;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.mnp-g.head{font-size:12.5px;color:var(--fg)}
+.mnp-g.head::after,summary.mnp-g::after{display:none}
+.mnp-g.head .i{width:13px;height:13px;color:var(--accent)}
+.mnp-g.mnp-day{padding-top:10px}
+/* Pinned chats: a block of their own, set apart from the dated list under it. */
+.mnp-pins{margin:0 0 2px}
+.mnp-row{position:relative;display:flex;align-items:center;gap:8px;min-height:34px;padding:5px 4px 5px 10px;border-radius:9px;cursor:pointer;color:var(--text-2,var(--fg));transition:background .12s,color .12s}
+.mnp-row:hover{color:var(--fg)}
+.mnp-row.on{color:var(--fg)}
+.mnp-row.on::before{content:"";position:absolute;left:2px;top:9px;bottom:9px;width:3px;border-radius:3px;background:var(--accent)}
+.mnp-row-ts{flex:none;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mnp-row.unread .mnp-row-ts{color:var(--accent);font-weight:600}
+@media (hover:hover){.mnp-row:hover .mnp-row-ts,.mnp-row.on .mnp-row-ts{display:none}}
+.mnp.selecting .mnp-row-ts{display:none}
 .mnp-row:hover{background:var(--hover)}
 .mnp-row.on{background:color-mix(in srgb,var(--accent) 11%,transparent)}
 .mnp-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.mnp-row-ic{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:8px;color:var(--muted);background:color-mix(in srgb,var(--fg) 5%,transparent)}
-.mnp-row.on .mnp-row-ic{color:var(--accent);background:var(--accent-soft)}
-.mnp-row-ic .i{width:15px;height:15px}
 .mnp-row-t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
-.mnp-row-t b{font-size:13.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mnp-row.unread .mnp-row-t b{font-weight:700;color:var(--fg)}
+.mnp-row-t b{font-size:13.5px;font-weight:450;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-row.on .mnp-row-t b{font-weight:600}
+.mnp-row.unread .mnp-row-t b{font-weight:650;color:var(--fg)}
 .mnp-selbar{display:flex;align-items:center;gap:6px;margin:4px 10px 6px;padding:6px 6px 6px 12px;border-radius:12px;border:1px solid var(--accent-line,var(--line-strong));background:var(--accent-soft,var(--hover))}
 .mnp-selbar[hidden]{display:none}
 .mnp-seln{flex:1;min-width:0;font-size:12.5px;font-weight:650}
@@ -1249,13 +1737,10 @@ const PAGE_CSS = `
 .mnp-check .i{width:12px;height:12px;stroke-width:3}
 .mnp-row.sel{background:var(--accent-soft,var(--hover))}
 .mnp-row.sel .mnp-check{background:var(--accent);border-color:var(--accent)}
-.mnp.selecting .mnp-row-ic{display:none}
-.mnp-fleet[aria-pressed=true]{background:color-mix(in srgb,#8b5cf6 16%,transparent);color:#8b5cf6;box-shadow:inset 0 0 0 1px color-mix(in srgb,#8b5cf6 45%,transparent)}
-.mnp.fleeting .mnp-head{--fg:#ece9f5;--muted:#9a94b0;--line:rgba(167,139,250,.15);--hover:rgba(167,139,250,.10);color-scheme:dark;color:var(--fg);background:#13111c}
-.mnp.fleeting .mnp-head :is(button,a){color:#c4bfd6}
-.mnp.fleeting #mnpTitle{color:#ddd6fe}
-.mnp.fleeting #mnpSub{color:#9a94b0}
-.mnp.fleeting .mnp-fleet[aria-pressed=true]{background:rgba(167,139,250,.2);color:#ddd6fe}
+.mnp-fleet[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.mnp-fleet[aria-pressed=true]:hover{background:color-mix(in srgb,var(--fg) 85%,transparent);color:var(--bg)}
+.mnp.fleeting .mnp-head{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--fg) 4%,transparent) 0 6px,transparent 6px 12px)}
+.mnp.fleeting #mnpTitle{color:var(--fg)}
 .mnp-art-ic.k-page{background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff}
 .mnp-clean-o{display:flex;flex-direction:column;gap:6px}
 .mnp-clean-r{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
@@ -1269,8 +1754,10 @@ const PAGE_CSS = `
 .mnp-row.unread:hover .mnp-newn,.mnp-row.unread:focus-within .mnp-newn{display:none}
 .mnp-row-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-more{opacity:0}.mnp-row:hover .mnp-row-more,.mnp-row.on .mnp-row-more,.mnp-row-more:focus-visible{opacity:1}
+/* The menu takes no room until it is wanted (the time shows there instead). */
+@media (hover:hover){.mnp-row-more{display:none}.mnp-row:hover .mnp-row-more,.mnp-row.on .mnp-row-more,.mnp-row:focus-within .mnp-row-more{display:grid}}
 /* Touch screens have no hover: the ⋯ is always there (iOS would spend the first tap on a hover). */
-@media (hover:none){.mnp-row-more{opacity:.7}}
+@media (hover:none){.mnp-row-more{opacity:.38}.mnp-row.on .mnp-row-more{opacity:.8}}
 .mnp-none{margin:0;padding:18px 10px;font-size:13px;color:var(--muted);line-height:1.5}
 .mnp-set{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:10px;background:none;color:var(--text-2,var(--fg));font:inherit;font-size:13.5px;cursor:pointer;
   white-space:nowrap;text-align:left;outline:none;-webkit-tap-highlight-color:transparent}
@@ -1290,8 +1777,10 @@ const PAGE_CSS = `
 .mnp-spin{display:block;width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:mnpSpin .8s linear infinite}
 @keyframes mnpSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.mnp-spin{animation-duration:2.4s}}
-.mnp-tag{display:inline-flex;align-items:center;height:17px;margin-right:6px;padding:0 6px;border-radius:99px;font-size:10.5px;font-weight:650;vertical-align:1px;
-  color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line,transparent)}
+.mnp-at{display:inline-block;margin-right:5px;padding:0 4px;border-radius:5px;font:600 11px/16px var(--mono);color:var(--muted);vertical-align:1px;
+  background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mnp-row-run{display:grid;place-items:center;flex:none;width:18px;height:18px}
+.mnp.selecting .mnp-row-run{display:none}
 .mnp-list mark{background:color-mix(in srgb,var(--accent) 26%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .mnp-hit{display:flex;gap:6px;width:calc(100% - 12px);margin:0 0 2px 12px;padding:6px 10px 6px 30px;border:0;border-radius:9px;background:none;color:var(--text-2,var(--fg));
   font:inherit;font-size:12.5px;line-height:1.45;text-align:left;cursor:pointer;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -1305,7 +1794,11 @@ const PAGE_CSS = `
 @media (max-width:760px){.mnp-act{padding:12px 12px 24px}}
 .mnp-scrim{display:none}
 .mnp-ren-l{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
-.mnp-ren-l input{height:40px}
+.mnp-ren-l input{width:100%;height:42px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--field-bg,var(--surface-0,var(--bg)));color:var(--fg);
+  font:inherit;font-size:14px;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
+.mnp-ren-l input:hover{border-color:color-mix(in srgb,var(--fg) 26%,transparent)}
+.mnp-ren-l input:focus{outline:none;border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft)}
+@media (max-width:640px){.mnp-ren-l input{font-size:16px}}
 @media (max-width:900px){.mnp{--sw:240px}.mnp.side-closed{--sw:0px}}
 @media (max-width:760px){
   .mnp,.mnp.side-closed{grid-template-columns:minmax(0,1fr)}
@@ -1322,4 +1815,138 @@ const PAGE_CSS = `
   .mnp-lists .i{width:20px;height:20px}
   .mnp-head{padding:6px 8px 6px 8px;min-height:50px}
 }
+
+/* The last row of the side list: every chat, on its own page. */
+.mnp-allrow{display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;padding:9px 8px;border:0;border-top:1px solid var(--line);border-radius:0;background:none;color:var(--text-2,var(--fg));
+  font:inherit;font-size:13px;font-weight:560;text-align:left;cursor:pointer}
+.mnp-allrow:hover,.mnp-allrow:focus-visible{background:var(--hover);border-radius:10px;outline:none}
+.mnp-allrow span{flex:1}
+.mnp-allrow small{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mnp-allrow .i{width:15px;height:15px;flex:none;color:var(--muted)}
+/* All chats (/mnemo/chats): over the whole Mnemo page. */
+.mnp-all{position:absolute;inset:0;z-index:30;overflow-y:auto;background:var(--bg)}
+.mnp-all[hidden]{display:none}
+.mnp-all-in{max-width:760px;margin:0 auto;padding:16px 20px 40px}
+.mnp-all-h{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;margin:0 -4px 10px;padding:6px 4px;background:var(--bg)}
+.mnp-all-h b{font-size:17px;font-weight:680;letter-spacing:-.01em}
+.mnp-all-h .mn-ibtn{width:36px;height:36px}
+.mnp-all-h .mn-ibtn .i{width:19px;height:19px}
+.mnp-all-q{margin:0 0 10px}
+.mnp-all-bar{margin:0 0 10px}
+.mnp-all-g{margin-bottom:10px}
+.mnp-all-g .mnp-g span{margin-left:4px;font-weight:500;opacity:.8}
+.mnp-all-arch>summary{display:flex;align-items:center;gap:4px;list-style:none;cursor:pointer;border-radius:8px}
+.mnp-all-arch>summary::-webkit-details-marker{display:none}
+.mnp-all-arch>summary:hover{color:var(--fg)}
+.mnp-all-chev{width:13px;height:13px;transition:transform .15s}
+.mnp-all-arch[open] .mnp-all-chev{transform:rotate(90deg)}
+.mnp-all .mnp-row{padding:9px 6px 9px 10px}
+.mnp-all .mnp-row-more{opacity:1}
+@media (hover:hover){.mnp-all .mnp-row-more{display:grid}}
+@media (max-width:760px){.mnp-all{position:fixed;z-index:60}.mnp-all-in{padding:10px 14px calc(28px + env(safe-area-inset-bottom,0px))}}
+@media (prefers-reduced-motion:reduce){.mnp-all-chev{transition:none}}
+/* ===== Chat list, 2.2: an icon rail for actions, then the chats (pinned tiles, rows that read
+   like conversations: a coloured tile, the title and its time, a line of the last message). ===== */
+.mnp{--sw:328px}
+@media (max-width:900px){.mnp{--sw:300px}}
+.mnp.side-closed{--sw:0px}
+.mnp-side{--side-bg:var(--surface-0,var(--bg));display:grid;grid-template-columns:52px minmax(0,1fr);background:var(--side-bg)}
+.mnp-rail{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0 10px;border-right:1px solid var(--line);
+  background:color-mix(in srgb,var(--fg) 2.5%,var(--side-bg))}
+.mnp-rail-mark{display:grid;place-items:center;margin-bottom:8px}
+.mnp-rail-mark .mn-mark{--s:30px}
+.mnp-rb,.mnp-rb-new{position:relative;display:grid;place-items:center;width:38px;height:38px;padding:0;border:0;border-radius:11px;background:none;color:var(--muted);
+  cursor:pointer;transition:background .14s,color .14s,transform .14s}
+.mnp-rb .i,.mnp-rb-new .i{width:19px;height:19px;stroke-width:1.9}
+.mnp-rb:hover{background:var(--hover);color:var(--fg)}
+.mnp-rb.on,.mnp-rb[aria-expanded=true]{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.mnp-rb:focus-visible,.mnp-rb-new:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.mnp-rb-new{margin-bottom:6px;background:var(--accent);color:var(--accent-fg,#fff);box-shadow:0 6px 16px -8px color-mix(in srgb,var(--accent) 80%,transparent)}
+.mnp-rb-new .i{stroke-width:2.4}
+.mnp-rb-new:hover{transform:translateY(-1px);background:color-mix(in srgb,var(--accent) 88%,var(--fg))}
+.mnp-rb.mnp-look-btn{color:var(--accent)}
+.mnp-rb .mnp-bgsw{display:none}
+.mnp-panel{display:flex;flex-direction:column;min-width:0;min-height:0}
+.mnp-ph{display:flex;align-items:center;gap:8px;padding:16px 10px 10px 16px}
+.mnp-ph b{font-size:17px;font-weight:700;letter-spacing:-.015em}
+.mnp-ph small{font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.mnp-ph .mnp-manage{width:32px;height:32px;border:0;background:none}
+.mnp-ph .mnp-manage:hover{background:var(--hover)}
+.mnp-panel .mnp-q{margin:0 12px 10px;height:36px;border:0;border-radius:10px;background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.mnp-panel .mnp-q:focus-within{background:var(--side-bg);box-shadow:0 0 0 1.5px var(--accent-line,var(--accent)),0 0 0 4px var(--accent-soft)}
+.mnp-panel .mnp-q input::placeholder{color:var(--muted);opacity:1}
+.mnp-chips{display:flex;gap:2px;margin:0 12px 6px;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.mnp-chip{flex:1 1 0;justify-content:center;height:26px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--muted);font-size:12px}
+.mnp-chip:hover{color:var(--fg)}
+.mnp-chip.on{background:var(--side-bg);color:var(--fg);border:0;box-shadow:0 1px 2px rgba(15,23,42,.14)}
+.mnp-panel .mnp-list{padding:0 8px 14px}
+.mnp-panel .mnp-g{position:sticky;top:0;z-index:2;margin:8px 0 2px;padding:8px 8px 4px;font-size:11.5px;font-weight:650;letter-spacing:0;text-transform:none;color:var(--muted);background:var(--side-bg)}
+.mnp-panel .mnp-g.pin{color:var(--muted)}
+.mnp-panel .mnp-g.pin small{margin-left:4px}
+.mnp-panel .mnp-g-chev{margin-left:auto}
+.mnp-panel .mnp-pins{margin:0 0 4px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+/* Pinned: tiles, three to a row. */
+.mnp-pin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:2px 2px 8px}
+.mnp-pin{position:relative;display:flex;align-items:center;gap:8px;min-width:0;min-height:52px;padding:8px 8px;border-radius:12px;cursor:pointer;
+  background:color-mix(in srgb,var(--fg) 3.5%,transparent);transition:background .14s,transform .14s}
+.mnp-pin:hover{background:var(--hover)}
+@media (hover:hover){.mnp-pin:hover,.mnp-pin:focus-within{padding-right:32px}}
+.mnp-pin.on{padding-right:32px;background:color-mix(in srgb,var(--accent) 13%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 45%,transparent)}
+.mnp-pin:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.mnp-pin-t{flex:1;min-width:0;font-size:12px;font-weight:600;line-height:1.3;text-align:left;color:var(--text-2,var(--fg));display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.mnp-pin.unread .mnp-pin-t{color:var(--fg);font-weight:700}
+.mnp-pin-dot{position:absolute;top:6px;left:6px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--side-bg)}
+.mnp-pin .mnp-row-more{position:absolute;top:50%;right:4px;width:26px;height:26px;transform:translateY(-50%);background:var(--side-bg)}
+/* Tiles: two initials on a soft tint of the chat's own colour. */
+.mnp-av{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:10px;font-size:12.5px;font-weight:700;letter-spacing:.02em;
+  background:hsl(var(--h) 70% 55% / .15);color:hsl(var(--h) 55% 36%)}
+:root:not([data-theme=light]) .mnp-av{background:hsl(var(--h) 60% 60% / .16);color:hsl(var(--h) 75% 74%)}
+.mnp-av.note{font-family:var(--mono,ui-monospace,monospace);font-size:15px}
+.mnp-av.big{width:32px;height:32px;border-radius:10px;font-size:12px}
+.mnp-av .mnp-spin{width:15px;height:15px}
+/* Rows: tile, title and time, then a line of the last message. */
+.mnp-panel .mnp-row{gap:8px;min-height:50px;padding:6px 6px 6px 10px;border-radius:11px;color:var(--fg)}
+.mnp-kind{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;color:var(--muted);background:color-mix(in srgb,var(--fg) 5.5%,transparent)}
+.mnp-kind .i{width:16px;height:16px;stroke-width:1.9}
+.mnp-kind.note{color:#0d9488;background:color-mix(in srgb,#14b8a6 13%,transparent)}
+:root:not([data-theme=light]) .mnp-kind.note{color:#5eead4}
+.mnp-kind.folder{color:#b45309;background:color-mix(in srgb,#f59e0b 14%,transparent)}
+:root:not([data-theme=light]) .mnp-kind.folder{color:#fbbf24}
+.mnp-row.on .mnp-kind.chat{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.mnp-kind .mnp-spin{width:14px;height:14px}
+.mnp-row-l1 .mnp-at{flex:none;margin:0;padding:0 4px;border-radius:5px;font:600 11px/16px var(--mono,ui-monospace,monospace);color:var(--muted);background:color-mix(in srgb,var(--fg) 7%,transparent)}
+.mnp-panel .mnp-row::before{display:none}
+.mnp-panel .mnp-row:hover{background:var(--hover)}
+.mnp-panel .mnp-row.on{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.mnp-panel .mnp-row-t{gap:2px}
+.mnp-row-l1,.mnp-row-l2{display:flex;align-items:center;gap:8px;min-width:0}
+.mnp-row-l1 b{flex:1;min-width:0;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-row-l2 small{flex:1;min-width:0;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mnp-row-l2 small em{font-style:normal;color:var(--text-2,var(--fg))}
+.mnp-panel .mnp-row-ts{font-size:11px}
+.mnp-panel .mnp-row.unread .mnp-row-l1 b{font-weight:750}
+.mnp-panel .mnp-row.unread .mnp-row-l2 small{color:var(--text-2,var(--fg))}
+.mnp-panel .mnp-newn{min-width:18px;height:18px;font-size:10.5px}
+.mnp-panel .mnp-row-more{align-self:center}
+@media (hover:hover){.mnp-panel .mnp-row:hover .mnp-row-ts{display:inline}.mnp-panel .mnp-row .mnp-row-more{display:none}.mnp-panel .mnp-row:hover .mnp-row-more,.mnp-panel .mnp-row:focus-within .mnp-row-more{display:grid}
+  .mnp-pin .mnp-row-more{display:none}.mnp-pin:hover .mnp-row-more,.mnp-pin:focus-within .mnp-row-more{display:grid}}
+@media (hover:none){.mnp-panel .mnp-row .mnp-row-more{display:none}.mnp-panel .mnp-row.on .mnp-row-more{display:grid;opacity:.8}.mnp-pin .mnp-row-more{display:none}.mnp-pin.on .mnp-row-more{display:grid}}
+.mnp-panel .mnp-allrow{margin-top:8px}
+/* Desktop: hiding the list keeps the rail; tablets and phones hide it all. */
+@media (min-width:1025px){
+  .mnp.side-closed{--sw:52px}
+  .mnp.side-closed .mnp-side{visibility:visible;grid-template-columns:52px 0}
+  .mnp.side-closed .mnp-panel{display:none}
+  .mnp.side-closed .mnp-rail{border-right:0;cursor:e-resize}
+  .mnp.side-closed .mnp-rail:hover{background:color-mix(in srgb,var(--fg) 4.5%,var(--side-bg))}
+  .mnp.side-closed .mnp-rail button{cursor:pointer}
+  .mnp .mnp-lists{display:none!important}
+  .mnp.side-closed .mnp-fold .i{transform:scaleX(-1)}
+  .mnp.side-closed .mnp-fold{color:var(--accent)}
+}
+@media (max-width:760px){
+  .mnp-side{width:min(360px,92vw);background:var(--side-bg)}
+  .mnp-ph{padding-top:14px}
+}
+
 `;

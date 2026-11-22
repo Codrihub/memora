@@ -42,6 +42,15 @@ pub struct ToolSpec {
 /// Argument names a tool accepts besides its schema: `(tool, alias, canonical)`.
 const ARG_ALIASES: &[(&str, &str, &str)] = &[("search_memory", "query", "q")];
 
+/// A notice the server adds to tool results: `(tool name) -> value` (set once at start).
+pub type ResultNote = dyn Fn(&str) -> Option<Value> + Send + Sync;
+static RESULT_NOTE: std::sync::OnceLock<Box<ResultNote>> = std::sync::OnceLock::new();
+
+/// Add `storage` (or whatever the server knows the caller should hear) to tool results.
+pub fn set_result_note(f: Box<ResultNote>) {
+    let _ = RESULT_NOTE.set(f);
+}
+
 /// Check a `tools/call` against the tool's `inputSchema`: an object of known argument
 /// names, required ones present (not null), and matching JSON types and enum values.
 pub fn check_args(tool: &str, schema: &Value, args: &Value) -> Result<(), String> {
@@ -1354,6 +1363,22 @@ impl McpServer {
     /// Execute a tool on behalf of `caller`, publishing an `ai_activity` start/end pair for
     /// every call. Permissions are NOT checked here (see `handle_as`).
     pub fn call_tool_by(&self, name: &str, args: &Value, caller: &Caller) -> anyhow::Result<Value> {
+        let r = self.call_tool_inner(name, args, caller);
+        // The server's notice for the caller (storage almost full, say) rides on the result.
+        match r {
+            Ok(mut v) => {
+                if let (Some(note), Some(o)) =
+                    (RESULT_NOTE.get().and_then(|f| f(name)), v.as_object_mut())
+                {
+                    o.insert("storage".into(), note);
+                }
+                Ok(v)
+            }
+            e => e,
+        }
+    }
+
+    fn call_tool_inner(&self, name: &str, args: &Value, caller: &Caller) -> anyhow::Result<Value> {
         activity::traced(caller, name, args, activity_label(name, args), || {
             if name == "set_my_color" {
                 return self.set_my_color(caller, args);

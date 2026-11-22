@@ -4,11 +4,12 @@
 
 import { attr, el, esc, useStyles } from '../dom';
 import { switchHTML } from '../control/ui';
+import { relTs } from '../format';
 import { hooks } from '../hooks';
 import { Modal } from '../modal';
 import { toast } from '../toast';
 import { icon } from '../ui/icons';
-import { createSelect, type Select } from '../ui/select';
+import { createSelect, type Select, type SelectOption } from '../ui/select';
 import { useFormStyles } from '../ui/forms';
 import * as A from './api';
 import { markHTML, MNEMO_CSS } from './styles';
@@ -33,6 +34,15 @@ let modelQuery = '';
 let showHidden = false;
 let defaultSel: Select | null = null;
 let fbSel: Select | null = null;
+/** The selects of the jobs and sub-agents cards (closed before each repaint). */
+let jobSels: Select[] = [];
+/** Sub-agents as typed here; saved when every row is complete. */
+let subDraft: A.SubAgent[] | null = null;
+let subTimer = 0;
+/** What Mnemo knows about the owner (loaded once per visit). */
+let mem: { items: A.OwnerMemory[]; learn: boolean } | null = null;
+let memErr = '';
+let memEditing = '';
 /** The last Test result per provider, shown under its row until the page is left. */
 const tested = new Map<string, { ok: boolean; text: string }>();
 
@@ -47,14 +57,24 @@ export async function wireMnemo(host: HTMLElement): Promise<void> {
   useFormStyles();
   const box = host.querySelector<HTMLElement>('#sMnemo');
   if (!box) return;
+  subDraft = null;
+  mem = null;
+  memErr = '';
+  memEditing = '';
   try {
     const s = await A.loadState(true);
     if (!host.contains(box)) return;
     paint(box, s);
+    // Opened at "Models for each job" (a notice's button): go there; the memory card waits for its list.
+    const part = A.takeSettingsPart();
+    if (part === 'jobs')
+      requestAnimationFrame(() => box.querySelector('#mnsJobs')?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+    else if (part) A.wantSettingsPart(part);
   } catch (e) {
     box.innerHTML = `<div class="st-card"><div class="st-row"><span class="st-note">Could not load ${A.MNEMO}: ${esc((e as Error).message)}</span></div></div>`;
     return;
   }
+  void loadMem(box);
   const off = A.onState((s) => {
     if (!document.body.contains(box)) {
       off();
@@ -65,11 +85,376 @@ export async function wireMnemo(host: HTMLElement): Promise<void> {
 }
 
 function paint(box: HTMLElement, s: A.MnemoState): void {
-  const focusedId = (document.activeElement as HTMLElement | null)?.id;
+  const active = document.activeElement as HTMLInputElement | null;
+  const focusedId = active?.id;
+  const sel = active && 'selectionStart' in active && box.contains(active) ? [active.selectionStart, active.selectionEnd] : null;
   defaultSel?.close();
-  box.innerHTML = `${introCard(s)}${providersCard(s)}${modelsCard(s)}${behaviourCard(s)}${toolsCard(s)}`;
-  if (focusedId) box.querySelector<HTMLElement>('#' + window.CSS.escape(focusedId))?.focus();
+  jobSels.forEach((x) => x.close());
+  jobSels = [];
+  box.innerHTML = `${introCard(s)}${providersCard(s)}${modelsCard(s)}${behaviourCard(s)}${jobsCard(s)}${memoryCard(s)}${toolsCard(s)}`;
+  if (focusedId) {
+    const again = box.querySelector<HTMLInputElement>('#' + window.CSS.escape(focusedId));
+    again?.focus();
+    if (again && sel && sel[0] !== null && typeof again.setSelectionRange === 'function') {
+      try {
+        again.setSelectionRange(sel[0], sel[1]);
+      } catch {
+        /* not a text field */
+      }
+    }
+  }
   wire(box, s);
+  wireJobs(box, s);
+  wireMem(box);
+}
+
+// ---- models for each job, and sub-agents ----
+
+const ROLES: { role: keyof A.Roles; label: string; hint: string }[] = [
+  { role: 'vision', label: 'Reads images', hint: `${A.MNEMO} hands pictures to this model when the chat model cannot see.` },
+  { role: 'image', label: 'Makes images', hint: `${A.MNEMO} asks this model when you want a picture made.` },
+  { role: 'tts', label: 'Reads aloud', hint: 'Reads replies aloud when you tap Listen, in the voice beside it.' },
+  { role: 'stt', label: 'Listens', hint: 'Turns what you say into text: the mic button in the chat.' },
+];
+
+const NAME_OK = /^[\p{L}\p{N} -]{1,24}$/u;
+
+function subs(s: A.MnemoState): A.SubAgent[] {
+  return subDraft ?? (s.prefs.subagents || []).map((x) => ({ ...x }));
+}
+
+function jobsCard(s: A.MnemoState): string {
+  const roles = ROLES.map(
+    (r) => `<div class="st-row"><div class="st-l"><b>${r.label}</b><small>${r.hint}</small></div><div class="st-c"><div class="mns-job"><span data-role="${r.role}"></span>${
+      r.role === 'tts' ? '<span data-voice></span>' : ''
+    }</div></div></div>`,
+  ).join('');
+  const list = subs(s);
+  const rows = list
+    .map(
+      (a, i) => `<div class="mns-sub" data-sub="${i}">
+        <input class="ui-input" id="mnsSubN${i}" data-f="name" type="text" maxlength="24" placeholder="Name" value="${attr(a.name)}" aria-label="Sub-agent name" spellcheck="false">
+        <span class="mns-sub-m" data-f="model"></span>
+        <input class="ui-input" id="mnsSubA${i}" data-f="about" type="text" maxlength="200" placeholder="Good at, e.g. Fast summaries of many notes" value="${attr(a.about)}" aria-label="What it is good at">
+        <button type="button" class="mn-ibtn" data-subdel title="Remove" aria-label="Remove ${attr(a.name || 'sub-agent')}">${icon('trash')}</button>
+      </div>`,
+    )
+    .join('');
+  return `<div class="st-card mns-jobs" id="mnsJobs"><div class="st-ch"><h3>Models for each job</h3><p>Things the chat model may not do itself. Pick None to leave a job off. Saved at once.</p></div>
+    ${roles}
+    <div class="st-row full"><div class="st-l"><b>Sub-agents</b><small>${A.MNEMO} can hand a task to a sub-agent, several at once, and gets their answers back. Name the ones you want with a job; ${A.MNEMO} can also start a general helper. On Auto a sub-agent uses your default model, then the fallbacks; ask in the chat for a specific model when you want one. Up to ${A.MAX_SUBAGENTS}.</small></div>
+      <div class="st-c"><div class="mns-subs">${rows || '<p class="mns-fb-none">None yet.</p>'}
+        <button type="button" class="btn sm" id="mnsSubAdd"${list.length >= A.MAX_SUBAGENTS ? ' disabled' : ''}>${icon('plus')}<span>Add sub-agent</span></button></div></div></div>
+    <div class="st-row sw"><div class="st-l"><b>Ask before sub-agents run</b><small>They use tokens of their own; ${A.MNEMO} asks first and says roughly how many. Saved at once.</small></div><div class="st-c end">${switchHTML(
+      'mnsSubAsk',
+      s.prefs.confirm_subagents ?? true,
+      'Ask before sub-agents run',
+    )}</div></div>
+  </div>`;
+}
+
+function modelOptions(s: A.MnemoState, keep: string): SelectOption[] {
+  const list = A.usableModels(s);
+  const opts = list.map((m) => ({
+    value: A.modelKey(m),
+    label: m.label || m.model_id,
+    hint: A.providerLabel(s, m.provider_id),
+    group: m.pinned ? 'Pinned' : A.providerLabel(s, m.provider_id),
+  }));
+  if (keep && !list.some((m) => A.modelKey(m) === keep)) opts.unshift({ value: keep, label: A.modelLabel(s, keep), hint: 'Not in your models', group: 'Set before' });
+  return opts;
+}
+
+function wireJobs(box: HTMLElement, s: A.MnemoState): void {
+  const card = box.querySelector<HTMLElement>('#mnsJobs');
+  if (!card) return;
+  const roles: A.Roles = { ...(s.prefs.roles || {}) };
+  card.querySelectorAll<HTMLElement>('[data-role]').forEach((slot) => {
+    const role = slot.dataset.role as keyof A.Roles;
+    const cur = roles[role] || '';
+    const opts = modelOptions(s, cur);
+    const sel = createSelect({
+      options: [{ value: '', label: 'None', hint: 'This job stays off' }, ...opts],
+      value: cur,
+      label: ROLES.find((r) => r.role === role)?.label || role,
+      searchable: opts.length > 7,
+      minWidth: 260,
+      onChange: (v) => {
+        const next: A.Roles = { ...(A.mnemoState()?.prefs.roles || roles), [role]: v };
+        void A.savePrefs({ roles: next }).catch(fail);
+      },
+    });
+    jobSels.push(sel);
+    slot.append(sel.el);
+  });
+  const vslot = card.querySelector<HTMLElement>('[data-voice]');
+  if (vslot) {
+    const voice = s.prefs.voice || 'alloy';
+    const vs = createSelect({
+      options: A.VOICES.map((v) => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) })),
+      value: A.VOICES.includes(voice) ? voice : 'alloy',
+      label: 'Voice',
+      className: 'mns-voice',
+      disabled: !roles.tts,
+      minWidth: 160,
+      onChange: (v) => void A.savePrefs({ voice: v }).catch(fail),
+    });
+    jobSels.push(vs);
+    vslot.append(vs.el);
+  }
+
+  // Sub-agents: saved a moment after a change, once every row has a valid, unique name. With
+  // no model of its own a sub-agent runs like a chat: the default model, then the fallbacks.
+  const list = subs(s);
+  const save = (now = false): void => {
+    window.clearTimeout(subTimer);
+    const run = (): void => {
+      const draft = subDraft;
+      if (!draft) return;
+      const names = new Set<string>();
+      for (const a of draft) {
+        const n = a.name.trim().toLowerCase();
+        if (!NAME_OK.test(a.name.trim()) || names.has(n)) return;
+        names.add(n);
+      }
+      const clean = draft.map((a) => ({ name: a.name.trim(), model: a.model, about: a.about.trim().slice(0, 200) }));
+      void A.savePrefs({ subagents: clean }).catch(fail);
+    };
+    if (now) run();
+    else subTimer = window.setTimeout(run, 600);
+  };
+  const edit = (fn: (d: A.SubAgent[]) => void, now = false): void => {
+    subDraft = subs(A.mnemoState() ?? s);
+    fn(subDraft);
+    save(now);
+  };
+  card.querySelectorAll<HTMLElement>('[data-sub]').forEach((row) => {
+    const i = Number(row.dataset.sub);
+    const a = list[i];
+    const nameIn = row.querySelector<HTMLInputElement>('[data-f=name]')!;
+    const aboutIn = row.querySelector<HTMLInputElement>('[data-f=about]')!;
+    const mark = (): void => {
+      const n = nameIn.value.trim().toLowerCase();
+      const dup = !!n && subs(A.mnemoState() ?? s).some((x, j) => j !== i && x.name.trim().toLowerCase() === n);
+      nameIn.classList.toggle('bad', !!nameIn.value && (dup || !NAME_OK.test(nameIn.value.trim())));
+      nameIn.title = dup ? 'Another sub-agent has this name' : '';
+    };
+    mark();
+    nameIn.oninput = () => {
+      const v = nameIn.value.replace(/[^\p{L}\p{N} -]/gu, '');
+      if (v !== nameIn.value) nameIn.value = v;
+      edit((d) => (d[i].name = v));
+      mark();
+    };
+    aboutIn.oninput = () => edit((d) => (d[i].about = aboutIn.value));
+    nameIn.onblur = aboutIn.onblur = () => save(true);
+    const m = createSelect({
+      options: [{ value: '', label: 'Auto', hint: 'Default model, then fallbacks' }, ...modelOptions(s, a.model)],
+      value: a.model || '',
+      label: 'Model',
+      placeholder: 'Auto',
+      searchable: A.usableModels(s).length > 7,
+      minWidth: 240,
+      onChange: (v) => edit((d) => (d[i].model = v), true),
+    });
+    jobSels.push(m);
+    row.querySelector<HTMLElement>('[data-f=model]')!.append(m.el);
+    row.querySelector<HTMLElement>('[data-subdel]')!.onclick = () => {
+      edit((d) => d.splice(i, 1), true);
+      paint(box, A.mnemoState() ?? s);
+    };
+  });
+  const ask = card.querySelector<HTMLElement>('#mnsSubAsk');
+  if (ask)
+    ask.onclick = () => {
+      const on = ask.getAttribute('aria-checked') !== 'true';
+      ask.setAttribute('aria-checked', String(on));
+      A.savePrefs({ confirm_subagents: on }).then(
+        () => toast(on ? `${A.MNEMO} asks before sub-agents run` : 'Sub-agents run without asking', 'ok'),
+        (e) => {
+          ask.setAttribute('aria-checked', String(!on));
+          fail(e);
+        },
+      );
+    };
+  const add = card.querySelector<HTMLButtonElement>('#mnsSubAdd');
+  if (add)
+    add.onclick = () => {
+      const d = subs(A.mnemoState() ?? s);
+      if (d.length >= A.MAX_SUBAGENTS) return;
+      subDraft = [...d, { name: '', model: '', about: '' }];
+      paint(box, A.mnemoState() ?? s);
+      box.querySelector<HTMLInputElement>(`#mnsSubN${subDraft.length - 1}`)?.focus();
+    };
+}
+
+// ---- what Mnemo knows about the owner ----
+
+async function loadMem(box: HTMLElement): Promise<void> {
+  try {
+    mem = await A.listOwnerMemory();
+    memErr = '';
+  } catch (e) {
+    memErr = (e as Error).message;
+  }
+  if (!document.body.contains(box)) return;
+  paintMem(box);
+  if (A.takeSettingsPart() === 'memory') scrollToMem();
+}
+
+/** Bring the memory card into view (Settings is open). */
+function scrollToMem(): void {
+  document.getElementById('mnsMem')?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+
+function paintMem(box: HTMLElement): void {
+  const s = A.mnemoState();
+  const card = box.querySelector<HTMLElement>('#mnsMem');
+  if (!s || !card) return;
+  card.outerHTML = memoryCard(s);
+  wireMem(box);
+}
+
+function memItem(m: A.OwnerMemory): string {
+  const by = m.by === 'owner' ? 'added by you' : 'learned';
+  const body =
+    memEditing === m.id
+      ? `<input class="ui-input mns-mi-in" id="mnsMemEdit" type="text" maxlength="500" value="${attr(m.text)}" aria-label="Edit">`
+      : `<span class="mns-mi-t" role="button" tabindex="0" data-medit title="Click to edit">${esc(m.text)}</span>`;
+  return `<li class="mns-mi" data-mid="${attr(m.id)}"><span class="mns-mi-b">${body}<small><span class="mns-mi-by${m.by === 'owner' ? ' own' : ''}">${by}</span> · <time title="${attr(
+    new Date(m.at * 1000).toLocaleString(),
+  )}">${esc(relTs(m.at))}</time></small></span><button type="button" class="mn-ibtn" data-mdel title="Delete" aria-label="Delete">${icon('trash')}</button></li>`;
+}
+
+function memoryCard(s: A.MnemoState): string {
+  const learn = s.prefs.learn_me ?? mem?.learn ?? true;
+  const items = mem?.items || [];
+  const groups = A.MEMORY_KINDS.map((k) => {
+    const list = items.filter((m) => m.kind === k.kind).sort((a, b) => b.at - a.at);
+    return list.length ? `<div class="mns-mg2"><b>${k.label}</b><ul>${list.map(memItem).join('')}</ul></div>` : '';
+  }).join('');
+  const listHTML = memErr
+    ? `<p class="mns-none">Could not load: ${esc(memErr)}</p>`
+    : !mem
+      ? '<p class="mns-none">Loading…</p>'
+      : groups || `<p class="mns-none">${A.MNEMO} knows nothing about you yet.</p>`;
+  return `<div class="st-card" id="mnsMem"><div class="st-ch"><h3>What ${A.MNEMO} knows about you</h3><p>${A.MNEMO}'s own notes on how to talk to you, read in every chat. Click one to change it.</p></div>
+    <div class="st-row sw"><div class="st-l"><b>Let ${A.MNEMO} learn about me</b><small>On: ${A.MNEMO} notes what it picks up in chats. Off: only what you add here. Saved at once.</small></div><div class="st-c end">${switchHTML(
+      'mnsLearn',
+      learn,
+      `Let ${A.MNEMO} learn about me`,
+    )}</div></div>
+    <div class="mns-mem">${listHTML}</div>
+    <form class="mns-mem-add" id="mnsMemAdd" autocomplete="off"><span class="mns-mem-k"></span><input class="ui-input" id="mnsMemNew" name="text" type="text" maxlength="500" placeholder="Something ${A.MNEMO} should know" aria-label="Something ${A.MNEMO} should know"><button type="submit" class="btn">${icon(
+      'plus',
+    )}<span>Add</span></button></form>
+  </div>`;
+}
+
+function wireMem(box: HTMLElement): void {
+  const card = box.querySelector<HTMLElement>('#mnsMem');
+  if (!card) return;
+  const sw = card.querySelector<HTMLElement>('#mnsLearn')!;
+  sw.onclick = () => {
+    const on = sw.getAttribute('aria-checked') !== 'true';
+    sw.setAttribute('aria-checked', String(on));
+    if (mem) mem.learn = on;
+    A.savePrefs({ learn_me: on }).then(
+      () => toast(on ? `${A.MNEMO} may learn about you` : `${A.MNEMO} keeps only what you add`, 'ok'),
+      (e) => {
+        sw.setAttribute('aria-checked', String(!on));
+        fail(e);
+      },
+    );
+  };
+  const kind = createSelect({
+    options: A.MEMORY_KINDS.map((k) => ({ value: k.kind, label: k.label })),
+    value: 'about',
+    label: 'Kind',
+    className: 'mns-mem-ksel',
+    minWidth: 200,
+  });
+  jobSels.push(kind);
+  card.querySelector('.mns-mem-k')!.append(kind.el);
+  const form = card.querySelector<HTMLFormElement>('#mnsMemAdd')!;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const input = form.querySelector<HTMLInputElement>('#mnsMemNew')!;
+    const text = input.value.trim();
+    if (!text) return input.focus();
+    try {
+      const r = await A.addOwnerMemory(text, kind.value as A.MemoryKind);
+      if (mem) mem.items.push(r.item);
+      else mem = { items: [r.item], learn: true };
+      paintMem(box);
+      box.querySelector<HTMLInputElement>('#mnsMemNew')?.focus();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  card.querySelectorAll<HTMLElement>('.mns-mi').forEach((li) => {
+    const id = li.dataset.mid!;
+    const item = mem?.items.find((m) => m.id === id);
+    if (!item) return;
+    const t = li.querySelector<HTMLElement>('[data-medit]');
+    if (t) {
+      const start = (): void => {
+        memEditing = id;
+        paintMem(box);
+        const inp = box.querySelector<HTMLInputElement>('#mnsMemEdit');
+        inp?.focus();
+        inp?.setSelectionRange(inp.value.length, inp.value.length);
+      };
+      t.onclick = start;
+      t.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          start();
+        }
+      };
+    }
+    const inp = li.querySelector<HTMLInputElement>('#mnsMemEdit');
+    if (inp) {
+      let left = false;
+      const finish = async (keep: boolean): Promise<void> => {
+        if (left) return;
+        left = true;
+        const text = inp.value.trim();
+        memEditing = '';
+        if (keep && text && text !== item.text) {
+          try {
+            const r = await A.editOwnerMemory(id, { text });
+            Object.assign(item, r.item);
+          } catch (err) {
+            fail(err);
+          }
+        }
+        paintMem(box);
+      };
+      inp.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void finish(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          void finish(false);
+        }
+      };
+      inp.onblur = () => void finish(true);
+    }
+    li.querySelector<HTMLElement>('[data-mdel]')!.onclick = async () => {
+      try {
+        await A.deleteOwnerMemory(id);
+        if (mem) mem.items = mem.items.filter((m) => m.id !== id);
+        if (memEditing === id) memEditing = '';
+        paintMem(box);
+        toast('Forgotten', 'ok');
+      } catch (err) {
+        fail(err);
+      }
+    };
+  });
 }
 
 function introCard(s: A.MnemoState): string {
@@ -181,9 +566,14 @@ function behaviourCard(s: A.MnemoState): string {
     <div class="st-row"><div class="st-l"><b>Default model</b><small>Used by new chats; each chat can switch.</small></div><div class="st-c"><span id="mnsDef"></span></div></div>
     <div class="st-row full"><div class="st-l"><b>Fallback models</b><small>When a chat's model fails (the provider is down, busy or out of credit), ${A.MNEMO} carries on with these, in this order, up to five. With none left, the chat shows the error and Try again. Saved at once.</small></div>
       <div class="st-c"><div class="mns-fb">${fallbackRows(s)}<span id="mnsFbAdd"></span></div></div></div>
-    <div class="st-row"><div class="st-l"><b>Permission</b><small>Ask first: ${A.MNEMO} reads freely but asks before it changes notes. Auto: it goes ahead and keeps working until the job is done. Saved at once.</small></div>
-      <div class="st-c"><div class="mns-seg" role="radiogroup" aria-label="Permission">${(['ask', 'auto'] as const)
-        .map((v) => `<label><input type="radio" name="mnsPerm" value="${v}"${(p.permission === 'auto' ? 'auto' : 'ask') === v ? ' checked' : ''}><span>${v === 'ask' ? 'Ask first' : 'Auto'}</span></label>`)
+    <div class="st-row"><div class="st-l"><b>Permission</b><small>Ask first: ${A.MNEMO} reads freely but asks before it changes notes or runs sub-agents. Auto: changes and sub-agents go ahead without asking. Read only: it reads and answers, and never changes notes. Saved at once.</small></div>
+      <div class="st-c"><div class="mns-seg" role="radiogroup" aria-label="Permission">${(['ask', 'auto', 'read'] as const)
+        .map(
+          (v) =>
+            `<label><input type="radio" name="mnsPerm" value="${v}"${(p.permission === 'auto' || p.permission === 'read' ? p.permission : 'ask') === v ? ' checked' : ''}><span>${
+              v === 'ask' ? 'Ask first' : v === 'auto' ? 'Auto' : 'Read only'
+            }</span></label>`,
+        )
         .join('')}</div></div></div>
     <div class="st-row"><div class="st-l"><b>Text size</b><small>The size of the chat's text on this device. Auto is small on phones, so more fits, and medium elsewhere. Saved at once.</small></div>
       <div class="st-c">${textSizeHTML('settings')}</div></div>
@@ -504,8 +894,13 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
     wireTextSize(beh);
     beh.querySelectorAll<HTMLInputElement>('[name=mnsPerm]').forEach((r) => {
       r.onchange = () => {
-        void A.savePrefs({ permission: r.value as 'ask' | 'auto' })
-          .then(() => toast(r.value === 'auto' ? `Auto: ${A.MNEMO} goes ahead without asking` : `Ask first: ${A.MNEMO} asks before changes`, 'ok'))
+        void A.savePrefs({ permission: r.value as 'ask' | 'auto' | 'read' })
+          .then(() =>
+            toast(
+              r.value === 'auto' ? `Auto: ${A.MNEMO} goes ahead without asking` : r.value === 'read' ? `Read only: ${A.MNEMO} reads and answers, never changes notes` : `Ask first: ${A.MNEMO} asks before changes`,
+              'ok',
+            ),
+          )
           .catch(fail);
       };
     });
@@ -542,6 +937,48 @@ function wire(box: HTMLElement, s: A.MnemoState): void {
 
 const CSS = `
 .mns{display:flex;flex-direction:column;gap:16px}
+.mns-job{display:flex;gap:8px;width:100%;min-width:0}
+.mns-job>span{display:flex;min-width:0}
+.mns-job>span[data-role]{flex:1}
+.mns-job .ui-sel{width:100%;max-width:none;height:44px}
+.mns-job>span[data-voice]{flex:0 0 140px}
+.mns-subs{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%}
+.mns-sub{display:grid;grid-template-columns:minmax(110px,160px) minmax(150px,220px) minmax(0,1fr) auto;align-items:center;gap:8px;width:100%}
+.mns-sub .ui-input{height:40px;min-width:0}
+.mns-sub .ui-input.bad{border-color:var(--danger)}
+.mns-sub-m{display:flex;min-width:0}
+.mns-sub-m .ui-sel{width:100%;max-width:none;height:40px}
+.mns-mem{display:flex;flex-direction:column;gap:14px;padding:4px 20px 6px}
+.mns-mem .mns-none{padding:6px 0}
+.mns-mg2>b{display:block;margin-bottom:6px;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg))}
+.mns-mg2 ul{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mns-mi{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 6px 6px 12px;border-top:1px solid var(--line)}
+.mns-mi:first-child{border-top:0}
+.mns-mi:hover{background:var(--hover)}
+.mns-mi-b{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.mns-mi-t{font-size:13.5px;line-height:1.45;color:var(--fg);overflow-wrap:anywhere;cursor:text;border-radius:6px}
+.mns-mi-t:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mns-mi-in{height:36px;font-size:13.5px}
+.mns-mi-b small{font-size:11.5px;color:var(--muted)}
+.mns-mi-by.own{color:var(--accent)}
+.mns-mem-add{display:flex;align-items:center;gap:8px;padding:12px 20px 18px;flex-wrap:wrap}
+.mns-mem-k{display:flex;flex:none}
+.ui-sel.mns-mem-ksel{height:40px;min-width:170px}
+.mns-mem-add .ui-input{flex:1;min-width:180px;height:40px}
+.mns-mem-add .btn{height:40px;flex:none}
+@media (max-width:720px){
+  .mns-sub{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;padding:10px;border:1px solid var(--line);border-radius:12px}
+  .mns-sub [data-f=about]{grid-column:1/-1;grid-row:2}
+  .mns-mem{padding:4px 16px 6px}
+  .mns-mem-add{padding:12px 16px 16px}
+}
+@media (max-width:640px){
+  .mns-job{flex-direction:column}
+  .mns-job>span[data-voice]{flex:none}
+  .mns-sub .ui-input,.mns-mem-add .ui-input,.mns-mi-in{font-size:16px}
+  .mns-mem-k,.ui-sel.mns-mem-ksel{width:100%}
+  .mns-mem-add .btn{width:100%;justify-content:center}
+}
 .mns-fb{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%}
 .mns-fb-none{margin:0;font-size:12.5px;color:var(--muted)}
 .mns-fb-list{display:flex;flex-direction:column;gap:6px;width:100%;margin:0;padding:0;list-style:none}

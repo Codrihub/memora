@@ -279,6 +279,8 @@ async fn shutdown_signal() {
         _ = memora_http::shutdown::requested() => {},
     }
     tracing::info!("shutting down");
+    // Open live streams (chat watchers) would hold the graceful shutdown: end them.
+    memora_http::assistant::live::shutdown();
 }
 
 async fn serve(state: String, db: Db) -> anyhow::Result<()> {
@@ -328,6 +330,7 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
     memora_http::assistant::mentions::watch(&app_state);
     memora_http::assistant::mentions::follow_moves(&app_state);
     memora_http::images::load_media_settings(&app_state);
+    memora_http::storage::spawn(&app_state);
     memora_http::release::spawn();
 
     let router = build_router(app_state.clone());
@@ -342,14 +345,25 @@ async fn serve(state: String, db: Db) -> anyhow::Result<()> {
         listener,
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown({
+        let st = app_state.clone();
+        async move {
+            shutdown_signal().await;
+            // Replies still running are kept as far as they got and their streams end.
+            let _ = tokio::task::spawn_blocking(move || memora_http::assistant::salvage(&st)).await;
+        }
+    })
     .await;
     memora_http::shutdown::withdraw_stop_token(&state_dir);
     served?;
     // Buffered key usage and session activity are written before exit.
     let st = app_state.clone();
     let _ = tokio::task::spawn_blocking(move || cache::flush_all(&st)).await;
-    Ok(())
+    // A reply cut or still waiting on a slow provider runs on a blocking thread the runtime
+    // would wait for on its way out (up to the provider's read timeout): everything that
+    // matters is written, so leave now.
+    tracing::info!("stopped");
+    std::process::exit(0)
 }
 
 #[cfg(test)]

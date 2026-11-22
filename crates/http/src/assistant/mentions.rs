@@ -15,7 +15,7 @@ use std::time::Duration;
 use memora_state::assistant::NewMessage;
 
 use super::{
-    busy, caller_for, endpoint, new_id, resolve_model, run_agent, store, store as store_of,
+    caller_for, endpoint, new_id, resolve_model, run_agent, store, store as store_of,
     system_prompt, NAME,
 };
 use crate::AppState;
@@ -524,9 +524,7 @@ fn ask(
             )
             .map_err(|_| "could not start a chat for this".to_string())?,
     };
-    if let Ok(mut b) = busy().lock() {
-        b.insert(sid.clone());
-    }
+    let owner = super::take_over(&sid);
     // A live run, so the owner can watch it on the Mnemo page while it works.
     let tx = super::live::start(&sid);
     let out = run_agent(
@@ -540,6 +538,7 @@ fn ask(
         &tx,
         &format!("{by} · @mnemo in {name}"),
     );
+    let cut = tx.is_closed();
     drop(tx);
     // Only what came after this request counts (the note's chat holds earlier ones too).
     let error = store
@@ -549,15 +548,16 @@ fn ask(
         .rev()
         .find(|m| m.role == "assistant" && m.id > uid)
         .and_then(|m| m.meta.and_then(|v| v["error"].as_str().map(str::to_string)));
-    if let Ok(mut b) = busy().lock() {
-        b.remove(&sid);
+    // Cut by a steer or Stop in the chat: what came next owns it now.
+    let mine = !cut && super::release(&sid, owner);
+    if mine {
+        super::live::notify(
+            &sid,
+            &serde_json::json!({"type": "idle", "outcome": "mention"}),
+        );
     }
-    super::live::notify(
-        &sid,
-        &serde_json::json!({"type": "idle", "outcome": "mention"}),
-    );
     // Messages the owner queued in this chat meanwhile go out now.
-    if super::live::queued(&sid) {
+    if mine && super::live::queued(&sid) {
         if let Ok(s) = store_of(st) {
             super::kick(
                 st,

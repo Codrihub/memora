@@ -33,6 +33,7 @@ import {
 import type { AuthState, Config, KeyRow, KeysResult, OkResult, SettingsInfo } from '../types';
 import { SYS_PAGE_CSS } from './tools';
 import { mnemoSectionHTML, wireMnemo } from '../assistant/settings';
+import { galleryHTML, storageSectionHTML, wireGallery, wireStorageSection } from './storage';
 
 /** The window listener that keeps the theme cards in step is added once. */
 let themeSync = false;
@@ -493,6 +494,7 @@ const SECTIONS: Section[] = [
   { id: 'stInterface', slug: 'interface', label: 'Interface', icon: 'sidebar', desc: 'Sidebar, pins and tag suggestions', group: 'personal' },
   { id: 'stToasts', slug: 'notifications', label: 'Notifications', icon: 'bell', desc: 'Pop-ups when an agent works in your notes', group: 'personal' },
   { id: 'stVault', slug: 'notes-folder', label: 'Notes folder', icon: 'folder', desc: 'Where every note is kept on the server', group: 'server' },
+  { id: 'stStorage', slug: 'storage', label: 'Storage', icon: 'vault', desc: 'How full notes, images and chats are, and their limits', group: 'server' },
   { id: 'stImages', slug: 'images', label: 'Images', icon: 'image', desc: 'How large an image may be, and what images take', group: 'server' },
   { id: 'stMnemo', slug: 'mnemo', label: 'Mnemo (AI agent)', icon: 'mnemo', desc: 'Models, API keys and what the notes agent may do', group: 'server' },
   { id: 'stLogs', slug: 'activity-log', label: 'Activity log', icon: 'activity', desc: 'How much history the server keeps', group: 'server' },
@@ -984,7 +986,13 @@ export async function renderSettings(): Promise<void> {
         'Uploads above this size are refused, from this app and from agents alike. Between 0.1 and 50 MB.',
         `<form id="sImgForm" class="lg-lim st-img-form"><label>Up to<span><input id="sImgMb" type="number" min="0.1" max="50" step="0.1" inputmode="decimal"> MB</span></label><button class="btn sm primary" type="submit" id="sImgSave">Save</button></form>`,
       )}`,
-      ),
+      ) + galleryHTML(),
+    )}
+
+    ${section(
+      'stStorage',
+      'How much room notes, images and Mnemo chats take, each against its own room. A banner warns when one is almost full.',
+      storageSectionHTML(),
     )}
 
     ${section('stMnemo', 'The notes agent built into Memora: connect a model with your own API key, choose models and set how it works.', mnemoSectionHTML())}
@@ -1818,6 +1826,8 @@ export async function renderSettings(): Promise<void> {
   // Activity log
   void wireLogLimits(host);
   void wireImages(host);
+  void wireStorageSection(host);
+  wireGallery(host);
   void wireMnemo(host);
 }
 

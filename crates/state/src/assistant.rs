@@ -476,6 +476,30 @@ impl Store {
         rows.collect::<std::result::Result<_, _>>().map_err(db_err)
     }
 
+    /// The last message with text in each chat (`chat id -> (role, text)`), for a preview in
+    /// the chat list; compaction summaries and failed turns are skipped.
+    pub fn previews(&self) -> Result<std::collections::HashMap<String, (String, String)>> {
+        let c = self.c();
+        let mut st = c
+            .prepare(
+                "SELECT m.session_id, m.role, substr(m.content, 1, 240) FROM messages m
+                 JOIN (SELECT session_id, MAX(id) AS id FROM messages
+                       WHERE role IN ('user','assistant') AND content != ''
+                         AND (meta IS NULL OR meta NOT LIKE '%\"compact\":true%')
+                       GROUP BY session_id) last ON last.id = m.id",
+            )
+            .map_err(db_err)?;
+        let rows = st
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    (r.get::<_, String>(1)?, r.get::<_, String>(2)?),
+                ))
+            })
+            .map_err(db_err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(db_err)
+    }
+
     pub fn session(&self, id: &str) -> Result<Option<Session>> {
         Ok(self.sessions()?.into_iter().find(|s| s.id == id))
     }

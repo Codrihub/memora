@@ -117,12 +117,43 @@ export function takeRouteAgent(): string | null {
 let mnemoChat: string | null = null;
 /** A chat the address asked for that the Mnemo page has not opened yet. */
 let mnemoWanted: string | null = null;
+/** The list of every chat is on screen (/mnemo/chats). */
+let mnemoAll = false;
+
+export function mnemoAllOn(): boolean {
+  return mnemoAll;
+}
+
+/** Show the list of every chat (/mnemo/chats) as a new history entry, so Back returns. */
+export function openMnemoAll(): void {
+  mnemoAll = true;
+  if (state.page !== 'assistant' || location.pathname === '/mnemo/chats') return;
+  try {
+    history.pushState({ page: 'assistant' }, '', '/mnemo/chats');
+  } catch {
+    /* sandboxed frames can refuse history writes */
+  }
+}
+
+/** Leave the list of every chat for chat `id` (null: a new chat); `push` adds a history entry. */
+export function closeMnemoAll(id: string | null, push: boolean): void {
+  mnemoAll = false;
+  mnemoChat = id;
+  if (state.page !== 'assistant') return;
+  const url = id ? `/mnemo/${id}` : '/mnemo';
+  try {
+    if (push) history.pushState({ page: 'assistant' }, '', url);
+    else history.replaceState({ page: 'assistant' }, '', url);
+  } catch {
+    /* sandboxed frames can refuse history writes */
+  }
+}
 
 /** The Mnemo page opened chat `id` (or a new chat): the address follows, without a new
  *  history entry. */
 export function setMnemoChat(id: string | null): void {
   mnemoChat = id;
-  if (state.page !== 'assistant') return;
+  if (state.page !== 'assistant' || mnemoAll) return;
   const url = id ? `/mnemo/${id}` : '/mnemo';
   if (location.pathname === url) return;
   try {
@@ -199,13 +230,21 @@ export function parseLocation(loc: Location = location): Route {
     else routeKeys = null;
     return { page: 'keys' };
   }
+  if (path === '/mnemo/chats') {
+    mnemoAll = true;
+    return { page: 'assistant' };
+  }
   const mc = /^\/mnemo\/(c[0-9a-f]{12})$/.exec(path);
   if (mc) {
+    mnemoAll = false;
     mnemoWanted = mc[1];
     mnemoChat = mc[1];
     return { page: 'assistant' };
   }
-  if (path === '/mnemo') mnemoChat = null;
+  if (path === '/mnemo') {
+    mnemoChat = null;
+    mnemoAll = false;
+  }
   const page = BY_PATH.get(path);
   return page ? { page } : { page: 'brain', unknown: true };
 }
@@ -262,6 +301,7 @@ function urlFor(page: Page): string {
   // An /activity/<id> address being opened keeps its agent (the page reads it).
   if (page === 'logs' && routeAgent) return '/activity/' + routeAgent;
   if (page === 'logs' && logsTimeline) return '/activity/timeline';
+  if (page === 'assistant' && mnemoAll) return '/mnemo/chats';
   if (page === 'assistant' && mnemoChat) return `/mnemo/${mnemoChat}`;
   if (page === 'keys' && routeKeys) {
     const to = routeKeys;
@@ -347,6 +387,7 @@ export function go(page: Page, keepEditing = false): void {
     state.graph.stop = null;
   }
   clearPeek();
+  if (page !== 'assistant') mnemoAll = false;
   syncUrl();
   for (const fn of listeners) {
     try {

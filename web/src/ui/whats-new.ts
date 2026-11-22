@@ -27,6 +27,32 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '2.2.0',
+    title: 'A model for every job',
+    lead: 'Sub-agents that work at the same time, models that read and make images, speak and listen, notes Mnemo keeps about you, and a new chat list.',
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'agents', title: 'Sub-agents and the Agents panel', text: 'Mnemo hands tasks to sub-agents, several at once, and answers from what they find. Follow them live in the Agents panel at the top right; the chat keeps one line.' },
+          { icon: 'image', title: 'Models for each job', text: 'Set a model that reads images, one that makes them, one that reads replies aloud and one that listens. A chat model that cannot see gets the pictures described.' },
+          { icon: 'shield', title: 'Ask first, Auto or Read only', text: 'Pick how freely Mnemo works: ask before changes and sub-agents, go ahead with everything, or only read.' },
+          { icon: 'user', title: 'What Mnemo knows about you', text: 'Mnemo quietly notes how you like answers. See, edit or delete every note in Settings, or turn learning off.' },
+          { icon: 'alert', title: 'Storage that warns you', text: 'Notes, images and chats each warn at 90% and 99% of their room. Settings shows every image and where it is used.' },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'chat', title: 'A new chat list', text: 'An icon rail for actions, pinned chats apart, and each chat with its kind, time and a line of the last message, grouped by day. Archive chats and see them all on one page.' },
+          { icon: 'send-now', title: 'Send now always goes', text: 'Send now or Stop ends the reply at once, whatever it is doing, and your message goes right away. A live status shows what Mnemo is doing and for how long.' },
+          { icon: 'incognito', title: 'Fleeting chats, anonymous', text: 'Quiet and colourless in any theme, with plain words on what is and is not kept.' },
+          { icon: 'expand', title: 'Chat width', text: 'Compact, Wide or Full in Appearance, kept per device.' },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.1.12',
     title: 'Private fleeting chats',
     lead: "Fleeting chats look the part, the timeline rail answers a hold on phones, and What's new picks versions from a dropdown.",
@@ -366,15 +392,16 @@ const CSS = `
 .wn-ver .pre{padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,.28);color:#cbd5e1}
 .wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2;height:2.4em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;height:4.8em;color:#a3afc2;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
-/* Releases: one dropdown, newest first, the latest picked by default. */
-.wn-pick{display:flex;align-items:center;gap:10px;margin-top:18px}
-.wn-pick>span{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8b98ad}
-.ui-sel.wn-sel{height:38px;min-width:220px;max-width:min(360px,100%);border-radius:999px;padding:0 12px 0 15px;border:1.5px solid rgba(148,163,184,.34);
-  background:rgba(15,23,42,.35);color:#e6e9ef;font:700 13.5px/1 var(--font);font-variant-numeric:tabular-nums}
-.ui-sel.wn-sel:hover:not(:disabled){border-color:rgba(148,163,184,.6)}
-.ui-sel.wn-sel .ui-sel-chev{stroke:#cbd5e1}
-.ui-sel.wn-sel .ui-sel-v small{margin-left:8px;padding:2px 7px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-  color:#5eead4;border:1px solid rgba(94,234,212,.45)}
+/* Releases: a compact dropdown in the top bar, newest first, the latest picked by default. */
+.wn-grow{flex:1}
+.wn-vlab{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8b98ad}
+.ui-sel.wn-sel{height:32px;width:auto;min-width:0;max-width:none;flex:none;border-radius:999px;padding:0 8px 0 12px;gap:6px;border:1px solid rgba(148,163,184,.34);
+  background:rgba(15,23,42,.35);color:#e6e9ef;font:650 13px/1 var(--font);font-variant-numeric:tabular-nums}
+.ui-sel.wn-sel:hover:not(:disabled){border-color:rgba(148,163,184,.6);background:rgba(148,163,184,.12)}
+.ui-sel.wn-sel .ui-sel-v{flex:none;display:inline-flex;align-items:center;gap:6px}
+.ui-sel.wn-sel .ui-sel-chev{stroke:#cbd5e1;width:14px;height:14px}
+.ui-sel.wn-sel .ui-sel-v small{padding:2px 6px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:#5eead4;background:rgba(94,234,212,.12)}
 .wn-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px 24px 12px}
 .wn-g{padding:14px 0 6px}
 .wn-g+.wn-g{border-top:1px solid var(--line)}
@@ -386,21 +413,20 @@ const CSS = `
 .wn-ic .i{width:18px;height:18px}
 .wn-it b{font-size:14px;font-weight:600;color:var(--fg);line-height:1.4}
 .wn-it p{margin:0;font-size:13px;line-height:1.55;color:var(--muted)}
-/* Footer: the GitHub star (with its count) on the left as a quiet pill, Changelog and Got it
-   on the right; on phones the two buttons share a row and the star sits under them. */
-.wn-foot{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px 12px 20px;border-top:1px solid var(--line);background:var(--surface-1)}
-.wn-star{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 11px;border:1px solid var(--line);border-radius:999px;
-  font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg));text-decoration:none;transition:border-color .15s,background .15s,color .15s}
+/* Footer: quiet links on the left (star with its count, full changelog), Got it on the right;
+   on phones Got it takes the whole width under the two links. */
+.wn-foot{flex:none;display:flex;align-items:center;gap:12px;padding:12px 16px 12px 18px;border-top:1px solid var(--line);background:var(--surface-1)}
+.wn-links{flex:1;min-width:0;display:flex;align-items:center;gap:4px}
+.wn-star,.wn-log{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 10px;border:0;border-radius:9px;background:none;
+  font:600 13px/1 var(--font);color:var(--text-2,var(--fg));text-decoration:none;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
+.wn-star:hover,.wn-log:hover{background:var(--hover);color:var(--fg)}
 .wn-star svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;transition:fill .15s,stroke .15s}
-.wn-star:hover{color:var(--fg);border-color:color-mix(in srgb,#f5c451 60%,var(--line));background:color-mix(in srgb,#f5c451 8%,transparent)}
 .wn-star:hover svg{fill:#f5c451;stroke:#f5c451}
-.wn-star em{display:inline-grid;place-items:center;min-width:24px;height:22px;padding:0 7px;border-radius:999px;font-style:normal;font-size:11.5px;font-weight:700;
+.wn-log .i{width:15px;height:15px}
+.wn-star em{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 6px;border-radius:999px;font-style:normal;font-size:11px;font-weight:700;
   font-variant-numeric:tabular-nums;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
 .wn-star em:empty{display:none}
-.wn-foot .grow{flex:1}
-.wn-log{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:none;
-  font:600 13px/1 var(--font);color:var(--text-2);cursor:pointer;transition:border-color .15s,color .15s}
-.wn-log:hover{color:var(--fg);border-color:var(--line-strong)}
+.wn-ok{min-width:112px;height:38px;justify-content:center}
 .wn :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:760px){
   .modal:has(.wn){border-radius:var(--r) var(--r) 0 0}
@@ -409,13 +435,12 @@ const CSS = `
   .wn-hero{padding:18px 18px 20px}.wn-hero h2{font-size:21px}.wn-hero p{font-size:13.5px}
   .wn-top{margin-bottom:16px}
   .wn-body{padding:4px 18px 10px}
-  .wn-foot{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px calc(12px + var(--safe-b,0px))}
-  .wn-foot .grow{display:none}
-  .wn-log{height:44px;font-size:14px;color:var(--fg)}
-  .wn-foot .btn.primary{height:44px;width:100%;justify-content:center;font-size:14px}
-  .wn-star{grid-column:1/-1;order:3;justify-self:center;height:32px}
-  .wn-pick{margin-top:16px}
-  .ui-sel.wn-sel{flex:1;min-width:0;max-width:none;height:42px}
+  .wn-foot{flex-direction:column;align-items:stretch;gap:8px;padding:10px 16px calc(12px + var(--safe-b,0px))}
+  .wn-links{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .wn-star,.wn-log{justify-content:center;height:40px;border:1px solid var(--line);font-size:13.5px}
+  .wn-ok{width:100%;height:46px;font-size:15px}
+  .wn-vlab{display:none}
+  .ui-sel.wn-sel{height:34px}
 }
 `;
 
@@ -438,13 +463,14 @@ function body(r: Release): string {
   const ahead = !!now && cmp(r.version, now) > 0;
   return `<div class="wn" role="document">
     <header class="wn-hero">
-      <div class="wn-top">${markSvg('wn-mark')}<span class="wn-word">Memora</span>
+      <div class="wn-top">${markSvg('wn-mark')}<span class="wn-word">Memora</span><span class="wn-grow"></span>${
+        RELEASES.length > 1 ? '<span class="wn-vlab" id="wnV">Version</span><i class="wn-slot"></i>' : ''
+      }
         <button type="button" class="wn-x" data-close aria-label="Close">${icon('close')}</button></div>
       <div class="wn-ver"><b>What's new in ${esc(r.version)}</b>${r.date ? `<span>${esc(r.date)}</span>` : ''}${
         ahead ? `<span class="pre">Coming next · you run ${esc(now)}</span>` : ''
       }</div>
       <h2 id="wnT" title="${attr(r.title)}">${esc(r.title)}</h2><p title="${attr(r.lead)}">${esc(r.lead)}</p>
-      ${RELEASES.length > 1 ? '<div class="wn-pick"><span id="wnV">Version</span><i class="wn-slot"></i></div>' : ''}
     </header>
     <div class="wn-body">${r.groups
       .map(
@@ -454,10 +480,11 @@ function body(r: Release): string {
       )
       .join('')}</div>
     <footer class="wn-foot">
-      <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="Memora is free and open source. A star helps others find it.">${STAR}<span>Star on GitHub</span><em data-stars></em></a>
-      <span class="grow"></span>
-      <button type="button" class="wn-log" data-log>Changelog</button>
-      <button type="button" class="btn primary" data-close>Got it</button>
+      <div class="wn-links">
+        <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="Memora is free and open source. A star helps others find it.">${STAR}<span>Star</span><em data-stars></em></a>
+        <button type="button" class="wn-log" data-log>${icon('book')}<span>Full changelog</span></button>
+      </div>
+      <button type="button" class="btn primary wn-ok" data-close>Got it</button>
     </footer>
   </div>`;
 }
@@ -499,6 +526,8 @@ export function openWhatsNew(version?: string): void {
       const pick = createSelect({
         className: 'wn-sel',
         label: 'Version',
+        align: 'end',
+        minWidth: 280,
         labelledBy: 'wnV',
         options: RELEASES.map((x, i) => ({ value: x.version, label: x.version, hint: (i === 0 ? 'Latest · ' : '') + x.title })),
         value: r.version,

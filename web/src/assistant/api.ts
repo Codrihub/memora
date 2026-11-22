@@ -45,11 +45,43 @@ export interface Prefs {
   context_tokens?: number | null;
   max_steps?: number | null;
   launcher?: boolean | null;
-  /** "ask": changes wait for the owner's OK; "auto": Mnemo goes ahead. */
-  permission?: 'ask' | 'auto' | null;
+  /** "ask": changes and sub-agents wait for the owner's OK; "auto": Mnemo goes ahead;
+   *  "read": Mnemo only reads and answers, it never changes notes. */
+  permission?: 'ask' | 'auto' | 'read' | null;
   thinking?: ThinkLevel | null;
   /** Models to carry on with when a chat's model fails, in order (`provider/model`, 5 at most). */
   fallback_models?: string[] | null;
+  /** A model for each job the chat model may not do itself (`provider/model`; empty for none). */
+  roles?: Roles | null;
+  /** The voice that reads replies aloud. */
+  voice?: string | null;
+  /** Helpers Mnemo can hand a task to (6 at most). */
+  subagents?: SubAgent[] | null;
+  /** Mnemo may note things about the owner on its own. */
+  learn_me?: boolean | null;
+  /** Mnemo asks the owner before sub-agents run (they use tokens of their own). */
+  confirm_subagents?: boolean | null;
+}
+
+export interface Roles {
+  vision?: string;
+  image?: string;
+  tts?: string;
+  stt?: string;
+}
+
+export interface SubAgent {
+  name: string;
+  model: string;
+  about: string;
+}
+
+export const VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
+export const MAX_SUBAGENTS = 6;
+
+/** The model set for a job, or '' when none is. */
+export function roleModel(s: MnemoState | null, role: keyof Roles): string {
+  return s?.prefs.roles?.[role] || '';
 }
 
 /** A question Mnemo asks with options to tap. */
@@ -97,6 +129,10 @@ export interface Session {
   running?: boolean;
   /** How many of its messages the owner has seen, on any device (in the chat list only). */
   seen?: number;
+  /** Put away: hidden from the chat list, still found by search and in All chats. */
+  archived?: boolean;
+  /** The last message with text, one line (in the chat list only). */
+  preview?: { role: 'user' | 'assistant'; text: string };
 }
 
 export interface StoredCall {
@@ -139,6 +175,7 @@ export async function uploadChatImage(file: File): Promise<{ id: string; name: s
   });
   const data = (await res.json().catch(() => ({}))) as { id?: string; name?: string; bytes?: number; url?: string; error?: string };
   if (!res.ok || !data.id) throw new Error(data.error || `could not attach the image (HTTP ${res.status})`);
+  window.dispatchEvent(new Event('memora:storage-check'));
   return data as { id: string; name: string; bytes: number; url: string };
 }
 
@@ -153,6 +190,55 @@ export interface ChatContext {
   model: string;
 }
 
+/** Progress of a sub-agent while a `delegate` call runs (`id` is that call's id). */
+export interface SubEvent {
+  id: string;
+  agent: string;
+  model: string;
+  phase: 'start' | 'step' | 'text' | 'tool' | 'tool_end' | 'ask' | 'answer' | 'usage' | 'done' | 'error' | 'fallback' | 'switched' | 'compacting' | 'compacted' | 'notice';
+  from?: string;
+  to?: string;
+  reason?: string;
+  messages?: number;
+  text?: string;
+  follow_up?: boolean;
+  window?: number | null;
+  step?: number;
+  steps?: number;
+  delta?: string;
+  name?: string;
+  args?: unknown;
+  ok?: boolean;
+  summary?: string;
+  question?: string;
+  answer?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  context?: number;
+  message?: string;
+}
+
+/** What a `delegate` call returns (the live card is drawn again from it after a reload). */
+export interface SubResult {
+  agent?: string;
+  model?: string;
+  answer?: string;
+  steps?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  context?: number;
+  window?: number | null;
+  follow_up?: boolean;
+  error?: string;
+  log?: ({ kind: 'tool'; name: string; ok: boolean; summary: string } | { kind: 'ask'; question: string; answer: string })[];
+}
+
+/** Something to do about a notice: open Settings at "Models for each job", or this chat's model picker. */
+export interface NoticeAction {
+  label: string;
+  open: 'jobs' | 'model';
+}
+
 export type ChatEvent =
   | { type: 'start'; model: string; context?: ChatContext }
   | ({ type: 'ask' } & Ask)
@@ -161,11 +247,12 @@ export type ChatEvent =
   | { type: 'compacted'; messages: number; tokens: number; summary?: string }
   | { type: 'compact_text'; delta: string }
   | { type: 'fallback'; from: string; model: string; reason: string; detail?: string }
-  | { type: 'notice'; text: string }
+  | { type: 'notice'; text: string; action?: NoticeAction }
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
   | { type: 'tool_start'; id: string; name: string; args: unknown }
-  | { type: 'tool_end'; id: string; name: string; ok: boolean; summary: string; ms: number; shown?: Shown[] }
+  | { type: 'tool_end'; id: string; name: string; ok: boolean; summary: string; ms: number; shown?: Shown[]; output?: unknown }
+  | ({ type: 'sub' } & SubEvent)
   | { type: 'error'; message: string }
   | { type: 'done'; input_tokens: number; output_tokens: number; title: string | null; context?: ChatContext };
 
@@ -273,7 +360,7 @@ export const compactSession = (id: string): Promise<{ ok: boolean; messages?: nu
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/compact`, {});
 export const getSession = (id: string): Promise<{ session: Session; messages: Message[]; context: ChatContext | null; running?: boolean; queue?: QueueState }> =>
   apiGet(`/api/assistant/sessions/${encodeURIComponent(id)}`);
-export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean }): Promise<{ session: Session }> =>
+export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean; archived?: boolean }): Promise<{ session: Session }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}`, b);
 /** Delete many chats: the ones picked, the ones untouched for some days, or all. */
 export const pruneSessions = (b: { ids?: string[]; older_than_days?: number; all?: boolean; keep_pinned?: boolean }): Promise<{ deleted: number; skipped: number }> =>
@@ -437,6 +524,76 @@ async function readEvents(res: Response, onEvent: (e: ChatEvent) => void): Promi
       }
     }
   }
+}
+
+// ---- what Mnemo knows about the owner ----
+
+export type MemoryKind = 'style' | 'about' | 'prefers';
+export const MEMORY_KINDS: { kind: MemoryKind; label: string }[] = [
+  { kind: 'style', label: 'How to answer me' },
+  { kind: 'about', label: 'About me' },
+  { kind: 'prefers', label: 'What I like' },
+];
+export interface OwnerMemory {
+  id: string;
+  text: string;
+  kind: MemoryKind;
+  by: 'mnemo' | 'owner';
+  at: number;
+}
+export const listOwnerMemory = (): Promise<{ items: OwnerMemory[]; learn: boolean }> => apiGet('/api/assistant/memory');
+export const addOwnerMemory = (text: string, kind: MemoryKind): Promise<{ item: OwnerMemory }> => apiPost('/api/assistant/memory', { text, kind });
+export const editOwnerMemory = (id: string, b: { text?: string; kind?: MemoryKind }): Promise<{ item: OwnerMemory }> =>
+  apiPost(`/api/assistant/memory/${encodeURIComponent(id)}`, b);
+/** Switch a sub-agent's model in one chat ('' goes back to Auto: the default model, then the fallbacks). */
+export const setSubModel = (sid: string, agent: string, model: string): Promise<{ ok: boolean; agent: string; model: string }> =>
+  apiPost(`/api/assistant/sessions/${encodeURIComponent(sid)}/subagent-model`, { agent, model });
+export const deleteOwnerMemory = (id: string): Promise<{ ok: boolean }> => apiPost(`/api/assistant/memory/${encodeURIComponent(id)}/delete`, {});
+
+/** The part of Settings, Mnemo to scroll to when it opens next (set before going there). */
+let settingsPart = '';
+export function wantSettingsPart(part: string): void {
+  settingsPart = part;
+}
+export function takeSettingsPart(): string {
+  const p = settingsPart;
+  settingsPart = '';
+  return p;
+}
+
+// ---- speech ----
+
+async function failOf(res: Response, what: string): Promise<Error> {
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  return new Error(data.error || `could not ${what} (HTTP ${res.status})`);
+}
+
+/** Text read aloud by the speech model, as audio. */
+export async function speak(text: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch('/api/assistant/speak', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { accept: 'audio/*, application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+    signal,
+    cache: 'no-store',
+  });
+  if (!res.ok) throw await failOf(res, 'read it aloud');
+  return res.blob();
+}
+
+/** Recorded speech turned into text by the listening model. */
+export async function transcribe(audio: Blob): Promise<string> {
+  const res = await fetch('/api/assistant/transcribe', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { accept: 'application/json', 'content-type': audio.type || 'audio/webm' },
+    body: audio,
+    cache: 'no-store',
+  });
+  if (!res.ok) throw await failOf(res, 'turn the recording into text');
+  const data = (await res.json().catch(() => ({}))) as { text?: string };
+  return (data.text || '').trim();
 }
 
 // ---- helpers ----

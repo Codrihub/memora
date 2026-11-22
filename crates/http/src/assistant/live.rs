@@ -85,6 +85,27 @@ pub fn queue_json(id: &str) -> serde_json::Value {
     })
 }
 
+/// The staged images queued messages carry: of chat `id`, or of every chat.
+pub fn queue_uploads(id: Option<&str>) -> Vec<String> {
+    let q = lock(queues());
+    q.iter()
+        .filter(|(k, _)| id.is_none_or(|i| i == k.as_str()))
+        .flat_map(|(_, x)| x.items.iter())
+        .flat_map(|i| images_of(&i.body))
+        .collect()
+}
+
+/// The staged image ids a chat message body attaches.
+pub fn images_of(body: &serde_json::Value) -> Vec<String> {
+    body.get("attach")
+        .and_then(|a| a.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|a| a["kind"] == "image")
+        .filter_map(|a| a["path"].as_str().map(str::to_string))
+        .collect()
+}
+
 /// Tell everyone watching chat `id` that its queue changed.
 pub fn queue_changed(id: &str) {
     let mut v = queue_json(id);
@@ -266,6 +287,18 @@ pub fn watch(id: &str) -> Response {
         .into_response()
 }
 
+/// Ends every open chat watch (the server is shutting down: open streams would hold it).
+pub fn shutdown() {
+    if let Ok(mut w) = watchers().lock() {
+        w.clear();
+    }
+}
+
+/// The chats with a reply running now.
+pub fn running_ids() -> Vec<String> {
+    lock(runs()).keys().cloned().collect()
+}
+
 /// Whether chat `id` has a reply running now.
 pub fn running(id: &str) -> bool {
     lock(runs()).contains_key(id)
@@ -315,15 +348,35 @@ pub fn start(id: &str) -> mpsc::UnboundedSender<String> {
     tx
 }
 
-/// Stop the reply running in chat `id`. `false` when none is.
-pub fn cancel(id: &str) -> bool {
-    match lock(runs()).get(id) {
-        Some(l) => {
-            l.stop.notify_one();
-            true
+/// Cut the reply running in chat `id` now: it is no longer this chat's run (a new one can
+/// start at once), its viewers get the end, and its next send fails so it winds down on its
+/// own. Gives what its current step wrote so far and the model writing it; `None` when no
+/// reply is running.
+pub fn cut(id: &str) -> Option<(String, String)> {
+    let live = lock(runs()).remove(id)?;
+    live.stop.notify_one();
+    let ev = lock(&live.events);
+    Some(partial(&ev))
+}
+
+/// The text of the step running (since its start, last tool or fallback) and its model.
+fn partial(events: &[Arc<str>]) -> (String, String) {
+    let (mut text, mut model) = (String::new(), String::new());
+    for line in events {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        match v["type"].as_str().unwrap_or("") {
+            "text" => text.push_str(v["delta"].as_str().unwrap_or("")),
+            "start" | "fallback" => {
+                model = v["model"].as_str().unwrap_or("").to_string();
+                text.clear();
+            }
+            "tool_start" | "tool_end" | "compacting" | "saved" => text.clear(),
+            _ => {}
         }
-        None => false,
     }
+    (text, model)
 }
 
 /// A viewer of chat `id`'s running reply: server-sent events from its start, then live.
@@ -394,9 +447,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stopping_makes_the_runs_sends_fail() {
+    async fn a_cut_frees_the_chat_at_once_keeps_the_text_and_fails_the_runs_sends() {
         let tx = start("t2");
-        assert!(cancel("t2"));
+        tx.send(r#"{"type":"start","model":"p/a"}"#.into()).unwrap();
+        tx.send(r#"{"type":"text","delta":"old "}"#.into()).unwrap();
+        tx.send(r#"{"type":"tool_start"}"#.into()).unwrap();
+        tx.send(r#"{"type":"text","delta":"half "}"#.into())
+            .unwrap();
+        tx.send(r#"{"type":"fallback","model":"p/b"}"#.into())
+            .unwrap();
+        tx.send(r#"{"type":"text","delta":"kept"}"#.into()).unwrap();
+        for _ in 0..50 {
+            if lock(runs())
+                .get("t2")
+                .is_some_and(|l| lock(&l.events).len() == 6)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let (text, model) = cut("t2").expect("running");
+        assert_eq!((text.as_str(), model.as_str()), ("kept", "p/b"));
+        assert!(!running("t2"), "a new run can start right away");
         for _ in 0..50 {
             if tx.send("{}".into()).is_err() {
                 break;
@@ -404,7 +476,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         assert!(tx.send("{}".into()).is_err());
-        assert!(!cancel("nope"));
+        assert!(cut("nope").is_none());
     }
 }
 

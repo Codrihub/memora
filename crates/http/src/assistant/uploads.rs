@@ -22,7 +22,7 @@ use crate::api::{bad, csrf_fail, csrf_ok};
 use crate::{ApiKeyCaller, AppState};
 
 const DIR: &str = "assistant-uploads";
-/// Staged images older than this are removed.
+/// Staged images older than this are removed once nothing uses them.
 const KEEP_SECS: u64 = 7 * 24 * 3600;
 const CAP: usize = 50 * 1024 * 1024 + 4096;
 
@@ -91,18 +91,125 @@ fn clean_name(name: &str, ext: &str) -> String {
     format!("{stem}.{ext}")
 }
 
-fn prune(d: &Path) {
+/// Upload ids (`u` and 12 hex digits) quoted anywhere in `text`.
+pub fn ids_in(text: &str, out: &mut std::collections::HashSet<String>) {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i + 14 <= b.len() {
+        if b[i] == b'"' && b[i + 1] == b'u' {
+            let hex = &b[i + 2..(i + 14).min(b.len())];
+            if hex.len() == 12
+                && hex.iter().all(u8::is_ascii_hexdigit)
+                && b.get(i + 14) == Some(&b'"')
+            {
+                out.insert(String::from_utf8_lossy(&b[i + 1..i + 14]).into_owned());
+                i += 14;
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Images a chat still shows or a queued message still carries: never pruned.
+fn in_use(st: &AppState) -> std::collections::HashSet<String> {
+    let mut keep = std::collections::HashSet::new();
+    if let Ok(store) = super::store(st) {
+        for s in store.sessions().unwrap_or_default() {
+            for m in store.messages(&s.id).unwrap_or_default() {
+                if let Some(meta) = &m.meta {
+                    ids_in(&meta.to_string(), &mut keep);
+                }
+                if m.role == "tool" {
+                    ids_in(&m.content, &mut keep);
+                }
+            }
+        }
+    }
+    keep.extend(super::live::queue_uploads(None));
+    keep
+}
+
+/// Remove staged images older than a week that nothing uses any more (at most once an hour).
+fn prune(st: &AppState, d: &Path) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now_s = memora_state::now() as u64;
+    if now_s.saturating_sub(LAST.load(std::sync::atomic::Ordering::Relaxed)) < 3600 {
+        return;
+    }
+    LAST.store(now_s, std::sync::atomic::Ordering::Relaxed);
     let Ok(rd) = std::fs::read_dir(d) else { return };
     let now = std::time::SystemTime::now();
+    let old: Vec<std::path::PathBuf> = rd
+        .flatten()
+        .filter(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age.as_secs() > KEEP_SECS)
+        })
+        .map(|e| e.path())
+        .collect();
+    if old.is_empty() {
+        return;
+    }
+    let keep = in_use(st);
+    for p in old {
+        let id = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if !keep.contains(&id) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// Every staged image: `(id, file name, bytes)`.
+pub fn list(st: &AppState) -> Vec<(String, String, u64)> {
+    let d = dir(st);
+    let Ok(rd) = std::fs::read_dir(&d) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
     for e in rd.flatten() {
-        let old = e
-            .metadata()
-            .and_then(|m| m.modified())
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(id) = p.file_stem().and_then(|x| x.to_str()).map(str::to_string) else {
+            continue;
+        };
+        let meta: Value = std::fs::read_to_string(&p)
             .ok()
-            .and_then(|t| now.duration_since(t).ok())
-            .is_some_and(|age| age.as_secs() > KEEP_SECS);
-        if old {
-            let _ = std::fs::remove_file(e.path());
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(Value::Null);
+        out.push((
+            id,
+            meta["name"].as_str().unwrap_or("image").to_string(),
+            meta["bytes"].as_u64().unwrap_or(0),
+        ));
+    }
+    out.sort();
+    out
+}
+
+/// Remove staged images no message of chat `chat` uses (a queued message dropped, say).
+pub fn remove_unused(st: &AppState, chat: &str, ids: &[String]) {
+    let mut keep = std::collections::HashSet::new();
+    if let Ok(store) = super::store(st) {
+        for m in store.messages(chat).unwrap_or_default() {
+            if let Some(meta) = &m.meta {
+                ids_in(&meta.to_string(), &mut keep);
+            }
+        }
+    }
+    keep.extend(super::live::queue_uploads(Some(chat)));
+    for id in ids {
+        if !keep.contains(id) {
+            remove(st, id);
         }
     }
 }
@@ -165,7 +272,7 @@ pub fn stage(
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700));
     }
-    prune(&d);
+    prune(st, &d);
     let id = format!(
         "u{}",
         &memora_gateway::hash_api_key(&memora_gateway::generate_key())[..12]

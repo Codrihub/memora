@@ -11,6 +11,7 @@ memora-state = { path = "../state" }
 serde_json.workspace = true
 anyhow.workspace = true
 libc = "0.2"
+walkdir.workspace = true
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.5", features = ["limit"] }

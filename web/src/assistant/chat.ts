@@ -89,7 +89,113 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
   template_create: ['Created from a template', true],
   pin: ['Pinned', true],
   unpin: ['Unpinned', true],
+  delegate: ['Asked a sub-agent', false],
+  describe_image: ['Looked at an image', false],
+  generate_image: ['Made an image', false],
 };
+
+/** Tools whose result is drawn in the card (an answer, a text, a picture), not as raw JSON. */
+const RICH = new Set(['describe_image', 'generate_image']);
+/** A task handed to a sub-agent: drawn as a small live panel in the reply, not a step. */
+const DELEGATE = 'delegate';
+/** Tools that change what Mnemo knows about the owner: a quiet line in the reply, not a step. */
+const OWNER_MEMORY = new Set(['remember_owner', 'update_owner_memory', 'forget_owner_memory']);
+
+function argStr(args: unknown, key: string): string {
+  const v = args && typeof args === 'object' ? (args as Record<string, unknown>)[key] : undefined;
+  return typeof v === 'string' ? v : '';
+}
+
+/** A tool card's title and the line under it. */
+function toolTitle(name: string, args: unknown): [string, string] {
+  if (name === 'delegate') return [argStr(args, 'agent') ? `Asked ${argStr(args, 'agent')}` : toolWords(name), argStr(args, 'task')];
+  if (name === 'generate_image') return [toolWords(name), argStr(args, 'prompt')];
+  if (name === 'describe_image') return [toolWords(name), argStr(args, 'question') || subject(args)];
+  return [toolWords(name), subject(args)];
+}
+
+function ownerMemoryText(name: string, args: unknown): string {
+  if (name === 'remember_owner') return argStr(args, 'text') ? `Noted about you: ${argStr(args, 'text')}` : 'Noted something about you';
+  if (name === 'update_owner_memory') return 'Updated what I know about you';
+  return 'Forgot something about you';
+}
+
+function parseOut(output: unknown): Record<string, unknown> | null {
+  if (output && typeof output === 'object') return output as Record<string, unknown>;
+  if (typeof output !== 'string') return null;
+  try {
+    const v = JSON.parse(output) as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A reply as plain words for reading aloud: Markdown marks, code and links dropped. */
+function speakable(md: string): string {
+  return md
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[\[([^\]|]*)(\|([^\]]*))?\]\]/g, (_m, a: string, _b, c: string) => c || a)
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/^\s*\|?[-:| ]+\|?\s*$/gm, '')
+    .replace(/\|/g, ', ')
+    .replace(/(\*\*|__|\*|_|~~)(\S[^\n]*?)\1/g, '$2')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+    .slice(0, 4000);
+}
+
+/** The one reply being read aloud (one at a time, in every chat). */
+let playing: { btn: HTMLElement; audio: HTMLAudioElement; ctrl: AbortController; url: string } | null = null;
+
+function paintListen(btn: HTMLElement, on: boolean): void {
+  btn.classList.toggle('on', on);
+  btn.innerHTML = icon(on ? 'stop' : 'volume');
+  btn.title = on ? 'Stop reading' : 'Listen';
+  btn.setAttribute('aria-label', on ? 'Stop reading' : 'Listen to the reply');
+}
+
+function stopListening(): void {
+  const p = playing;
+  playing = null;
+  if (!p) return;
+  p.ctrl.abort();
+  p.audio.pause();
+  p.audio.removeAttribute('src');
+  if (p.url) URL.revokeObjectURL(p.url);
+  paintListen(p.btn, false);
+}
+
+async function listen(btn: HTMLElement): Promise<void> {
+  if (playing?.btn === btn) return stopListening();
+  stopListening();
+  const text = speakable(btn.closest<HTMLElement>('.mn-foot')?.dataset.raw || '');
+  if (!text) return;
+  const me = { btn, audio: new Audio(), ctrl: new AbortController(), url: '' };
+  playing = me;
+  paintListen(btn, true);
+  try {
+    const blob = await A.speak(text, me.ctrl.signal);
+    if (playing !== me) return;
+    me.url = URL.createObjectURL(blob);
+    me.audio.src = me.url;
+    me.audio.onended = () => playing === me && stopListening();
+    me.audio.onerror = () => playing === me && stopListening();
+    await me.audio.play();
+  } catch (e) {
+    if (playing !== me) return;
+    stopListening();
+    if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'err');
+  }
+}
+
+/** Recording can run in this browser at all. */
+const canRecord = (): boolean => typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
 function toolWords(name: string): string {
   return TOOL_WORDS[name]?.[0] ?? name.replace(/_/g, ' ');
@@ -227,6 +333,10 @@ export interface ChatOptions {
   onNew?: () => void;
   /** The stored chat changed (opened, a reply finished, a new chat): the artifacts panel follows. */
   onMessages?: () => void;
+  /** The chat's sub-agents changed (one started, finished, or the chat changed). */
+  onAgents?: () => void;
+  /** Show the Agents panel (the page's side panel or sheet); without it a dialog opens. */
+  openAgents?: () => void;
 }
 
 /** Thinking levels, for models that can think. */
@@ -237,6 +347,15 @@ const THINK_LEVELS: { v: A.ThinkLevel; label: string; hint: string }[] = [
   { v: 'medium', label: 'Medium', hint: 'Balanced' },
   { v: 'high', label: 'High', hint: 'Think it through, slower' },
 ];
+
+/** Permission modes: what Mnemo may do without asking (one setting for every chat). */
+type PermMode = 'ask' | 'auto' | 'read';
+const PERM_MODES: { v: PermMode; label: string; hint: string; icon: string; toast: string }[] = [
+  { v: 'ask', label: 'Ask first', hint: 'Asks before it changes notes or runs sub-agents', icon: 'shield', toast: `Ask first: ${A.MNEMO} asks before it changes notes or runs sub-agents` },
+  { v: 'auto', label: 'Auto', hint: 'Changes and sub-agents go ahead without asking', icon: 'bolt', toast: `Auto: ${A.MNEMO} makes changes and runs sub-agents without asking` },
+  { v: 'read', label: 'Read only', hint: 'Only reads and answers; never changes notes', icon: 'eye', toast: `Read only: ${A.MNEMO} reads and answers, and never changes your notes` },
+];
+const permMode = (p: string | null | undefined): PermMode => (p === 'auto' || p === 'read' ? p : 'ask');
 
 export class ChatView {
   readonly el: HTMLElement;
@@ -265,7 +384,6 @@ export class ChatView {
   private watchCtrl: AbortController | null = null;
   private watchSid = '';
   /** The owner sent a message now: the reply running ends as "cut", not "stopped". */
-  private cutting = false;
   /** A reply was asked to stop: the button waits for it to end. */
   private stopping = false;
   /** The question an "Other" answer goes to (set by tapping Other). */
@@ -279,6 +397,9 @@ export class ChatView {
   private input: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
   private plusEl: HTMLElement;
+  private mic: HTMLButtonElement;
+  /** Speech being recorded for the message (the mic button). */
+  private rec: { r: MediaRecorder; stream: MediaStream; t0: number; tick: number } | null = null;
   private attEl: HTMLElement;
   /** Notes and folders attached to the next message. */
   private attach: A.Attach[] = [];
@@ -297,6 +418,10 @@ export class ChatView {
   private ctx: A.ChatContext | null = null;
   private modelSlot: HTMLElement;
   private select: Select | null = null;
+  /** The permission picker in the composer: Ask first, Auto or Read only. */
+  private permSel: Select | null = null;
+  /** Every sub-agent of this chat, by what it is doing now (the Agents panel's content). */
+  readonly agents: AgentsPanel;
   private offState: () => void;
 
   constructor(private o: ChatOptions) {
@@ -313,7 +438,8 @@ export class ChatView {
           <textarea rows="1" maxlength="40000" placeholder="Ask ${A.MNEMO} about your notes…" aria-label="Message to ${A.MNEMO}"></textarea>
           <div class="mn-comp-bar">
             <button type="button" class="mn-plus" aria-label="Attach notes or folders from your vault" title="Attach notes or folders from your vault">${icon('plus')}</button>
-            <button type="button" class="mn-perm" hidden></button>
+            <button type="button" class="mn-mic" hidden aria-label="Speak a message" title="Speak a message">${icon('mic')}<i class="mn-mic-dot" aria-hidden="true"></i><span class="mn-mic-t"></span></button>
+            <span class="mn-perm-slot" hidden></span>
             <span class="mn-grow"></span>
             <span class="mn-think-slot"></span>
             <button type="submit" class="mn-send" aria-label="Send">${icon('send')}</button>
@@ -331,19 +457,16 @@ export class ChatView {
     this.input = this.el.querySelector('textarea')!;
     this.sendBtn = this.el.querySelector('.mn-send')!;
     this.plusEl = this.el.querySelector('.mn-plus')!;
+    this.mic = this.el.querySelector('.mn-mic')!;
+    this.mic.onclick = () => void this.toggleMic();
+    this.el.classList.add('w-' + chatWidth());
     this.attEl = this.el.querySelector('.mn-att')!;
     this.meter = this.el.querySelector('.mn-meter')!;
     this.modelSlot = this.el.querySelector('.mn-model-slot')!;
     this.pinBtn = this.el.querySelector('.mn-pin')!;
     this.pinBtn.onclick = () => void this.togglePin();
-    const perm = this.el.querySelector<HTMLButtonElement>('.mn-perm')!;
-    perm.onclick = () => {
-      const s = A.mnemoState();
-      const next = s?.prefs.permission === 'auto' ? 'ask' : 'auto';
-      void A.savePrefs({ permission: next })
-        .then(() => toast(next === 'auto' ? `Auto: ${A.MNEMO} makes changes without asking and keeps going until done` : `Ask first: ${A.MNEMO} asks before it changes your notes`, 'ok'))
-        .catch((e) => toast((e as Error).message, 'err'));
-    };
+    this.agents = new AgentsPanel(() => this.o.onAgents?.());
+    this.agents.el.addEventListener('click', (e) => this.onAgentsClick(e));
     this.rail = this.el.querySelector('.mn-rail')!;
     this.wireRail();
     this.log.addEventListener('scroll', () => {
@@ -451,7 +574,6 @@ export class ChatView {
       if (!row) return;
       const qid = Number(row.dataset.q);
       if (act === 'send') {
-        if (this.busy) this.cutting = true;
         return void A.queueOp(sid, qid, 'send').then(done, fail);
       }
       if (act === 'del' || act === 'up' || act === 'down') void A.queueOp(sid, qid, act).then(done, fail);
@@ -519,18 +641,32 @@ export class ChatView {
       f.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button').forEach((x) => (x.disabled = true));
       void this.send(text, { to: card.dataset.ask!, other: true });
     });
-    this.offState = A.onState(() => this.paintModels());
+    this.offState = A.onState(() => {
+      this.paintModels();
+      this.paintSpeech();
+    });
     void A.loadState().then(() => {
       this.paintModels();
+      this.paintSpeech();
       if (!this.session) this.paintEmpty();
     });
     this.blank();
   }
 
   destroy(): void {
+    if (this.rec) {
+      const rec = this.rec;
+      this.rec = null;
+      window.clearInterval(rec.tick);
+      rec.r.onstop = null;
+      if (rec.r.state !== 'inactive') rec.r.stop();
+      rec.stream.getTracks().forEach((t) => t.stop());
+    }
+    if (playing && this.el.contains(playing.btn)) stopListening();
     this.detach();
     this.unwatch();
     this.thinkSel?.close();
+    this.permSel?.close();
     this.offOutside();
     this.offState();
     this.select?.close();
@@ -538,6 +674,99 @@ export class ChatView {
 
   focus(): void {
     this.input.focus({ preventScroll: true });
+  }
+
+  /** The mic shows when a listening model is set; Listen under replies when a speech one is. */
+  private paintSpeech(): void {
+    const s = A.mnemoState();
+    this.mic.hidden = !this.rec && !(canRecord() && A.roleModel(s, 'stt'));
+    this.el.classList.toggle('can-tts', !!A.roleModel(s, 'tts'));
+  }
+
+  private async toggleMic(): Promise<void> {
+    if (this.rec) {
+      if (this.rec.r.state !== 'inactive') this.rec.r.stop();
+      return;
+    }
+    if (this.mic.classList.contains('wait')) return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      const n = (e as Error).name;
+      toast(n === 'NotAllowedError' || n === 'SecurityError' ? 'The browser did not allow the microphone' : n === 'NotFoundError' ? 'No microphone found' : (e as Error).message, 'err');
+      return;
+    }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+    let r: MediaRecorder;
+    try {
+      r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    } catch (e) {
+      stream.getTracks().forEach((t) => t.stop());
+      toast((e as Error).message, 'err');
+      return;
+    }
+    const chunks: Blob[] = [];
+    r.ondataavailable = (ev) => {
+      if (ev.data.size) chunks.push(ev.data);
+    };
+    r.onstop = () => void this.endRecording(chunks, r.mimeType || type);
+    const t0 = Date.now();
+    this.rec = { r, stream, t0, tick: window.setInterval(() => this.paintRec(), 250) };
+    r.start(1000);
+    this.paintRec();
+  }
+
+  private paintRec(): void {
+    const on = !!this.rec;
+    this.mic.classList.toggle('rec', on);
+    const secs = this.rec ? Math.floor((Date.now() - this.rec.t0) / 1000) : 0;
+    this.mic.querySelector('.mn-mic-t')!.textContent = on ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : '';
+    this.mic.title = on ? 'Stop and turn into text' : 'Speak a message';
+    this.mic.setAttribute('aria-label', this.mic.title);
+    this.mic.setAttribute('aria-pressed', String(on));
+    this.paintOpen();
+  }
+
+  private async endRecording(chunks: Blob[], type: string): Promise<void> {
+    const rec = this.rec;
+    this.rec = null;
+    if (rec) {
+      window.clearInterval(rec.tick);
+      rec.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.paintRec();
+    const blob = new Blob(chunks, { type: (type || 'audio/webm').split(';')[0] });
+    if (!blob.size) return this.paintSpeech();
+    this.mic.classList.add('wait');
+    this.mic.disabled = true;
+    try {
+      const text = await A.transcribe(blob);
+      if (text) this.insertText(text);
+      else toast('Nothing was heard', 'info');
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      this.mic.classList.remove('wait');
+      this.mic.disabled = false;
+      this.paintSpeech();
+    }
+  }
+
+  /** Put text at the cursor (spaced from what is around it), then type on from there. */
+  private insertText(text: string): void {
+    const i = this.input;
+    const a = i.selectionStart ?? i.value.length;
+    const b = i.selectionEnd ?? a;
+    const before = i.value.slice(0, a);
+    const after = i.value.slice(b);
+    const pre = before && !/\s$/.test(before) ? ' ' : '';
+    const post = after && !/^\s/.test(after) ? ' ' : '';
+    i.value = before + pre + text + post + after;
+    const pos = (before + pre + text).length;
+    i.focus();
+    i.setSelectionRange(pos, pos);
+    i.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /** Bring message `mid` into view and flash it (a search hit). */
@@ -589,12 +818,10 @@ export class ChatView {
     this.attach = [];
     this.paintAtt();
     this.grow();
-    if (this.busy) this.cutting = true;
     try {
       const r = await A.steerChat(this.session.id, body);
       this.setQueue(r.queue);
     } catch (e) {
-      this.cutting = false;
       toast((e as Error).message, 'warn');
       this.input.value = text;
       this.grow();
@@ -628,12 +855,12 @@ export class ChatView {
       n > 3 ? `<button type="button" class="mn-qh-b" data-qa="all" aria-expanded="${this.qAll}">${this.qAll ? 'Show less' : `Show all (${n})`}</button>` : '',
       `<button type="button" class="mn-qh-b" data-qa="clear" title="Remove every queued message">${icon('trash')}<span>Clear</span></button>`,
     ].join('');
-    const sendTitle = this.busy ? 'Send now: cuts the reply where it is and answers this message' : 'Send now';
+    const sendTitle = this.busy ? 'Send now: cuts the reply and answers this' : 'Send now';
     box.innerHTML = `<div class="mn-queue-h">${head}<span class="mn-grow"></span>${tools}</div><div class="mn-q-list${this.qAll ? ' all' : ''}">${this.queue
       .map(
         (q, i) => `<div class="mn-q-i" data-q="${q.id}" draggable="true"><span class="mn-q-n">${i + 1}</span><span class="mn-q-t" title="${attr(q.text)}">${esc(q.text)}${
           q.attach.length ? ` <small>+${q.attach.length}</small>` : ''
-        }</span><span class="mn-q-a"><button type="button" class="mn-ibtn" data-qa="send" title="${sendTitle}" aria-label="Send now">${icon('enter')}</button><button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
+        }</span><span class="mn-q-a"><button type="button" class="mn-ibtn" data-qa="send" title="${sendTitle}" aria-label="Send now">${icon('send-now')}</button><button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
           i === n - 1 ? ' disabled' : ''
         }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="Remove" aria-label="Remove">${icon('close')}</button></span></div>`,
       )
@@ -853,7 +1080,7 @@ export class ChatView {
   /** A capsule at rest; focused (or holding text, attachments or a running reply) it opens up
    *  with +, the model and the context meter while the placeholder still shows. */
   private paintOpen(): void {
-    const open = this.focused || this.busy || !!this.input.value.trim() || this.attach.length > 0;
+    const open = this.focused || this.busy || !!this.input.value.trim() || this.attach.length > 0 || !!this.rec || this.mic.classList.contains('wait');
     this.el.querySelector('.mn-comp-box')!.classList.toggle('open', open);
   }
 
@@ -982,19 +1209,57 @@ export class ChatView {
     }
   }
 
-  /** The permission chip: Ask first (changes wait for an OK) or Auto. */
+  /** The permission picker: Ask first (changes and sub-agents wait for an OK), Auto, or
+   *  Read only (Mnemo reads and answers, never changes notes). One setting for every chat. */
   private paintPerm(): void {
-    const b = this.el.querySelector<HTMLButtonElement>('.mn-perm');
+    const slot = this.el.querySelector<HTMLElement>('.mn-perm-slot');
     const s = A.mnemoState();
+    if (!slot) return;
+    slot.hidden = !s || !A.usableModels(s).length;
+    if (slot.hidden || !s) {
+      this.permSel?.close();
+      return;
+    }
+    const mode = permMode(s.prefs.permission);
+    const opts: SelectOption[] = PERM_MODES.map((m) => ({ value: m.v, label: m.label, hint: m.hint, lead: `<span class="mn-perm-ld">${icon(m.icon)}</span>` }));
+    if (!this.permSel) {
+      this.permSel = createSelect({
+        options: opts,
+        value: mode,
+        label: 'Permission',
+        className: 'mn-model mn-perm',
+        align: 'start',
+        minWidth: 260,
+        render: (o) => {
+          const m = PERM_MODES.find((x) => x.v === o?.value) || PERM_MODES[0];
+          return `${icon(m.icon)}<span class="mn-model-v">${esc(m.label)}</span>`;
+        },
+        onChange: (v) => {
+          const m = PERM_MODES.find((x) => x.v === v) || PERM_MODES[0];
+          this.paintPermLook(m.v);
+          void A.savePrefs({ permission: m.v }).then(
+            () => toast(m.toast, 'ok'),
+            (e) => {
+              toast((e as Error).message, 'err');
+              this.paintPerm();
+            },
+          );
+        },
+      });
+      slot.innerHTML = '';
+      slot.append(this.permSel.el);
+    } else this.permSel.setOptions(opts, mode);
+    this.paintPermLook(mode);
+  }
+
+  /** The chip's colour and words say the mode: Auto warm, Read only neutral, Ask first accent. */
+  private paintPermLook(mode: PermMode): void {
+    const b = this.permSel?.el;
     if (!b) return;
-    b.hidden = !s || !A.usableModels(s).length;
-    if (b.hidden || !s) return;
-    const auto = s.prefs.permission === 'auto';
-    b.classList.toggle('auto', auto);
-    b.innerHTML = `${icon(auto ? 'bolt' : 'shield')}<span>${auto ? 'Auto' : 'Ask first'}</span>`;
-    const t = auto ? 'Auto: changes go ahead without asking. Tap for Ask first.' : 'Ask first: changes wait for your OK. Tap for Auto.';
-    b.title = t;
-    b.setAttribute('aria-label', t);
+    const m = PERM_MODES.find((x) => x.v === mode) || PERM_MODES[0];
+    b.classList.remove('p-ask', 'p-auto', 'p-read');
+    b.classList.add('p-' + m.v);
+    b.title = `${m.label}: ${m.hint}`;
   }
 
   private paintPin(): void {
@@ -1019,6 +1284,17 @@ export class ChatView {
   }
 
   // ---- timeline rail: one bar per question; tap, hover, or hold and slide to scrub ----
+  // The rail has a fixed height and the bars a fixed spacing; when there are more bars than
+  // fit, a window of them glides with the conversation (the question in view near the middle),
+  // fading at the edge that hides more. A knob marks how far the chat is scrolled.
+
+  /** Spacing of the bars (px). */
+  private static RH = 8;
+  /** Height of the window of bars, and how far the bars are moved up in it. */
+  private railWin = 0;
+  private railOff = 0;
+  /** A scrub is under way: the bars hold still under the finger. */
+  private railHold = false;
 
   private paintRail(): void {
     const us = Array.from(this.log.querySelectorAll<HTMLElement>('.mn-u'));
@@ -1026,45 +1302,54 @@ export class ChatView {
     this.rail.hidden = !show;
     this.el.classList.toggle('has-rail', show);
     if (!show) return;
-    // Bars share the rail's height: roomy for a few questions, tight for hundreds.
-    const room = Math.max(120, this.el.clientHeight * 0.56);
-    this.rail.style.setProperty('--rh', Math.max(3, Math.min(12, Math.floor(room / us.length))) + 'px');
-    this.rail.innerHTML =
-      us
-        .map((u, i) => {
-          const t = (u.querySelector('.mn-ub')?.textContent || '').trim();
-          const w = 8 + Math.min(14, Math.round(Math.sqrt(t.length) * 1.4));
-          return `<button type="button" class="mn-rb" data-at="${i}" style="--w:${w}px" aria-label="${attr(t.slice(0, 80) || 'Message')}" tabindex="-1"><i></i></button>`;
-        })
-        .join('') + '<span class="mn-rlab" aria-hidden="true"></span>';
+    const max = Math.min(matchMedia('(max-width: 640px)').matches ? 180 : 220, Math.max(100, this.el.clientHeight * 0.6)) - 12;
+    this.railWin = Math.min(us.length * ChatView.RH, max);
+    this.rail.style.setProperty('--rh', ChatView.RH + 'px');
+    this.rail.style.setProperty('--rwin', this.railWin + 'px');
+    this.rail.innerHTML = `<div class="mn-rwin"><div class="mn-rtrack">${us
+      .map((u, i) => {
+        const t = (u.querySelector('.mn-ub')?.textContent || '').trim();
+        const w = 8 + Math.min(14, Math.round(Math.sqrt(t.length) * 1.4));
+        return `<button type="button" class="mn-rb" data-at="${i}" style="--w:${w}px" aria-label="${attr(t.slice(0, 80) || 'Message')}" tabindex="-1"><i></i></button>`;
+      })
+      .join('')}</div></div><span class="mn-rknob" aria-hidden="true"></span><span class="mn-rlab" aria-hidden="true"></span>`;
+    this.railOff = 0;
     this.syncRail();
   }
 
+  /** Move the bars so that bar position `f` (fractional) sits at `y` in the window. */
+  private railPlace(f: number, y: number): void {
+    const track = this.rail.querySelector<HTMLElement>('.mn-rtrack');
+    const win = this.rail.querySelector<HTMLElement>('.mn-rwin');
+    if (!track || !win) return;
+    const full = track.childElementCount * ChatView.RH;
+    const off = Math.max(0, Math.min(full - this.railWin, (f + 0.5) * ChatView.RH - y));
+    this.railOff = off;
+    track.style.transform = off ? `translateY(${-off}px)` : '';
+    win.classList.toggle('more-top', off > 1);
+    win.classList.toggle('more-bot', full - this.railWin - off > 1);
+  }
+
   /** Tap a bar to jump; hover (mouse) or press and slide (touch, mouse) to scrub through
-   *  the questions: the bars swell around the finger, the chat follows, a label says which. */
+   *  the questions: the bars swell around the finger, the chat follows, a label says which.
+   *  Sliding past the top or bottom edge keeps going through the questions hidden there. */
   private wireRail(): void {
     let pressed = false;
     let moved = false;
     let cur = -1;
     let hide = 0;
+    let edge = 0;
+    let edgeDir = 0;
+    let lastY = 0;
+    const RH = ChatView.RH;
     const bars = (): HTMLElement[] => Array.from(this.rail.querySelectorAll<HTMLElement>('.mn-rb'));
+    const winRect = (): DOMRect | null => this.rail.querySelector<HTMLElement>('.mn-rwin')?.getBoundingClientRect() ?? null;
     const at = (y: number): number => {
-      const b = bars();
-      if (!b.length) return -1;
-      // The bar nearest the finger; above the first or below the last means that end.
-      if (y <= b[0].getBoundingClientRect().bottom) return 0;
-      if (y >= b[b.length - 1].getBoundingClientRect().top) return b.length - 1;
-      let best = 0;
-      let dist = Infinity;
-      b.forEach((x, i) => {
-        const r = x.getBoundingClientRect();
-        const d = Math.abs(r.top + r.height / 2 - y);
-        if (d < dist) {
-          dist = d;
-          best = i;
-        }
-      });
-      return best;
+      const n = bars().length;
+      const r = winRect();
+      if (!n || !r) return -1;
+      const i = Math.floor((Math.max(r.top, Math.min(r.bottom - 1, y)) - r.top + this.railOff) / RH);
+      return Math.max(0, Math.min(n - 1, i));
     };
     const swell = (i: number): void => {
       bars().forEach((b, j) => {
@@ -1080,7 +1365,8 @@ export class ChatView {
       const u = this.log.querySelectorAll<HTMLElement>('.mn-u')[i];
       const t = (u?.querySelector('.mn-ub')?.textContent || '').trim();
       lab.innerHTML = `<b>${i + 1}/${bars().length}</b>${esc(t.slice(0, 90) || 'Message')}`;
-      lab.style.top = b.offsetTop + b.offsetHeight / 2 + 'px';
+      const r = b.getBoundingClientRect();
+      lab.style.top = r.top + r.height / 2 - this.rail.getBoundingClientRect().top + 'px';
       lab.classList.add('in');
       window.clearTimeout(hide);
     };
@@ -1098,32 +1384,8 @@ export class ChatView {
             : this.log.scrollTop + u.getBoundingClientRect().top - this.log.getBoundingClientRect().top - 12;
       this.log.scrollTo({ top, behavior: smooth && !reduce ? 'smooth' : 'auto' });
     };
-    const done = (): void => {
-      swell(-1);
-      cur = -1;
-      this.rail.classList.remove('scrub');
-      hide = window.setTimeout(() => this.rail.querySelector('.mn-rlab')?.classList.remove('in'), 500);
-    };
-    this.rail.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      pressed = true;
-      moved = false;
-      this.rail.setPointerCapture(e.pointerId);
-      this.rail.classList.add('scrub');
-      cur = at(e.clientY);
-      swell(cur);
-      label(cur);
-      // Touch: the press alone shows where the finger is (no swipe needed first).
-      if (e.pointerType !== 'mouse') navigator.vibrate?.(8);
-      e.preventDefault();
-    });
-    // A long press must not open the browser's own menu or select text.
-    this.rail.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.rail.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-    this.rail.addEventListener('pointermove', (e) => {
-      if (!pressed && e.pointerType !== 'mouse') return;
-      const i = at(e.clientY);
-      if (i === cur) return;
+    const pick = (i: number): void => {
+      if (i === cur || i < 0) return;
       cur = i;
       swell(i);
       label(i);
@@ -1133,11 +1395,77 @@ export class ChatView {
         // A tick under the thumb for each question passed (phones that support it).
         navigator.vibrate?.(6);
       }
+    };
+    // Past an edge with more bars beyond it: step through them, the window following.
+    const stopEdge = (): void => {
+      window.clearInterval(edge);
+      edge = 0;
+      edgeDir = 0;
+    };
+    const step = (): void => {
+      const n = bars().length;
+      const next = Math.max(0, Math.min(n - 1, (cur < 0 ? at(lastY) : cur) + edgeDir));
+      if (next === cur) return stopEdge();
+      const y = edgeDir < 0 ? RH * 0.5 : this.railWin - RH * 0.5;
+      this.railPlace(next, y);
+      pick(next);
+    };
+    const track = (y: number): void => {
+      lastY = y;
+      const r = winRect();
+      if (!r) return;
+      const full = bars().length * RH;
+      const dir = y < r.top + RH && this.railOff > 1 ? -1 : y > r.bottom - RH && full - this.railWin - this.railOff > 1 ? 1 : 0;
+      // Beyond the ends with nothing hidden: the end bar.
+      if (dir !== edgeDir) {
+        stopEdge();
+        if (dir) {
+          edgeDir = dir;
+          step();
+          edge = window.setInterval(step, 70);
+          return;
+        }
+      }
+      if (!edgeDir) pick(at(y));
+    };
+    const done = (): void => {
+      stopEdge();
+      swell(-1);
+      cur = -1;
+      this.railHold = false;
+      this.rail.classList.remove('scrub');
+      hide = window.setTimeout(() => this.rail.querySelector('.mn-rlab')?.classList.remove('in'), 500);
+      this.syncRail();
+    };
+    this.rail.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      pressed = true;
+      moved = false;
+      this.railHold = true;
+      this.rail.setPointerCapture(e.pointerId);
+      this.rail.classList.add('scrub');
+      cur = -1;
+      lastY = e.clientY;
+      const i = at(e.clientY);
+      cur = i;
+      swell(i);
+      label(i);
+      // Touch: the press alone shows where the finger is (no swipe needed first).
+      if (e.pointerType !== 'mouse') navigator.vibrate?.(8);
+      e.preventDefault();
+    });
+    // A long press must not open the browser's own menu or select text.
+    this.rail.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.rail.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+    this.rail.addEventListener('pointermove', (e) => {
+      if (!pressed && e.pointerType !== 'mouse') return;
+      this.railHold = true;
+      track(e.clientY);
     });
     const up = (e: PointerEvent): void => {
       if (!pressed) return;
       pressed = false;
-      const i = at(e.clientY);
+      const i = edgeDir ? cur : at(e.clientY);
       if (!moved && i >= 0) go(i, true);
       done();
     };
@@ -1160,13 +1488,23 @@ export class ChatView {
     const box = this.log.getBoundingClientRect().top;
     const mid = this.log.clientHeight * 0.35;
     let cur = 0;
-    us.forEach((u, i) => {
-      if (u.getBoundingClientRect().top - box <= mid) cur = i;
+    const tops = Array.from(us, (u) => u.getBoundingClientRect().top - box);
+    tops.forEach((t, i) => {
+      if (t <= mid) cur = i;
     });
+    // How far between this question and the next the view is: the bars glide, not jump.
+    let f = cur;
+    if (cur < tops.length - 1 && tops[cur] <= mid) f = cur + Math.max(0, Math.min(1, (mid - tops[cur]) / Math.max(1, tops[cur + 1] - tops[cur])));
     // At the very top or bottom the end bars light up, whatever is in the middle.
-    if (top <= 8) cur = 0;
-    else if (max - top <= 8) cur = us.length - 1;
+    if (top <= 8) cur = f = 0;
+    else if (max - top <= 8) cur = f = us.length - 1;
     this.rail.querySelectorAll<HTMLElement>('.mn-rb').forEach((b, i) => b.classList.toggle('on', i === cur));
+    if (!this.railHold) this.railPlace(f, this.railWin / 2);
+    const knob = this.rail.querySelector<HTMLElement>('.mn-rknob');
+    if (knob) {
+      const p = max > 0 ? Math.max(0, Math.min(1, top / max)) : 1;
+      knob.style.transform = `translateY(${Math.round(p * Math.max(0, this.railWin - (knob.offsetHeight || 18)))}px)`;
+    }
   }
 
   /** Offer the note or folder Mnemo was opened from as an attachment (removable). */
@@ -1352,6 +1690,7 @@ export class ChatView {
     this.messages = [];
     this.model = '';
     this.ctx = null;
+    this.agents.reset();
     this.seedAttach();
     this.paintModels();
     this.paintEmpty();
@@ -1478,6 +1817,56 @@ export class ChatView {
     if (!this.session && !this.ctx) this.paintMeter(0, this.contextWindow());
   }
 
+  /** Switch a sub-agent's model from its card, the way the chat's model is switched: pick,
+   *  confirm, and it takes over from the sub-agent's next step (follow-ups use it too). */
+  private async pickSubModel(card: HTMLElement, at: HTMLElement): Promise<void> {
+    const s = A.mnemoState();
+    if (!s || !this.session) return;
+    const sid = this.session.id;
+    const st = subSt(card);
+    const prev = st.model;
+    const name = (k: string): string => (k ? A.modelLabel(s, k) : 'Auto');
+    const opts: SelectOption[] = [
+      { value: '', label: 'Auto', hint: 'Default model, then the fallbacks' },
+      ...A.usableModels(s).map((m) => ({ value: A.modelKey(m), label: m.label || m.model_id, hint: A.providerLabel(s, m.provider_id), group: m.pinned ? 'Pinned' : A.providerLabel(s, m.provider_id) })),
+    ];
+    card.querySelectorAll('.mn-sub-sel').forEach((x) => x.remove());
+    const sel = createSelect({
+      options: opts,
+      value: prev,
+      label: `Model for ${st.agent}`,
+      searchable: opts.length > 8,
+      minWidth: 260,
+      onChange: (key) => {
+        sel.el.remove();
+        if (key === prev) return;
+        Modal.open({
+          title: `Switch ${esc(st.agent)}'s model?`,
+          body: `<p><b>${esc(name(key))}</b> takes over from ${esc(st.agent)}'s next step${
+            card.dataset.state === 'run' ? ' (it is working now)' : ''
+          }, and answers its follow-ups in this chat. It may work a little differently from <b>${esc(name(prev))}</b>.</p>`,
+          actions: [
+            { label: 'Keep ' + name(prev), cls: 'ghost', run: () => Modal.close() },
+            {
+              label: 'Switch',
+              cls: 'primary',
+              run: () => {
+                Modal.close();
+                A.setSubModel(sid, st.agent, key).then(
+                  () => toast(`${st.agent} now uses ${name(key)}`, 'ok'),
+                  (e) => toast((e as Error).message, 'err'),
+                );
+              },
+            },
+          ],
+        });
+      },
+    });
+    sel.el.classList.add('mn-sub-sel');
+    at.after(sel.el);
+    sel.open();
+  }
+
   private async chooseModel(key: string): Promise<void> {
     const prev = this.model || A.fallbackModel(A.mnemoState()!);
     if (key === prev) return;
@@ -1582,19 +1971,19 @@ export class ChatView {
         ${
           this.fleetingOn
             ? `<div class="mn-incog" aria-hidden="true">${icon('incognito')}</div>
-        <h2>You're in a fleeting chat</h2>
-        <p>Private and not kept. ${esc(A.MNEMO)} still works in your notes as usual.</p>
-        <ul class="mn-fleet">
-          <li>${icon('eye-off')}<span><b>Gone when you leave</b><small>This chat and the pictures you send in it are deleted.</small></span></li>
-          <li>${icon('search')}<span><b>Out of sight</b><small>Not in the chat list, search or ${esc(A.MNEMO)}'s memory of your chats.</small></span></li>
-          <li>${icon('edit')}<span><b>Note changes stay</b><small>Anything ${esc(A.MNEMO)} changes in your notes is kept, in Activity and History.</small></span></li>
-        </ul>`
+        <h2>Fleeting chat</h2>
+        <p>Nothing said here is kept.</p>
+        <dl class="mn-fleet">
+          <div><dt>Gone</dt><dd>this chat and its pictures, once you leave</dd></div>
+          <div><dt>Unseen</dt><dd>chat list, search, ${esc(A.MNEMO)}'s memory of you and your chats</dd></div>
+          <div><dt>Kept</dt><dd>changes to your notes, in Activity and History</dd></div>
+        </dl>`
             : `<div class="mn-hello-mark">${markHTML('xl')}</div>
         <h2>${this.o.compact ? `Hi, I'm ${A.MNEMO}` : `${A.MNEMO} looks after your notes`}</h2>
         <p>${about}</p>`
         }
         ${
-          ready
+          ready && !this.fleetingOn
             ? `<div class="mn-sugs" data-kind="${kind}"></div>${
                 kind === 'global'
                   ? `<div class="mn-sug-bar"><button type="button" class="mn-sug-act" data-amaze title="${A.MNEMO} writes new suggestions from your recent notes (yours stay)">${icon('sparkle')}<span>Fresh ideas</span></button><button type="button" class="mn-sug-act" data-own-sugs title="Your own suggestions, kept until you change them">${icon('edit')}<span>Your suggestions</span></button></div><div class="mn-sk-row" hidden></div>`
@@ -1605,7 +1994,7 @@ export class ChatView {
               : ''
         }
       </div>`;
-    if (ready) this.fillSugs(kind);
+    if (ready && !this.fleetingOn) this.fillSugs(kind);
   }
 
   /** Four suggestions: some of yours and some of Mnemo's (on a vault-wide chat), the rest picked
@@ -1711,6 +2100,7 @@ export class ChatView {
   private renderAll(): void {
     closePreview();
     this.log.innerHTML = '';
+    this.agents.reset();
     if (!this.messages.length) {
       this.paintEmpty();
       return;
@@ -1778,12 +2168,18 @@ export class ChatView {
           md.dataset.raw = m.content;
           md.dataset.mid = String(m.id);
           body.append(md);
-          if (meta.stopped === true) body.insertAdjacentHTML('beforeend', `<div class="mn-notice cut">${icon('stop')}<span>Stopped here</span></div>`);
         }
         for (const c of m.tool_calls || []) {
           if (c.name === ASK) body.append(askEl({ id: c.id, ...(askOf(c.arguments) || { question: '', options: [], allow_other: true }) }, answerTo(this.messages, c.id)));
+          else if (OWNER_MEMORY.has(c.name)) body.append(memLine(c.id, c.name, c.arguments));
+          else if (c.name === DELEGATE) subCard(body, c.id, c.arguments, this.agents);
           else if (c.name !== SHOW) this.toolCard(body, c.id, c.name, c.arguments);
         }
+      } else if (m.role === 'tool' && m.tool_name === DELEGATE) {
+        const sc = this.agents.byId(m.tool_call_id || '');
+        if (sc) subFinal(sc, m.content, m.meta?.ok !== false);
+      } else if (m.role === 'tool' && m.tool_name && OWNER_MEMORY.has(m.tool_name)) {
+        if (m.meta?.ok === false) endMemLine(body, m.tool_call_id || '', false);
       } else if (m.role === 'tool' && m.tool_name === ASK) {
         /* the question card stands for it */
       } else if (m.role === 'tool' && m.tool_name === SHOW) {
@@ -1800,6 +2196,8 @@ export class ChatView {
       }
     }
     finishTurn();
+    // A stored task with no result: the reply was stopped while it ran.
+    this.agents.cards().forEach((c) => subStop(c));
     this.shownModel = lastModel;
     // Number the versions of each page across the whole chat.
     mountArt(this.log);
@@ -1960,20 +2358,20 @@ export class ChatView {
     const st = ACTS.get(a)!;
     st.steps++;
     for (const p of touchedPaths(args)) (changesNotes(name) ? st.changed : st.read).add(p);
+    const [title, sub] = toolTitle(name, args);
     const live = a.querySelector<HTMLElement>('.mn-act-t small');
-    if (live && a.classList.contains('live')) live.textContent = `${toolWords(name)}${subject(args) ? ' ' + subject(args) : ''}…`;
+    if (live && a.classList.contains('live')) live.textContent = `${title}${sub ? ' ' + sub : ''}…`;
     const d = el('details', 'mn-tool run' + (changesNotes(name) ? ' w' : ''));
     d.dataset.id = id;
-    const sub = subject(args);
-    d.innerHTML = `<summary><span class="mn-tool-ic">${icon(changesNotes(name) ? 'edit' : 'search')}</span><span class="mn-tool-t"><b>${esc(
-      toolWords(name),
-    )}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="mn-tool-s"><i class="mn-spin"></i></span>${icon('chev', 'i mn-tool-chev')}</summary>
+    d.dataset.name = name;
+    const ic = name === 'delegate' ? 'agents' : name === 'describe_image' || name === 'generate_image' ? 'image' : changesNotes(name) ? 'edit' : 'search';
+    d.innerHTML = `<summary><span class="mn-tool-ic">${icon(ic)}</span><span class="mn-tool-t"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="mn-tool-s"><i class="mn-spin"></i></span>${icon('chev', 'i mn-tool-chev')}</summary>
       <div class="mn-tool-b"><div class="mn-tool-k">${esc(name)}</div><pre>${esc(pretty(args, 1200))}</pre></div>`;
     stack.append(d);
     return d;
   }
 
-  private endTool(card: HTMLElement, ok: boolean, summary: string, ms: number, output?: string): void {
+  private endTool(card: HTMLElement, ok: boolean, summary: string, ms: number, output?: unknown): void {
     card.classList.remove('run');
     card.classList.add(ok ? 'ok' : 'err');
     const a = card.closest<HTMLElement>('.mn-act');
@@ -1985,9 +2383,53 @@ export class ChatView {
     const s = card.querySelector<HTMLElement>('.mn-tool-s')!;
     const bits = [summary, ms ? (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`) : ''].filter(Boolean).join(' · ');
     s.innerHTML = `${ok ? icon('check') : icon('alert')}<span>${esc(bits || (ok ? 'Done' : 'Failed'))}</span>`;
-    if (output) {
-      const b = card.querySelector('.mn-tool-b')!;
-      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Result</div><pre>${esc(pretty(output))}</pre>`);
+    if (output !== undefined && output !== null && output !== '') this.toolResult(card, output);
+  }
+
+  /** A finished tool's result in its card: a sub-agent's answer, what an image shows, the
+   *  picture made (also shown in the reply, where it can be opened); raw JSON otherwise. */
+  private toolResult(card: HTMLElement, output: unknown): void {
+    if (card.dataset.filled) return;
+    card.dataset.filled = '1';
+    const b = card.querySelector('.mn-tool-b')!;
+    const name = card.dataset.name || '';
+    const o = RICH.has(name) ? parseOut(output) : null;
+    const err = o && typeof o.error === 'string' ? o.error : '';
+    const model = o && typeof o.model === 'string' && o.model ? ` · ${A.modelLabel(A.mnemoState(), o.model)}` : '';
+    if (o && !err && name === 'describe_image' && typeof o.text === 'string') {
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">What it shows${esc(model)}</div><div class="mn-md mn-tool-ans">${renderReply(o.text)}</div>`);
+      return;
+    }
+    if (o && !err && name === 'generate_image' && typeof o.upload === 'string' && o.upload) {
+      const nm = typeof o.name === 'string' ? o.name : 'Image';
+      const src = `/api/assistant/uploads/${encodeURIComponent(o.upload)}`;
+      const tile = (cls: string): string =>
+        `<button type="button" class="${cls}" data-img="${attr(o.upload as string)}" title="${attr(nm)}" aria-label="${attr('Open ' + nm)}"><img alt="" loading="lazy" src="${attr(
+          src,
+        )}" onerror="this.parentElement.classList.add('gone')"></button>`;
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Picture${esc(model)}</div>${tile('mn-gen sm')}`);
+      const body = card.closest<HTMLElement>('.mn-tb');
+      if (body && !body.querySelector(`.mn-gen:not(.sm)[data-img="${CSS.escape(o.upload)}"]`)) body.append(el('div', 'mn-gen-row', tile('mn-gen')));
+      return;
+    }
+    if (err) {
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Error</div><pre>${esc(err)}</pre>`);
+      return;
+    }
+    b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Result</div><pre>${esc(pretty(output))}</pre>`);
+  }
+
+  /** Results that came after the live reply (answers, pictures) from the stored chat. */
+  private fillResults(messages: A.Message[]): void {
+    for (const m of messages) {
+      if (m.role === 'tool' && m.tool_name === DELEGATE && m.tool_call_id) {
+        const sc = this.agents.byId(m.tool_call_id);
+        if (sc && !sc.dataset.filled) subFinal(sc, m.content, m.meta?.ok !== false);
+        continue;
+      }
+      if (m.role !== 'tool' || !m.tool_name || !RICH.has(m.tool_name) || !m.tool_call_id) continue;
+      const card = this.log.querySelector<HTMLElement>(`.mn-tool[data-id="${CSS.escape(m.tool_call_id)}"]`);
+      if (card && !card.dataset.filled) this.toolResult(card, m.content);
     }
   }
 
@@ -2010,7 +2452,11 @@ export class ChatView {
       'mn-foot',
       // Actions first (where the eye ends after reading), then what answered and its cost.
       `<span class="mn-foot-a">${
-        raw ? `<button type="button" class="mn-ibtn" data-copy title="Copy the reply" aria-label="Copy the reply">${icon('copy')}</button>` : ''
+        raw
+          ? `<button type="button" class="mn-ibtn" data-copy title="Copy the reply" aria-label="Copy the reply">${icon('copy')}</button><button type="button" class="mn-ibtn mn-listen" data-listen title="Listen" aria-label="Listen to the reply">${icon(
+              'volume',
+            )}</button>`
+          : ''
       }<button type="button" class="mn-ibtn" data-regen title="Regenerate this reply" aria-label="Regenerate this reply">${icon('refresh')}</button></span>${
         bits.length ? `<span class="mn-foot-m">${bits.map((b) => `<span>${esc(b)}</span>`).join('<i></i>')}</span>` : ''
       }`,
@@ -2030,6 +2476,32 @@ export class ChatView {
     const show = fromEnd > 220;
     this.downBtn.classList.toggle('on', show);
     this.downBtn.tabIndex = show ? 0 : -1;
+  }
+
+  /** Open the Agents panel (the page's panel, or a dialog in the small chat), at `ids`. */
+  openAgents(ids: string[] = []): void {
+    if (this.o.openAgents) this.o.openAgents();
+    else Modal.open({ title: 'Agents', body: this.agents.el, wide: true });
+    requestAnimationFrame(() => this.agents.reveal(ids));
+  }
+
+  /** Clicks in the Agents panel: a sub-agent's model, its whole task, links in its answer. */
+  private onAgentsClick(e: MouseEvent): void {
+    const t = e.target as HTMLElement;
+    const subModel = t.closest<HTMLElement>('[data-submodel]');
+    if (subModel) {
+      const card = subModel.closest<HTMLElement>('.mn-sub');
+      if (card) void this.pickSubModel(card, subModel);
+      return;
+    }
+    const task = t.closest<HTMLElement>('[data-subtask]');
+    if (task) {
+      const open = task.getAttribute('aria-expanded') !== 'true';
+      task.setAttribute('aria-expanded', String(open));
+      task.title = open ? 'Show less' : 'Show the whole task';
+      return;
+    }
+    if (t.closest('.mn-md, [data-img]')) this.onLogClick(e);
   }
 
   private onLogClick(e: MouseEvent): void {
@@ -2145,6 +2617,28 @@ export class ChatView {
       );
       return;
     }
+    // The one line a group of sub-agents leaves in the reply: open the Agents panel there.
+    const team = t.closest<HTMLElement>('.mn-team-line');
+    if (team && this.log.contains(team)) {
+      this.openAgents(teamIds(team));
+      return;
+    }
+    // A notice with something to do about it: set a model for a job, or switch this chat's.
+    const act = t.closest<HTMLElement>('[data-notice-open]');
+    if (act) {
+      if (act.dataset.noticeOpen === 'model') this.select?.open();
+      else openMnemoSettings('jobs');
+      return;
+    }
+    const hear = t.closest<HTMLElement>('[data-listen]');
+    if (hear) {
+      void listen(hear);
+      return;
+    }
+    if (t.closest('[data-seemem]')) {
+      openMnemoSettings('memory');
+      return;
+    }
     const copy = t.closest<HTMLElement>('[data-copy]');
     if (copy) {
       const raw = copy.closest<HTMLElement>('.mn-foot')?.dataset.raw || '';
@@ -2235,7 +2729,7 @@ export class ChatView {
           ? 'Stop this reply (the next queued message goes out)'
           : 'Stop'
       : queue
-        ? 'Add to the queue (Enter) · Ctrl+Enter sends it now, cutting this reply'
+        ? 'Add to the queue (Enter) · Ctrl+Enter sends it now'
         : 'Send (Enter)';
     this.sendBtn.title = t;
     this.sendBtn.setAttribute('aria-label', stop ? 'Stop' : queue ? 'Add to the queue' : 'Send');
@@ -2350,6 +2844,32 @@ export class ChatView {
       if (md) md.innerHTML = renderReply(raw2, true) + '<span class="mn-caret"></span>';
       this.scrollEnd();
     };
+    // The live status under the reply: what Mnemo is doing now and for how long, and while
+    // sub-agents work, how many are at it (each one's work shows in the Agents panel).
+    let phase = 'Thinking';
+    let phaseAt = performance.now();
+    /** This reply's sub-agents (delegate call ids) and whether each has finished. */
+    const subs = new Map<string, boolean>();
+    const secs = (ms: number): string => {
+      const n = Math.floor(ms / 1000);
+      return n < 60 ? `${n}s` : `${Math.floor(n / 60)}m ${String(n % 60).padStart(2, '0')}s`;
+    };
+    const tick = (): void => {
+      const t = body.querySelector<HTMLElement>('.mn-think');
+      if (!t) return;
+      const now = performance.now();
+      const running = [...subs.values()].filter((x) => !x).length;
+      const waited = now - phaseAt;
+      let head = `${phase} · ${secs(waited)}`;
+      // A model that has not begun after a while: say so (Stop cuts it, a message queued goes on).
+      if (phase === 'Thinking' && waited > 45_000 && !raw2) head += ' · the model has not started answering yet';
+      if (subs.size && running) {
+        const done = subs.size - running;
+        head = `${running} sub-agent${running === 1 ? '' : 's'} working${done ? ` · ${done} done` : ''} · ${secs(now - phaseAt)}`;
+      }
+      t.querySelector('span')!.textContent = head;
+    };
+    const ticker = window.setInterval(tick, 1000);
     const think = (on: boolean, label = 'Thinking'): void => {
       let t = body.querySelector<HTMLElement>('.mn-think');
       if (on) {
@@ -2357,7 +2877,10 @@ export class ChatView {
           t = el('div', 'mn-think', '<i></i><i></i><i></i><span></span>');
           body.append(t);
         }
-        t.querySelector('span')!.textContent = label;
+        if (label !== phase || !t.dataset.on) phaseAt = performance.now();
+        phase = label;
+        t.dataset.on = '1';
+        tick();
       } else t?.remove();
     };
     const closeText = (): void => {
@@ -2374,7 +2897,6 @@ export class ChatView {
     let dropped = false;
     let gone = false;
     // A reply that ends without "done" or an error was stopped or cut on the server.
-    let ended = false;
     try {
       await start(this.ctrl.signal, (ev) => {
         got = true;
@@ -2451,13 +2973,22 @@ export class ChatView {
               this.session = { ...this.session, model: ev.model };
               toast(`${name(ev.from)} did not answer, so this chat now uses ${name(ev.model)}`, 'info');
             }
-            think(true);
+            think(true, `${name(ev.model)} is answering`);
             this.scrollEnd();
             break;
           }
-          case 'notice':
-            body.insertAdjacentHTML('beforeend', `<div class="mn-notice">${icon('info')}<span>${esc(ev.text)}</span></div>`);
+          case 'notice': {
+            const go = ev.action && (ev.action.open === 'jobs' || ev.action.open === 'model') && ev.action.label;
+            body.insertAdjacentHTML(
+              'beforeend',
+              `<div class="mn-notice">${icon('info')}<span>${esc(ev.text)}</span>${
+                go ? `<button type="button" class="mn-notice-a" data-notice-open="${attr(ev.action!.open)}">${esc(ev.action!.label)}</button>` : ''
+              }</div>`,
+            );
+            // A model that did not answer is asked again: say so while waiting.
+            if (/trying again/i.test(ev.text)) think(true, 'Waiting for the model to answer again');
             break;
+          }
           case 'thinking':
             think(false);
             this.thought(body, ev.delta);
@@ -2480,8 +3011,20 @@ export class ChatView {
               think(true);
               break;
             }
+            if (OWNER_MEMORY.has(ev.name)) {
+              body.append(memLine(ev.id, ev.name, ev.args));
+              think(true);
+              break;
+            }
+            if (ev.name === DELEGATE) {
+              subCard(body, ev.id, ev.args, this.agents);
+              if (!subs.has(ev.id)) subs.set(ev.id, false);
+              think(true, 'Sub-agents at work');
+              this.scrollEnd();
+              break;
+            }
             this.toolCard(body, ev.id, ev.name, ev.args);
-            think(true, toolWords(ev.name) + '…');
+            think(true, toolWords(ev.name));
             this.scrollEnd();
             break;
           }
@@ -2495,20 +3038,37 @@ export class ChatView {
               this.scrollEnd();
               break;
             }
+            if (OWNER_MEMORY.has(ev.name)) {
+              endMemLine(body, ev.id, ev.ok);
+              think(true);
+              break;
+            }
+            if (ev.name === DELEGATE) {
+              const sc = this.agents.byId(ev.id);
+              if (sc) subFinal(sc, ev.output ?? { error: ev.ok ? '' : ev.summary }, ev.ok);
+              subs.set(ev.id, true);
+              think(true);
+              break;
+            }
             const card = body.querySelector<HTMLElement>(`.mn-tool[data-id="${CSS.escape(ev.id)}"]`);
-            if (card) this.endTool(card, ev.ok, ev.summary, ev.ms);
+            if (card) this.endTool(card, ev.ok, ev.summary, ev.ms, ev.output);
             if (ev.ok && changesNotes(ev.name)) wrote = true;
             think(true);
             break;
           }
+          case 'sub': {
+            const sc = this.agents.byId(ev.id);
+            if (sc) subEvent(sc, ev);
+            subs.set(ev.id, subs.get(ev.id) || ev.phase === 'done' || ev.phase === 'error');
+            tick();
+            break;
+          }
           case 'error':
-            ended = true;
             closeText();
             think(false);
             body.append(this.errorCard(ev.message));
             break;
           case 'done':
-            ended = true;
             think(false);
             closeText();
             this.footer(turn, model, ev.input_tokens, ev.output_tokens);
@@ -2522,10 +3082,7 @@ export class ChatView {
       if (err.name === 'Queued') {
         gone = true;
       } else if (err.name === 'AbortError') {
-        if (my === this.run && this.stopping) {
-          ended = true;
-          body.insertAdjacentHTML('beforeend', `<div class="mn-notice cut">${icon('stop')}<span>Stopped</span></div>`);
-        } else if (my === this.run) ended = true;
+        // Stopped or cut: the reply just ends where it is.
       } else if (lostLink(err)) {
         // The connection dropped (the tab went to the background, the page was left, the
         // network blinked): the reply goes on on the server, so watch it again, no error.
@@ -2561,18 +3118,14 @@ export class ChatView {
         return;
       }
       if (frame) cancelAnimationFrame(frame);
+      window.clearInterval(ticker);
       think(false);
       closeText();
-      if (!ended) {
-        body.insertAdjacentHTML(
-          'beforeend',
-          this.cutting
-            ? `<div class="mn-notice cut">${icon('enter')}<span>Cut here for your newer message</span></div>`
-            : `<div class="mn-notice cut">${icon('stop')}<span>Stopped</span></div>`,
-        );
-      }
-      this.cutting = false;
       this.stopping = false;
+      for (const id of subs.keys()) {
+        const c = this.agents.byId(id);
+        if (c) subStop(c);
+      }
       this.finishAct(body, Math.round(performance.now() - t0));
       turn.classList.remove('live');
       if (!body.childElementCount) body.append(this.errorCard('No reply came back.'));
@@ -2592,6 +3145,7 @@ export class ChatView {
         .then((r) => {
           if (this.session?.id === sid) {
             this.messages = r.messages;
+            this.fillResults(r.messages);
             this.session = r.session;
             this.setContext(r.context);
             this.setQueue(r.queue);
@@ -2844,10 +3398,476 @@ function cardsEl(items: A.Shown[]): HTMLElement {
   return box;
 }
 
-/** Settings, Mnemo. */
-export function openMnemoSettings(): void {
+/** Settings, Mnemo; `part` 'memory' scrolls to what Mnemo knows about the owner, 'jobs' to
+ *  the models for each job. */
+export function openMnemoSettings(part = ''): void {
+  A.wantSettingsPart(part);
   requestSettingsSection('stMnemo');
   hooks.go('settings');
+  // Settings already open with the card loaded: scroll there now.
+  const id = part === 'memory' ? 'mnsMem' : part === 'jobs' ? 'mnsJobs' : '';
+  if (id)
+    window.setTimeout(() => {
+      const card = document.getElementById(id);
+      if (!card) return;
+      if (part === 'memory' && (!card.querySelector('.mns-mg2, .mns-none:not(:empty)') || card.textContent?.includes('Loading…'))) return;
+      A.takeSettingsPart();
+      card.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }, 350);
+}
+
+// ---- sub-agents: their work lives in the Agents panel; a reply keeps one line per group ----
+
+interface SubState {
+  agent: string;
+  model: string;
+  text: string;
+  step: number;
+  window: number;
+  tin: number;
+  tout: number;
+  context: number;
+}
+const SUBS = new WeakMap<HTMLElement, SubState>();
+/** The panel a card lives in, the reply line it belongs to, and each line's cards. */
+const PANEL = new WeakMap<HTMLElement, AgentsPanel>();
+const CARD_LINE = new WeakMap<HTMLElement, HTMLElement>();
+const LINE_CARDS = new WeakMap<HTMLElement, HTMLElement[]>();
+
+const fmtT = (n: number): string => A.fmtTokens(Math.max(0, Math.round(n)));
+const subBusy = (c: HTMLElement): boolean => c.dataset.state === 'run' || c.dataset.state === 'ask';
+const seqOf = (c: Element): number => Number((c as HTMLElement).dataset.seq || 0);
+
+type AgentSec = 'run' | 'idle' | 'done';
+
+/** The Agents panel: every sub-agent of the chat on screen, by what it is doing now. Running
+ *  ones show their live work; idle ones answered and can take a follow-up; done ones (older
+ *  runs, failed or stopped) fold away under a count. */
+class AgentsPanel {
+  readonly el: HTMLElement;
+  private seq = 0;
+
+  constructor(private changed: () => void) {
+    this.el = el('div', 'mn-agents');
+    this.el.innerHTML = `<p class="mn-ag-none">No sub-agents in this chat yet. When ${A.MNEMO} hands a task to one, it shows here.</p>
+      <section class="mn-ag-sec" data-sec="run" hidden><h4>Running<span></span></h4><div class="mn-ag-l"></div></section>
+      <section class="mn-ag-sec" data-sec="idle" hidden><h4>Idle<span></span><small>Can take a follow-up</small></h4><div class="mn-ag-l"></div></section>
+      <details class="mn-ag-sec mn-ag-done" data-sec="done" hidden><summary><h4>Done<span></span></h4>${icon('chev', 'i mn-ag-chev')}</summary><div class="mn-ag-l"></div></details>`;
+  }
+
+  private list(sec: AgentSec): HTMLElement {
+    return this.el.querySelector<HTMLElement>(`[data-sec="${sec}"] > .mn-ag-l`)!;
+  }
+
+  cards(): HTMLElement[] {
+    return Array.from(this.el.querySelectorAll<HTMLElement>('.mn-sub'));
+  }
+
+  byId(id: string): HTMLElement | null {
+    return id ? this.el.querySelector<HTMLElement>(`.mn-sub[data-id="${CSS.escape(id)}"]`) : null;
+  }
+
+  counts(): { running: number; total: number } {
+    return { running: this.list('run').childElementCount, total: this.cards().length };
+  }
+
+  reset(): void {
+    this.cards().forEach((c) => c.remove());
+    this.seq = 0;
+    this.el.querySelector<HTMLDetailsElement>('.mn-ag-done')!.open = false;
+    this.paint();
+  }
+
+  add(c: HTMLElement): void {
+    c.dataset.seq = String(++this.seq);
+    PANEL.set(c, this);
+    this.place(c);
+  }
+
+  /** Put a card in the section its state says. A finished agent is idle while it is the
+   *  latest run of that name (a follow-up goes on with it); older runs are done. */
+  place(c: HTMLElement): void {
+    const agent = subSt(c).agent;
+    const n = seqOf(c);
+    const same = (sec: AgentSec): HTMLElement[] =>
+      Array.from(this.list(sec).children).filter((x): x is HTMLElement => x !== c && x instanceof HTMLElement && subSt(x).agent === agent);
+    let sec: AgentSec = 'done';
+    if (subBusy(c)) {
+      sec = 'run';
+      for (const o of same('idle')) if (seqOf(o) < n) this.put(o, 'done');
+    } else if (c.dataset.state === 'done') {
+      const idle = same('idle');
+      if (!idle.some((o) => seqOf(o) > n) && !same('run').some((o) => seqOf(o) > n)) {
+        sec = 'idle';
+        idle.forEach((o) => this.put(o, 'done'));
+      }
+    }
+    this.put(c, sec);
+    this.paint();
+  }
+
+  private put(c: HTMLElement, sec: AgentSec): void {
+    // Live work stays open only while the agent runs; after that it folds to one line.
+    const act = c.querySelector<HTMLDetailsElement>('.mn-sub-act');
+    if (act) {
+      act.open = sec === 'run';
+      const k = c.querySelectorAll('.mn-sub-log > .mn-tool').length;
+      act.querySelector('em')!.textContent = k ? `${k} tool${k === 1 ? '' : 's'}` : '';
+    }
+    const l = this.list(sec);
+    if (c.parentElement === l) return;
+    const n = seqOf(c);
+    // Running: in the order they were sent. Idle and done: the newest first.
+    const before = Array.from(l.children).find((x) => (sec === 'run' ? seqOf(x) > n : seqOf(x) < n));
+    l.insertBefore(c, before || null);
+  }
+
+  private paint(): void {
+    let total = 0;
+    for (const sec of ['run', 'idle', 'done'] as AgentSec[]) {
+      const box = this.el.querySelector<HTMLElement>(`[data-sec="${sec}"]`)!;
+      const n = this.list(sec).childElementCount;
+      total += n;
+      box.hidden = !n;
+      box.querySelector('h4 > span')!.textContent = String(n);
+    }
+    this.el.querySelector<HTMLElement>('.mn-ag-none')!.hidden = total > 0;
+    this.changed();
+  }
+
+  /** Bring these agents into view (a running one first) and flash them. */
+  reveal(ids: string[]): void {
+    const cards = ids.map((id) => this.byId(id)).filter((x): x is HTMLElement => !!x);
+    const c = cards.find(subBusy) || cards[0];
+    if (!c) return;
+    const done = c.closest<HTMLDetailsElement>('.mn-ag-done');
+    if (done) done.open = true;
+    c.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    for (const x of cards) {
+      x.classList.remove('mn-flash');
+      void x.offsetWidth;
+      x.classList.add('mn-flash');
+      window.setTimeout(() => x.classList.remove('mn-flash'), 2300);
+    }
+  }
+}
+
+/** The delegate call ids a reply's sub-agent line stands for. */
+function teamIds(line: HTMLElement): string[] {
+  return (LINE_CARDS.get(line) || []).map((c) => c.dataset.id || '');
+}
+
+/** A new card in the Agents panel for a `delegate` call; the reply gets (or adds to) the one
+ *  line for the group of tasks it was sent with. */
+function subCard(body: HTMLElement, id: string, args: unknown, panel: AgentsPanel): HTMLElement {
+  const agent = argStr(args, 'agent') || 'Sub-agent';
+  const task = argStr(args, 'task');
+  let line = body.lastElementChild as HTMLElement | null;
+  if (!line || !line.classList.contains('mn-team-line')) {
+    line = el('button', 'mn-team-line');
+    line.setAttribute('type', 'button');
+    body.append(line);
+    LINE_CARDS.set(line, []);
+  }
+  const c = el('div', 'mn-sub');
+  c.dataset.id = id;
+  c.dataset.state = 'run';
+  c.innerHTML = `<div class="mn-sub-h"><span class="mn-sub-av" aria-hidden="true">${esc(agent.charAt(0).toUpperCase())}</span><span class="mn-sub-t"><b>${esc(
+    agent,
+  )}</b><small></small></span><span class="mn-sub-chip"><i class="mn-spin"></i><span>Working</span></span></div>
+    <div class="mn-sub-m" hidden><span class="mn-sub-bar" title=""><i></i></span><span class="mn-sub-tok"></span></div>
+    ${task ? `<button type="button" class="mn-sub-task" data-subtask aria-expanded="false" title="Show the whole task">${esc(task)}</button>` : ''}
+    <details class="mn-sub-act" open><summary>${icon('chev', 'i mn-sub-chev')}<span>Activity</span><em></em></summary><div class="mn-sub-log mn-tools"></div></details>
+    <div class="mn-sub-pre" hidden></div>`;
+  SUBS.set(c, { agent, model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 });
+  CARD_LINE.set(c, line);
+  LINE_CARDS.get(line)!.push(c);
+  panel.add(c);
+  paintTeam(line);
+  return c;
+}
+
+function subSt(c: HTMLElement): SubState {
+  let st = SUBS.get(c);
+  if (!st) {
+    st = { agent: c.querySelector('.mn-sub-t b')?.textContent || 'Sub-agent', model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 };
+    SUBS.set(c, st);
+  }
+  return st;
+}
+
+function subChip(c: HTMLElement, state: 'run' | 'ask' | 'done' | 'err' | 'stop', text: string): void {
+  const moved = c.dataset.state !== state;
+  c.dataset.state = state;
+  const chip = c.querySelector<HTMLElement>('.mn-sub-chip')!;
+  const lead = state === 'run' || state === 'ask' ? '<i class="mn-spin"></i>' : icon(state === 'done' ? 'check' : state === 'err' ? 'alert' : 'stop');
+  chip.innerHTML = `${lead}<span>${esc(text)}</span>`;
+  if (moved) PANEL.get(c)?.place(c);
+  const line = CARD_LINE.get(c);
+  if (line) paintTeam(line);
+}
+
+function subMeta(c: HTMLElement, followUp?: boolean): void {
+  const st = subSt(c);
+  const small = c.querySelector<HTMLElement>('.mn-sub-t small')!;
+  if (followUp !== undefined) c.classList.toggle('follow', followUp);
+  // The model is a button: switch this sub-agent's model, like the chat's own.
+  const model = st.model
+    ? `<button type="button" class="mn-sub-model" data-submodel title="Switch ${attr(st.agent)}'s model">${esc(A.modelLabel(A.mnemoState(), st.model))}${icon('chev-down')}</button>`
+    : '';
+  small.innerHTML = [model, c.classList.contains('follow') ? 'Follow-up' : ''].filter(Boolean).join(' · ');
+}
+
+function subMeter(c: HTMLElement): void {
+  const st = subSt(c);
+  const m = c.querySelector<HTMLElement>('.mn-sub-m')!;
+  if (!st.tin && !st.tout && !st.context) return;
+  m.hidden = false;
+  const bar = m.querySelector<HTMLElement>('.mn-sub-bar')!;
+  const pct = st.window ? Math.min(100, (st.context / st.window) * 100) : 0;
+  bar.hidden = !st.window;
+  bar.classList.toggle('hi', pct >= 85);
+  bar.querySelector<HTMLElement>('i')!.style.width = pct.toFixed(1) + '%';
+  bar.title = st.window ? `Memory used: ${fmtT(st.context)} of ${fmtT(st.window)}` : '';
+  m.querySelector<HTMLElement>('.mn-sub-tok')!.textContent = `${st.window ? `${fmtT(st.context)} of ${fmtT(st.window)} · ` : ''}${fmtT(st.tin)} in · ${fmtT(st.tout)} out`;
+}
+
+/** A tool the sub-agent runs: the same step card as the chat's own tools. */
+function subLogTool(c: HTMLElement, name: string, args: unknown): void {
+  const d = el('details', 'mn-tool run' + (changesNotes(name) ? ' w' : ''));
+  d.dataset.name = name;
+  const [title, sub] = toolTitle(name, args);
+  const ic = name === 'describe_image' || name === 'generate_image' ? 'image' : changesNotes(name) ? 'edit' : 'search';
+  const shown = args !== null && args !== undefined;
+  d.innerHTML = `<summary><span class="mn-tool-ic">${icon(ic)}</span><span class="mn-tool-t"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="mn-tool-s"><i class="mn-spin"></i></span>${icon('chev', 'i mn-tool-chev')}</summary>
+    <div class="mn-tool-b"><div class="mn-tool-k">${esc(name)}</div>${shown ? `<pre>${esc(pretty(args, 1200))}</pre>` : ''}</div>`;
+  c.querySelector('.mn-sub-log')!.append(d);
+}
+
+function subLogToolEnd(c: HTMLElement, name: string, ok: boolean, summary: string): void {
+  let d = Array.from(c.querySelectorAll<HTMLElement>('.mn-sub-log > .mn-tool.run')).find((x) => x.dataset.name === name);
+  if (!d) {
+    subLogTool(c, name, null);
+    d = c.querySelector<HTMLElement>('.mn-sub-log')!.lastElementChild as HTMLElement;
+  }
+  d.classList.remove('run');
+  d.classList.add(ok ? 'ok' : 'err');
+  d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon(ok ? 'check' : 'alert')}<span>${esc(summary || (ok ? 'Done' : 'Failed'))}</span>`;
+  if (summary) d.querySelector('.mn-tool-b')!.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Result</div><pre>${esc(summary)}</pre>`);
+}
+
+function subLogAsk(c: HTMLElement, question: string, answer?: string): void {
+  const agent = subSt(c).agent;
+  const log = c.querySelector('.mn-sub-log')!;
+  let li = answer === undefined ? null : (Array.from(log.querySelectorAll<HTMLElement>('.mn-sub-li.ask.wait')).pop() ?? null);
+  if (!li) {
+    li = el('div', 'mn-sub-li ask' + (answer === undefined ? ' wait' : ''));
+    li.innerHTML = `${icon('chat')}<span class="mn-sub-x"><span><b>${esc(agent)} → ${A.MNEMO}:</b> ${esc(question)}</span></span>`;
+    log.append(li);
+  }
+  if (answer !== undefined) {
+    li.classList.remove('wait');
+    li.querySelector('.mn-sub-x')!.insertAdjacentHTML('beforeend', `<span><b>${A.MNEMO} → ${esc(agent)}:</b> ${esc(answer)}</span>`);
+  }
+}
+
+/** A quiet line in a sub-agent's activity (a model switch, a summary, an error). */
+function subNote(c: HTMLElement, ic: string, text: string, cls = ''): void {
+  c.querySelector('.mn-sub-log')!.insertAdjacentHTML('beforeend', `<div class="mn-sub-li${cls ? ' ' + cls : ''}">${icon(ic)}<span>${esc(text)}</span></div>`);
+}
+
+/** One progress event of a running sub-agent. */
+function subEvent(c: HTMLElement, ev: A.SubEvent): void {
+  const st = subSt(c);
+  if (ev.model && ev.model !== st.model) {
+    st.model = ev.model;
+    subMeta(c);
+  }
+  const pre = c.querySelector<HTMLElement>('.mn-sub-pre')!;
+  switch (ev.phase) {
+    case 'start':
+      if (ev.window) st.window = ev.window;
+      subMeta(c, !!ev.follow_up);
+      break;
+    case 'step':
+      st.step = ev.step || st.step + 1;
+      st.text = '';
+      pre.hidden = true;
+      subChip(c, 'run', `Working · step ${st.step}`);
+      break;
+    case 'text': {
+      st.text += ev.delta || '';
+      const line = st.text.trim().split(/\n+/).pop() || '';
+      pre.textContent = line.length > 160 ? '…' + line.slice(-160) : line;
+      pre.hidden = !line;
+      break;
+    }
+    case 'tool':
+      subLogTool(c, ev.name || '', ev.args);
+      break;
+    case 'tool_end':
+      subLogToolEnd(c, ev.name || '', ev.ok !== false, ev.summary || '');
+      break;
+    case 'ask':
+      subLogAsk(c, ev.question || '');
+      subChip(c, 'ask', `Asking ${A.MNEMO}`);
+      break;
+    case 'answer':
+      subLogAsk(c, '', ev.answer || '');
+      subChip(c, 'run', st.step ? `Working · step ${st.step}` : 'Working');
+      break;
+    case 'usage':
+      if (typeof ev.input_tokens === 'number') st.tin = ev.input_tokens;
+      if (typeof ev.output_tokens === 'number') st.tout = ev.output_tokens;
+      if (typeof ev.context === 'number') st.context = ev.context;
+      if (ev.window) st.window = ev.window;
+      subMeter(c);
+      break;
+    case 'done':
+      pre.hidden = true;
+      subChip(c, 'done', `Done · ${ev.steps ?? st.step} step${(ev.steps ?? st.step) === 1 ? '' : 's'}`);
+      break;
+    case 'fallback':
+    case 'switched': {
+      const s = A.mnemoState();
+      const to = s ? A.modelLabel(s, ev.to || '') : ev.to || '';
+      subNote(c, 'refresh', ev.phase === 'fallback' ? `${s ? A.modelLabel(s, ev.from || '') : ev.from} did not answer (${ev.reason || 'error'}); ${to} carries on` : `Switched to ${to}`);
+      break;
+    }
+    case 'notice':
+      if (ev.text) subNote(c, 'info', ev.text);
+      break;
+    case 'compacting':
+      subChip(c, 'run', 'Summarising its work');
+      break;
+    case 'compacted':
+      subNote(c, 'sparkle', `Summarised ${ev.messages ?? ''} earlier messages to make room`);
+      subChip(c, 'run', st.step ? `Working · step ${st.step}` : 'Working');
+      break;
+    case 'error':
+      pre.hidden = true;
+      if (ev.message) subNote(c, 'alert', ev.message, 'err');
+      subChip(c, 'err', 'Failed');
+      break;
+  }
+}
+
+/** The task's result: totals, the steps when the card was drawn from the stored chat, and
+ *  the answer (closed until opened). */
+function subFinal(c: HTMLElement, output: unknown, ok: boolean): void {
+  if (c.dataset.filled) return;
+  c.dataset.filled = '1';
+  const o = (parseOut(output) || {}) as A.SubResult;
+  const st = subSt(c);
+  if (o.model) st.model = o.model;
+  if (typeof o.input_tokens === 'number') st.tin = o.input_tokens;
+  if (typeof o.output_tokens === 'number') st.tout = o.output_tokens;
+  if (typeof o.context === 'number') st.context = o.context;
+  if (o.window) st.window = o.window;
+  subMeta(c, o.follow_up ?? c.classList.contains('follow'));
+  subMeter(c);
+  const log = c.querySelector<HTMLElement>('.mn-sub-log')!;
+  if (!log.childElementCount && o.log?.length) {
+    for (const x of o.log) {
+      if (x.kind === 'tool') {
+        subLogTool(c, x.name, null);
+        subLogToolEnd(c, x.name, x.ok, x.summary);
+      } else subLogAsk(c, x.question, x.answer);
+    }
+  }
+  c.querySelector<HTMLElement>('.mn-sub-pre')!.hidden = true;
+  const err = typeof o.error === 'string' && o.error ? o.error : '';
+  if (!ok || err) {
+    if (err && !log.querySelector('.mn-sub-li.err')) subNote(c, 'alert', err, 'err');
+    subChip(c, 'err', 'Failed');
+    return;
+  }
+  const steps = o.steps ?? st.step;
+  if (o.answer) {
+    c.insertAdjacentHTML('beforeend', `<details class="mn-sub-ans"><summary>${icon('chev', 'i mn-sub-chev')}<span>Answer</span></summary><div class="mn-md">${renderReply(o.answer)}</div></details>`);
+  }
+  subChip(c, 'done', steps ? `Done · ${steps} step${steps === 1 ? '' : 's'}` : 'Done');
+}
+
+/** A task cut off with the reply. */
+function subStop(c: HTMLElement): void {
+  if (c.dataset.filled) return;
+  c.dataset.filled = '1';
+  c.querySelector<HTMLElement>('.mn-sub-pre')!.hidden = true;
+  c.querySelectorAll<HTMLElement>('.mn-sub-log > .mn-tool.run').forEach((d) => {
+    d.classList.remove('run');
+    d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon('stop')}<span>Stopped</span>`;
+  });
+  c.querySelectorAll('.mn-sub-li.wait').forEach((x) => x.classList.remove('wait'));
+  subChip(c, 'stop', 'Stopped');
+}
+
+/** The one line a group of sub-agents leaves in the reply: how many, how many are working
+ *  or done, and View (opens the Agents panel there). */
+function paintTeam(line: HTMLElement): void {
+  const cards = LINE_CARDS.get(line) || [];
+  const n = cards.length;
+  if (!n) return;
+  const busy = cards.filter(subBusy).length;
+  const done = cards.filter((c) => c.dataset.state === 'done').length;
+  const failed = cards.filter((c) => c.dataset.state === 'err').length;
+  const stopped = cards.filter((c) => c.dataset.state === 'stop').length;
+  const text =
+    n === 1
+      ? `${subSt(cards[0]).agent} · ${cards[0].querySelector('.mn-sub-chip span')?.textContent || 'Working'}`
+      : [`${n} sub-agents`, busy ? `${busy} working` : '', done ? `${done} done` : '', failed ? `${failed} failed` : '', stopped ? `${stopped} stopped` : ''].filter(Boolean).join(' · ');
+  const lead = busy ? '<i class="mn-spin"></i>' : icon(failed ? 'alert' : stopped && !done ? 'stop' : 'check');
+  line.className = 'mn-team-line ' + (busy ? 'run' : failed ? 'err' : stopped && !done ? 'stop' : 'ok');
+  line.innerHTML = `<span class="mn-team-ic">${lead}</span><span class="mn-team-t">${esc(text)}</span><span class="mn-team-go">View${icon('chev')}</span>`;
+  const t = `${text}. Open the Agents panel`;
+  line.title = t;
+  line.setAttribute('aria-label', t);
+}
+
+/** A quiet line in a reply: Mnemo noted, changed or forgot something about the owner. */
+function memLine(id: string, name: string, args: unknown): HTMLElement {
+  const d = el(
+    'div',
+    'mn-memline',
+    `${icon('user')}<span>${esc(ownerMemoryText(name, args))}</span><button type="button" class="mn-memline-a" data-seemem>See all</button>`,
+  );
+  d.dataset.id = id;
+  return d;
+}
+
+function endMemLine(body: HTMLElement, id: string, ok: boolean): void {
+  const d = body.querySelector<HTMLElement>(`.mn-memline[data-id="${CSS.escape(id)}"]`);
+  if (!d || ok) return;
+  d.classList.add('err');
+  d.querySelector('span')!.textContent = 'Could not change what I know about you';
+}
+
+// ---- chat width (per device) ----
+
+export type ChatWidth = 'compact' | 'wide' | 'full';
+const LS_WIDTH = 'memora.mnemo.width.v1';
+
+export function chatWidth(): ChatWidth {
+  try {
+    const v = localStorage.getItem(LS_WIDTH);
+    if (v === 'wide' || v === 'full') return v;
+  } catch {
+    /* storage blocked */
+  }
+  return 'compact';
+}
+
+/** Keep the width on this device and apply it to every chat open. */
+export function setChatWidth(w: ChatWidth): void {
+  try {
+    localStorage.setItem(LS_WIDTH, w);
+  } catch {
+    /* storage blocked: this visit only */
+  }
+  document.querySelectorAll<HTMLElement>('.mn-chat').forEach((c) => {
+    c.classList.remove('w-compact', 'w-wide', 'w-full');
+    c.classList.add('w-' + w);
+  });
 }
 
 /** A small searchable list of notes; `run` gets the chosen path. */

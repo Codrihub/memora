@@ -10,7 +10,9 @@
 pub mod docs;
 pub mod live;
 pub mod mentions;
+pub mod owner;
 pub mod providers;
+pub mod roles;
 pub mod uploads;
 
 use axum::{
@@ -186,6 +188,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/assistant/sessions/{id}/watch", get(h_watch))
         .route("/api/assistant/sessions/{id}/export", get(h_export))
         .merge(uploads::router())
+        .merge(owner::router())
+        .merge(roles::router())
 }
 
 fn s(b: &Value, k: &str) -> Option<String> {
@@ -524,7 +528,17 @@ async fn h_models_fetch(
 
 fn state_json(store: &Store) -> Value {
     let mut prefs = store.prefs().unwrap_or_default();
-    for k in [SEEN, FLEETING, OWN_SUGGESTIONS, AI_SUGGESTIONS, THINKERS] {
+    for k in [
+        SEEN,
+        FLEETING,
+        OWN_SUGGESTIONS,
+        AI_SUGGESTIONS,
+        THINKERS,
+        owner::KEY,
+        ARCHIVED,
+        roles::SUB_MODELS,
+        BLIND,
+    ] {
         prefs.remove(k);
     }
     let seen_thinking = thinkers(store);
@@ -667,7 +681,11 @@ async fn h_prefs(
                 v.is_null() || v.as_i64().is_some_and(|x| (2_000..=2_000_000).contains(&x))
             }
             "max_steps" => v.is_null() || v.as_i64().is_some_and(|x| (1..=60).contains(&x)),
-            "permission" => v.is_null() || v.as_str().is_some_and(|x| x == "ask" || x == "auto"),
+            "permission" => {
+                v.is_null()
+                    || v.as_str()
+                        .is_some_and(|x| ["ask", "auto", "read"].contains(&x))
+            }
             "launcher" => v.is_null() || v.is_boolean(),
             THINKING => {
                 v.is_null()
@@ -684,7 +702,11 @@ async fn h_prefs(
                             })
                     })
             }
-            other => return bad(&format!("unknown preference: {other}")),
+            owner::LEARN => v.is_null() || v.is_boolean(),
+            other => match roles::valid_pref(store, other, v) {
+                Some(ok) => ok,
+                None => return bad(&format!("unknown preference: {other}")),
+            },
         };
         if !ok {
             return bad(&format!("{k} is out of range"));
@@ -711,6 +733,99 @@ fn seen_map(store: &Store) -> Option<serde_json::Map<String, Value>> {
         .get(SEEN)
         .and_then(Value::as_object)
         .cloned()
+}
+
+/// The server is stopping: every reply still running is cut where it is, what it wrote is
+/// kept and the chat says the server restarted (with Try again), and its stream ends so the
+/// shutdown does not wait on it.
+pub fn salvage(st: &AppState) {
+    let Ok(store) = store(st) else { return };
+    for id in live::running_ids() {
+        let Some((text, model)) = live::cut(&id) else {
+            continue;
+        };
+        take_over(&id);
+        let _ = store.append(
+            &id,
+            &NewMessage {
+                role: "assistant".into(),
+                content: text.trim_end().to_string(),
+                meta: Some(json!({
+                    "model": model,
+                    "stopped": true,
+                    "error": "The server restarted while Mnemo was answering. Try again to carry on.",
+                })),
+                ..Default::default()
+            },
+            memora_state::now(),
+        );
+    }
+}
+
+/// How many chats Mnemo keeps (for the storage report).
+pub fn chat_count(st: &AppState) -> u64 {
+    store(st)
+        .ok()
+        .map(|s| s.sessions().unwrap_or_default().len() as u64)
+        .unwrap_or(0)
+}
+
+/// The pictures staged for chats, each with its size and the chats that show it (for the
+/// global image gallery): `[{id, url, name, bytes, chats: [{id, title}]}]`.
+pub fn staged_images(st: &AppState) -> Vec<Value> {
+    let Ok(s) = store(st) else {
+        return Vec::new();
+    };
+    let mut used: std::collections::HashMap<String, Vec<Value>> = Default::default();
+    for x in s.sessions().unwrap_or_default() {
+        let mut ids = std::collections::HashSet::new();
+        for m in s.messages(&x.id).unwrap_or_default() {
+            if let Some(meta) = &m.meta {
+                uploads::ids_in(&meta.to_string(), &mut ids);
+            }
+            if m.role == "tool" {
+                uploads::ids_in(&m.content, &mut ids);
+            }
+        }
+        for i in ids {
+            used.entry(i)
+                .or_default()
+                .push(json!({"id": x.id, "title": x.title}));
+        }
+    }
+    uploads::list(st)
+        .into_iter()
+        .map(|(id, name, bytes)| {
+            let chats = used.remove(&id).unwrap_or_default();
+            json!({"id": id, "url": format!("/api/assistant/uploads/{id}"), "name": name, "bytes": bytes, "chats": chats})
+        })
+        .collect()
+}
+
+/// Archived chats (`{chat id: when}`): kept and searchable, out of the main chat list.
+const ARCHIVED: &str = "archived";
+
+fn archived_map(store: &Store) -> serde_json::Map<String, Value> {
+    store
+        .prefs()
+        .ok()
+        .and_then(|p| p.get(ARCHIVED).and_then(Value::as_object).cloned())
+        .unwrap_or_default()
+}
+
+fn set_archived(store: &Store, id: &str, on: bool) {
+    let mut m = archived_map(store);
+    if on {
+        m.insert(id.to_string(), json!(memora_state::now()));
+    } else if m.remove(id).is_none() {
+        return;
+    }
+    let v = if m.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(m)
+    };
+    let _ = store.set_pref(ARCHIVED, &v);
 }
 
 /// Fleeting chats (`{chat id: started}`): kept only while the owner is in them. They are left
@@ -750,9 +865,21 @@ fn set_fleeting(store: &Store, id: &str, on: bool) {
 /// Delete a chat with the images sent in it (a picture already placed in a note is a copy in
 /// the vault and stays).
 fn drop_chat(st: &AppState, store: &Store, id: &str) -> bool {
+    for up in live::queue_uploads(Some(id)) {
+        uploads::remove(st, &up);
+    }
     live::queue_clear(id);
+    roles::forget_threads(id);
     for m in store.messages(id).unwrap_or_default() {
         // Pictures Mnemo opened from the vault were staged copies; the vault keeps its own.
+        if m.tool_name.as_deref() == Some(roles::GENERATE_IMAGE) {
+            if let Some(up) = serde_json::from_str::<Value>(&m.content)
+                .ok()
+                .and_then(|v| v["upload"].as_str().map(str::to_string))
+            {
+                uploads::remove(st, &up);
+            }
+        }
         if m.tool_name.as_deref() == Some(VIEW_IMAGE) {
             if let Some(up) = serde_json::from_str::<Value>(&m.content)
                 .ok()
@@ -776,6 +903,7 @@ fn drop_chat(st: &AppState, store: &Store, id: &str) -> bool {
         }
     }
     set_fleeting(store, id, false);
+    set_archived(store, id, false);
     store.delete_session(id).unwrap_or(false)
 }
 
@@ -827,10 +955,25 @@ async fn h_sessions(
                 all.retain(|x| ids.contains(&x.id));
                 all.sort_by_key(|x| ids.iter().position(|i| i == &x.id));
             }
+            let archived = archived_map(s);
+            let previews = s.previews().unwrap_or_default();
             let list: Vec<Value> = all
                 .into_iter()
                 .map(|x| {
                     let mut v = json!(x);
+                    v["archived"] = json!(archived.contains_key(&x.id));
+                    // A line of the last message, so a chat is known by what was said.
+                    if let Some((role, text)) = previews.get(&x.id) {
+                        let flat: String = text
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .trim_start_matches(['#', '*', '>', '-', ' '])
+                            .chars()
+                            .take(120)
+                            .collect();
+                        v["preview"] = json!({"role": role, "text": flat});
+                    }
                     v["running"] = json!(live::running(&x.id));
                     v["seen"] = json!(seen.get(&x.id).and_then(Value::as_i64).unwrap_or(0));
                     v
@@ -1050,6 +1193,11 @@ async fn h_compact(
     })
     .await;
     unclaim(&id);
+    // A message sent or queued while compacting goes now.
+    if live::queued(&id) {
+        let (st2, id2, who) = (st.clone(), id.clone(), on_behalf(&st, &headers));
+        crate::blocking(move || kick(&st2, store, &id2, who, false, false)).await;
+    }
     match res {
         Ok((Some((n, t, summary)), ctx)) => {
             live::notify(&id, &json!({"type": "compacted"}));
@@ -1083,8 +1231,24 @@ async fn h_session_set(
         .map(|t| t.chars().take(80).collect::<String>());
     let model = s(&b, "model");
     let pinned = b.get("pinned").and_then(Value::as_bool);
-    match store.update_session(&id, title.as_deref(), model.as_deref(), pinned, None) {
-        Ok(true) => Json(json!({"session": store.session(&id).ok().flatten()})).into_response(),
+    let archived = b.get("archived").and_then(Value::as_bool);
+    if store.session(&id).ok().flatten().is_none() {
+        return fail(StatusCode::NOT_FOUND, "chat not found");
+    }
+    if let Some(a) = archived {
+        set_archived(store, &id, a);
+    }
+    let changed = if title.is_none() && model.is_none() && pinned.is_none() {
+        Ok(true)
+    } else {
+        store.update_session(&id, title.as_deref(), model.as_deref(), pinned, None)
+    };
+    match changed {
+        Ok(true) => {
+            let mut v = json!(store.session(&id).ok().flatten());
+            v["archived"] = json!(archived_map(store).contains_key(&id));
+            Json(json!({"session": v})).into_response()
+        }
         Ok(false) => fail(StatusCode::NOT_FOUND, "chat not found"),
         Err(e) => bad(&e),
     }
@@ -2290,7 +2454,7 @@ fn place_image(st: &AppState, who: &Caller, args: &Value) -> Result<Value, Strin
         .mcp
         .call_tool_by("upload_image", &call, who)
         .map_err(|e| e.to_string())?;
-    uploads::remove(st, upload);
+    // The staged image stays: the chat still shows it where it was sent.
     Ok(v)
 }
 
@@ -2321,8 +2485,8 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
 /// What Mnemo can tell the owner about itself (its features change with Memora). Chats
 /// keep the prompt they began with; one from before this text gets it added once, at the
 /// end, so it stays the same for the rest of that chat.
-const FEATURES_MARK: &str = "[Mnemo features 12]";
-const FEATURES: &str = "[Mnemo features 12] What you can do in Memora (explain it when the owner asks):\n\
+const FEATURES_MARK: &str = "[Mnemo features 13]";
+const FEATURES: &str = "[Mnemo features 13] What you can do in Memora (explain it when the owner asks):\n\
 - @mnemo in notes: a line `@mnemo: <request>` anywhere in a note (also in a list item or a quote) asks you. \
 A few seconds after the note is saved you run the request in that note's chat, titled \"@mnemo · <note>\" (one chat \
 per note: later requests in the same note join it); writing `@mnemo: <request>` into a note yourself (from a chat) asks \
@@ -2348,6 +2512,15 @@ the skill's name, e.g. Skills/tidy-meeting.md, then a line `description: <what i
 owner runs one by typing /<name> in the chat (the composer lists them after a slash); its steps then come with \
 the message. When asked, make, change or remove skills with your note tools (create_memory, save_memory, \
 rename_memory, soft_delete moves one to the Trash); write steps that are clear and reusable.\n\
+- Models for each job (Settings, Mnemo): besides the chat model the owner can set a model that reads images \
+(describe_image, and it describes attached pictures for a chat model that cannot see), one that makes images \
+(generate_image), one that reads replies aloud (the Listen button) and one that listens (the mic in the composer). \
+Sub-agents are other models with a name and a job: delegate hands one a self-contained task, several at once \
+(say one note or folder each), and you answer from what they report.\n\
+- Your notes about the owner: remember_owner, update_owner_memory and forget_owner_memory keep short notes on how \
+they like answers, who they are and what they like, learned quietly as you go; they come with their messages. The \
+owner sees, edits and deletes them in Settings, Mnemo, What Mnemo knows about you, and can turn learning off. \
+Nothing is learned in a fleeting chat.\n\
 - Fleeting chats: the owner can start a chat that is not kept; it disappears (with the images sent in it) when \
 they leave it, and it is left out of search and of list_chats. Changes you make to notes in it stay.\n\
 - Pictures: view_image lets you look at a picture in the vault (one a note shows: its path, or the path as written \
@@ -2479,7 +2652,7 @@ fn msg_tokens(m: &Msg) -> i64 {
 }
 
 /// Most images sent with one request, from the newest messages back; older ones stay text.
-const IMAGES_PER_REQUEST: usize = 6;
+const IMAGES_PER_REQUEST: usize = 3;
 /// Largest picture sent to a model (the strictest common limit is 5 MB).
 const IMAGE_SEND_MAX: usize = 4_500_000;
 
@@ -2536,6 +2709,33 @@ fn strip_images(history: &mut [Msg]) -> bool {
         }
     }
     any
+}
+
+/// Models that failed on pictures (by key, kept across restarts): they get pictures as text
+/// from then on. Kept as a preference the web app does not edit.
+const BLIND: &str = "blind_models";
+
+fn blind_list(store: &Store) -> Vec<String> {
+    store
+        .prefs()
+        .ok()
+        .and_then(|p| p.get(BLIND).and_then(Value::as_array).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect()
+}
+
+fn blind_in(store: &Store, key: &str) -> bool {
+    blind_list(store).iter().any(|k| k == key)
+}
+
+fn mark_blind_in(store: &Store, key: &str) {
+    let mut l = blind_list(store);
+    if !l.iter().any(|k| k == key) {
+        l.push(key.to_string());
+        let _ = store.set_pref(BLIND, &json!(l));
+    }
 }
 
 /// Whether a provider error says the model does not take images.
@@ -2728,9 +2928,14 @@ the rest of the message after the skill name is what to apply it to.)\n<skill>\n
                         sk["text"].as_str().unwrap_or("")
                     );
                 }
+                if let Some(notes) = m.meta.as_ref().and_then(|v| v["owner"].as_str()) {
+                    let learn = m.meta.as_ref().is_none_or(|v| v["owner_learn"] != false);
+                    text = format!("{}\n\n{text}", owner::intro(notes, learn));
+                }
                 match m.meta.as_ref().and_then(|v| v["mode"].as_str()) {
                     Some("auto") => text.push_str("\n\n(Mode: Auto. Go ahead with changes without asking, and keep going until the job is done; report what you changed.)"),
                     Some("ask") => text.push_str("\n\n(Mode: Ask first. Read and look freely, but before changing notes ask me with ask_owner and an option marked approve.)"),
+                    Some("read") => text.push_str("\n\n(Mode: Read only. Look things up and answer; do not change notes, any change is refused. Say what you would change instead.)"),
                     _ => {}
                 }
                 if let Some(mn) = m
@@ -2839,7 +3044,7 @@ the rest of the message after the skill name is what to apply it to.)\n<skill>\n
         turns.remove(0);
         trimmed = true;
     }
-    let mut out: Vec<Msg> = turns.into_iter().flatten().collect();
+    let mut out = paired(turns.into_iter().flatten().collect());
     if trimmed {
         // Leaving out earlier turns changes what thinking blocks were bound to: send none.
         for m in &mut out {
@@ -2849,6 +3054,43 @@ the rest of the message after the skill name is what to apply it to.)\n<skill>\n
         }
     }
     (out, trimmed)
+}
+
+/// Every tool call answered, every answer after its call: a reply cut while a tool ran leaves
+/// a call with no result (it gets one saying so), and a stray result is left out. Providers
+/// refuse a history that breaks this.
+fn paired(msgs: Vec<Msg>) -> Vec<Msg> {
+    fn flush(out: &mut Vec<Msg>, open: &mut Vec<(String, String)>) {
+        for (call_id, name) in open.drain(..) {
+            out.push(Msg::Tool {
+                call_id,
+                name,
+                output: json!({"error": "Not finished: the owner cut this reply before the tool returned."})
+                    .to_string(),
+            });
+        }
+    }
+    let mut out = Vec::with_capacity(msgs.len());
+    let mut open: Vec<(String, String)> = Vec::new();
+    for m in msgs {
+        if let Msg::Tool { call_id, .. } = &m {
+            if let Some(i) = open.iter().position(|(c, _)| c == call_id) {
+                open.remove(i);
+                out.push(m);
+            }
+            continue;
+        }
+        flush(&mut out, &mut open);
+        if let Msg::Assistant { calls, .. } = &m {
+            open = calls
+                .iter()
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect();
+        }
+        out.push(m);
+    }
+    flush(&mut out, &mut open);
+    out
 }
 
 /// Most items one message may attach, and how much of them goes to the model.
@@ -2981,9 +3223,44 @@ is left. list_memory with folder \"{folder}\" pages through the rest.\n"
 }
 
 /// Chats with a run in progress (one run per chat at a time).
-fn busy() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static BUSY: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+/// Chats with a reply running or starting, each with the epoch of the run that owns it: a
+/// steer or Stop takes the chat over at once (a new epoch), and the run it cut ends on its own
+/// without touching the chat again.
+fn busy() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
+    static BUSY: OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
+        OnceLock::new();
     BUSY.get_or_init(Default::default)
+}
+
+fn next_epoch() -> u64 {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The epoch of the run that owns chat `id`, if any.
+fn epoch(id: &str) -> Option<u64> {
+    busy().lock().ok().and_then(|b| b.get(id).copied())
+}
+
+/// Own chat `id` now, whoever had it: the run before it is cut loose.
+pub(crate) fn take_over(id: &str) -> u64 {
+    let e = next_epoch();
+    if let Ok(mut b) = busy().lock() {
+        b.insert(id.to_string(), e);
+    }
+    e
+}
+
+/// Give chat `id` back, if run `e` still owns it (`false`: it was taken over).
+pub(crate) fn release(id: &str, e: u64) -> bool {
+    busy().lock().is_ok_and(|mut b| {
+        if b.get(id) == Some(&e) {
+            b.remove(id);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 fn send(tx: &tokio::sync::mpsc::UnboundedSender<String>, v: Value) -> bool {
@@ -3319,7 +3596,12 @@ fn prepare_turn(
     let Some(sess) = store.session(id).ok().flatten() else {
         return Err((StatusCode::NOT_FOUND, "chat not found".into()));
     };
-    let asked = s(b, "model").filter(|m| !m.is_empty());
+    // A chat that has a model keeps it: the picker saves a change on the chat itself, so a
+    // model in the message only counts for a chat without one (a page open since before the
+    // change, or another device, may still send the old pick).
+    let asked = s(b, "model")
+        .filter(|m| !m.is_empty())
+        .filter(|_| sess.model.is_empty());
     let (provider, model) = resolve_model(
         store,
         asked.as_deref(),
@@ -3349,10 +3631,10 @@ fn prepare_turn(
     }
     // The permission mode this message was sent in (Mnemo is told with it).
     let prefs = store.prefs().unwrap_or_default();
-    let mode = if prefs.get("permission").and_then(Value::as_str) == Some("auto") {
-        "auto"
-    } else {
-        "ask"
+    let mode = match prefs.get("permission").and_then(Value::as_str) {
+        Some("auto") => "auto",
+        Some("read") => "read",
+        _ => "ask",
     };
     meta.get_or_insert_with(|| json!({}))["mode"] = json!(mode);
     if via != "chat" {
@@ -3391,12 +3673,36 @@ fn prepare_turn(
         let prompt = system_prompt(st, &sess.scope, extra.as_deref());
         meta.get_or_insert_with(|| json!({}))["system"] = json!(prompt);
     }
+    // What Mnemo knows about the owner goes with this message when it changed since the last
+    // one in this chat (never in a fleeting chat).
+    if !fleeting_ids(store).contains(id) {
+        let notes = owner::prompt_text(store);
+        let before = store
+            .messages(id)
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .filter(|m| m.role == "user")
+            .find_map(|m| {
+                m.meta
+                    .as_ref()
+                    .and_then(|v| v["owner"].as_str())
+                    .map(str::to_string)
+            });
+        if before.as_deref() != Some(notes.as_str()) && !(before.is_none() && notes.is_empty()) {
+            let m = meta.get_or_insert_with(|| json!({}));
+            m["owner"] = json!(notes);
+            m["owner_learn"] = json!(owner::learning(store));
+        }
+    }
     let now = memora_state::now();
     let shown = meta.as_ref().map(|m| {
         let mut m = m.clone();
         if let Some(o) = m.as_object_mut() {
             o.remove("system");
             o.remove("context");
+            o.remove("owner");
+            o.remove("owner_learn");
             if let Some(sk) = o.get_mut("skill").and_then(Value::as_object_mut) {
                 sk.remove("text");
             }
@@ -3442,7 +3748,14 @@ fn prepare_turn(
 
 /// Claim chat `id` for one reply (`false`: one is already running or starting).
 fn claim(id: &str) -> bool {
-    busy().lock().is_ok_and(|mut b| b.insert(id.to_string()))
+    busy().lock().is_ok_and(|mut b| {
+        if b.contains_key(id) {
+            false
+        } else {
+            b.insert(id.to_string(), next_epoch());
+            true
+        }
+    })
 }
 
 fn unclaim(id: &str) {
@@ -3516,6 +3829,7 @@ fn on_behalf(st: &AppState, headers: &HeaderMap) -> String {
 /// viewer (see `live`). When it ends, the chat's queue goes on: the next message is sent the
 /// same way, until the queue is empty or paused after a failed reply.
 fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_behalf: String) {
+    let ep = epoch(id).unwrap_or_else(|| take_over(id));
     let tx = live::start(id);
     let (st2, id2) = (st.clone(), id.to_string());
     tokio::task::spawn_blocking(move || {
@@ -3532,7 +3846,13 @@ fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_beh
                 &tx,
                 &on_behalf,
             );
+            // Cut by a steer or Stop: the chat already belongs to what came next (the cut may
+            // not have taken it over yet, so the closed stream says it too).
+            let cut = tx.is_closed();
             drop(tx);
+            if cut || epoch(&id2) != Some(ep) {
+                return;
+            }
             live::notify(&id2, &json!({"type": "idle", "outcome": out.word()}));
             let Some(q) = live::queue_next(&id2, out == Outcome::Failed, true) else {
                 break;
@@ -3549,8 +3869,49 @@ fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_beh
                 }
             }
         }
-        unclaim(&id2);
+        release(&id2, ep);
     });
+}
+
+/// Cut the reply running in chat `id` at once and take the chat over: what it wrote so far is
+/// kept, and the first queued message goes out right away (whatever the reply was doing:
+/// compacting, waiting on a slow or failing model, falling back, running a tool). With no
+/// reply running, `start` sends the first queued message now. `true` when a reply was cut.
+fn interrupt(st: &AppState, store: &'static Store, id: &str, who: String, start: bool) -> bool {
+    let Some((text, model)) = live::cut(id) else {
+        if start {
+            kick(st, store, id, who, false, false);
+        }
+        return false;
+    };
+    let ep = take_over(id);
+    if !text.trim().is_empty() {
+        let _ = store.append(
+            id,
+            &NewMessage {
+                role: "assistant".into(),
+                content: text.trim_end().to_string(),
+                meta: Some(json!({"model": model, "stopped": true})),
+                ..Default::default()
+            },
+            memora_state::now(),
+        );
+    }
+    live::notify(id, &json!({"type": "idle", "outcome": "stopped"}));
+    match live::queue_next(id, false, true) {
+        Some(q) => match prepare_turn(st, store, id, &q.body, "queue") {
+            Ok(p) => begin_run(st, store, id, p, who),
+            Err((_, e)) => {
+                live::requeue(id, q, true);
+                live::notify(id, &json!({"type": "queue_error", "message": e}));
+                release(id, ep);
+            }
+        },
+        None => {
+            release(id, ep);
+        }
+    }
+    true
 }
 
 /// Start the next queued message of chat `id` when no reply is running (it was sent now,
@@ -3641,15 +4002,14 @@ async fn h_steer(
 
 /// The first queued message goes now: cut the reply running for it, or start it.
 async fn go_now(st: &AppState, headers: &HeaderMap, store: &'static Store, id: &str) {
-    if !live::cancel(id) {
-        let (st2, id2, who) = (st.clone(), id.to_string(), on_behalf(st, headers));
-        crate::blocking(move || kick(&st2, store, &id2, who, false, false)).await;
-    }
+    let (st2, id2, who) = (st.clone(), id.to_string(), on_behalf(st, headers));
+    crate::blocking(move || interrupt(&st2, store, &id2, who, true)).await;
 }
 
 /// `POST /api/assistant/sessions/{id}/stop`: end the reply running in this chat. What it
 /// wrote so far stays; the next queued message (if any) goes out.
 async fn h_stop(
+    State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
     headers: HeaderMap,
     UrlPath(id): UrlPath<String>,
@@ -3660,7 +4020,13 @@ async fn h_stop(
     if !csrf_ok(&headers) {
         return csrf_fail();
     }
-    Json(json!({"stopped": live::cancel(&id)})).into_response()
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let (st2, id2, who) = (st.clone(), id.clone(), on_behalf(&st, &headers));
+    let stopped = crate::blocking(move || interrupt(&st2, store, &id2, who, false)).await;
+    Json(json!({"stopped": stopped})).into_response()
 }
 
 /// `GET /api/assistant/sessions/{id}/queue`: the messages waiting for this chat's reply.
@@ -3730,7 +4096,11 @@ async fn h_queue_op(
     let op = s(&b, "op").unwrap_or_default();
     let to = b.get("to").and_then(Value::as_u64).unwrap_or(0) as usize;
     match qid.as_str() {
-        "clear" => live::queue_clear(&id),
+        "clear" => {
+            let ids = live::queue_uploads(Some(&id));
+            live::queue_clear(&id);
+            uploads::remove_unused(&st, &id, &ids);
+        }
         "resume" => {
             live::queue_resume(&id);
             if !live::running(&id) {
@@ -3744,8 +4114,13 @@ async fn h_queue_op(
             if !["del", "up", "down", "move", "send"].contains(&op.as_str()) {
                 return bad("op must be del, up, down, move or send");
             }
+            let before = live::queue_uploads(Some(&id));
             if !live::queue_op(&id, n, &op, to) {
                 return fail(StatusCode::NOT_FOUND, "that message is no longer queued");
+            }
+            // A removed message takes its pictures with it.
+            if op == "del" {
+                uploads::remove_unused(&st, &id, &before);
             }
             if op == "send" {
                 go_now(&st, &headers, store, &id).await;
@@ -3788,7 +4163,7 @@ async fn h_rerun(
     let Some(sess) = store.session(&id).ok().flatten() else {
         return fail(StatusCode::NOT_FOUND, "chat not found");
     };
-    if busy().lock().is_ok_and(|b| b.contains(&id)) {
+    if busy().lock().is_ok_and(|b| b.contains_key(&id)) {
         return fail(
             StatusCode::CONFLICT,
             "Mnemo is still answering in this chat",
@@ -3856,7 +4231,7 @@ async fn h_rerun(
 
 /// What one model gets in one chat: its limits, the chat's frozen prompt, the tools and the
 /// tokens left for history.
-struct Setup {
+pub(crate) struct Setup {
     ctx: i64,
     max_out: u64,
     system: String,
@@ -3918,7 +4293,11 @@ fn setup(
                 prefs.get("system_prompt").and_then(Value::as_str),
             )
         });
-    let tools = tool_defs(st);
+    let mut tools = tool_defs(st);
+    tools.extend(roles::defs(st, store, false));
+    if owner::learning(store) && !fleeting_ids(store).contains(id) {
+        tools.extend(owner::defs());
+    }
     let fixed = approx_tokens(&system)
         + approx_tokens(
             &serde_json::to_string(&tools.iter().map(|t| &t.parameters).collect::<Vec<_>>())
@@ -4080,6 +4459,10 @@ fn compact(
     if text.is_empty() {
         return Err("the model wrote an empty summary".into());
     }
+    // Cut meanwhile (a steer or Stop): the chat has moved on without this summary.
+    if !on("") {
+        return Err("stopped".into());
+    }
     let tokens = approx_tokens(&text);
     store
         .append(
@@ -4094,6 +4477,114 @@ fn compact(
         )
         .map_err(|e| e.to_string())?;
     Ok(Some((older.len(), tokens, text)))
+}
+
+/// The owner's latest message as an answer: `(approves, it answered the sub-agent question,
+/// it carries a standing OK such as an @mnemo request)`.
+fn latest_answer(store: &Store, id: &str) -> (bool, bool, bool) {
+    let msgs = store.messages(id).unwrap_or_default();
+    let Some(meta) = msgs
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .and_then(|m| m.meta.clone())
+    else {
+        return (false, false, false);
+    };
+    let yes = meta["answer"]["approve"] == true;
+    let to = meta["answer"]["to"].as_str().unwrap_or("");
+    let to_subs = !to.is_empty()
+        && msgs.iter().rev().any(|m| {
+            m.tool_calls
+                .as_ref()
+                .and_then(Value::as_array)
+                .is_some_and(|cs| {
+                    cs.iter()
+                        .any(|c| c["id"] == to && c["arguments"]["subagents"] == true)
+                })
+        });
+    (yes, to_subs, meta["approved"] == true)
+}
+
+/// Run one of Mnemo's tools (all but ask_owner and delegate, which belong to the reply
+/// itself). `sub`: the sub-agent running it (it cannot ask the owner for an OK).
+pub(crate) fn exec_tool(
+    st: &AppState,
+    store: &Store,
+    id: &str,
+    who: &Caller,
+    approved: bool,
+    c: &ToolCall,
+    sub: Option<&str>,
+) -> Result<Value, String> {
+    let off = st.mcp.disabled_tools();
+    let allowed = TOOLS.contains(&c.name.as_str()) && !off.contains(&c.name);
+    let writes = c.name == PLACE_IMAGE
+        || (c.name == roles::GENERATE_IMAGE && c.arguments["note"].is_string())
+        || (TOOLS.contains(&c.name.as_str()) && !memora_mcp::activity::is_read_only(&c.name));
+    if writes
+        && store
+            .prefs()
+            .ok()
+            .and_then(|p| {
+                p.get("permission")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .as_deref()
+            == Some("read")
+    {
+        return Err("Not done: Mnemo is in Read only mode, so notes are not changed. Say what you would change; the owner can switch to Ask first or Auto in the chat.".into());
+    }
+    if writes && !approved {
+        return Err(match sub {
+            None => format!(
+                "Not done: {NAME} is in Ask first mode, so changes wait for the owner's OK. Ask with ask_owner \
+(say what you will change; give an option with approve: true such as \"Yes, go ahead\"), then make the change \
+after they approve."
+            ),
+            Some(_) => "Not done: the chat is in Ask first mode, so a sub-agent cannot change notes. Say in your \
+answer what should change; Mnemo asks the owner."
+                .into(),
+        });
+    }
+    if c.name == VIEW_IMAGE {
+        view_image(st, &c.arguments)
+    } else if c.name == PLACE_IMAGE && !off.contains("upload_image") {
+        place_image(st, who, &c.arguments)
+    } else if c.name == SHOW_ITEMS {
+        show_items(st, &c.arguments)
+    } else if c.name == CURRENT_TIME {
+        Ok(current_time(store, id))
+    } else if c.name == docs::SEARCH || c.name == docs::READ {
+        docs::run(st, &c.name, &c.arguments)
+    } else if [
+        SEARCH_CHATS,
+        READ_CHAT,
+        LIST_CHATS,
+        LIST_ARTIFACTS,
+        READ_ARTIFACT,
+    ]
+    .contains(&c.name.as_str())
+    {
+        chat_tool(store, &c.name, &c.arguments, id)
+    } else if [owner::REMEMBER, owner::UPDATE, owner::FORGET].contains(&c.name.as_str()) {
+        if sub.is_some() || fleeting_ids(store).contains(id) || !owner::learning(store) {
+            Err("Not kept: nothing is learned about the owner here.".into())
+        } else {
+            owner::run(store, &c.name, &c.arguments)
+        }
+    } else if c.name == roles::DESCRIBE_IMAGE {
+        roles::describe_image(st, store, &c.arguments)
+    } else if c.name == roles::GENERATE_IMAGE {
+        roles::generate_image(st, store, who, &c.arguments)
+    } else if allowed {
+        st.mcp
+            .call_tool_by(&c.name, &c.arguments, who)
+            .map_err(|e| e.to_string())
+    } else {
+        Err(format!("{} is not one of {NAME}'s tools", c.name))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4139,15 +4630,14 @@ fn run_agent(
         });
     // Ask first: changes wait for the owner's OK, given by answering an ask_owner question
     // with an option marked approve; that OK holds for this reply.
-    let approved = auto
-        || store
-            .messages(id)
-            .unwrap_or_default()
-            .iter()
-            .rev()
-            .find(|m| m.role == "user")
-            .and_then(|m| m.meta.as_ref())
-            .is_some_and(|v| v["answer"]["approve"] == true || v["approved"] == true);
+    // The owner's latest answer, and whether it answered the question about sub-agents (a
+    // yes to that spends tokens; it never lets changes through, and the other way round).
+    let (yes, to_subs, said_ok) = latest_answer(store, id);
+    let read_only = prefs.get("permission").and_then(Value::as_str) == Some("read");
+    let approved = !read_only && (auto || (yes && !to_subs) || said_ok);
+    // Sub-agents spend tokens of their own: in Auto they just run; otherwise once the owner
+    // said yes to them, unless the owner turned that question off.
+    let subs_ok = auto || !roles::confirm_first(store) || (yes && to_subs);
     let budget = stp.budget;
     // Near full: fold the older turns into a summary before this turn (the whole chat stays
     // in memory, just shorter). If that fails, the oldest turns are left out instead.
@@ -4207,7 +4697,60 @@ fn run_agent(
             }
         };
         let (system, tools) = (&stp.system, &stp.tools);
-        let mut res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
+        // A model that failed on pictures before gets them as text from the start.
+        if blind_in(store, &key) && history.iter().any(|m| matches!(m, Msg::UserImages { .. })) {
+            let seen = roles::describe_history(st, store, &mut history);
+            if seen == 0 {
+                strip_images(&mut history);
+            }
+            // Said once per reply, so the owner knows why pictures go as text.
+            if step == 0 {
+                let note = if seen > 0 {
+                    json!({"type": "notice", "text": format!("{model} cannot read pictures, so the image model looks at them for it.")})
+                } else {
+                    json!({"type": "notice", "text": format!("{model} cannot read pictures, so it only gets their names. Set a model that reads images, or switch this chat's model."),
+                           "action": {"label": "Set an image model", "open": "jobs"}})
+                };
+                send(tx, note);
+            }
+        }
+        let with_pictures = history
+            .iter()
+            .any(|m| matches!(m, Msg::UserImages { images, .. } if images.iter().any(|i| !i.data.is_empty())));
+        let mut res = if with_pictures {
+            providers::with_read_timeout(60, || {
+                providers::run(&ep, &model, system, &history, tools, &opts, &mut on)
+            })
+        } else {
+            providers::run(&ep, &model, system, &history, tools, &opts, &mut on)
+        };
+        // Pictures in the request and it failed (some routers time out or fail without a
+        // word on a model that cannot see): try once at once without them, before any
+        // retry, and remember that model.
+        if let Err(e) = &res {
+            let pictures = history
+                .iter()
+                .any(|m| matches!(m, Msg::UserImages { images, .. } if images.iter().any(|i| !i.data.is_empty())));
+            if pictures && e != "stopped" && !got.get() && !tx.is_closed() {
+                let mut plain = history.clone();
+                let seen = roles::describe_history(st, store, &mut plain);
+                if seen > 0 || strip_images(&mut plain) {
+                    let again = providers::run(&ep, &model, system, &plain, tools, &opts, &mut on);
+                    if again.is_ok() {
+                        mark_blind_in(store, &key);
+                        let note = if seen > 0 {
+                            json!({"type": "notice", "text": format!("{model} cannot read pictures, so the image model looked at them for it.")})
+                        } else {
+                            json!({"type": "notice", "text": format!("{model} cannot read pictures, so it only got their names. Set a model that reads images, or switch this chat's model."),
+                                   "action": {"label": "Set an image model", "open": "jobs"}})
+                        };
+                        send(tx, note);
+                        history = plain;
+                        res = again;
+                    }
+                }
+            }
+        }
         // A provider that is briefly down or busy (502, 503, 429, a dropped connection) is
         // asked again a few times, over about half a minute, before the owner sees an error;
         // only while nothing of this step has streamed yet, so no text is repeated.
@@ -4237,33 +4780,26 @@ fn run_agent(
         }
         // A model without eyes: say so and ask again with the pictures as text.
         if let Err(e) = &res {
-            if refuses_images(e) && strip_images(&mut history) {
-                send(
-                    tx,
-                    json!({"type": "notice", "text": format!("{model} cannot look at images; it got their names instead. Pick a vision model to have them seen.")}),
-                );
-                res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
+            if refuses_images(e) {
+                // The image model, when one is set, looks at them and the chat model reads that.
+                let seen = roles::describe_history(st, store, &mut history);
+                if seen > 0 || strip_images(&mut history) {
+                    let text = if seen > 0 {
+                        format!(
+                            "{model} cannot look at images; the image model described them for it."
+                        )
+                    } else {
+                        format!("{model} cannot look at images; it got their names instead. Set a model that reads images in Settings to have them seen.")
+                    };
+                    send(tx, json!({"type": "notice", "text": text}));
+                    res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
+                }
             }
         }
         let turn = match res {
             Ok(t) => t,
-            Err(e) if e == "stopped" => {
-                // Stopped or cut for a newer message: what it wrote so far stays in the chat.
-                let text = partial.into_inner();
-                if !text.trim().is_empty() {
-                    let _ = store.append(
-                        id,
-                        &NewMessage {
-                            role: "assistant".into(),
-                            content: text.trim_end().to_string(),
-                            meta: Some(json!({"model": key, "stopped": true})),
-                            ..Default::default()
-                        },
-                        memora_state::now(),
-                    );
-                }
-                return Outcome::Stopped;
-            }
+            // Stopped or cut for a newer message: whoever cut it kept what it wrote so far.
+            Err(e) if e == "stopped" || tx.is_closed() => return Outcome::Stopped,
             Err(e) if fallbacks.len() > 0 => {
                 // Carry on with the next model the owner lined up; what the failed one
                 // started writing is dropped (the new one answers the step again).
@@ -4296,6 +4832,12 @@ fn run_agent(
         };
         tin += turn.input_tokens.unwrap_or(0);
         tout += turn.output_tokens.unwrap_or(0);
+        // Delegating before the owner's OK: the step asks them first instead (stored as the
+        // question it is, so it shows the same way after a reload).
+        let mut turn = turn;
+        if !subs_ok && turn.calls.iter().any(|c| c.name == roles::DELEGATE) {
+            turn.calls = roles::confirm_calls(store, &turn.calls, stp.fixed);
+        }
         let calls_json = (!turn.calls.is_empty()).then(|| {
             json!(turn
                 .calls
@@ -4317,6 +4859,10 @@ fn run_agent(
         if let Some(raw) = &turn.raw {
             meta["raw"] = raw.clone();
         }
+        // Cut while the model answered: the chat has moved on, this answer is dropped.
+        if tx.is_closed() {
+            return Outcome::Stopped;
+        }
         let _ = store.append(
             id,
             &NewMessage {
@@ -4328,30 +4874,42 @@ fn run_agent(
             },
             memora_state::now(),
         );
+        // What was streamed so far is in the chat now: a cut keeps nothing of it twice.
+        send(tx, json!({"type": "saved"}));
         if turn.calls.is_empty() {
             break;
         }
         let mut asked = false;
+        // Sub-agents asked in this step work at the same time; their cards show at once.
+        let mut delegated = roles::delegate_all(
+            st,
+            store,
+            id,
+            on_behalf,
+            approved,
+            &turn.calls,
+            tx,
+            roles::Main {
+                model: &model,
+                ep: &ep,
+                stp: &stp,
+                key: &key,
+            },
+        );
+        if tx.is_closed() {
+            return Outcome::Stopped;
+        }
         for c in &turn.calls {
-            if !send(
-                tx,
-                json!({"type": "tool_start", "id": c.id, "name": c.name, "args": c.arguments}),
-            ) {
+            if !delegated.contains_key(&c.id)
+                && !send(
+                    tx,
+                    json!({"type": "tool_start", "id": c.id, "name": c.name, "args": c.arguments}),
+                )
+            {
                 return Outcome::Stopped;
             }
             let started = Instant::now();
-            let off = st.mcp.disabled_tools();
-            let allowed = TOOLS.contains(&c.name.as_str()) && !off.contains(&c.name);
-            let writes = c.name == PLACE_IMAGE
-                || (TOOLS.contains(&c.name.as_str())
-                    && !memora_mcp::activity::is_read_only(&c.name));
-            let res = if writes && !approved {
-                Err(format!(
-                    "Not done: {NAME} is in Ask first mode, so changes wait for the owner's OK. Ask with ask_owner \
-(say what you will change; give an option with approve: true such as \"Yes, go ahead\"), then make the change \
-after they approve."
-                ))
-            } else if c.name == ASK_OWNER {
+            let res = if c.name == ASK_OWNER {
                 match ask_check(&c.arguments) {
                     Ok(q) => {
                         asked = true;
@@ -4365,32 +4923,10 @@ after they approve."
                     }
                     Err(e) => Err(e),
                 }
-            } else if c.name == VIEW_IMAGE {
-                view_image(st, &c.arguments)
-            } else if c.name == PLACE_IMAGE && !off.contains("upload_image") {
-                place_image(st, &who, &c.arguments)
-            } else if c.name == SHOW_ITEMS {
-                show_items(st, &c.arguments)
-            } else if c.name == CURRENT_TIME {
-                Ok(current_time(store, id))
-            } else if c.name == docs::SEARCH || c.name == docs::READ {
-                docs::run(st, &c.name, &c.arguments)
-            } else if [
-                SEARCH_CHATS,
-                READ_CHAT,
-                LIST_CHATS,
-                LIST_ARTIFACTS,
-                READ_ARTIFACT,
-            ]
-            .contains(&c.name.as_str())
-            {
-                chat_tool(store, &c.name, &c.arguments, id)
-            } else if allowed {
-                st.mcp
-                    .call_tool_by(&c.name, &c.arguments, &who)
-                    .map_err(|e| e.to_string())
+            } else if let Some(r) = delegated.remove(&c.id) {
+                r
             } else {
-                Err(format!("{} is not one of {NAME}'s tools", c.name))
+                exec_tool(st, store, id, &who, approved, c, None)
             };
             let ms = started.elapsed().as_millis() as u64;
             let (ok, output, line) = match &res {
@@ -4406,6 +4942,9 @@ after they approve."
                 }
                 Err(e) => (false, json!({"error": e}).to_string(), e.clone()),
             };
+            if tx.is_closed() {
+                return Outcome::Stopped;
+            }
             let _ = store.append(
                 id,
                 &NewMessage {
@@ -4418,11 +4957,25 @@ after they approve."
                 },
                 memora_state::now(),
             );
+            // What was streamed so far is in the chat now: a cut keeps nothing of it twice.
+            send(tx, json!({"type": "saved"}));
             let mut end = json!({"type": "tool_end", "id": c.id, "name": c.name, "ok": ok, "summary": line, "ms": ms});
             // Cards to show right away (the chat draws them from this).
             if c.name == SHOW_ITEMS {
                 if let Ok(v) = &res {
                     end["shown"] = v["shown"].clone();
+                }
+            }
+            // Sub-agent answers and images show in their card as soon as they are back.
+            if [
+                roles::DELEGATE,
+                roles::DESCRIBE_IMAGE,
+                roles::GENERATE_IMAGE,
+            ]
+            .contains(&c.name.as_str())
+            {
+                if let Ok(v) = &res {
+                    end["output"] = v.clone();
                 }
             }
             if !send(tx, end) {
@@ -4451,6 +5004,9 @@ after they approve."
         .is_some_and(|s| s.title == NEW_TITLE || s.title == first_words(store, id))
     {
         let t = chat_title(store, id, &model, &ep);
+        if tx.is_closed() {
+            return Outcome::Stopped;
+        }
         let _ = store.update_session(id, Some(&t), None, None, None);
     }
     let title = store.session(id).ok().flatten().map(|s| s.title);
@@ -4471,6 +5027,9 @@ fn fail_turn(
     model: &str,
     e: &str,
 ) -> Outcome {
+    if tx.is_closed() {
+        return Outcome::Stopped;
+    }
     let _ = store.append(
         id,
         &NewMessage {
@@ -4573,6 +5132,58 @@ fn fallback_chain(store: &Store, provider: &str, model: &str) -> Vec<(String, St
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_cut_tool_call_gets_an_answer_and_stray_results_are_dropped() {
+        let call = |id: &str| super::providers::ToolCall {
+            id: id.into(),
+            name: "read_memory".into(),
+            arguments: serde_json::json!({}),
+        };
+        let tool = |id: &str| super::Msg::Tool {
+            call_id: id.into(),
+            name: "read_memory".into(),
+            output: "{}".into(),
+        };
+        let out = super::paired(vec![
+            super::Msg::User("a".into()),
+            super::Msg::Assistant {
+                text: String::new(),
+                calls: vec![call("1"), call("2")],
+                raw: None,
+            },
+            tool("1"),
+            super::Msg::User("steer".into()),
+            tool("9"),
+        ]);
+        let shape: Vec<String> = out
+            .iter()
+            .map(|m| match m {
+                super::Msg::User(t) => format!("u:{t}"),
+                super::Msg::Assistant { calls, .. } => format!("a:{}", calls.len()),
+                super::Msg::Tool {
+                    call_id, output, ..
+                } => format!("t:{call_id}:{}", output.contains("cut")),
+                super::Msg::UserImages { .. } => "img".into(),
+            })
+            .collect();
+        assert_eq!(shape, ["u:a", "a:2", "t:1:false", "t:2:true", "u:steer"]);
+    }
+
+    #[test]
+    fn a_take_over_leaves_the_cut_run_unable_to_release_the_chat() {
+        assert!(super::claim("ep-chat"));
+        let first = super::epoch("ep-chat").unwrap();
+        let second = super::take_over("ep-chat");
+        assert!(
+            !super::release("ep-chat", first),
+            "the cut run gives nothing back"
+        );
+        assert!(!super::claim("ep-chat"));
+        assert!(super::release("ep-chat", second));
+        assert!(super::claim("ep-chat"));
+        super::unclaim("ep-chat");
+    }
 
     #[test]
     fn a_skill_says_what_it_is_for() {

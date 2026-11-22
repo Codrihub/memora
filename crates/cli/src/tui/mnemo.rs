@@ -1203,6 +1203,38 @@ fn stream_reply(link: &Link, path: &str, body: Value) -> Result<()> {
             let _ = writeln!(out, "  {}", style(ev["text"].as_str().unwrap_or("")).dim());
             at_line_start = true;
         }
+        // A sub-agent at work: one dim line for each thing it does.
+        "sub" => {
+            let agent = ev["agent"].as_str().unwrap_or("sub-agent");
+            let line = match ev["phase"].as_str().unwrap_or("") {
+                "start" => Some(format!(
+                    "{agent} ({}) starts",
+                    ev["model"].as_str().unwrap_or("")
+                )),
+                "tool" => Some(format!("{agent}: {}", ev["name"].as_str().unwrap_or(""))),
+                "ask" => Some(format!(
+                    "{agent} asks: {}",
+                    ev["question"].as_str().unwrap_or("")
+                )),
+                "answer" => Some(format!(
+                    "Mnemo answers {agent}: {}",
+                    ev["answer"].as_str().unwrap_or("")
+                )),
+                "done" => Some(format!("{agent} is done ({} steps)", ev["steps"])),
+                "error" => Some(format!(
+                    "{agent} failed: {}",
+                    ev["message"].as_str().unwrap_or("")
+                )),
+                _ => None,
+            };
+            if let Some(line) = line {
+                if !at_line_start {
+                    let _ = writeln!(out);
+                }
+                let _ = writeln!(out, "    {} {}", style("·").dim(), style(line).dim());
+                at_line_start = true;
+            }
+        }
         "fallback" => {
             if !at_line_start {
                 let _ = writeln!(out);

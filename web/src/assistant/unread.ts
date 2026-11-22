@@ -56,7 +56,8 @@ export function markSeen(id: string, messages: number): void {
 
 /** The latest list of chats (from the Mnemo page or the check below). */
 export function noteSessions(list: A.Session[]): void {
-  sessions = list;
+  // Archived chats do not count as unread anywhere.
+  sessions = list.filter((s) => !s.archived);
   const ids = new Set<string>();
   for (const s of list) {
     ids.add(s.id);
