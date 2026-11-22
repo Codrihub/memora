@@ -235,6 +235,20 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-down:hover{background:var(--hover)}
 .mn-down:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mn-chat.compact .mn-comp{padding:8px 12px 12px}
+/* The live status: one line above the composer, outside the reply, only while Mnemo works. */
+.mn-live{display:flex;align-items:center;gap:8px;max-width:780px;width:100%;margin:0 auto 8px;padding:2px 6px;border:0;background:none;
+  font:inherit;font-size:calc(var(--mn-fs,14.5px) - 1px);color:var(--muted);text-align:left;cursor:pointer;border-radius:8px;min-width:0}
+.mn-live[hidden]{display:none}
+.mn-live>i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--accent);animation:mnLive 1.4s ease-in-out infinite}
+.mn-live-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 2.4s linear infinite}
+.mn-live-s{flex:none;font-variant-numeric:tabular-nums;opacity:.75}
+.mn-live>.i,.mn-live>svg{flex:none;width:14px;height:14px;opacity:.6;transition:transform .15s}
+.mn-live:hover{color:var(--fg)}.mn-live:hover>.i,.mn-live:hover>svg{transform:translateX(2px);opacity:1}
+.mn-live:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@keyframes mnLive{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+.mn-turn.live:has(.mn-tb:empty){display:none}
+@media (prefers-reduced-motion:reduce){.mn-live>i,.mn-live-t{animation:none}.mn-live-t{color:var(--muted);background:none}}
 .mn-comp-box{max-width:780px;margin:0 auto;border:1px solid var(--line-strong);border-radius:20px;background:var(--surface-0,var(--bg));
   box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -12px rgba(15,23,42,.12);transition:border-color .15s,box-shadow .15s}
 .mn-comp-box:focus-within{border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft),0 8px 24px -12px rgba(15,23,42,.14)}
@@ -690,7 +704,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 @media (min-width:641px){
   .mn-chat.w-wide:not(.compact) .mn-log>*{max-width:1100px}
   .mn-chat.w-wide:not(.compact) .mn-ub,.mn-chat.w-wide:not(.compact) .mn-u-att{max-width:70%}
-  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash){max-width:1100px}
+  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash,.mn-live){max-width:1100px}
   .mn-chat.w-full:not(.compact) .mn-log{padding-left:32px;padding-right:32px}
   .mn-chat.w-full.has-rail:not(.compact) .mn-log{padding-right:48px}
   .mn-chat.w-full:not(.compact) .mn-log>*{max-width:none}
@@ -737,7 +751,13 @@ details.mn-ag-done{display:block}
 .mn-ag-done>.mn-ag-l{margin-top:8px}
 .mn-ag-done .mn-sub{background:none}
 .mn-agents .mn-tool[open]>summary{position:static;box-shadow:none}
-.mn-agents .mn-tool-s{max-width:42%}
+/* In the narrow Agents panel a step takes two lines: what it did (and on what), then how it went. */
+.mn-agents .mn-tool summary{display:grid;grid-template-columns:26px minmax(0,1fr) 14px;grid-template-areas:"ic t ch" "ic s ch";column-gap:10px;row-gap:1px;align-items:center;padding:7px 10px 7px 7px}
+.mn-agents .mn-tool-ic{grid-area:ic;align-self:center}
+.mn-agents .mn-tool-t{grid-area:t;min-width:0;overflow:hidden}
+.mn-agents .mn-tool-t b{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.mn-agents .mn-tool-s{grid-area:s;max-width:100%;justify-self:start;font-size:11.5px}
+.mn-agents .mn-tool summary>.mn-tool-chev{grid-area:ch}
 .mn-sub{display:flex;flex-direction:column;gap:8px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg))}
 .mn-sub:is([data-state=run],[data-state=ask]){border-color:var(--accent-line,var(--line-strong))}
 .mn-sub-h{display:flex;align-items:center;gap:10px;min-width:0}
@@ -792,6 +812,6 @@ details.mn-ag-done{display:block}
 .mn-sub-chev{width:13px;height:13px;color:var(--muted);transition:transform .15s}
 .mn-sub-ans[open] .mn-sub-chev{transform:rotate(90deg)}
 .mn-sub-ans .mn-md{margin-top:6px;max-height:360px;overflow:auto;font-size:13px}
-@media (max-width:640px){.mn-sub{padding:9px 10px}.mn-sub-chip{max-width:46%}.mn-agents{padding:10px}.mn-agents .mn-tool-s{max-width:38%}}
+@media (max-width:640px){.mn-sub{padding:9px 10px}.mn-sub-chip{max-width:46%}.mn-agents{padding:10px}}
 @media (prefers-reduced-motion:reduce){.mn-sub-bar i,.mn-sub-chev,.mn-ag-chev{transition:none}.mn-team-line{animation:none}}
 `;

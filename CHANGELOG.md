@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The live status (what Mnemo is doing and for how long, or how many
+  sub-agents are working) is one line above the message box, outside the
+  reply, shown only while Mnemo works. Click it to open the Agents panel while
+  sub-agents run.
+- Steps in the Agents panel take two lines, what they did and how it went, so
+  a long title no longer runs into its result.
+
 - Sub-agents need no setup: the named sub-agents in Settings are gone (typing a
   name there redrew the whole page). Mnemo names each sub-agent as it starts
   it; the settings keep only "Ask before sub-agents run".

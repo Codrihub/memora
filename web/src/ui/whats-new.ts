@@ -29,13 +29,14 @@ const RELEASES: Release[] = [
   {
     version: '2.2.1',
     title: 'Sub-agents, simpler',
-    lead: 'Nothing to set up for sub-agents, every model in reach, and a yes that sticks.',
+    lead: 'Nothing to set up for sub-agents, every model in reach, a yes that sticks, and the live status above the message box.',
     groups: [
       {
         kind: 'better',
         items: [
           { icon: 'agents', title: 'No setup for sub-agents', text: 'Mnemo names and starts them itself. Settings keeps only whether it asks first; follow them and switch their model in Agents.' },
           { icon: 'chat', title: 'Every model, by name', text: 'Ask for a sub-agent model by its short name, like hai-gpt. Mnemo sees all your models, with your default and fallbacks, and never swaps in another.' },
+          { icon: 'chat', title: 'Status above the message box', text: 'What Mnemo is doing, and for how long, now sits in one line just above where you type, only while it works. Tap it to see the sub-agents.' },
           { icon: 'send-now', title: 'Your yes sticks', text: 'Said Run them and then wrote again? The sub-agents still run, without a second question.' },
         ],
       },

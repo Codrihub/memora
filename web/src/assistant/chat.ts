@@ -423,6 +423,8 @@ export class ChatView {
   /** Every sub-agent of this chat, by what it is doing now (the Agents panel's content). */
   readonly agents: AgentsPanel;
   private offState: () => void;
+  /** The one-line live status above the composer, shown only while a reply runs. */
+  private liveEl!: HTMLButtonElement;
 
   constructor(private o: ChatOptions) {
     useStyles('mnemo-css', MNEMO_CSS);
@@ -432,6 +434,7 @@ export class ChatView {
       <nav class="mn-rail" aria-label="Jump to a message" hidden></nav>
       <form class="mn-comp" autocomplete="off">
         <button type="button" class="mn-down" aria-label="Scroll to the bottom" title="Scroll to the bottom" tabindex="-1">${icon('chev-down')}</button>
+        <button type="button" class="mn-live" hidden aria-live="polite"><i aria-hidden="true"></i><span class="mn-live-t"></span><span class="mn-live-s"></span>${icon('chev-right')}</button>
         <div class="mn-comp-box">
           <div class="mn-queue" hidden></div>
           <div class="mn-att" aria-live="polite"><div class="mn-att-in"></div></div>
@@ -469,6 +472,14 @@ export class ChatView {
     this.agents.el.addEventListener('click', (e) => this.onAgentsClick(e));
     this.rail = this.el.querySelector('.mn-rail')!;
     this.wireRail();
+    // The live status above the composer: a click opens what is at work (the sub-agents in
+    // the Agents panel, else the reply itself).
+    this.liveEl = this.el.querySelector('.mn-live')!;
+    this.liveEl.onclick = () => {
+      const ids = (this.liveEl.dataset.subs || '').split(',').filter(Boolean);
+      if (ids.length) this.openAgents(ids);
+      else this.log.querySelector('.mn-turn.live')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    };
     this.log.addEventListener('scroll', () => {
       if (!this.railFrame) this.railFrame = requestAnimationFrame(() => this.syncRail());
     }, { passive: true });
@@ -2700,6 +2711,7 @@ export class ChatView {
     detach(): void {
     if (!this.ctrl) return;
     this.run++;
+    this.liveEl.hidden = true;
     this.ctrl.abort();
     this.ctrl = null;
     this.setBusy(false);
@@ -2830,7 +2842,7 @@ export class ChatView {
     turn.classList.add('live');
     if (uid) turn.dataset.uid = String(uid);
     const body = turn.querySelector<HTMLElement>('.mn-tb')!;
-    body.innerHTML = `<div class="mn-think"><i></i><i></i><i></i><span>Thinking</span></div>`;
+    body.innerHTML = '';
     this.log.append(turn);
     this.scrollEnd(true);
 
@@ -2844,8 +2856,8 @@ export class ChatView {
       if (md) md.innerHTML = renderReply(raw2, true) + '<span class="mn-caret"></span>';
       this.scrollEnd();
     };
-    // The live status under the reply: what Mnemo is doing now and for how long, and while
-    // sub-agents work, how many are at it (each one's work shows in the Agents panel).
+    // The live status above the composer, outside the reply: what Mnemo is doing now and for
+    // how long, and while sub-agents work, how many are at it (their work is in the Agents panel).
     let phase = 'Thinking';
     let phaseAt = performance.now();
     /** This reply's sub-agents (delegate call ids) and whether each has finished. */
@@ -2854,35 +2866,38 @@ export class ChatView {
       const n = Math.floor(ms / 1000);
       return n < 60 ? `${n}s` : `${Math.floor(n / 60)}m ${String(n % 60).padStart(2, '0')}s`;
     };
+    const bar = this.liveEl;
     const tick = (): void => {
-      const t = body.querySelector<HTMLElement>('.mn-think');
-      if (!t) return;
+      if (my !== this.run || bar.hidden) return;
       const now = performance.now();
-      const running = [...subs.values()].filter((x) => !x).length;
+      const running = [...subs.entries()].filter(([, x]) => !x);
       const waited = now - phaseAt;
-      let head = `${phase} · ${secs(waited)}`;
+      let head = phase;
       // A model that has not begun after a while: say so (Stop cuts it, a message queued goes on).
       if (phase === 'Thinking' && waited > 45_000 && !raw2) head += ' · the model has not started answering yet';
-      if (subs.size && running) {
-        const done = subs.size - running;
-        head = `${running} sub-agent${running === 1 ? '' : 's'} working${done ? ` · ${done} done` : ''} · ${secs(now - phaseAt)}`;
+      if (running.length) {
+        const done = subs.size - running.length;
+        head = `${running.length} sub-agent${running.length === 1 ? '' : 's'} working${done ? ` · ${done} done` : ''}`;
       }
-      t.querySelector('span')!.textContent = head;
+      bar.dataset.subs = running.map(([id]) => id).join(',');
+      bar.title = running.length ? 'Open the Agents panel' : 'Go to the reply';
+      bar.querySelector('.mn-live-t')!.textContent = head;
+      bar.querySelector('.mn-live-s')!.textContent = secs(waited);
     };
     const ticker = window.setInterval(tick, 1000);
     const think = (on: boolean, label = 'Thinking'): void => {
-      let t = body.querySelector<HTMLElement>('.mn-think');
+      if (my !== this.run) return;
       if (on) {
-        if (!t) {
-          t = el('div', 'mn-think', '<i></i><i></i><i></i><span></span>');
-          body.append(t);
-        }
-        if (label !== phase || !t.dataset.on) phaseAt = performance.now();
+        if (label !== phase || bar.hidden) phaseAt = performance.now();
         phase = label;
-        t.dataset.on = '1';
+        bar.hidden = false;
         tick();
-      } else t?.remove();
+      } else {
+        bar.hidden = true;
+        delete bar.dataset.subs;
+      }
     };
+    think(true);
     const closeText = (): void => {
       if (md) {
         md.innerHTML = renderReply(raw2);
@@ -3089,6 +3104,8 @@ export class ChatView {
         dropped = true;
       } else body.append(this.errorCard(err.message));
     } finally {
+      window.clearInterval(ticker);
+      think(false);
       // Left for another chat: the reply goes on on the server; nothing here is ours now.
       if (my !== this.run) {
         if (frame) cancelAnimationFrame(frame);
