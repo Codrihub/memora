@@ -254,6 +254,7 @@ async fn hidden_paths_never_reach_the_agents_they_are_hidden_from() {
         (ida.clone(), true),
         (idb.clone(), false),
         (idc.clone(), true),
+        ("mnemo".to_string(), true),
     ];
     want.sort();
     assert_eq!(can_see, want);

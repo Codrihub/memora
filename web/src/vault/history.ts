@@ -3,6 +3,7 @@
 import { apiGet, apiPost } from '../api';
 import { attr, el, esc } from '../dom';
 import { hashColor } from '../format';
+import { t, tn } from '../i18n';
 import { Modal } from '../modal';
 import { fadeScroll } from '../ui/scroll-fade';
 import { I } from './icons';
@@ -44,7 +45,7 @@ const numbers = new Map<string, number>();
 function actionText(v: Version): string {
   const from = restoredRev(v.message);
   const n = from ? numbers.get(from) ?? Array.from(numbers).find(([r]) => r.startsWith(from) || from.startsWith(r))?.[1] : undefined;
-  return n ? `Restored v${n}` : actionOf(v.message);
+  return n ? t('Restored v{n}', { n }) : actionOf(v.message);
 }
 
 /** Forget the versions of `path` (every note when left out); the next look asks again. */
@@ -91,7 +92,7 @@ const avatar = (v: Version): string => {
 /** The panel body: a skeleton, then the versions by day (or why there are none). */
 function historyBody(h: HistoryHost): HTMLElement {
   const body = el('div', 'vh');
-  body.innerHTML = `<div class="vh-loading" role="status"><span>Reading the history…</span><i class="vh-bar" aria-hidden="true"></i></div>
+  body.innerHTML = `<div class="vh-loading" role="status"><span>${t('Reading the history…')}</span><i class="vh-bar" aria-hidden="true"></i></div>
     <div class="vh-list vh-sks" aria-busy="true">${[0, 1, 2, 3, 4]
     .map(
       (i) =>
@@ -104,13 +105,13 @@ function historyBody(h: HistoryHost): HTMLElement {
 
 function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
   if ('off' in r) {
-    body.innerHTML = `<div class="vh-empty"><span class="vh-empty-i" aria-hidden="true">${I.history}</span><b>Version history is off</b>
-      <p>Memora keeps every version of a note when the vault folder is a git repository. Run <code>git init</code> in the vault folder once (see Configuration, “Version history” in the docs); from then on every change is kept here.</p></div>`;
+    body.innerHTML = `<div class="vh-empty"><span class="vh-empty-i" aria-hidden="true">${I.history}</span><b>${t('Version history is off')}</b>
+      <p>${t('Memora keeps every version of a note when the vault folder is a git repository. Run {cmd} in the vault folder once (see Configuration, “Version history” in the docs); from then on every change is kept here.', { cmd: '<code>git init</code>' })}</p></div>`;
     return;
   }
   if ('error' in r) {
-    body.innerHTML = `<div class="vh-empty" role="alert"><b>Could not load the versions</b><p>${esc(r.error)}.</p>
-      <button type="button" class="btn sm" data-retry>Try again</button></div>`;
+    body.innerHTML = `<div class="vh-empty" role="alert"><b>${t('Could not load the versions')}</b><p>${esc(r.error)}.</p>
+      <button type="button" class="btn sm" data-retry>${t('Try again')}</button></div>`;
     body.querySelector<HTMLElement>('[data-retry]')!.onclick = () => {
       invalidateHistory(h.path);
       void loadHistory(h.path).then((x) => paint(body, h, x));
@@ -119,8 +120,8 @@ function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
   }
   const { list } = r;
   if (!list.versions.length) {
-    body.innerHTML = `<div class="vh-empty"><span class="vh-empty-i" aria-hidden="true">${I.history}</span><b>No versions yet</b>
-      <p>This note has not been saved to the history yet. The next change starts it.</p></div>`;
+    body.innerHTML = `<div class="vh-empty"><span class="vh-empty-i" aria-hidden="true">${I.history}</span><b>${t('No versions yet')}</b>
+      <p>${t('This note has not been saved to the history yet. The next change starts it.')}</p></div>`;
     return;
   }
   const viewing = h.viewing();
@@ -128,9 +129,9 @@ function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
   for (const v of list.versions) numbers.set(v.rev, v.version);
   const groups = groupByDay(list.versions);
   let row = 0;
-  const more = list.total > list.versions.length ? `<p class="vh-more">Showing the latest ${list.versions.length} of ${list.total} versions.</p>` : '';
-  body.innerHTML = `<p class="vh-sum">${list.total === 1 ? '1 version' : `${list.total} versions`} · newest first</p>
-    <div class="vh-list" role="list" aria-label="Versions">${groups
+  const more = list.total > list.versions.length ? `<p class="vh-more">${t('Showing the latest {shown} of {total} versions.', { shown: list.versions.length, total: list.total })}</p>` : '';
+  body.innerHTML = `<p class="vh-sum">${tn(list.total, '{n} version · newest first', '{n} versions · newest first')}</p>
+    <div class="vh-list" role="list" aria-label="${attr(t('Versions'))}">${groups
       .map(
         (g) =>
           `<section class="vh-day" role="presentation"><h4>${esc(g.label)}</h4>${g.items
@@ -138,13 +139,17 @@ function paint(body: HTMLElement, h: HistoryHost, r: Loaded): void {
               const ms = versionMs(v);
               const cur = v.version === list.total;
               const on = viewing ? v.rev === viewing : cur;
-              const renamed = v.path ? `<span class="vh-was" title="${attr(v.path)}">as ${esc((v.path.split('/').pop() || v.path).replace(/\.md$/i, ''))}</span>` : '';
+              const renamed = v.path ? `<span class="vh-was" title="${attr(v.path)}">${t('as {name}', { name: esc((v.path.split('/').pop() || v.path).replace(/\.md$/i, '')) })}</span>` : '';
               return `<button type="button" role="listitem" class="vh-v${cur ? ' cur' : ''}${on ? ' on' : ''}" style="--i:${Math.min(row++, 12)}" data-rev="${attr(v.rev)}"${
                 on ? ' aria-current="true"' : ''
-              } aria-label="${attr(`Version ${v.version}, ${g.label} ${timeLabel(ms)}, by ${whoOf(v)}${cur ? ', current version' : ''}`)}">
+              } aria-label="${attr(
+                cur
+                  ? t('Version {n}, {day} {time}, by {who}, current version', { n: v.version, day: g.label, time: timeLabel(ms), who: whoOf(v) })
+                  : t('Version {n}, {day} {time}, by {who}', { n: v.version, day: g.label, time: timeLabel(ms), who: whoOf(v) }),
+              )}">
                 <span class="vh-dot" aria-hidden="true"></span>
                 <span class="vh-main"><span class="vh-top"><b>${esc(timeLabel(ms) || v.rev)}</b>${
-                  cur ? '<em class="vh-cur">Current version</em>' : ''
+                  cur ? `<em class="vh-cur">${t('Current version')}</em>` : ''
                 }<span class="vh-num">v${v.version}</span></span>
                 <span class="vh-meta">${avatar(v)}<span class="vh-who">${esc(whoOf(v))}</span><span aria-hidden="true">·</span><span class="vh-act">${esc(actionText(v))}</span>${renamed}</span></span></button>`;
             })
@@ -190,7 +195,7 @@ export function openHistorySheet(anchor: HTMLElement, h: HistoryHost, close: () 
       h.latest();
     },
   };
-  openPanel(anchor, 'Version history', historyBody(wrap), 'vx-pop-ct vx-pop-hist', true);
+  openPanel(anchor, t('Version history'), historyBody(wrap), 'vx-pop-ct vx-pop-hist', true);
 }
 
 /** The banner over a previewed version: what it is, Restore and Back to latest. */
@@ -201,18 +206,18 @@ export function previewBanner(
 ): HTMLElement {
   const b = el('div', 'vh-banner');
   b.setAttribute('role', 'region');
-  b.setAttribute('aria-label', `Viewing version ${v.version}`);
+  b.setAttribute('aria-label', t('Viewing version {n}', { n: v.version }));
   const ms = versionMs(v);
   b.innerHTML = `<div class="vh-b-head"><span class="vh-b-i" aria-hidden="true">${I.history}</span><div class="vh-b-t">
-      <b>Viewing version ${v.version} from ${esc(whenLabel(ms))}</b>
-      <span>${esc(whoOf(v))} · ${esc(actionText(v))} · read only. The current version is v${v.total}.</span></div></div>
-    <div class="vh-b-row"><div class="vh-seg" role="group" aria-label="Show">
-        <button type="button" data-m="read" aria-pressed="${mode === 'read'}">Text</button>
-        <button type="button" data-m="changes" aria-pressed="${mode === 'changes'}"><span class="vh-l-long">Compare to current</span><span class="vh-l-short">Compare</span></button></div>
+      <b>${t('Viewing version {n} from {when}', { n: v.version, when: esc(whenLabel(ms)) })}</b>
+      <span>${esc(whoOf(v))} · ${esc(actionText(v))} · ${t('read only. The current version is v{n}.', { n: v.total })}</span></div></div>
+    <div class="vh-b-row"><div class="vh-seg" role="group" aria-label="${attr(t('Show'))}">
+        <button type="button" data-m="read" aria-pressed="${mode === 'read'}">${t('Text')}</button>
+        <button type="button" data-m="changes" aria-pressed="${mode === 'changes'}"><span class="vh-l-long">${t('Compare to current')}</span><span class="vh-l-short">${t('Compare')}</span></button></div>
       <span class="vx-grow"></span>
-      ${act.list ? `<button type="button" class="btn sm ghost vh-b-list" data-list>${I.history}<span>All versions</span></button>` : ''}
-      <button type="button" class="btn sm ghost" data-latest aria-label="Back to latest"><span class="vh-l-long">Back to latest</span><span class="vh-l-short">Latest</span></button>
-      <button type="button" class="btn sm primary" data-restore aria-label="Restore this version">${I.undo}<span class="vh-l-long">Restore this version</span><span class="vh-l-short">Restore</span></button></div>`;
+      ${act.list ? `<button type="button" class="btn sm ghost vh-b-list" data-list>${I.history}<span>${t('All versions')}</span></button>` : ''}
+      <button type="button" class="btn sm ghost" data-latest aria-label="${attr(t('Back to latest'))}"><span class="vh-l-long">${t('Back to latest')}</span><span class="vh-l-short">${t('Latest')}</span></button>
+      <button type="button" class="btn sm primary" data-restore aria-label="${attr(t('Restore this version'))}">${I.undo}<span class="vh-l-long">${t('Restore this version')}</span><span class="vh-l-short">${t('Restore')}</span></button></div>`;
   b.querySelector<HTMLElement>('[data-restore]')!.onclick = act.restore;
   b.querySelector<HTMLElement>('[data-latest]')!.onclick = act.latest;
   b.querySelector<HTMLElement>('[data-list]')?.addEventListener('click', () => act.list?.());
@@ -224,24 +229,26 @@ export function previewBanner(
 export function diffView(v: Version, diff: string | null): HTMLElement {
   const box = el('div', 'vh-diff');
   if (diff == null) {
-    box.innerHTML = `<div class="vh-loading" role="status"><span>Comparing with the current version…</span><i class="vh-bar" aria-hidden="true"></i></div>`;
+    box.innerHTML = `<div class="vh-loading" role="status"><span>${t('Comparing with the current version…')}</span><i class="vh-bar" aria-hidden="true"></i></div>`;
     return box;
   }
   const lines = parseDiff(diff);
   if (!lines.length) {
-    box.innerHTML = `<p class="vh-diff-note">The text of version ${v.version} is the same as the current version.</p>`;
+    box.innerHTML = `<p class="vh-diff-note">${t('The text of version {n} is the same as the current version.', { n: v.version })}</p>`;
     return box;
   }
   const n = diffCounts(lines);
-  box.innerHTML = `<p class="vh-diff-note"><span class="vh-k del">${n.del} line${n.del === 1 ? '' : 's'} only in version ${v.version}</span><span class="vh-k add">${
-    n.add
-  } line${n.add === 1 ? '' : 's'} only in the current version</span></p>
-    <div class="vh-lines" role="table" aria-label="Changes from version ${v.version} to the current version">${lines
+  box.innerHTML = `<p class="vh-diff-note"><span class="vh-k del">${tn(n.del, '{n} line only in version {v}', '{n} lines only in version {v}', { v: v.version })}</span><span class="vh-k add">${tn(
+    n.add,
+    '{n} line only in the current version',
+    '{n} lines only in the current version',
+  )}</span></p>
+    <div class="vh-lines" role="table" aria-label="${attr(t('Changes from version {n} to the current version', { n: v.version }))}">${lines
       .map((l) =>
         l.kind === 'hunk'
           ? `<div class="vh-l hunk" role="row"><span role="cell">⋯ ${esc(l.text)}</span></div>`
           : `<div class="vh-l ${l.kind}" role="row"><span class="vh-sign" role="cell" aria-label="${
-              l.kind === 'add' ? 'Only in the current version' : l.kind === 'del' ? `Only in version ${v.version}` : 'Unchanged'
+              l.kind === 'add' ? t('Only in the current version') : l.kind === 'del' ? t('Only in version {n}', { n: v.version }) : t('Unchanged')
             }">${l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ''}</span><span role="cell">${esc(l.text) || '&nbsp;'}</span></div>`,
       )
       .join('')}</div>`;
@@ -252,14 +259,15 @@ export function diffView(v: Version, diff: string | null): HTMLElement {
 export function askRestoreVersion(path: string, v: Version, done: (version: number) => void | Promise<void>): void {
   const ms = versionMs(v);
   Modal.open({
-    title: `Restore version ${v.version}?`,
-    body: `<p style="margin:0 0 10px">The note goes back to how it was ${esc(whenLabel(ms))}. This becomes a new latest version (v${
-      v.total + 1
-    }).</p><p style="margin:0">Nothing is lost: the current text stays in the history as v${v.total}, so you can switch back at any time.</p>`,
+    title: t('Restore version {n}?', { n: v.version }),
+    body: `<p style="margin:0 0 10px">${t('The note goes back to how it was {when}. This becomes a new latest version (v{n}).', {
+      when: esc(whenLabel(ms)),
+      n: v.total + 1,
+    })}</p><p style="margin:0">${t('Nothing is lost: the current text stays in the history as v{n}, so you can switch back at any time.', { n: v.total })}</p>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Restore this version',
+        label: t('Restore this version'),
         cls: 'primary',
         run: async () => {
           try {
@@ -268,15 +276,15 @@ export function askRestoreVersion(path: string, v: Version, done: (version: numb
             invalidateHistory(path);
             undoToast(
               r.changed === false
-                ? `Version ${v.version} is the same as the current text; nothing changed`
-                : `Restored version ${v.version}. It is now the latest version (v${r.version ?? v.total + 1}).`,
+                ? t('Version {n} is the same as the current text; nothing changed', { n: v.version })
+                : t('Restored version {n}. It is now the latest version (v{latest}).', { n: v.version, latest: r.version ?? v.total + 1 }),
               null,
               r.changed === false ? 'info' : 'ok',
             );
             await done(r.version ?? v.total + 1);
           } catch (e) {
             Modal.close();
-            undoToast(`Could not restore version ${v.version}: ${(e as Error).message}`, null, 'err');
+            undoToast(t('Could not restore version {n}: {error}', { n: v.version, error: (e as Error).message }), null, 'err');
           }
         },
       },

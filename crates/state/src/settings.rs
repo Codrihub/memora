@@ -185,3 +185,43 @@ pub fn set_log_limits(
     )?;
     Ok((max_mb, max_days))
 }
+
+/// The interface language a new device starts in (`auto`: its browser's), chosen at setup
+/// or in Settings; a device's own pick wins. Kept in `meta` (no schema change).
+const UI_LANGUAGE: &str = "ui_language";
+
+/// Whether `code` is a language code the web app could offer (`id`, `zh-TW`), or `auto`.
+pub fn language_ok(code: &str) -> bool {
+    code == "auto"
+        || ((2..=8).contains(&code.len())
+            && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && !code.starts_with('-'))
+}
+
+/// The server's default interface language: English until the owner picks one (`auto` then
+/// means each browser's own language).
+pub fn ui_language(conn: &Connection) -> String {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        [UI_LANGUAGE],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .filter(|v| language_ok(v))
+    .unwrap_or_else(|| "en".into())
+}
+
+/// Set the server's default interface language.
+pub fn set_ui_language(conn: &Connection, code: &str) -> Result<()> {
+    if !language_ok(code) {
+        return Err(Error::invalid(
+            "language",
+            "a language code such as en, id or zh-TW, or auto",
+        ));
+    }
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![UI_LANGUAGE, code],
+    )?;
+    Ok(())
+}

@@ -145,6 +145,120 @@ fn step(i: usize, owner: bool) {
 const STEPS: usize = 5;
 
 /// Run the steps. Returns when the operator finishes or skips.
+/// The languages the web app comes in (the same codes as `web/src/i18n/langs.ts`).
+const LANGS: &[(&str, &str)] = &[
+    ("auto", "Auto (each browser picks)"),
+    ("en", "English"),
+    ("vi", "Tiếng Việt"),
+    ("zh", "简体中文"),
+    ("zh-TW", "繁體中文"),
+    ("ja", "日本語"),
+    ("pt", "Português (Brasil)"),
+    ("pt-PT", "Português (Portugal)"),
+    ("ko", "한국어"),
+    ("es", "Español"),
+    ("de", "Deutsch"),
+    ("fr", "Français"),
+    ("he", "עברית"),
+    ("ar", "العربية"),
+    ("ru", "Русский"),
+    ("pl", "Polski"),
+    ("cs", "Čeština"),
+    ("nl", "Nederlands"),
+    ("tr", "Türkçe"),
+    ("uk", "Українська"),
+    ("tl", "Tagalog"),
+    ("id", "Bahasa Indonesia"),
+    ("km", "ខ្មែរ"),
+    ("th", "ไทย"),
+    ("hi", "हिन्दी"),
+    ("bn", "বাংলা"),
+    ("ur", "اردو"),
+    ("ro", "Română"),
+    ("sv", "Svenska"),
+    ("it", "Italiano"),
+    ("el", "Ελληνικά"),
+    ("hu", "Magyar"),
+    ("fi", "Suomi"),
+    ("da", "Dansk"),
+    ("nb", "Norsk"),
+    ("fa", "فارسی"),
+];
+
+/// Ask the language new browsers start in and the server's name (both also in the web app's
+/// Settings). Esc keeps what is there; nothing here can fail the welcome.
+fn basics(ctx: &Ctx, term: &Term) {
+    let _ = term.clear_screen();
+    println!();
+    title("Set up", "Two quick things");
+    let (lang, realm) = store::read(ctx, |c| {
+        Ok((
+            memora_state::settings::ui_language(c),
+            memora_state::settings::get(c)
+                .map(|s| s.realm)
+                .unwrap_or_default(),
+        ))
+    })
+    .unwrap_or_else(|_| ("auto".into(), "Memora".into()));
+    let theme = dialoguer::theme::SimpleTheme;
+    let names: Vec<&str> = LANGS.iter().map(|(_, n)| *n).collect();
+    let at = LANGS.iter().position(|(c, _)| *c == lang).unwrap_or(0);
+    let picked = dialoguer::Select::with_theme(&theme)
+        .with_prompt("Language of the web app (each device can still change it)")
+        .items(&names)
+        .default(at)
+        .interact_on_opt(term)
+        .ok()
+        .flatten()
+        .map(|i| LANGS[i].0.to_string());
+    let name = dialoguer::Input::<String>::with_theme(&theme)
+        .with_prompt("Name of this server (shown on the sign-in page and the browser tab)")
+        .default(if realm.is_empty() {
+            "Memora".into()
+        } else {
+            realm.clone()
+        })
+        .validate_with(|s: &String| -> std::result::Result<(), &str> {
+            let n = s.trim().chars().count();
+            if (1..=64).contains(&n) && !s.chars().any(char::is_control) {
+                Ok(())
+            } else {
+                Err("1 to 64 printable characters")
+            }
+        })
+        .interact_text_on(term)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| *s != realm);
+    if picked.is_none() && name.is_none() {
+        return;
+    }
+    let now = memora_state::now();
+    let saved = store::write(ctx, |tx| {
+        if let Some(l) = &picked {
+            memora_state::settings::set_ui_language(tx, l)?;
+        }
+        if let Some(r) = &name {
+            let patch = memora_state::settings::SettingsPatch {
+                realm: Some(r.clone()),
+                session_ttl: None,
+                session_max_age: None,
+                min_password_len: None,
+            };
+            memora_state::settings::update(tx, &patch, now)?;
+        }
+        Ok(())
+    });
+    match saved {
+        Ok(()) => println!(
+            "\n  {}",
+            style("Saved. You can change both in Settings in the web app.").green()
+        ),
+        Err(e) => println!("\n  {}", style(format!("Not saved: {e}")).red()),
+    }
+    std::thread::sleep(std::time::Duration::from_millis(900));
+}
+
 pub(super) fn run(ctx: &Ctx) -> Result<()> {
     mark_seen(ctx);
     let term = Term::stdout();
@@ -155,6 +269,10 @@ pub(super) fn run(ctx: &Ctx) -> Result<()> {
         return Ok(());
     }
     let owner = ctx.owner().ok().flatten().is_some();
+    // Two quick questions first, in order: the language of the web app and the server's name.
+    if owner {
+        basics(ctx, &term);
+    }
     let mut at = 0;
     loop {
         let _ = term.clear_screen();

@@ -11,6 +11,7 @@ import { setThemePref, THEME_ICON, THEME_LABEL, themePref, type ThemePref } from
 import { state, type Page } from '../state';
 import { notify, toast } from '../toast';
 import { icon } from '../ui/icons';
+import { t, tn } from '../i18n';
 import { openMenu } from '../vault/ui';
 import { VAULT_CSS } from '../vault/styles';
 import * as A from './api';
@@ -35,12 +36,12 @@ let searchTimer = 0;
 /** Open a chat on the page (from the floating panel's "open full"). */
 let pendingOpen: string | null = null;
 /** What to bring along when Mnemo opens: a note or folder to attach, text to start with. */
-let pendingWith: { scope?: string; text?: string; view?: 'activity' } | null = null;
+let pendingWith: { scope?: string; text?: string; view?: 'activity'; send?: boolean } | null = null;
 /** Mnemo's activity is on screen instead of the chat. */
 let showingActivity = false;
 
 /** Open the Mnemo page on chat `id` ('' = a new chat, null = the chat you were in). */
-export function openOnPage(id: string | null, extra?: { scope?: string; text?: string; view?: 'activity' }): void {
+export function openOnPage(id: string | null, extra?: { scope?: string; text?: string; view?: 'activity'; send?: boolean }): void {
   pendingOpen = id;
   pendingWith = extra ?? null;
 }
@@ -57,6 +58,8 @@ export async function renderAssistant(): Promise<void> {
   const host = $('#view-assistant');
   if (!root) build();
   if (root!.parentElement !== host) host.replaceChildren(root!);
+  // Read before anything redraws the header (which keeps the address in step).
+  const fleetAsked = location.hash === FLEET_HASH;
   await refreshList();
   watchRunning();
   paintPrefs();
@@ -86,13 +89,36 @@ export async function renderAssistant(): Promise<void> {
   // chats are one tap away in the list. A reply still running keeps its chat on screen.
   if (want) await openChat(want);
   else if (want === '' || (fresh && !chat!.working)) newChat();
+  // /mnemo#fleeting-chat: a shortcut straight to a new fleeting chat.
+  openFleetingFromHash(fleetAsked);
   if (fresh || extra) showActivity(extra?.view === 'activity');
   if (extra?.scope) chat!.attachScope(extra.scope);
-  if (extra?.text) chat!.prefill(extra.text);
+  if (extra?.text) chat!.prefill(extra.text, !!extra.send);
   paintHead();
   void A.loadState(true).catch(() => undefined);
   if (window.matchMedia('(min-width: 761px)').matches) chat!.focus();
   fitViewport();
+}
+
+const FLEET_HASH = '#fleeting-chat';
+
+/** The address says #fleeting-chat: start a new fleeting chat (unless one is open already). */
+function openFleetingFromHash(asked = location.hash === FLEET_HASH): void {
+  if (!chat || !asked || chat.fleeting) return;
+  if (chat.session) newChat();
+  chat.setFleeting(true);
+  paintHead();
+}
+
+/** Keep the address in step: #fleeting-chat while a fleeting chat is open, nothing otherwise. */
+function syncFleetHash(): void {
+  // Only on Mnemo's own page: the chat lives on (and repaints) after leaving it, and the
+  // address of another page must never pick up the mark.
+  if (!chat || !root?.isConnected || !location.pathname.startsWith('/mnemo')) return;
+  const want = chat.fleeting;
+  const has = location.hash === FLEET_HASH;
+  if (want === has) return;
+  history.replaceState(history.state, '', location.pathname + location.search + (want ? FLEET_HASH : ''));
 }
 
 function build(): void {
@@ -100,63 +126,63 @@ function build(): void {
   onUnread(() => paintList());
   root = el('div', 'mnp');
   root.innerHTML = `
-    <aside class="mnp-side" id="mnpSide" aria-label="Chats">
+    <aside class="mnp-side" id="mnpSide" aria-label="${t('Chats')}">
       <nav class="mnp-rail" aria-label="${A.MNEMO}">
-        <span class="mnp-rail-mark" title="${A.MNEMO}, your notes agent">${markHTML('sm')}</span>
-        <button type="button" class="mnp-rb-new" id="mnpNewRow" title="New chat" aria-label="New chat">${icon('plus')}</button>
-        <button type="button" class="mnp-rb" id="mnpSearchBtn" title="Search chats" aria-label="Search chats">${icon('search')}</button>
-        <button type="button" class="mnp-rb" id="mnpAllBtn" title="All chats: pinned, recent and archived" aria-label="All chats">${icon('chat')}</button>
-        <button type="button" class="mnp-rb" id="mnpActBtn" title="Everything ${A.MNEMO} did, and for whom" aria-label="Activity">${icon('activity')}</button>
+        <span class="mnp-rail-mark" title="${t('{mnemo}, your notes agent', { mnemo: A.MNEMO })}">${markHTML('sm')}</span>
+        <button type="button" class="mnp-rb-new" id="mnpNewRow" title="${t('New chat')}" aria-label="${t('New chat')}">${icon('plus')}</button>
+        <button type="button" class="mnp-rb" id="mnpSearchBtn" title="${t('Search chats')}" aria-label="${t('Search chats')}">${icon('search')}</button>
+        <button type="button" class="mnp-rb" id="mnpAllBtn" title="${t('All chats: pinned, recent and archived')}" aria-label="${t('All chats')}">${icon('chat')}</button>
+        <button type="button" class="mnp-rb" id="mnpActBtn" title="${t('Everything {mnemo} did, and for whom', { mnemo: A.MNEMO })}" aria-label="${t('Activity')}">${icon('activity')}</button>
         <span class="mnp-grow"></span>
-        <button type="button" class="mnp-rb mnp-look-btn" id="mnpLook" title="Appearance: theme, background, text size and width" aria-label="Appearance" aria-haspopup="dialog">${icon('palette')}<i class="mnp-bgsw mnp-look-sw" id="mnpLookSw" hidden aria-hidden="true"></i><small id="mnpLookSub" hidden></small></button>
-        <button type="button" class="mnp-rb" id="mnpSet" title="Models, keys and instructions" aria-label="Settings">${icon('settings')}</button>
-        <button type="button" class="mnp-rb" id="mnpHome" title="Back to Memora" aria-label="Back to Memora">${icon('overview')}</button>
-        <button type="button" class="mnp-rb mnp-fold" id="mnpFold" title="Hide the chat list" aria-label="Hide the chat list">${icon('sidebar')}</button>
+        <button type="button" class="mnp-rb mnp-look-btn" id="mnpLook" title="${t('Appearance: theme, background, text size and width')}" aria-label="${t('Appearance')}" aria-haspopup="dialog">${icon('palette')}<i class="mnp-bgsw mnp-look-sw" id="mnpLookSw" hidden aria-hidden="true"></i><small id="mnpLookSub" hidden></small></button>
+        <button type="button" class="mnp-rb" id="mnpSet" title="${t('Models, keys and instructions')}" aria-label="${t('Settings')}">${icon('settings')}</button>
+        <button type="button" class="mnp-rb" id="mnpHome" title="${t('Back to Memora')}" aria-label="${t('Back to Memora')}">${icon('overview')}</button>
+        <button type="button" class="mnp-rb mnp-fold" id="mnpFold" title="${t('Hide the chat list')}" aria-label="${t('Hide the chat list')}">${icon('sidebar')}</button>
       </nav>
       <div class="mnp-panel">
-        <div class="mnp-ph"><b>Chats</b><small id="mnpCount"></small><span class="mnp-grow"></span>
-          <button type="button" class="mnp-manage" id="mnpManage" title="Select or clean up chats" aria-label="Select or clean up chats">${icon('more')}</button>
-          <button type="button" class="mnp-new" id="mnpNew" title="New chat" aria-label="New chat">${icon('plus')}</button></div>
-        <label class="mnp-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpQ" placeholder="Search" autocomplete="off"></label>
-        <div class="mnp-chips" id="mnpChips" role="tablist" aria-label="Show"></div>
+        <div class="mnp-ph"><b>${t('Chats')}</b><small id="mnpCount"></small><span class="mnp-grow"></span>
+          <button type="button" class="mnp-manage" id="mnpManage" title="${t('Select or clean up chats')}" aria-label="${t('Select or clean up chats')}">${icon('more')}</button>
+          <button type="button" class="mnp-new" id="mnpNew" title="${t('New chat')}" aria-label="${t('New chat')}">${icon('plus')}</button></div>
+        <label class="mnp-q">${icon('search')}<span class="sr-only">${t('Search chats')}</span><input type="search" id="mnpQ" placeholder="${t('Search')}" autocomplete="off"></label>
+        <div class="mnp-chips" id="mnpChips" role="tablist" aria-label="${t('Show')}"></div>
         <div class="mnp-selbar" id="mnpSelBar" hidden></div>
-        <nav class="mnp-list" id="mnpList" aria-label="Chat list"></nav>
+        <nav class="mnp-list" id="mnpList" aria-label="${t('Chat list')}"></nav>
       </div>
     </aside>
     <div class="mnp-scrim" id="mnpScrim"></div>
     <main class="mnp-main">
       <header class="mnp-head">
-        <button type="button" class="mnp-lists" id="mnpLists" aria-label="Show or hide the chat list" title="Chats" aria-controls="mnpSide">${icon('sidebar')}</button>
-        <div class="mnp-title"><b id="mnpTitle">New chat</b><small id="mnpSub"></small></div>
-        <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="Fleeting chat" title="Fleeting chat: not kept, gone when you leave it">${icon('incognito')}</button>
-        <button type="button" class="mn-ibtn" id="mnpNew2" aria-label="New chat" title="New chat">${icon('plus')}</button>
-        <button type="button" class="mn-ibtn mnp-agbtn" id="mnpAgBtn" aria-label="Agents in this chat" title="Agents" aria-controls="mnpAgents" hidden>${icon(
+        <button type="button" class="mnp-lists" id="mnpLists" aria-label="${t('Show or hide the chat list')}" title="${t('Chats')}" aria-controls="mnpSide">${icon('sidebar')}</button>
+        <div class="mnp-title"><b id="mnpTitle">${t('New chat')}</b><small id="mnpSub"></small></div>
+        <button type="button" class="mn-ibtn mnp-fleet" id="mnpFleet" aria-pressed="false" aria-label="${t('Fleeting chat')}" title="${t('Fleeting chat: not kept, gone when you leave it')}">${icon('incognito')}</button>
+        <button type="button" class="mn-ibtn" id="mnpNew2" aria-label="${t('New chat')}" title="${t('New chat')}">${icon('plus')}</button>
+        <button type="button" class="mn-ibtn mnp-agbtn" id="mnpAgBtn" aria-label="${t('Agents in this chat')}" title="${t('Agents')}" aria-controls="mnpAgents">${icon(
           'agents',
         )}<span class="mnp-agn" hidden></span></button>
-        <button type="button" class="mn-ibtn mnp-artbtn" id="mnpArtBtn" aria-label="Notes, folders and images in this chat" title="In this chat" aria-controls="mnpArt">${icon(
+        <button type="button" class="mn-ibtn mnp-artbtn" id="mnpArtBtn" aria-label="${t('Notes, folders and images in this chat')}" title="${t('In this chat')}" aria-controls="mnpArt">${icon(
           'sidebar',
         )}<span class="mnp-artn" hidden></span></button>
-        <button type="button" class="mn-ibtn" id="mnpMore" aria-label="Chat actions" title="More">${icon('more')}</button>
+        <button type="button" class="mn-ibtn" id="mnpMore" aria-label="${t('Chat actions')}" title="${t('More')}">${icon('more')}</button>
         <span class="mnp-hsep" aria-hidden="true"></span>
-        <button type="button" class="mn-ibtn mnp-close" id="mnpClose" aria-label="Close ${A.MNEMO}" title="Close ${A.MNEMO} (Esc)">${icon('close')}</button>
+        <button type="button" class="mn-ibtn mnp-close" id="mnpClose" aria-label="${t('Close {mnemo}', { mnemo: A.MNEMO })}" title="${t('Close {mnemo} (Esc)', { mnemo: A.MNEMO })}">${icon('close')}</button>
       </header>
       <div class="mnp-chat" id="mnpChat"></div>
       <div class="mnp-act" id="mnpAct" hidden><div class="ap mnp-ap"></div></div>
     </main>
-    <aside class="mnp-art" id="mnpArt" aria-label="In this chat">
-      <div class="mnp-art-h"><b>In this chat</b><button type="button" class="mn-ibtn" id="mnpArtX" aria-label="Close" title="Close">${icon('close')}</button></div>
+    <aside class="mnp-art" id="mnpArt" aria-label="${t('In this chat')}">
+      <div class="mnp-art-h"><b>${t('In this chat')}</b><button type="button" class="mn-ibtn" id="mnpArtX" aria-label="${t('Close')}" title="${t('Close')}">${icon('close')}</button></div>
       <div class="mnp-art-b" id="mnpArtB"></div>
     </aside>
-    <aside class="mnp-agp" id="mnpAgents" aria-label="Agents">
-      <div class="mnp-art-h"><b>Agents</b><small id="mnpAgSub"></small><span class="mnp-grow"></span><button type="button" class="mn-ibtn" id="mnpAgX" aria-label="Close" title="Close">${icon('close')}</button></div>
+    <aside class="mnp-agp" id="mnpAgents" aria-label="${t('Agents')}">
+      <div class="mnp-art-h"><b>${t('Agents')}</b><small id="mnpAgSub"></small><span class="mnp-grow"></span><button type="button" class="mn-ibtn" id="mnpAgX" aria-label="${t('Close')}" title="${t('Close')}">${icon('close')}</button></div>
       <div class="mnp-agp-b" id="mnpAgB"></div>
     </aside>
     <div class="mnp-ascrim" id="mnpAScrim"></div>
-    <section class="mnp-all" id="mnpAll" aria-label="All chats" hidden>
+    <section class="mnp-all" id="mnpAll" aria-label="${t('All chats')}" hidden>
       <div class="mnp-all-in">
-        <header class="mnp-all-h"><button type="button" class="mn-ibtn" id="mnpAllBack" aria-label="Back to the chat" title="Back">${icon('chev-left')}</button><b>All chats</b>
-          <span class="mnp-grow"></span><button type="button" class="mnp-selb" id="mnpAllSel">${icon('check')}<span>Select</span></button></header>
-        <label class="mnp-q mnp-all-q">${icon('search')}<span class="sr-only">Search chats</span><input type="search" id="mnpAllQ" placeholder="Search chats" autocomplete="off"></label>
+        <header class="mnp-all-h"><button type="button" class="mn-ibtn" id="mnpAllBack" aria-label="${t('Back to the chat')}" title="${t('Back')}">${icon('chev-left')}</button><b>${t('All chats')}</b>
+          <span class="mnp-grow"></span><button type="button" class="mnp-selb" id="mnpAllSel">${icon('check')}<span>${t('Select')}</span></button></header>
+        <label class="mnp-q mnp-all-q">${icon('search')}<span class="sr-only">${t('Search chats')}</span><input type="search" id="mnpAllQ" placeholder="${t('Search chats')}" autocomplete="off"></label>
         <div class="mnp-selbar mnp-all-bar" id="mnpAllBar" hidden></div>
         <div class="mnp-all-list" id="mnpAllList"></div>
       </div>
@@ -184,6 +210,8 @@ function build(): void {
     onMessages: () => paintArt(),
     onAgents: () => paintAgents(),
     openAgents: () => setPane('agents', true),
+    agentsOpen: () => !!root?.classList.contains('ag-open'),
+    closeAgents: () => setPane('agents', false),
     // The chat on screen started or finished a reply: its row spins meanwhile.
     onBusy: (on) => {
       const s = chat?.session && sessions.find((x) => x.id === chat!.session!.id);
@@ -194,6 +222,14 @@ function build(): void {
     },
   });
   root.querySelector('#mnpChat')!.append(chat.el);
+  window.addEventListener('hashchange', () => {
+    if (root?.isConnected) openFleetingFromHash();
+  });
+  // One layout on every screen: the header keeps New chat, In this chat, More and Close; the
+  // row under it has the model (left) and Fleeting (right, new chats only); Agents sits under
+  // the message box with the context meter.
+  chat.topRightEl.append(root.querySelector('#mnpFleet')!);
+  chat.agentsSlotEl.append(root.querySelector('#mnpAgBtn')!);
   root.querySelector('#mnpAgB')!.append(chat.agents.el);
   paintAgents();
   const q = root.querySelector<HTMLInputElement>('#mnpQ')!;
@@ -268,7 +304,7 @@ function build(): void {
   root.querySelector<HTMLElement>('#mnpFleet')!.onclick = () => {
     if (chat!.fleeting && chat!.session) {
       newChat();
-      toast('Fleeting chat left and deleted', 'ok');
+      toast(t('Fleeting chat left and deleted'), 'ok');
       return;
     }
     if (chat!.session) newChat();
@@ -424,18 +460,18 @@ function newChat(): void {
 
 /** Chat backgrounds: quiet textures and light that follow the theme, never loud. */
 const BGS = [
-  { id: 'glow', label: 'Glow' },
-  { id: 'aurora', label: 'Aurora' },
-  { id: 'mesh', label: 'Mesh' },
-  { id: 'dusk', label: 'Dusk' },
-  { id: 'dawn', label: 'Dawn' },
-  { id: 'deep', label: 'Deep' },
-  { id: 'dots', label: 'Dots' },
-  { id: 'grid', label: 'Grid' },
-  { id: 'lines', label: 'Lines' },
-  { id: 'waves', label: 'Waves' },
-  { id: 'grain', label: 'Grain' },
-  { id: 'plain', label: 'Plain' },
+  { id: 'glow', label: t('Glow') },
+  { id: 'aurora', label: t('Aurora') },
+  { id: 'mesh', label: t('Mesh') },
+  { id: 'dusk', label: t('Dusk') },
+  { id: 'dawn', label: t('Dawn') },
+  { id: 'deep', label: t('Deep') },
+  { id: 'dots', label: t('Dots') },
+  { id: 'grid', label: t('Grid') },
+  { id: 'lines', label: t('Lines') },
+  { id: 'waves', label: t('Waves') },
+  { id: 'grain', label: t('Grain') },
+  { id: 'plain', label: t('Plain') },
 ] as const;
 type BgId = (typeof BGS)[number]['id'];
 const LS_BG = 'memora.mnemo.bg.v1';
@@ -467,23 +503,23 @@ function lookMenu(at: HTMLElement): void {
   const scrim = el('div', 'mnp-lookscrim' + (sheet ? ' dim' : ''));
   const pop = el('div', 'mnp-look' + (sheet ? ' sheet' : ''));
   pop.setAttribute('role', 'dialog');
-  pop.setAttribute('aria-label', 'Appearance');
-  pop.innerHTML = `<div class="mnp-look-h"><b>Appearance</b><button type="button" class="mn-ibtn" data-look-x aria-label="Close" title="Close">${icon('close')}</button></div>
-    <span class="mnp-look-l">Theme</span>
-    <div class="mnp-theme" role="radiogroup" aria-label="Theme">${(['light', 'dark', 'system'] as ThemePref[])
-      .map((t) => `<button type="button" role="radio" data-theme-pick="${t}">${icon(THEME_ICON[t])}<span>${THEME_LABEL[t]}</span></button>`)
+  pop.setAttribute('aria-label', t('Appearance'));
+  pop.innerHTML = `<div class="mnp-look-h"><b>${t('Appearance')}</b><button type="button" class="mn-ibtn" data-look-x aria-label="${t('Close')}" title="${t('Close')}">${icon('close')}</button></div>
+    <span class="mnp-look-l">${t('Theme')}</span>
+    <div class="mnp-theme" role="radiogroup" aria-label="${t('Theme')}">${(['light', 'dark', 'system'] as ThemePref[])
+      .map((th) => `<button type="button" role="radio" data-theme-pick="${th}">${icon(THEME_ICON[th])}<span>${THEME_LABEL[th]}</span></button>`)
       .join('')}</div>
-    <span class="mnp-look-l">Chat background</span>
+    <span class="mnp-look-l">${t('Chat background')}</span>
     <div class="mnp-bgpop-g">${BGS.map(
       (b) =>
         `<button type="button" class="mnp-bgopt${b.id === cur ? ' on' : ''}" data-pick-bg="${b.id}" aria-pressed="${b.id === cur}"><i class="mnp-bgsw big" data-bg="${b.id}"></i><span>${esc(
           b.label,
         )}</span></button>`,
     ).join('')}</div>
-    <span class="mnp-look-l">Text size</span>
+    <span class="mnp-look-l">${t('Text size')}</span>
     <div class="mnp-look-fs">${textSizeHTML('look')}</div>
-    <span class="mnp-look-l mnp-look-wl">Chat width</span>
-    <div class="mnp-theme mnp-look-w" role="radiogroup" aria-label="Chat width">${(Object.keys(WIDTH_LABEL) as ChatWidth[])
+    <span class="mnp-look-l mnp-look-wl">${t('Chat width')}</span>
+    <div class="mnp-theme mnp-look-w" role="radiogroup" aria-label="${t('Chat width')}">${(Object.keys(WIDTH_LABEL) as ChatWidth[])
       .map((w) => `<button type="button" role="radio" data-width-pick="${w}"><span>${WIDTH_LABEL[w]}</span></button>`)
       .join('')}</div>`;
   document.body.append(scrim, pop);
@@ -543,7 +579,7 @@ function lookMenu(at: HTMLElement): void {
 
 let lookOff: (() => void) | null = null;
 
-const WIDTH_LABEL: Record<ChatWidth, string> = { compact: 'Compact', wide: 'Wide', full: 'Full' };
+const WIDTH_LABEL: Record<ChatWidth, string> = { compact: t('Compact'), wide: t('Wide'), full: t('Full') };
 
 /** Close the Appearance panel; true when it was open. */
 function closeLook(): boolean {
@@ -557,9 +593,9 @@ function closeLook(): boolean {
 /** The theme switch and the background tiles show what is on now. */
 function paintPrefs(): void {
   if (!root) return;
-  const t = themePref();
+  const th = themePref();
   document.querySelectorAll<HTMLElement>('.mnp-look [data-theme-pick]').forEach((b) => {
-    const on = b.dataset.themePick === t;
+    const on = b.dataset.themePick === th;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
@@ -574,7 +610,7 @@ function paintPrefs(): void {
   const sw = root.querySelector<HTMLElement>('#mnpLookSw');
   if (sw) sw.dataset.bg = bg;
   const sub = root.querySelector('#mnpLookSub');
-  if (sub) sub.textContent = `${THEME_LABEL[t]} · ${BGS.find((b) => b.id === bg)?.label || 'Glow'} background`;
+  if (sub) sub.textContent = t('{theme} · {bg} background', { theme: THEME_LABEL[th], bg: BGS.find((b) => b.id === bg)?.label || t('Glow') });
   document.querySelectorAll<HTMLElement>('.mnp-look [data-pick-bg]').forEach((x) => {
     const on = x.dataset.pickBg === bg;
     x.classList.toggle('on', on);
@@ -599,9 +635,9 @@ function paintFold(): void {
   const b = root?.querySelector<HTMLElement>('#mnpFold');
   if (!b) return;
   const closed = !!root?.classList.contains('side-closed');
-  const t = closed ? 'Show the chat list' : 'Hide the chat list';
-  b.title = t;
-  b.setAttribute('aria-label', t);
+  const lbl = closed ? t('Show the chat list') : t('Hide the chat list');
+  b.title = lbl;
+  b.setAttribute('aria-label', lbl);
   b.setAttribute('aria-expanded', String(!closed));
 }
 
@@ -631,10 +667,10 @@ function setPane(which: 'side' | 'art' | 'agents', open: boolean): void {
 }
 
 const ART_GROUPS: { role: Artifact['role']; label: string }[] = [
-  { role: 'changed', label: 'Changed' },
-  { role: 'shown', label: 'Shown to you' },
-  { role: 'attached', label: 'You attached' },
-  { role: 'read', label: 'Read' },
+  { role: 'changed', label: t('Changed') },
+  { role: 'shown', label: t('Shown to you') },
+  { role: 'attached', label: t('You attached') },
+  { role: 'read', label: t('Read') },
 ];
 
 /** The "In this chat" panel: every note, folder, image and the vault this chat touched. */
@@ -659,16 +695,16 @@ function paintArt(): void {
   n.textContent = String(total);
   const body = root.querySelector<HTMLElement>('#mnpArtB')!;
   if (!total) {
-    body.innerHTML = `<p class="mnp-art-none">Pages ${A.MNEMO} writes, and the notes, folders and images this chat attaches, reads, changes or shows you collect here.</p>`;
+    body.innerHTML = `<p class="mnp-art-none">${t('Pages {mnemo} writes, and the notes, folders and images this chat attaches, reads, changes or shows you collect here.', { mnemo: A.MNEMO })}</p>`;
     return;
   }
   const pageHTML = pages.length
-    ? `<section><h4>Pages<span>${pages.length}</span></h4>${pages
+    ? `<section><h4>${t('Pages')}<span>${pages.length}</span></h4>${pages
         .map(
           (p, i) =>
-            `<button type="button" class="mnp-art-i" data-page-art="${i}" title="${attr(p.card.dataset.title || 'Page')}"><span class="mnp-art-ic k-page">${icon('code')}</span><span class="mnp-art-t"><b>${esc(
-              p.card.dataset.title || 'Page',
-            )}</b><small>${p.card.dataset.art === 'svg' ? 'SVG image' : 'HTML page'}${p.versions > 1 ? ` · ${p.versions} versions` : ''}</small></span></button>`,
+            `<button type="button" class="mnp-art-i" data-page-art="${i}" title="${attr(p.card.dataset.title || t('Page'))}"><span class="mnp-art-ic k-page">${icon('code')}</span><span class="mnp-art-t"><b>${esc(
+              p.card.dataset.title || t('Page'),
+            )}</b><small>${p.card.dataset.art === 'svg' ? t('SVG image') : t('HTML page')}${p.versions > 1 ? ` · ${t('{n} versions', { n: p.versions })}` : ''}</small></span></button>`,
         )
         .join('')}</section>`
     : '';
@@ -677,7 +713,7 @@ function paintArt(): void {
     if (!list.length) return '';
     return `<section><h4>${esc(g.label)}<span>${list.length}</span></h4>${list
       .map((i) => {
-        const dir = i.kind === 'note' || i.kind === 'image' ? (i.path.includes('/') ? i.path.slice(0, i.path.lastIndexOf('/')) : 'Top level') : i.kind === 'upload' ? 'Image you attached' : i.kind === 'vault' ? 'Every note' : 'Folder';
+        const dir = i.kind === 'note' || i.kind === 'image' ? (i.path.includes('/') ? i.path.slice(0, i.path.lastIndexOf('/')) : t('Top level')) : i.kind === 'upload' ? t('Image you attached') : i.kind === 'vault' ? t('Every note') : t('Folder');
         const lead =
           i.kind === 'image' || i.kind === 'upload'
             ? `<span class="mnp-art-img"><img alt="" loading="lazy" src="${attr(
@@ -685,7 +721,7 @@ function paintArt(): void {
               )}" onerror="this.remove()"></span>`
             : `<span class="mnp-art-ic k-${i.kind}">${icon(i.kind === 'note' ? (i.role === 'changed' ? 'edit' : 'note') : i.kind === 'folder' ? 'folder' : 'vault')}</span>`;
         return `<button type="button" class="mnp-art-i" data-card="${attr(i.kind)}" data-path="${attr(i.path)}" title="${attr(i.path || i.title)}">${lead}<span class="mnp-art-t"><b>${esc(
-          i.title || 'Untitled',
+          i.title || t('Untitled'),
         )}</b><small>${esc(dir)}</small></span></button>`;
       })
       .join('')}</section>`;
@@ -697,21 +733,18 @@ function paintAgents(): void {
   if (!root || !chat) return;
   const { running, total } = chat.agents.counts();
   const b = root.querySelector<HTMLElement>('#mnpAgBtn')!;
-  b.hidden = !total;
+    // Always beside Think and the meter; the panel says when there are none yet.
+  b.hidden = false;
+  b.classList.toggle('none', !total);
   b.classList.toggle('run', running > 0);
   const n = b.querySelector<HTMLElement>('.mnp-agn')!;
   n.hidden = !running;
   n.textContent = String(running);
-  const t = running ? `Agents: ${running} working` : 'Agents in this chat';
-  b.title = t;
-  b.setAttribute('aria-label', t);
-  root.querySelector('#mnpAgSub')!.textContent = total ? (running ? `${running} working · ${total} in this chat` : `${total} in this chat`) : '';
-  // A chat without sub-agents has nothing to show: the panel closes with its button.
-  // (Checked a frame later: a chat drawn again empties the panel for a moment.)
-  if (!total && root.classList.contains('ag-open'))
-    requestAnimationFrame(() => {
-      if (chat && !chat.agents.counts().total) setPane('agents', false);
-    });
+  const lbl = running ? t('Agents: {n} working', { n: running }) : t('Agents in this chat');
+  b.title = lbl;
+  b.setAttribute('aria-label', lbl);
+  root.querySelector('#mnpAgSub')!.textContent = total ? (running ? t('{running} working · {total} in this chat', { running, total }) : t('{total} in this chat', { total })) : '';
+  // The panel stays open with its empty note when the chat has no sub-agents yet.
 }
 
 /** Swap the chat for Mnemo's activity (every tool call, and who it was for), or back. */
@@ -740,7 +773,7 @@ async function openChat(id: string): Promise<void> {
   const known = sessions.find((x) => x.id === id);
   if (root && known) {
     root.querySelector('#mnpTitle')!.textContent = known.title;
-    root.querySelector('#mnpSub')!.textContent = 'Opening…';
+    root.querySelector('#mnpSub')!.textContent = t('Opening…');
   }
   await chat!.open(id);
   // A chat that is gone (deleted, another server): back to a new one.
@@ -814,7 +847,7 @@ function paintChips(): void {
   if (box.hidden && listFilter !== 'all') listFilter = 'all';
   const chip = (f: ListFilter, label: string, n: number): string =>
     `<button type="button" role="tab" class="mnp-chip${listFilter === f ? ' on' : ''}" aria-selected="${listFilter === f}" data-filter="${f}">${label}<small>${n}</small></button>`;
-  box.innerHTML = chip('all', 'All', live.length) + chip('chats', 'Chats', live.length - notes) + chip('notes', 'Notes', notes);
+  box.innerHTML = chip('all', t('All'), live.length) + chip('chats', t('Chats'), live.length - notes) + chip('notes', t('Notes'), notes);
   box.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => {
     b.onclick = () => {
       listFilter = b.dataset.filter as ListFilter;
@@ -827,11 +860,11 @@ function paintChips(): void {
 /** What a chat is, at a glance: a chat, one about a note (or asked from it), or about a
  *  folder; a spinner while Mnemo works in it. */
 function kindIcon(s: A.Session): string {
-  if (s.running) return `<span class="mnp-kind run" title="${A.MNEMO} is working on this"><i class="mnp-spin"></i></span>`;
+  if (s.running) return `<span class="mnp-kind run" title="${t('{mnemo} is working on this', { mnemo: A.MNEMO })}"><i class="mnp-spin"></i></span>`;
   const note = s.title.startsWith(A.NOTE_TASK_PREFIX) || s.scope.startsWith('note:');
   const folder = s.scope.startsWith('folder:');
   const k = note ? 'note' : folder ? 'folder' : 'chat';
-  const tip = note ? 'About a note' : folder ? 'About a folder' : 'Chat';
+  const tip = note ? t('About a note') : folder ? t('About a folder') : t('Chat');
   return `<span class="mnp-kind ${k}" title="${tip}" aria-label="${tip}">${icon(k)}</span>`;
 }
 
@@ -839,29 +872,29 @@ function rowHTML(s: A.Session, cur: string | undefined, sel: boolean | null): st
   const news = s.running || s.id === cur ? 0 : s.archived ? 0 : unreadOf(s);
   const picking = sel !== null;
   const pv = s.preview?.text
-    ? `${s.preview.role === 'user' ? '<em>You:</em> ' : ''}${esc(s.preview.text)}`
+    ? `${s.preview.role === 'user' ? `<em>${t('You:')}</em> ` : ''}${esc(s.preview.text)}`
     : s.scope !== 'global'
       ? esc(A.scopeLabel(s.scope))
-      : 'No messages yet';
+      : t('No messages yet');
   const title = s.title.startsWith(A.NOTE_TASK_PREFIX) ? s.title.slice(A.NOTE_TASK_PREFIX.length) : s.title;
   return `<div class="mnp-row${s.id === cur && !picking ? ' on' : ''}${s.running ? ' run' : ''}${news ? ' unread' : ''}${sel ? ' sel' : ''}" data-id="${attr(s.id)}" role="${picking ? 'checkbox' : 'button'}" tabindex="0"${
     picking ? ` aria-checked="${sel}"` : ` aria-current="${s.id === cur}"`
-  } title="${attr(s.scope.startsWith('note:') ? `From the note ${s.scope.slice(5)}` : title)}">
+  } title="${attr(s.scope.startsWith('note:') ? t('From the note {path}', { path: s.scope.slice(5) }) : title)}">
       ${picking ? `<span class="mnp-check" aria-hidden="true">${sel ? icon('check') : ''}</span>` : kindIcon(s)}
       <span class="mnp-row-t"><span class="mnp-row-l1"><b>${esc(title)}</b><time class="mnp-row-ts" datetime="${new Date(s.updated_at * 1000).toISOString()}">${esc(shortAgo(s.updated_at))}</time></span>
-        <span class="mnp-row-l2"><small>${pv}</small>${news ? `<span class="mnp-newn" aria-label="${news} new message${news === 1 ? '' : 's'}">${news > 99 ? '99+' : news}</span>` : ''}</span></span>
-      ${picking ? '' : `<button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="Chat actions">${icon('more')}</button>`}</div>`;
+        <span class="mnp-row-l2"><small>${pv}</small>${news ? `<span class="mnp-newn" aria-label="${tn(news, '{n} new message', '{n} new messages')}">${news > 99 ? '99+' : news}</span>` : ''}</span></span>
+      ${picking ? '' : `<button type="button" class="mn-ibtn mnp-row-more" data-more aria-label="${t('Chat actions')}">${icon('more')}</button>`}</div>`;
 }
 
 
 /** How long ago, in a few characters: now, 5m, 3h, 2d, 3w, then the date. */
 function shortAgo(ts: number): string {
   const sec = Math.max(0, Date.now() / 1000 - ts);
-  if (sec < 60) return 'now';
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-  if (sec < 86_400) return `${Math.floor(sec / 3600)}h`;
-  if (sec < 7 * 86_400) return `${Math.floor(sec / 86_400)}d`;
-  if (sec < 30 * 86_400) return `${Math.floor(sec / (7 * 86_400))}w`;
+  if (sec < 60) return t('now');
+  if (sec < 3600) return t('{n}m', { n: Math.floor(sec / 60) });
+  if (sec < 86_400) return t('{n}h', { n: Math.floor(sec / 3600) });
+  if (sec < 7 * 86_400) return t('{n}d', { n: Math.floor(sec / 86_400) });
+  if (sec < 30 * 86_400) return t('{n}w', { n: Math.floor(sec / (7 * 86_400)) });
   const d = new Date(ts * 1000);
   const same = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString('en-US', same ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' });
@@ -882,8 +915,8 @@ function rowKeys(list: HTMLElement): void {
 async function setArchived(s: A.Session, on: boolean): Promise<void> {
   try {
     afterUpdate((await A.updateSession(s.id, { archived: on })).session);
-    if (on) notify('Chat archived', 'ok', 6000, { label: 'Undo', run: () => void setArchived(s, false) });
-    else toast('Chat back in the list', 'ok');
+    if (on) notify(t('Chat archived'), 'ok', 6000, { label: t('Undo'), run: () => void setArchived(s, false) });
+    else toast(t('Chat back in the list'), 'ok');
   } catch (e) {
     fail(e);
   }
@@ -954,18 +987,18 @@ function paintAll(): void {
   };
   const group = (title: string, items: A.Session[]): string =>
     items.length
-      ? `<div class="mnp-all-g${title === 'Pinned' ? ' mnp-pins' : ''}"><div class="mnp-g head">${title === 'Pinned' ? icon('pin') : ''}<span>${title}</span><small>${items.length}</small></div>${
-          title === 'Pinned' ? items.map((s) => rowHTML(s, cur, sel(s))).join('') : dated(items)
+      ? `<div class="mnp-all-g${title === t('Pinned') ? ' mnp-pins' : ''}"><div class="mnp-g head">${title === t('Pinned') ? icon('pin') : ''}<span>${title}</span><small>${items.length}</small></div>${
+          title === t('Pinned') ? items.map((s) => rowHTML(s, cur, sel(s))).join('') : dated(items)
         }</div>`
       : '';
   const archived = arch.length
-    ? `<details class="mnp-all-g mnp-all-arch"${archOpen || (q && !pinned.length && !rest.length) ? ' open' : ''}><summary class="mnp-g">${icon('chev', 'i mnp-all-chev')}Archived <span>${arch.length}</span></summary>${arch
+    ? `<details class="mnp-all-g mnp-all-arch"${archOpen || (q && !pinned.length && !rest.length) ? ' open' : ''}><summary class="mnp-g">${icon('chev', 'i mnp-all-chev')}${t('Archived')} <span>${arch.length}</span></summary>${arch
         .map((s) => rowHTML(s, cur, sel(s)))
         .join('')}</details>`
     : '';
   list.innerHTML =
-    group('Pinned', pinned) + group('Chats', rest) + archived ||
-    `<p class="mnp-none">${q ? 'No chat matches.' : `No chats yet. Ask ${A.MNEMO} something to start one.`}</p>`;
+    group(t('Pinned'), pinned) + group(t('Chats'), rest) + archived ||
+    `<p class="mnp-none">${q ? t('No chat matches.') : t('No chats yet. Ask {mnemo} something to start one.', { mnemo: A.MNEMO })}</p>`;
   list.querySelector<HTMLDetailsElement>('.mnp-all-arch')?.addEventListener('toggle', (e) => {
     archOpen = (e.currentTarget as HTMLDetailsElement).open;
   });
@@ -975,10 +1008,10 @@ function paintAll(): void {
   root!.querySelector<HTMLElement>('#mnpAllSel')!.hidden = !!allPicked;
   if (allPicked) {
     const n = allPicked.size;
-    bar.innerHTML = `<span class="mnp-seln">${n ? `${n} selected` : 'Pick chats'}</span>
-      <button type="button" class="mnp-selb" data-asel="archive"${n ? '' : ' disabled'}>${icon('archive')}<span>Archive</span></button>
-      <button type="button" class="mnp-selb danger" data-asel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>Delete</span></button>
-      <button type="button" class="mn-ibtn" data-asel="cancel" aria-label="Stop selecting" title="Done">${icon('close')}</button>`;
+    bar.innerHTML = `<span class="mnp-seln">${n ? t('{n} selected', { n }) : t('Pick chats')}</span>
+      <button type="button" class="mnp-selb" data-asel="archive"${n ? '' : ' disabled'}>${icon('archive')}<span>${t('Archive')}</span></button>
+      <button type="button" class="mnp-selb danger" data-asel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>${t('Delete')}</span></button>
+      <button type="button" class="mn-ibtn" data-asel="cancel" aria-label="${t('Stop selecting')}" title="${t('Done')}">${icon('close')}</button>`;
   }
 }
 
@@ -1011,8 +1044,8 @@ function wireAll(): void {
       done.forEach((r) => upsert(r.session));
       allPicked = null;
       paintAll();
-      notify(`${ids.length} chat${ids.length === 1 ? '' : 's'} archived`, 'ok', 6000, {
-        label: 'Undo',
+      notify(tn(ids.length, '{n} chat archived', '{n} chats archived'), 'ok', 6000, {
+        label: t('Undo'),
         run: () => void Promise.all(ids.map((id) => A.updateSession(id, { archived: false }))).then((rs) => rs.forEach((r) => upsert(r.session)), fail),
       });
     } catch (err) {
@@ -1043,15 +1076,15 @@ function wireAll(): void {
 }
 
 function bucket(s: A.Session): string {
-  if (s.pinned) return 'Pinned';
+  if (s.pinned) return t('Pinned');
   const d = new Date(s.updated_at * 1000);
   const now = new Date();
   const day = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86_400_000);
-  if (diff < 1) return 'Today';
-  if (diff < 2) return 'Yesterday';
-  if (diff < 7) return 'Previous 7 days';
-  if (diff < 30) return 'Previous 30 days';
+  if (diff < 1) return t('Today');
+  if (diff < 2) return t('Yesterday');
+  if (diff < 7) return t('Previous 7 days');
+  if (diff < 30) return t('Previous 30 days');
   // Older chats by month: "October", or "October 2025" in an earlier year.
   const month = d.toLocaleString('en-US', { month: 'long' });
   return d.getFullYear() === now.getFullYear() ? month : `${month} ${d.getFullYear()}`;
@@ -1068,12 +1101,12 @@ function marked(text: string, q: string): string {
 }
 
 /** A chat's title; a chat asked with @mnemo in a note gets a small @ (the note's path as its tip). */
-function titleHTML(t: string, q = '', scope = ''): string {
-  if (t.startsWith(A.NOTE_TASK_PREFIX)) {
-    const tip = scope.startsWith('note:') ? scope.slice(5) : 'Asked with @mnemo in a note';
-    return `<span class="mnp-at" title="${attr(tip)}" aria-label="${attr('From a note: ' + tip)}">@</span>${marked(t.slice(A.NOTE_TASK_PREFIX.length), q)}`;
+function titleHTML(title: string, q = '', scope = ''): string {
+  if (title.startsWith(A.NOTE_TASK_PREFIX)) {
+    const tip = scope.startsWith('note:') ? scope.slice(5) : t('Asked with @mnemo in a note');
+    return `<span class="mnp-at" title="${attr(tip)}" aria-label="${attr(t('From a note: {tip}', { tip }))}">@</span>${marked(title.slice(A.NOTE_TASK_PREFIX.length), q)}`;
   }
-  return marked(t, q);
+  return marked(title, q);
 }
 
 /** Search results: each chat once, with the messages that matched (tap one to jump to it). */
@@ -1085,20 +1118,20 @@ function paintFound(list: HTMLElement): boolean {
     if (h.message_id != null) chats.get(h.chat)!.push(h);
   }
   if (!chats.size) {
-    list.innerHTML = `<p class="mnp-none">Nothing in your chats says “${esc(query)}”.</p>`;
+    list.innerHTML = `<p class="mnp-none">${t('Nothing in your chats says “{query}”.', { query: esc(query) })}</p>`;
     return true;
   }
   const n = found.hits.filter((h) => h.message_id != null).length;
-  let html = `<div class="mnp-g">${n ? `${n} message${n === 1 ? '' : 's'} in ${chats.size} chat${chats.size === 1 ? '' : 's'}` : `${chats.size} chat${chats.size === 1 ? '' : 's'}`}</div>`;
+  let html = `<div class="mnp-g">${n ? tn(n, '{n} message in {chats}', '{n} messages in {chats}', { chats: tn(chats.size, '{n} chat', '{n} chats') }) : tn(chats.size, '{n} chat', '{n} chats')}</div>`;
   for (const [id, hits] of chats) {
     const s = sessions.find((x) => x.id === id);
     const h0 = found.hits.find((h) => h.chat === id)!;
     html += `<div class="mnp-row mnp-res" data-id="${attr(id)}" role="button" tabindex="0">
       <span class="mnp-row-t"><b>${titleHTML(s?.title || h0.title, query, s?.scope || h0.scope)}</b><small>${esc(relTs(s?.updated_at || h0.at))}</small></span></div>`;
     for (const h of hits.slice(0, 3)) {
-      html += `<button type="button" class="mnp-hit" data-id="${attr(id)}" data-mid="${h.message_id}"><em>${h.role === 'user' ? 'You' : A.MNEMO}</em>${marked(h.snippet, query)}</button>`;
+      html += `<button type="button" class="mnp-hit" data-id="${attr(id)}" data-mid="${h.message_id}"><em>${h.role === 'user' ? t('You') : A.MNEMO}</em>${marked(h.snippet, query)}</button>`;
     }
-    if (hits.length > 3) html += `<div class="mnp-hit-more">+${hits.length - 3} more in this chat</div>`;
+    if (hits.length > 3) html += `<div class="mnp-hit-more">${t('+{n} more in this chat', { n: hits.length - 3 })}</div>`;
   }
   list.innerHTML = html;
   return true;
@@ -1120,11 +1153,11 @@ function paintList(): void {
   // Pinned chats always show, apart; then the newest others.
   const shown = query || picked ? matching : [...matching.filter((x) => x.pinned), ...matching.filter((x) => !x.pinned).slice(0, RECENT)];
   const allRow = sessions.length
-    ? `<button type="button" class="mnp-allrow" data-allchats>${icon('chat')}<span>View all chats</span><small>${sessions.length}</small>${icon('chev')}</button>`
+    ? `<button type="button" class="mnp-allrow" data-allchats>${icon('chat')}<span>${t('View all chats')}</span><small>${sessions.length}</small>${icon('chev')}</button>`
     : '';
   paintAll();
   if (!shown.length) {
-    list.innerHTML = `<p class="mnp-none">${query ? 'No chat matches.' : sessions.length ? 'Every chat is archived.' : `No chats yet. Ask ${A.MNEMO} something to start one.`}</p>${query ? '' : allRow}`;
+    list.innerHTML = `<p class="mnp-none">${query ? t('No chat matches.') : sessions.length ? t('Every chat is archived.') : t('No chats yet. Ask {mnemo} something to start one.', { mnemo: A.MNEMO })}</p>${query ? '' : allRow}`;
     return;
   }
   const cur = chat?.session?.id;
@@ -1134,7 +1167,7 @@ function paintList(): void {
   const open = pinsOpen() || !!query;
   // Pinned chats: their own list above the others.
   let html = pins.length
-    ? `<section class="mnp-pins${open ? '' : ' shut'}" aria-label="Pinned chats"><button type="button" class="mnp-g pin" data-pins aria-expanded="${open}"><span>Pinned</span><small>${pins.length}</small>${icon('chev-down', 'i mnp-g-chev')}</button>${
+    ? `<section class="mnp-pins${open ? '' : ' shut'}" aria-label="${t('Pinned chats')}"><button type="button" class="mnp-g pin" data-pins aria-expanded="${open}"><span>${t('Pinned')}</span><small>${pins.length}</small>${icon('chev-down', 'i mnp-g-chev')}</button>${
         !open ? '' : pins.map((s) => rowHTML(s, cur, picked ? picked.has(s.id) : null)).join('')
       }</section>`
     : '';
@@ -1161,10 +1194,11 @@ function paintList(): void {
 }
 
 function paintHead(): void {
+  syncFleetHash();
   if (!root) return;
   if (showingActivity) {
-    root.querySelector('#mnpTitle')!.textContent = `${A.MNEMO} activity`;
-    root.querySelector('#mnpSub')!.textContent = 'Everything it did, and who it was for';
+    root.querySelector('#mnpTitle')!.textContent = t('{mnemo} activity', { mnemo: A.MNEMO });
+    root.querySelector('#mnpSub')!.textContent = t('Everything it did, and who it was for');
     return;
   }
   const s = chat?.session;
@@ -1172,20 +1206,24 @@ function paintHead(): void {
   root.classList.toggle('fleeting', fleet);
   const fb = root.querySelector<HTMLElement>('#mnpFleet')!;
   // Only a new chat can become fleeting (and a fleeting chat shows it, to leave it).
-  fb.hidden = !!s && !fleet;
+  // Only before the first message: on a new chat it turns fleeting on, in an empty fleeting
+  // chat it goes back to a normal one (once a message is sent, New chat leaves it).
+  fb.hidden = !!s;
+  fb.innerHTML = icon(fleet ? 'chat' : 'incognito');
+  fb.setAttribute('aria-label', fleet ? t('Back to a normal chat') : t('Fleeting chat'));
   fb.setAttribute('aria-pressed', String(fleet));
-  fb.title = fleet ? (s ? 'Leave this fleeting chat (it is deleted)' : 'Turn fleeting off') : 'Fleeting chat: not kept, gone when you leave it';
+  fb.title = fleet ? t('Back to a normal chat') : t('Fleeting chat: not kept, gone when you leave it');
   if (fleet) {
-    root.querySelector('#mnpTitle')!.textContent = 'Fleeting chat';
+    root.querySelector('#mnpTitle')!.textContent = t('Fleeting chat');
     root.querySelector('#mnpTitle')!.classList.remove('task');
-    root.querySelector('#mnpSub')!.textContent = 'Not kept · gone when you leave it';
+    root.querySelector('#mnpSub')!.textContent = t('Not kept · gone when you leave it');
     return;
   }
-  root.querySelector('#mnpTitle')!.textContent = s?.title || 'New chat';
+  root.querySelector('#mnpTitle')!.textContent = s?.title || t('New chat');
   root.querySelector('#mnpTitle')!.classList.toggle('task', !!s?.title.startsWith(A.NOTE_TASK_PREFIX));
   root.querySelector('#mnpSub')!.textContent = s
-    ? `${A.scopeLabel(s.scope)} · ${s.messages} message${s.messages === 1 ? '' : 's'}`
-    : 'A chat about your whole vault';
+    ? `${A.scopeLabel(s.scope)} · ${tn(s.messages, '{n} message', '{n} messages')}`
+    : t('A chat about your whole vault');
 }
 
 /** The ⋯ in the header: this chat's actions (once it has started), the chat list and settings. */
@@ -1196,30 +1234,30 @@ function headMenu(at: HTMLElement): void {
     [
       ...(s
         ? []
-        : [{ label: 'New chat: these work once you send a message', icon: icon('info', 'vx-i'), disabled: true }, { sep: true, label: '' }]),
-      { label: 'Rename', icon: icon('edit', 'vx-i'), disabled: !s, run: () => s && rename(s) },
+        : [{ label: t('New chat: these work once you send a message'), icon: icon('info', 'vx-i'), disabled: true }, { sep: true, label: '' }]),
+      { label: t('Rename'), icon: icon('edit', 'vx-i'), disabled: !s, run: () => s && rename(s) },
       {
-        label: s?.pinned ? 'Unpin' : 'Pin to the top',
+        label: s?.pinned ? t('Unpin') : t('Pin to the top'),
         icon: icon('pin', 'vx-i'),
         disabled: !s,
         run: () => s && void A.updateSession(s.id, { pinned: !s.pinned }).then((r) => afterUpdate(r.session), fail),
       },
       {
-        label: s?.archived ? 'Unarchive' : 'Archive',
+        label: s?.archived ? t('Unarchive') : t('Archive'),
         icon: icon('archive', 'vx-i'),
         disabled: !s,
         run: () => s && void setArchived(s, !s.archived),
       },
       ...exportItems(s),
-      { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: !!s, disabled: !s, run: () => s && askDelete(s) },
+      { label: t('Delete chat'), icon: icon('trash', 'vx-i'), danger: !!s, disabled: !s, run: () => s && askDelete(s) },
       { sep: true, label: '' },
-      { label: 'All chats', icon: icon('chat', 'vx-i'), run: () => showAll(true, true) },
-      { label: 'Select chats', icon: icon('check', 'vx-i'), run: () => select(new Set()) },
-      { label: 'Clean up chats…', icon: icon('trash', 'vx-i'), run: () => cleanUp() },
-      { label: `${A.MNEMO} activity`, icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
-      { label: 'Appearance', icon: icon('sun', 'vx-i'), run: () => lookMenu(at) },
-      { label: `${A.MNEMO} settings: models and keys`, icon: icon('settings', 'vx-i'), run: () => openMnemoSettings() },
-      { label: 'Back to Memora', icon: icon('overview', 'vx-i'), run: () => leave(true) },
+      { label: t('All chats'), icon: icon('chat', 'vx-i'), run: () => showAll(true, true) },
+      { label: t('Select chats'), icon: icon('check', 'vx-i'), run: () => select(new Set()) },
+      { label: t('Clean up chats…'), icon: icon('trash', 'vx-i'), run: () => cleanUp() },
+      { label: t('{mnemo} activity', { mnemo: A.MNEMO }), icon: icon('activity', 'vx-i'), run: () => showActivity(true) },
+      { label: t('Appearance'), icon: icon('sun', 'vx-i'), run: () => lookMenu(at) },
+      { label: t('{mnemo} settings: models and keys', { mnemo: A.MNEMO }), icon: icon('settings', 'vx-i'), run: () => openMnemoSettings() },
+      { label: t('Back to Memora'), icon: icon('overview', 'vx-i'), run: () => leave(true) },
     ],
     at,
   );
@@ -1244,7 +1282,7 @@ async function saveChatNote(s: A.Session): Promise<void> {
     const title = s.title.startsWith(A.NOTE_TASK_PREFIX) ? s.title.slice(A.NOTE_TASK_PREFIX.length) : s.title;
     const r = await apiPost<{ path: string }>('/api/create', { title: `Chat - ${title}`.slice(0, 100), folder: 'Mnemo chats', content });
     void hooks.loadCore();
-    notify(`Saved as a note in Mnemo chats`, 'ok', 6000, { label: 'Open', run: () => hooks.openNote(r.path) });
+    notify(t('Saved as a note in {folder}', { folder: 'Mnemo chats' }), 'ok', 6000, { label: t('Open'), run: () => hooks.openNote(r.path) });
   } catch (e) {
     fail(e);
   }
@@ -1253,24 +1291,24 @@ async function saveChatNote(s: A.Session): Promise<void> {
 /** The export entries of a chat's menus. */
 function exportItems(s: A.Session | null | undefined): { label: string; icon: string; disabled?: boolean; run: () => void }[] {
   return [
-    { label: 'Download as Markdown', icon: icon('download', 'vx-i'), disabled: !s, run: () => s && downloadChat(s) },
-    { label: 'Save as a note', icon: icon('note', 'vx-i'), disabled: !s, run: () => s && void saveChatNote(s) },
+    { label: t('Download as Markdown'), icon: icon('download', 'vx-i'), disabled: !s, run: () => s && downloadChat(s) },
+    { label: t('Save as a note'), icon: icon('note', 'vx-i'), disabled: !s, run: () => s && void saveChatNote(s) },
   ];
 }
 
 function rowMenu(s: A.Session, at: HTMLElement): void {
   openMenu(
     [
-      { label: 'Rename', icon: icon('edit', 'vx-i'), run: () => rename(s) },
+      { label: t('Rename'), icon: icon('edit', 'vx-i'), run: () => rename(s) },
       {
-        label: s.pinned ? 'Unpin' : 'Pin to the top',
+        label: s.pinned ? t('Unpin') : t('Pin to the top'),
         icon: icon('pin', 'vx-i'),
         run: () => void A.updateSession(s.id, { pinned: !s.pinned }).then((r) => afterUpdate(r.session), fail),
       },
-      { label: s.archived ? 'Unarchive' : 'Archive', icon: icon('archive', 'vx-i'), run: () => void setArchived(s, !s.archived) },
+      { label: s.archived ? t('Unarchive') : t('Archive'), icon: icon('archive', 'vx-i'), run: () => void setArchived(s, !s.archived) },
       ...exportItems(s),
       {
-        label: 'Select',
+        label: t('Select'),
         icon: icon('check', 'vx-i'),
         run: () => {
           if (root?.classList.contains('all-open')) {
@@ -1280,7 +1318,7 @@ function rowMenu(s: A.Session, at: HTMLElement): void {
         },
       },
       { sep: true, label: '' },
-      { label: 'Delete chat', icon: icon('trash', 'vx-i'), danger: true, run: () => askDelete(s) },
+      { label: t('Delete chat'), icon: icon('trash', 'vx-i'), danger: true, run: () => askDelete(s) },
     ],
     at,
   );
@@ -1297,7 +1335,7 @@ function afterUpdate(s: A.Session): void {
 }
 
 function rename(s: A.Session): void {
-  const body = el('div', 'mnp-ren', `<label class="mnp-ren-l">Name<input type="text" maxlength="80" value="${attr(s.title)}"></label>`);
+  const body = el('div', 'mnp-ren', `<label class="mnp-ren-l">${t('Name')}<input type="text" maxlength="80" value="${attr(s.title)}"></label>`);
   const input = body.querySelector('input')!;
   const save = async (): Promise<void> => {
     const title = input.value.trim();
@@ -1313,11 +1351,11 @@ function rename(s: A.Session): void {
     if (e.key === 'Enter') void save();
   };
   Modal.open({
-    title: 'Rename chat',
+    title: t('Rename chat'),
     body,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      { label: 'Save', cls: 'primary', run: save },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      { label: t('Save'), cls: 'primary', run: save },
     ],
   });
   window.setTimeout(() => input.select(), 30);
@@ -1348,20 +1386,20 @@ function paintSelBar(): void {
   bar.hidden = !picked;
   if (!picked) return;
   const n = picked.size;
-  bar.innerHTML = `<span class="mnp-seln">${n ? `${n} selected` : 'Pick chats'}</span>
-    <button type="button" class="mnp-selb" data-sel="all">All</button>
-    <button type="button" class="mnp-selb danger" data-sel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>Delete</span></button>
-    <button type="button" class="mn-ibtn" data-sel="cancel" aria-label="Stop selecting" title="Done">${icon('close')}</button>`;
+  bar.innerHTML = `<span class="mnp-seln">${n ? t('{n} selected', { n }) : t('Pick chats')}</span>
+    <button type="button" class="mnp-selb" data-sel="all">${t('All')}</button>
+    <button type="button" class="mnp-selb danger" data-sel="delete"${n ? '' : ' disabled'}>${icon('trash')}<span>${t('Delete')}</span></button>
+    <button type="button" class="mn-ibtn" data-sel="cancel" aria-label="${t('Stop selecting')}" title="${t('Done')}">${icon('close')}</button>`;
 }
 
 /** The ⋯ beside New chat: pick chats, clean up old ones, or delete them all. */
 function manageMenu(at: HTMLElement): void {
   openMenu(
     [
-      { label: 'Select chats', icon: icon('check', 'vx-i'), run: () => select(new Set()) },
-      { label: 'Clean up chats…', icon: icon('refresh', 'vx-i'), run: () => cleanUp() },
+      { label: t('Select chats'), icon: icon('check', 'vx-i'), run: () => select(new Set()) },
+      { label: t('Clean up chats…'), icon: icon('refresh', 'vx-i'), run: () => cleanUp() },
       { sep: true, label: '' },
-      { label: 'Delete all chats…', icon: icon('trash', 'vx-i'), danger: true, disabled: !sessions.length, run: () => cleanUp(true) },
+      { label: t('Delete all chats…'), icon: icon('trash', 'vx-i'), danger: true, disabled: !sessions.length, run: () => cleanUp(true) },
     ],
     at,
   );
@@ -1375,7 +1413,7 @@ function afterPrune(r: { deleted: number; skipped: number }): void {
   });
   Modal.close();
   toast(
-    `${r.deleted} chat${r.deleted === 1 ? '' : 's'} deleted${r.skipped ? `, ${r.skipped} still answering left as they are` : ''}`,
+    `${tn(r.deleted, '{n} chat deleted', '{n} chats deleted')}${r.skipped ? t(', {n} still answering left as they are', { n: r.skipped }) : ''}`,
     r.deleted ? 'ok' : 'info',
   );
 }
@@ -1383,9 +1421,9 @@ function afterPrune(r: { deleted: number; skipped: number }): void {
 function askDeleteMany(ids: string[]): void {
   if (!ids.length) return;
   Modal.confirm(
-    `Delete ${ids.length} chat${ids.length === 1 ? '' : 's'}?`,
-    'They and their messages are removed for good. Your notes are not touched.',
-    `Delete ${ids.length}`,
+    tn(ids.length, 'Delete {n} chat?', 'Delete {n} chats?'),
+    t('They and their messages are removed for good. Your notes are not touched.'),
+    t('Delete {n}', { n: ids.length }),
     async () => {
       try {
         afterPrune(await A.pruneSessions({ ids }));
@@ -1402,22 +1440,22 @@ function cleanUp(all = false): void {
   const DAY = 86_400;
   const now = Date.now() / 1000;
   const opts = [
-    { v: '7', label: 'Older than 7 days' },
-    { v: '30', label: 'Older than 30 days' },
-    { v: '90', label: 'Older than 90 days' },
-    { v: 'all', label: 'All chats' },
+    { v: '7', label: t('Older than 7 days') },
+    { v: '30', label: t('Older than 30 days') },
+    { v: '90', label: t('Older than 90 days') },
+    { v: 'all', label: t('All chats') },
   ];
   const body = el(
     'div',
     'mnp-clean',
-    `<div class="mnp-clean-o" role="radiogroup" aria-label="Which chats">${opts
+    `<div class="mnp-clean-o" role="radiogroup" aria-label="${t('Which chats')}">${opts
       .map(
         (o) =>
           `<label class="mnp-clean-r"><input type="radio" name="mnpClean" value="${o.v}"${(all ? o.v === 'all' : o.v === '30') ? ' checked' : ''}><span>${o.label}</span><em data-n="${o.v}"></em></label>`,
       )
       .join('')}</div>
-    <label class="mnp-clean-k"><input type="checkbox" checked data-keep><span>Keep pinned chats</span></label>
-    <p class="mnp-clean-p">Deleted chats and their messages are gone for good. Your notes are not touched, and a chat that is answering right now is left alone.</p>`,
+    <label class="mnp-clean-k"><input type="checkbox" checked data-keep><span>${t('Keep pinned chats')}</span></label>
+    <p class="mnp-clean-p">${t('Deleted chats and their messages are gone for good. Your notes are not touched, and a chat that is answering right now is left alone.')}</p>`,
   );
   const count = (v: string, keep: boolean): number =>
     sessions.filter((s) => !(keep && s.pinned) && !s.running && (v === 'all' || s.updated_at < now - Number(v) * DAY)).length;
@@ -1429,19 +1467,19 @@ function cleanUp(all = false): void {
     const go = document.querySelector<HTMLButtonElement>('.mnp-clean-go');
     if (go) {
       go.disabled = !n;
-      go.textContent = n ? `Delete ${n} chat${n === 1 ? '' : 's'}` : 'Nothing to delete';
+      go.textContent = n ? tn(n, 'Delete {n} chat', 'Delete {n} chats') : t('Nothing to delete');
     }
   };
   body.onchange = paint;
   Modal.open({
-    title: all ? 'Delete all chats' : 'Clean up chats',
-    sub: `${sessions.length} chat${sessions.length === 1 ? '' : 's'} in ${A.MNEMO}`,
+    title: all ? t('Delete all chats') : t('Clean up chats'),
+    sub: tn(sessions.length, '{n} chat in {mnemo}', '{n} chats in {mnemo}', { mnemo: A.MNEMO }),
     body,
     onOpen: () => paint(),
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Delete',
+        label: t('Delete'),
         cls: 'danger mnp-clean-go',
         run: async () => {
           const v = body.querySelector<HTMLInputElement>('input[name=mnpClean]:checked')!.value;
@@ -1458,14 +1496,14 @@ function cleanUp(all = false): void {
 }
 
 function askDelete(s: A.Session): void {
-  Modal.confirm('Delete this chat?', `“${s.title}” and its messages are removed. Your notes are not touched.`, 'Delete chat', async () => {
+  Modal.confirm(t('Delete this chat?'), t('“{title}” and its messages are removed. Your notes are not touched.', { title: s.title }), t('Delete chat'), async () => {
     try {
       await A.deleteSession(s.id);
       sessions = sessions.filter((x) => x.id !== s.id);
       if (chat?.session?.id === s.id) newChat();
       else paintList();
       Modal.close();
-      toast('Chat deleted', 'ok');
+      toast(t('Chat deleted'), 'ok');
     } catch (e) {
       fail(e);
     }
@@ -1739,8 +1777,10 @@ button.mnp-g:hover{color:var(--fg)}
 .mnp-row.sel .mnp-check{background:var(--accent);border-color:var(--accent)}
 .mnp-fleet[aria-pressed=true]{background:var(--fg);color:var(--bg)}
 .mnp-fleet[aria-pressed=true]:hover{background:color-mix(in srgb,var(--fg) 85%,transparent);color:var(--bg)}
-.mnp.fleeting .mnp-head{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--fg) 4%,transparent) 0 6px,transparent 6px 12px)}
-.mnp.fleeting #mnpTitle{color:var(--fg)}
+/* A fleeting chat: the page stays as it is (header, colours, backdrop); only the chat itself
+   sits in a dark rounded room inside it. */
+.mnp.fleeting .mnp-chat{padding:10px}
+.mnp.fleeting .mnp-chat>.mn-chat{flex:1;height:auto;min-height:0}
 .mnp-art-ic.k-page{background:linear-gradient(135deg,#14b8a6,#4f46e5);color:#fff}
 .mnp-clean-o{display:flex;flex-direction:column;gap:6px}
 .mnp-clean-r{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer}

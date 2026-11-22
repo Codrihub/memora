@@ -1,6 +1,8 @@
 // Instructions for an AI agent that uses Memora as its memory. crates/cli/src/tui/docs.rs mirrors both Balanced
 // prompts, every short prompt and SECRETS_WARNING; its test reads them here by their `export const` lines.
 
+import { t } from '../i18n';
+
 /** One short paragraph for clients with a small instructions field. */
 export const AGENT_PROMPT_SHORT = `Use Memora (MCP server "memora") as your long-term memory. Before answering, search_memory for the topic and read_memory the relevant notes. When you learn something worth keeping (a decision, a preference, a fact about me or my projects, a fix), save it with patch_memory or create_memory as short Markdown with [[wikilinks]] and #tags. Search before creating, update instead of duplicating, and never store secrets.`;
 
@@ -135,37 +137,37 @@ export interface PromptStyle {
 export const PROMPT_STYLES: PromptStyle[] = [
   {
     id: 'balanced',
-    label: 'Balanced',
-    desc: 'Recalls before it answers and saves decisions, preferences and fixes. Never stores secrets. Fits most people.',
+    label: t('Balanced'),
+    desc: t('Recalls before it answers and saves decisions, preferences and fixes. Never stores secrets. Fits most people.'),
     full: AGENT_PROMPT,
     short: AGENT_PROMPT_SHORT,
   },
   {
     id: 'everything',
-    label: 'Remember everything',
-    desc: 'Saves everything useful, including small talk, personal details and the passwords or API keys you share.',
+    label: t('Remember everything'),
+    desc: t('Saves everything useful, including small talk, personal details and the passwords or API keys you share.'),
     full: AGENT_PROMPT_EVERYTHING,
     short: AGENT_PROMPT_EVERYTHING_SHORT,
     warning: SECRETS_WARNING,
   },
   {
     id: 'private',
-    label: 'Private',
-    desc: 'Recalls freely, but saves only when you say "remember this", and asks before it writes.',
+    label: t('Private'),
+    desc: t('Recalls freely, but saves only when you say "remember this", and asks before it writes.'),
     full: AGENT_PROMPT_PRIVATE,
     short: AGENT_PROMPT_PRIVATE_SHORT,
   },
   {
     id: 'journal',
-    label: 'Session journal',
-    desc: 'Starts each session from the last journal entry and ends it with a dated session note and open todos.',
+    label: t('Session journal'),
+    desc: t('Starts each session from the last journal entry and ends it with a dated session note and open todos.'),
     full: AGENT_PROMPT_JOURNAL,
     short: AGENT_PROMPT_JOURNAL_SHORT,
   },
   {
     id: 'readonly',
-    label: 'Read only',
-    desc: 'Only looks things up and never writes. For agents with a read-only key.',
+    label: t('Read only'),
+    desc: t('Only looks things up and never writes. For agents with a read-only key.'),
     full: AGENT_PROMPT_READONLY,
     short: AGENT_PROMPT_READONLY_SHORT,
   },

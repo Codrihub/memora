@@ -4,6 +4,7 @@ import { folderOf, noteName } from './format';
 import { state } from './state';
 import type { NoteDoc } from './types';
 import { hooks } from './hooks';
+import { t } from './i18n';
 
 export async function openPeek(path: string): Promise<void> {
   // Phones open the full node page instead of the side panel.
@@ -14,7 +15,7 @@ export async function openPeek(path: string): Promise<void> {
   state.peekPath = path;
   $('#peek').classList.remove('hidden');
   $('#peekFolder').textContent = folderOf(path) + ' / ' + noteName(path);
-  $('#peekBody').innerHTML = '<div class="empty">Loading...</div>';
+  $('#peekBody').innerHTML = `<div class="empty">${t('Loading...')}</div>`;
   try {
     const d = await apiGet<NoteDoc>('/api/note?path=' + encodeURIComponent(path));
     if (state.peekPath !== path) return;
@@ -22,7 +23,7 @@ export async function openPeek(path: string): Promise<void> {
     $('#peekBody').innerHTML = d.html || `<pre>${esc(d.content || '')}</pre>`;
   } catch (e) {
     if (state.peekPath !== path) return;
-    $('#peekBody').innerHTML = `<div class="empty">Could not load: ${esc((e as Error).message)}</div>`;
+    $('#peekBody').innerHTML = `<div class="empty">${t('Could not load: {error}', { error: esc((e as Error).message) })}</div>`;
   }
 }
 

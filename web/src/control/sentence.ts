@@ -1,5 +1,6 @@
 // Activity in plain words ("Claude Code edited *Launch plan*"), bursts and Undo plans. Pure, no DOM.
 
+import { t, tn } from '../i18n';
 import { attr, esc } from '../dom';
 import { noteName } from '../format';
 import type { ActivityItem } from './feed';
@@ -113,6 +114,12 @@ export function whoOf(it: ActivityItem, me = ''): string {
   return it.actor;
 }
 
+/** `whoOf` as shown: "You" in the interface language (`whoOf` keeps the English word to compare with). */
+export function whoText(it: ActivityItem, me = ''): string {
+  const w = whoOf(it, me);
+  return w === 'You' && it.actor !== 'You' ? t('You') : w;
+}
+
 /** Last part of a folder path, as shown in a sentence. */
 export function folderName(folder: string): string {
   return folder.split('/').pop() || folder;
@@ -141,10 +148,6 @@ function resultCount(it: ActivityItem): string {
   const n = (it.raw as { count?: unknown }).count;
   if (typeof n === 'number') return String(n);
   return it.paths.length >= 20 ? '20+' : String(it.paths.length);
-}
-
-function plural(n: number | string, one: string, many = one + 's'): string {
-  return `${n} ${String(n) === '1' ? one : many}`;
 }
 
 function quoted(q: string): string {
@@ -177,97 +180,118 @@ function done(it: ActivityItem): string {
     case 'system':
       return systemLine(it);
     case 'created': {
-      if (a === 'create_folder') return `created the folder ${em(lbl || p)}`;
-      if (it.paths.length > 1 && a !== 'create_memory') return `created ${plural(it.paths.length, 'note')}`;
+      if (a === 'create_folder') return t('created the folder {folder}', { folder: em(lbl || p) });
+      if (it.paths.length > 1 && a !== 'create_memory') return tn(it.paths.length, 'created {n} note', 'created {n} notes');
       if (p) {
         const fo = folderOf(p);
-        return `created ${n}${fo ? ` in ${f(fo)}` : ''}`;
+        return fo ? t('created {note} in {folder}', { note: n, folder: f(fo) }) : t('created {note}', { note: n });
       }
-      return lbl ? `created ${em(lbl)}${destFolder ? ` in ${f(destFolder)}` : ''}` : 'created a note';
+      return lbl
+        ? destFolder
+          ? t('created {note} in {folder}', { note: em(lbl), folder: f(destFolder) })
+          : t('created {note}', { note: em(lbl) })
+        : t('created a note');
     }
     case 'edited':
-      if (a === 'add_tags' || a === 'remove_tags' || a === 'set_tags') return p ? `changed the tags of ${n}` : 'changed some tags';
-      if (a === 'bulk_replace') return it.paths.length ? `replaced text in ${plural(it.paths.length, 'note')}` : 'replaced text in your notes';
-      if (a === 'merge_memory') return p ? `merged notes into ${n}` : 'merged notes';
-      if (a === 'rename_tag' || a === 'merge_tag') return lbl ? `renamed the tag ${em(lbl)}` : 'renamed a tag';
-      if (a === 'set_folder_meta') return `changed the details of the folder ${em(folderName(lbl || p))}`;
-      if (a === 'restore_memory') return p ? `brought back an earlier version of ${n}` : 'brought back an earlier version of a note';
-      if (a === 'mention_agent') return p ? `left a message in ${n}` : 'left a message for another AI';
-      return p ? `edited ${n}` : 'changed your notes';
+      if (a === 'add_tags' || a === 'remove_tags' || a === 'set_tags') return p ? t('changed the tags of {note}', { note: n }) : t('changed some tags');
+      if (a === 'bulk_replace') return it.paths.length ? tn(it.paths.length, 'replaced text in {n} note', 'replaced text in {n} notes') : t('replaced text in your notes');
+      if (a === 'merge_memory') return p ? t('merged notes into {note}', { note: n }) : t('merged notes');
+      if (a === 'rename_tag' || a === 'merge_tag') return lbl ? t('renamed the tag {tag}', { tag: em(lbl) }) : t('renamed a tag');
+      if (a === 'set_folder_meta') return t('changed the details of the folder {folder}', { folder: em(folderName(lbl || p)) });
+      if (a === 'restore_memory') return p ? t('brought back an earlier version of {note}', { note: n }) : t('brought back an earlier version of a note');
+      if (a === 'mention_agent') return p ? t('left a message in {note}', { note: n }) : t('left a message for another AI');
+      return p ? t('edited {note}', { note: n }) : t('changed your notes');
     case 'moved': {
       if (a === 'move_folder' || a === 'move_folder_contents' || a === 'rename_folder') {
         const what = em(folderName(lbl || p));
-        return a === 'rename_folder' ? `renamed the folder ${what}` : a === 'move_folder' ? `moved the folder ${what}` : `moved what is in ${what}`;
+        return a === 'rename_folder'
+          ? t('renamed the folder {folder}', { folder: what })
+          : a === 'move_folder'
+            ? t('moved the folder {folder}', { folder: what })
+            : t('moved what is in {folder}', { folder: what });
       }
       const to = moveTo(it);
       if (to) {
-        if (folderOf(to) === folderOf(p) && titleOf(to) !== titleOf(p)) return `renamed ${em(titleOf(p))} to ${noteRef(to, true)}`;
+        if (folderOf(to) === folderOf(p) && titleOf(to) !== titleOf(p)) return t('renamed {old} to {note}', { old: em(titleOf(p)), note: noteRef(to, true) });
         const fo = folderOf(to);
-        return `moved ${noteRef(to, true)} to ${fo ? f(fo) : 'the top level'}`;
+        return fo ? t('moved {note} to {folder}', { note: noteRef(to, true), folder: f(fo) }) : t('moved {note} to the top level', { note: noteRef(to, true) });
       }
-      if (a === 'rename_memory') return p ? `renamed ${em(titleOf(p))}` : 'renamed a note';
-      if (p && destFolder) return `moved ${em(titleOf(p))} to ${/^root$/i.test(destFolder) ? 'the top level' : f(destFolder)}`;
-      return p ? `moved ${em(titleOf(p))}` : 'moved a note';
+      if (a === 'rename_memory') return p ? t('renamed {note}', { note: em(titleOf(p)) }) : t('renamed a note');
+      if (p && destFolder)
+        return /^root$/i.test(destFolder)
+          ? t('moved {note} to the top level', { note: em(titleOf(p)) })
+          : t('moved {note} to {folder}', { note: em(titleOf(p)), folder: f(destFolder) });
+      return p ? t('moved {note}', { note: em(titleOf(p)) }) : t('moved a note');
     }
     case 'trashed':
-      if (a === 'delete_folder') return `moved the folder ${em(folderName(lbl || p))} to Trash`;
-      if (it.paths.length > 1) return `moved ${plural(it.paths.length, 'note')} to Trash`;
-      return p ? `moved ${n} to Trash` : 'moved notes to Trash';
+      if (a === 'delete_folder') return t('moved the folder {folder} to Trash', { folder: em(folderName(lbl || p)) });
+      if (it.paths.length > 1) return tn(it.paths.length, 'moved {n} note to Trash', 'moved {n} notes to Trash');
+      return p ? t('moved {note} to Trash', { note: n }) : t('moved notes to Trash');
     case 'deleted':
-      return p ? `deleted ${n}` : 'deleted a note';
+      return p ? t('deleted {note}', { note: n }) : t('deleted a note');
     case 'restored':
-      return lbl || p ? `brought back ${em(titleOf(lbl || p))} from Trash` : 'brought back a note from Trash';
+      return lbl || p ? t('brought back {note} from Trash', { note: em(titleOf(lbl || p)) }) : t('brought back a note from Trash');
     case 'pinned': {
-      const what = p ? (p.endsWith('.md') ? n : `the folder ${em(folderName(p))}`) : '';
-      return a === 'unpin' ? (what ? `unpinned ${what}` : 'unpinned something') : what ? `pinned ${what}` : 'pinned something';
+      const what = p ? (p.endsWith('.md') ? n : t('the folder {folder}', { folder: em(folderName(p)) })) : '';
+      return a === 'unpin'
+        ? what
+          ? t('unpinned {what}', { what })
+          : t('unpinned something')
+        : what
+          ? t('pinned {what}', { what })
+          : t('pinned something');
     }
     case 'searched': {
       const q = lbl || (a === 'find_similar' || a === 'suggest_links' ? '' : p);
-      if (a === 'find_similar') return p ? `looked for notes like ${n}` : 'looked for similar notes';
-      if (a === 'suggest_links') return p ? `looked for links to add to ${n}` : 'looked for links to add';
-      if (a === 'find_path') return it.paths.length >= 2 ? `looked for a path from ${noteRef(p, true)} to ${noteRef(it.paths[1], true)}` : 'looked for a path between notes';
-      if (a === 'search_logs') return q ? `searched the activity log for ${quoted(q)}` : 'searched the activity log';
-      const count = ` (${plural(resultCount(it), 'result')})`;
-      if (a === 'search_by_tag') return q ? `looked for notes tagged ${em('#' + q.replace(/^#/, ''))}${count}` : 'looked for notes by tag';
-      return q ? `searched ${quoted(q)}${count}` : 'searched your notes';
+      if (a === 'find_similar') return p ? t('looked for notes like {note}', { note: n }) : t('looked for similar notes');
+      if (a === 'suggest_links') return p ? t('looked for links to add to {note}', { note: n }) : t('looked for links to add');
+      if (a === 'find_path')
+        return it.paths.length >= 2
+          ? t('looked for a path from {from} to {to}', { from: noteRef(p, true), to: noteRef(it.paths[1], true) })
+          : t('looked for a path between notes');
+      if (a === 'search_logs') return q ? t('searched the activity log for {q}', { q: quoted(q) }) : t('searched the activity log');
+      const rc = resultCount(it);
+      const count = ` (${rc === '1' ? t('{n} result', { n: rc }) : t('{n} results', { n: rc })})`;
+      if (a === 'search_by_tag') return q ? t('looked for notes tagged {tag}', { tag: em('#' + q.replace(/^#/, '')) }) + count : t('looked for notes by tag');
+      return q ? t('searched {q}', { q: quoted(q) }) + count : t('searched your notes');
     }
     case 'read':
       return readLine(it, n, lbl);
     default:
-      if (a === 'set_my_name') return lbl ? `changed its name to ${em(lbl)}` : 'changed its name';
-      if (a === 'set_my_color') return 'changed its colour';
-      if (a === 'lock_node') return p ? `reserved ${n} while it works on it` : 'reserved a note';
-      if (a === 'release_lock') return p ? `let go of ${n}` : 'let go of a note';
-      if (a === 'snapshot') return 'saved a snapshot of all your notes';
-      if (a.startsWith('privacy_')) return 'changed who can see what';
-      if (a.startsWith('admin_')) return 'changed a server setting';
+      if (a === 'set_my_name') return lbl ? t('changed its name to {name}', { name: em(lbl) }) : t('changed its name');
+      if (a === 'set_my_color') return t('changed its colour');
+      if (a === 'lock_node') return p ? t('reserved {note} while it works on it', { note: n }) : t('reserved a note');
+      if (a === 'release_lock') return p ? t('let go of {note}', { note: n }) : t('let go of a note');
+      if (a === 'snapshot') return t('saved a snapshot of all your notes');
+      if (a.startsWith('privacy_')) return t('changed who can see what');
+      if (a.startsWith('admin_')) return t('changed a server setting');
       if (it.source === 'vault' && !it.action.startsWith('node_')) return systemLine(it);
-      return p ? `worked on ${n}` : 'did something in your notes';
+      return p ? t('worked on {note}', { note: n }) : t('did something in your notes');
   }
 }
 
 function readLine(it: ActivityItem, n: string, lbl: string): string {
   const a = it.action;
   const where = lbl && !/\.md$/i.test(lbl) && lbl.length < 80 ? em(folderName(lbl)) : '';
-  if (a === 'read_memory') return n ? `read ${n}` : 'read a note';
-  if (a === 'export_memory') return n ? `exported ${n}` : 'exported notes';
-  if (a === 'get_neighbors' || a === 'get_subgraph') return n ? `looked at notes linked to ${n}` : 'looked at linked notes';
-  if (a === 'get_history' || a === 'get_note_at' || a === 'diff') return n ? `looked at the history of ${n}` : 'looked at a note’s history';
-  if (a === 'validate_memory') return n ? `checked ${n}` : 'checked a note';
-  if (a === 'list_memory') return where ? `looked through ${where}` : 'looked through your notes';
-  if (a === 'list_folders' || a === 'folder_stats') return where ? `looked at the folder ${where}` : 'looked at your folders';
-  if (a === 'get_folder_meta') return where ? `read the details of the folder ${where}` : 'read folder details';
-  if (a === 'healthcheck') return 'checked that Memora is working';
-  if (a === 'get_stats' || a === 'digest') return 'looked at an overview of your notes';
-  if (/^(get_graph|link_stats|broken_links|get_hubs|get_isolated)$/.test(a)) return 'looked at how your notes link together';
-  if (a === 'get_tags' || a === 'list_tags') return 'looked at your tags';
-  if (a === 'get_logs' || a === 'get_events') return 'looked at recent activity';
-  if (a === 'list_trash') return 'looked in Trash';
-  if (a === 'list_pins') return 'looked at your pinned notes';
-  if (/^(get_locks|get_assignments|presence|list_actors)$/.test(a)) return 'checked who is working on what';
-  if (/^(get_todos|follow_ups|stale_detection)$/.test(a)) return 'looked for notes that need attention';
-  if (a === 'admin_list_tools' || a === 'privacy_list') return 'looked at the server settings';
-  return n ? `read ${n}` : 'looked through your notes';
+  if (a === 'read_memory') return n ? t('read {note}', { note: n }) : t('read a note');
+  if (a === 'export_memory') return n ? t('exported {note}', { note: n }) : t('exported notes');
+  if (a === 'get_neighbors' || a === 'get_subgraph') return n ? t('looked at notes linked to {note}', { note: n }) : t('looked at linked notes');
+  if (a === 'get_history' || a === 'get_note_at' || a === 'diff') return n ? t('looked at the history of {note}', { note: n }) : t('looked at a note’s history');
+  if (a === 'validate_memory') return n ? t('checked {note}', { note: n }) : t('checked a note');
+  if (a === 'list_memory') return where ? t('looked through {folder}', { folder: where }) : t('looked through your notes');
+  if (a === 'list_folders' || a === 'folder_stats') return where ? t('looked at the folder {folder}', { folder: where }) : t('looked at your folders');
+  if (a === 'get_folder_meta') return where ? t('read the details of the folder {folder}', { folder: where }) : t('read folder details');
+  if (a === 'healthcheck') return t('checked that Memora is working');
+  if (a === 'get_stats' || a === 'digest') return t('looked at an overview of your notes');
+  if (/^(get_graph|link_stats|broken_links|get_hubs|get_isolated)$/.test(a)) return t('looked at how your notes link together');
+  if (a === 'get_tags' || a === 'list_tags') return t('looked at your tags');
+  if (a === 'get_logs' || a === 'get_events') return t('looked at recent activity');
+  if (a === 'list_trash') return t('looked in Trash');
+  if (a === 'list_pins') return t('looked at your pinned notes');
+  if (/^(get_locks|get_assignments|presence|list_actors)$/.test(a)) return t('checked who is working on what');
+  if (/^(get_todos|follow_ups|stale_detection)$/.test(a)) return t('looked for notes that need attention');
+  if (a === 'admin_list_tools' || a === 'privacy_list') return t('looked at the server settings');
+  return n ? t('read {note}', { note: n }) : t('looked through your notes');
 }
 
 /** "change <em>Plan</em>": what an AI tried to do. */
@@ -277,56 +301,56 @@ function tried(it: ActivityItem): string {
   const lbl = it.label && !it.paths.includes(it.label) ? it.label : '';
   switch (kindOf(it)) {
     case 'created':
-      return n ? `create ${n}` : lbl ? `create ${em(lbl)}` : 'create a note';
+      return n ? t('create {note}', { note: n }) : lbl ? t('create {note}', { note: em(lbl) }) : t('create a note');
     case 'edited':
-      return n ? `change ${n}` : 'change your notes';
+      return n ? t('change {note}', { note: n }) : t('change your notes');
     case 'read':
-      return n ? `read ${n}` : 'look through your notes';
+      return n ? t('read {note}', { note: n }) : t('look through your notes');
     case 'searched':
-      return lbl ? `search ${quoted(lbl)}` : 'search your notes';
+      return lbl ? t('search {q}', { q: quoted(lbl) }) : t('search your notes');
     case 'moved':
-      return n ? `move ${n}` : 'move a note';
+      return n ? t('move {note}', { note: n }) : t('move a note');
     case 'trashed':
-      return n ? `move ${n} to Trash` : 'move notes to Trash';
+      return n ? t('move {note} to Trash', { note: n }) : t('move notes to Trash');
     case 'deleted':
-      return n ? `delete ${n}` : 'delete a note';
+      return n ? t('delete {note}', { note: n }) : t('delete a note');
     case 'restored':
-      return 'bring back a note from Trash';
+      return t('bring back a note from Trash');
     case 'pinned':
-      return n ? `pin ${n}` : 'change your pins';
+      return n ? t('pin {note}', { note: n }) : t('change your pins');
     default:
-      return it.action.startsWith('admin_') || it.action.startsWith('privacy_') ? 'change a server setting' : 'do something';
+      return it.action.startsWith('admin_') || it.action.startsWith('privacy_') ? t('change a server setting') : t('do something');
   }
 }
 
 /** Why a call was refused, from the server's refusal message. */
 function refusedWhy(error: string): string {
-  if (/'write' scope/.test(error)) return 'but can only read';
-  if (/'admin' scope/.test(error)) return 'but does not have full control';
-  if (/disabled on this server/.test(error)) return 'but that is switched off on this server';
-  if (/not allowed/.test(error)) return 'but is not allowed to';
-  return 'but was refused';
+  if (/'write' scope/.test(error)) return t('but can only read');
+  if (/'admin' scope/.test(error)) return t('but does not have full control');
+  if (/disabled on this server/.test(error)) return t('but that is switched off on this server');
+  if (/not allowed/.test(error)) return t('but is not allowed to');
+  return t('but was refused');
 }
 
 function attempt(it: ActivityItem, problem: 'refused' | 'failed'): string {
-  if (problem === 'refused') return `tried to ${tried(it)} ${refusedWhy(raw(it, 'error'))}`;
-  return `tried to ${tried(it)}, but it did not work`;
+  if (problem === 'refused') return t('tried to {action} {why}', { action: tried(it), why: refusedWhy(raw(it, 'error')) });
+  return t('tried to {action}, but it did not work', { action: tried(it) });
 }
 
 const SYSTEM_WORDS: Record<string, string> = {
-  signin: 'signed in',
-  signout: 'signed out',
-  signout_cli: 'was signed out from the console',
-  login_fail: 'could not sign in',
-  auth_fail: 'could not sign in',
-  key_fail: 'an unknown key was refused',
-  cooldown: 'sign-in paused after too many tries',
-  key_created: 'made a new AI key',
-  key_deleted: 'removed an AI key',
-  key_restored: 'brought back an AI key',
-  key_rolled: 'made a new secret for an AI key',
-  key_updated: 'changed an AI key',
-  key_permissions: 'changed what an AI may do',
+  signin: t('signed in'),
+  signout: t('signed out'),
+  signout_cli: t('was signed out from the console'),
+  login_fail: t('could not sign in'),
+  auth_fail: t('could not sign in'),
+  key_fail: t('an unknown key was refused'),
+  cooldown: t('sign-in paused after too many tries'),
+  key_created: t('made a new AI key'),
+  key_deleted: t('removed an AI key'),
+  key_restored: t('brought back an AI key'),
+  key_rolled: t('made a new secret for an AI key'),
+  key_updated: t('changed an AI key'),
+  key_permissions: t('changed what an AI may do'),
 };
 
 /** Server, console and sign-in lines: plain where known, the raw words otherwise. */
@@ -351,7 +375,7 @@ export function plainText(html: string): string {
 
 /** The whole sentence as text: "Claude Code edited Launch plan". */
 export function sentenceText(it: ActivityItem, me = ''): string {
-  return `${whoOf(it, me)} ${plainText(predicate(it))}`;
+  return `${whoText(it, me)} ${plainText(predicate(it))}`;
 }
 
 export interface Burst {
@@ -411,42 +435,49 @@ export function burstPredicate(b: Burst): string {
   const targets = [...new Set(b.items.map((x) => (b.kind === 'moved' ? moveTo(x) || x.paths[0] : x.paths[0])).filter(Boolean))] as string[];
   const k = targets.length;
   const folders = new Set(targets.map(folderOf));
-  const inF = folders.size === 1 && [...folders][0] ? ` in ${em(folderName([...folders][0]))}` : '';
+  const inF = folders.size === 1 && [...folders][0] ? em(folderName([...folders][0])) : '';
+  const withF = (s: string): string => (inF ? t('{what} in {folder}', { what: s, folder: inF }) : s);
   const browse = b.kind === 'read' && b.it.action !== 'read_memory';
   switch (b.kind) {
     case 'read':
-      return browse || !k ? `looked around your notes ${n} times` : `read ${plural(k, 'note')}${inF}`;
+      return browse || !k ? t('looked around your notes {n} times', { n }) : withF(tn(k, 'read {n} note', 'read {n} notes'));
     case 'searched': {
       const qs = [...new Set(b.items.map((x) => (x.label && !x.paths.includes(x.label) ? x.label : '')))];
       if (qs.length <= 3 && qs.every(Boolean)) {
         const parts = qs.map(quoted);
-        return `searched ${parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]}`;
+        return t('searched {q}', {
+          q: parts.length > 1 ? t('{list} and {last}', { list: parts.slice(0, -1).join(', '), last: parts[parts.length - 1] }) : parts[0],
+        });
       }
-      return `searched ${n} times`;
+      return t('searched {n} times', { n });
     }
     case 'created':
-      return k ? `created ${plural(k, 'note')}${inF}` : `created ${n} notes`;
+      return k ? withF(tn(k, 'created {n} note', 'created {n} notes')) : tn(n, 'created {n} note', 'created {n} notes');
     case 'edited':
-      return k === 1 ? `edited ${noteRef(targets[0], true)} ${n} times` : k ? `edited ${plural(k, 'note')}${inF}` : `made ${n} changes`;
+      return k === 1
+        ? t('edited {note} {n} times', { note: noteRef(targets[0], true), n })
+        : k
+          ? withF(tn(k, 'edited {n} note', 'edited {n} notes'))
+          : t('made {n} changes', { n });
     case 'moved':
-      return `moved ${plural(Math.max(k, 1), 'note')}`;
+      return tn(Math.max(k, 1), 'moved {n} note', 'moved {n} notes');
     case 'trashed':
-      return `moved ${plural(Math.max(k, 1), 'note')} to Trash`;
+      return tn(Math.max(k, 1), 'moved {n} note to Trash', 'moved {n} notes to Trash');
     case 'deleted':
-      return `deleted ${plural(Math.max(k, 1), 'note')}`;
+      return tn(Math.max(k, 1), 'deleted {n} note', 'deleted {n} notes');
     case 'restored':
-      return `brought back ${plural(n, 'note')} from Trash`;
+      return tn(n, 'brought back {n} note from Trash', 'brought back {n} notes from Trash');
     case 'pinned':
-      return `changed your pins ${n} times`;
+      return t('changed your pins {n} times', { n });
     default:
-      return `did ${n} things`;
+      return t('did {n} things', { n });
   }
 }
 
 /** "40 s" / "3 min": how long a burst took. */
 export function spanText(secs: number): string {
   const s = Math.max(1, Math.round(secs));
-  return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`;
+  return s < 60 ? t('{n} s', { n: s }) : t('{n} min', { n: Math.round(s / 60) });
 }
 
 /** Tools whose success always leaves a note event behind (same actor, a few seconds later). */
@@ -531,19 +562,19 @@ export function undoPlan(it: ActivityItem, exists: (path: string) => boolean, no
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  create_memory: 'Created a note',
-  batch_create: 'Created several notes',
-  save_memory: 'Rewrote a note',
-  patch_memory: 'Edited part of a note',
-  read_memory: 'Read a note',
-  search_memory: 'Searched notes',
-  query_memory: 'Searched with filters',
-  list_memory: 'Looked through notes',
-  node_created: 'Note created',
-  node_updated: 'Note saved',
-  node_renamed: 'Note moved or renamed',
-  node_deleted: 'Note deleted',
-  folder_changed: 'Folder changed',
+  create_memory: t('Created a note'),
+  batch_create: t('Created several notes'),
+  save_memory: t('Rewrote a note'),
+  patch_memory: t('Edited part of a note'),
+  read_memory: t('Read a note'),
+  search_memory: t('Searched notes'),
+  query_memory: t('Searched with filters'),
+  list_memory: t('Looked through notes'),
+  node_created: t('Note created'),
+  node_updated: t('Note saved'),
+  node_renamed: t('Note moved or renamed'),
+  node_deleted: t('Note deleted'),
+  folder_changed: t('Folder changed'),
 };
 
 /** A plain name for one kind of action: "Read a note", "Searched notes". */

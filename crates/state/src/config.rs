@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 pub const CONFIG_KEYS: &[(&str, &str)] = &[
     ("MEMORA_PORT", "HTTP port (API, MCP, web UI and realtime share it)"),
     ("MEMORA_BIND", "Bind address: 0.0.0.0 for every interface, 127.0.0.1 behind a local proxy"),
-    ("MEMORA_BASE_URL", "Public URL, e.g. https://memory.example.com (its host is also an allowed domain)"),
+    ("MEMORA_BASE_URL", "Public URL, e.g. https://memora.example.com (its host is also an allowed domain)"),
     ("MEMORA_DOMAIN", "Allowed hostnames, comma separated (*.example.com works); other hosts get 404. Empty: any host"),
     ("MEMORA_TRUSTED_PROXIES", "IPs of reverse proxies whose X-Forwarded-For is trusted (loopback always is)"),
     ("MEMORA_ARM_TTL", "Default setup / reset window length in seconds"),

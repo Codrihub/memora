@@ -37,6 +37,7 @@ import {
 } from './agents-data';
 import { renderAgentPage } from './agent-page';
 import { renderNewAgent } from './agent-new';
+import { t } from '../i18n';
 
 const KEYS_CSS = `
 .ky{container:ky/inline-size;--r14:14px;--tile:color-mix(in srgb,var(--fg) 5%,transparent);--tile-h:color-mix(in srgb,var(--fg) 8%,transparent)}
@@ -206,12 +207,12 @@ async function renderList(host: HTMLElement): Promise<void> {
   host.innerHTML = `<div class="cc ky">
     ${systemHeader(
       'keys',
-      'Agents & API keys',
-      'Each AI app you connect is an agent with its own key, so you see what each one does and can turn one off on its own.',
-      `<a class="btn primary" id="kNew" href="/agents/new" data-nav="new">${ICO.plus}New agent</a>`,
+      t('Agents & API keys'),
+      t('Each AI app you connect is an agent with its own key, so you see what each one does and can turn one off on its own.'),
+      `<a class="btn primary" id="kNew" href="/agents/new" data-nav="new">${ICO.plus}${t('New agent')}</a>`,
     )}
     <div class="ky-sum" id="kStats" aria-live="polite">${statsHTML(data.loaded ? data.keys : null)}</div>
-    <div class="ky-h"><h2>Agents</h2><span id="kCount"></span></div>
+    <div class="ky-h"><h2>${t('Agents')}</h2><span id="kCount"></span></div>
     <div class="kl" id="kList" aria-busy="true">${skeletonRows()}</div>
     <div id="kDel"></div></div>`;
   wireAgentLinks(host);
@@ -249,8 +250,8 @@ function paint(): void {
   if (!data.loaded && data.error) {
     $('#kStats').innerHTML = statsHTML(null);
     list.removeAttribute('aria-busy');
-    list.innerHTML = `<div class="ky-err"><b>Could not load the agents</b>${esc(data.error)}
-      <div style="margin-top:14px"><button type="button" class="btn" id="kRetry">${ICO.refresh}Try again</button></div></div>`;
+    list.innerHTML = `<div class="ky-err"><b>${t('Could not load the agents')}</b>${esc(data.error)}
+      <div style="margin-top:14px"><button type="button" class="btn" id="kRetry">${ICO.refresh}${t('Try again')}</button></div></div>`;
     $('#kRetry').onclick = () => void loadAgents(true);
     return;
   }
@@ -263,12 +264,12 @@ function paint(): void {
 
 function statsHTML(rows: KeyRowFull[] | null): string {
   const url = mcpUrl();
-  const ep = `<div class="ky-st ky-ep"><span class="k">Address for AI apps</span><span class="row"><code title="${attr(url)}">${esc(url)}</code>
-    <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="Copy the address (MCP endpoint)" title="Copy">${ICO.copy}</button></span>
-    <span class="hint">The MCP endpoint every agent connects to</span></div>`;
+  const ep = `<div class="ky-st ky-ep"><span class="k">${t('Address for AI apps')}</span><span class="row"><code title="${attr(url)}">${esc(url)}</code>
+    <button type="button" class="cc-ibtn" data-copy="${attr(url)}" aria-label="${t('Copy the address (MCP endpoint)')}" title="${t('Copy')}">${ICO.copy}</button></span>
+    <span class="hint">${t('The MCP endpoint every agent connects to')}</span></div>`;
   if (!rows) {
     const sk = (k: string): string => `<div class="ky-st"><span class="k">${k}</span><span class="v">${skBlock('38px', 22)}</span></div>`;
-    return sk('Agents') + sk('Active now') + sk('Calls in 24h') + ep;
+    return sk(t('Agents')) + sk(t('Active now')) + sk(t('Calls in 24h')) + ep;
   }
   const now = Date.now() / 1000;
   const on = rows.filter((k) => k.enabled !== false);
@@ -277,11 +278,11 @@ function statsHTML(rows: KeyRowFull[] | null): string {
   for (const k of rows) usageOf(k)?.spark.forEach((v, i) => (all24[i] += v));
   const day = all24.reduce((a, b) => a + b, 0);
   const off = rows.length - on.length;
-  return `<div class="ky-st"><span class="k">Agents</span><span class="v">${rows.length}${
-    rows.length ? `<small>${off ? `${on.length} on · ${off} off` : 'all on'}</small>` : ''
+  return `<div class="ky-st"><span class="k">${t('Agents')}</span><span class="v">${rows.length}${
+    rows.length ? `<small>${off ? t('{on} on · {off} off', { on: on.length, off }) : t('all on')}</small>` : ''
   }</span></div>
-    <div class="ky-st"><span class="k">Active now</span><span class="v">${active}${active ? '<span class="ky-live" aria-hidden="true"></span>' : ''}</span></div>
-    <div class="ky-st"><span class="k">Calls in 24h</span><span class="v">${day}${day ? `<span class="sp">${sparkSVG(all24, 72, 22)}</span>` : ''}</span></div>${ep}`;
+    <div class="ky-st"><span class="k">${t('Active now')}</span><span class="v">${active}${active ? '<span class="ky-live" aria-hidden="true"></span>' : ''}</span></div>
+    <div class="ky-st"><span class="k">${t('Calls in 24h')}</span><span class="v">${day}${day ? `<span class="sp">${sparkSVG(all24, 72, 22)}</span>` : ''}</span></div>${ep}`;
 }
 
 /** Most recent activity first (live calls, the loaded history or the key's last use); never used last, newest first. */
@@ -294,23 +295,23 @@ function paintList(list: HTMLElement): void {
   const keys = data.keys;
   list.removeAttribute('aria-busy');
   const on = keys.filter((k) => k.enabled !== false).length;
-  $('#kCount').textContent = keys.length ? `${keys.length} · ${on === keys.length ? 'all turned on' : `${keys.length - on} turned off`}` : '';
+  $('#kCount').textContent = keys.length ? `${keys.length} · ${on === keys.length ? t('all turned on') : t('{n} turned off', { n: keys.length - on })}` : '';
   if (!keys.length) {
     const pop = ['claude-code', 'cursor', 'claude-ai', 'chatgpt', 'codex']
       .map((id) => appById(id))
       .filter(Boolean)
       .map((s) => `<a href="${attr(agentsHref('new/' + s!.id))}" data-nav="new/${attr(s!.id)}">${appIconHTML(s!.label, 26)}${esc(s!.label)}</a>`)
       .join('');
-    list.innerHTML = `<div class="ky-empty"><span class="ic">${ICO.plug}</span><h3>No agents yet</h3>
-      <p>Make an agent for each app or device you use. Each one gets its own key, so you can see what it does and turn it off on its own.</p>
-      <a class="btn primary" href="/agents/new" data-nav="new">${ICO.plus}New agent</a><div class="ky-pop" aria-label="Popular apps">${pop}</div></div>`;
+    list.innerHTML = `<div class="ky-empty"><span class="ic">${ICO.plug}</span><h3>${t('No agents yet')}</h3>
+      <p>${t('Make an agent for each app or device you use. Each one gets its own key, so you can see what it does and turn it off on its own.')}</p>
+      <a class="btn primary" href="/agents/new" data-nav="new">${ICO.plus}${t('New agent')}</a><div class="ky-pop" aria-label="${t('Popular apps')}">${pop}</div></div>`;
     wireAgentLinks(list);
     return;
   }
   const now = Date.now() / 1000;
-  list.innerHTML = `<ul aria-label="Agents">${sorted()
+  list.innerHTML = `<ul aria-label="${t('Agents')}">${sorted()
     .map((k) => rowHTML(k, now))
-    .join('')}<li class="kc-add"><a class="ky-add" href="/agents/new" data-nav="new"><span class="ic">${ICO.plus}</span>Connect another AI<small>Claude, ChatGPT, Cursor and more</small></a></li></ul>`;
+    .join('')}<li class="kc-add"><a class="ky-add" href="/agents/new" data-nav="new"><span class="ic">${ICO.plus}</span>${t('Connect another AI')}<small>${t('Claude, ChatGPT, Cursor and more')}</small></a></li></ul>`;
   wireAgentLinks(list);
   $$<HTMLElement>('[data-more]', list).forEach(
     (b) =>
@@ -330,20 +331,20 @@ function rowHTML(k: KeyRowFull, now: number): string {
   const p = summarize(permsOf(k));
   const signed = data.oauth.has(k.id);
   const kind = app.id ? appById(app.id)?.kind || '' : '';
-  const desc = kind ? kind + (signed ? ' · signed in' : '') : signed ? 'Signed in' : 'No app picked yet';
+  const desc = kind ? kind + (signed ? ' · ' + t('signed in') : '') : signed ? t('Signed in') : t('No app picked yet');
   const day = u ? u.day : 0;
   const dot = s.st === 'active' ? 'ok' : s.st === 'off' ? 'danger' : s.st;
   return `<li class="kc${s.st === 'off' ? ' off' : ''}" style="--ag:${agentColor(name, k.id)}">
-    <a class="kr-hit" href="${attr(agentsHref(k.id))}" data-nav="${attr(k.id)}" aria-label="${attr(`${name}: ${s.label}, ${app.label || 'app not set'}, ${p.level}`)}"></a>
+    <a class="kr-hit" href="${attr(agentsHref(k.id))}" data-nav="${attr(k.id)}" aria-label="${attr(`${name}: ${s.label}, ${app.label || t('app not set')}, ${p.level}`)}"></a>
     <div class="kc-h">${avatarHTML(name, 40, '', k.id)}<span class="t"><b title="${attr(k.id)}">${esc(name)}</b>
-      <span class="st ${dot}">${s.label}${s.st === 'active' || s.st === 'off' ? '' : s.st === 'never' ? ' · no calls yet' : ''}</span></span>
-      <span class="kr-act"><button type="button" class="cc-ibtn" data-more="${attr(k.id)}" aria-haspopup="menu" aria-label="Actions for ${attr(name)}" title="Actions">${ICO.more}</button></span></div>
+      <span class="st ${dot}">${s.label}${s.st === 'active' || s.st === 'off' ? '' : s.st === 'never' ? ' · ' + t('no calls yet') : ''}</span></span>
+      <span class="kr-act"><button type="button" class="cc-ibtn" data-more="${attr(k.id)}" aria-haspopup="menu" aria-label="${t('Actions for {name}', { name: attr(name) })}" title="${t('Actions')}">${ICO.more}</button></span></div>
     <p class="kc-d${kind || signed ? '' : ' none'}">${esc(desc)}</p>
     <dl class="kc-props">
-      <div><dt>Access</dt><dd class="${p.tone || ''}" title="${attr(p.tools)}"><span>${esc(p.level)}</span></dd></div>
-      <div><dt>Last active</dt><dd><span class="${s.st === 'never' ? 'muted' : ''}">${esc(s.seen)}</span></dd></div>
-      <div><dt>Calls in 24h</dt><dd>${day ? `<span class="sp">${sparkSVG(u!.spark, 56, 20)}</span>` : ''}<span class="${day ? '' : 'z'}">${day}</span></dd></div>
-      <div><dt>App</dt><dd>${appIconHTML(app.label, 20)}<span class="${app.label ? '' : 'muted'}">${esc(app.label || 'Not set')}</span></dd></div>
+      <div><dt>${t('Access')}</dt><dd class="${p.tone || ''}" title="${attr(p.tools)}"><span>${esc(p.level)}</span></dd></div>
+      <div><dt>${t('Last active')}</dt><dd><span class="${s.st === 'never' ? 'muted' : ''}">${esc(s.seen)}</span></dd></div>
+      <div><dt>${t('Calls in 24h')}</dt><dd>${day ? `<span class="sp">${sparkSVG(u!.spark, 56, 20)}</span>` : ''}<span class="${day ? '' : 'z'}">${day}</span></dd></div>
+      <div><dt>${t('App')}</dt><dd>${appIconHTML(app.label, 20)}<span class="${app.label ? '' : 'muted'}">${esc(app.label || t('Not set'))}</span></dd></div>
     </dl>
   </li>`;
 }
@@ -354,11 +355,11 @@ function paintDeleted(): void {
     box.innerHTML = '';
     return;
   }
-  box.innerHTML = `<section class="ky-del"><div class="ky-h" style="--gt:var(--warn)"><h2>Recently deleted</h2><span>Restore until you reload the app</span></div>
+  box.innerHTML = `<section class="ky-del"><div class="ky-h" style="--gt:var(--warn)"><h2>${t('Recently deleted')}</h2><span>${t('Restore until you reload the app')}</span></div>
     <div class="kl">${state.keysDeleted
       .map(
         (k) => `<div class="kd">${avatarHTML(nameOf(k), 32, '', k.id)}<span class="tx"><b>${esc(nameOf(k))}</b><small>${esc(k.id)}</small></span>
-        <button type="button" class="btn" data-restore="${attr(k.id)}">${ICO_RESTORE}Restore</button></div>`,
+        <button type="button" class="btn" data-restore="${attr(k.id)}">${ICO_RESTORE}${t('Restore')}</button></div>`,
       )
       .join('')}</div></section>`;
   $$<HTMLElement>('[data-restore]', box).forEach((b) => (b.onclick = () => void restoreKey(b.dataset.restore!)));
@@ -371,22 +372,22 @@ function agentMenu(anchor: HTMLElement, k: KeyRowFull): void {
   openMenu(
     anchor,
     [
-      { label: 'Open', desc: 'Its page: status, recent calls, access and settings.', icon: ICO_CHEV, run: () => navAgents(k.id) },
+      { label: t('Open'), desc: t('Its page: status, recent calls, access and settings.'), icon: ICO_CHEV, run: () => navAgents(k.id) },
       {
-        label: never ? 'Connect' : 'Setup guide',
-        desc: 'The setup steps for its app, with its key filled in.',
+        label: never ? t('Connect') : t('Setup guide'),
+        desc: t('The setup steps for its app, with its key filled in.'),
         icon: ICO.plug,
         run: () => navAgents(k.id + '/setup'),
       },
-      { label: 'Activity', desc: 'Everything this agent did.', icon: ICO_ACTIVITY, run: () => navAgents(k.id + '/activity') },
+      { label: t('Activity'), desc: t('Everything this agent did.'), icon: ICO_ACTIVITY, run: () => navAgents(k.id + '/activity') },
       { sep: true, label: '' },
       {
-        label: off ? 'Turn on' : 'Turn off',
-        desc: off ? 'Let it connect again with the same key.' : 'Block it without deleting; turn back on any time.',
+        label: off ? t('Turn on') : t('Turn off'),
+        desc: off ? t('Let it connect again with the same key.') : t('Block it without deleting; turn back on any time.'),
         icon: off ? ICO.check : ICO_POWER,
         run: () => void toggleKey(k),
       },
-      { label: 'Delete', desc: 'Remove the agent; its key stops working at once.', icon: ICO_TRASH, danger: true, run: () => delKey(k) },
+      { label: t('Delete'), desc: t('Remove the agent; its key stops working at once.'), icon: ICO_TRASH, danger: true, run: () => delKey(k) },
     ],
     { title: name, lead: avatarHTML(name, 30, '', k.id) },
   );

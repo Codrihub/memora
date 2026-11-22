@@ -1,6 +1,7 @@
 // Small vault UI primitives: context menu, undo toast, inline rename and dialogs.
 
 import { el, esc, attr } from '../dom';
+import { t } from '../i18n';
 import { Modal } from '../modal';
 import { notify } from '../toast';
 import { SWATCH_COLORS } from '../icons';
@@ -11,6 +12,8 @@ export interface MenuItem {
   label: string;
   icon?: string;
   hint?: string;
+  /** A second, quieter line under the label (the item then shows its icon in a tile). */
+  desc?: string;
   danger?: boolean;
   disabled?: boolean;
   run?: () => void;
@@ -40,10 +43,10 @@ export function openMenu(items: MenuItem[], at: { x: number; y: number } | HTMLE
     }
     const b = el(
       'button',
-      'vx-menu-item' + (it.danger ? ' danger' : ''),
-      `${it.icon || '<span class="vx-i"></span>'}<span class="vx-menu-label">${esc(it.label)}</span>${
-        it.hint ? `<kbd>${esc(it.hint)}</kbd>` : ''
-      }`,
+      'vx-menu-item' + (it.danger ? ' danger' : '') + (it.desc ? ' rich' : ''),
+      it.desc
+        ? `<span class="vx-menu-tile">${it.icon || ''}</span><span class="vx-menu-txt"><span class="vx-menu-label">${esc(it.label)}</span><small>${esc(it.desc)}</small></span>`
+        : `${it.icon || '<span class="vx-i"></span>'}<span class="vx-menu-label">${esc(it.label)}</span>${it.hint ? `<kbd>${esc(it.hint)}</kbd>` : ''}`,
     );
     b.setAttribute('role', 'menuitem');
     b.disabled = !!it.disabled;
@@ -118,7 +121,7 @@ export function undoToast(
   kind: 'ok' | 'err' | 'info' = 'ok',
   ms = 7000,
 ): void {
-  notify(msg, kind, ms, undo ? { label: 'Undo', icon: I.undo, run: undo } : undefined);
+  notify(msg, kind, ms, undo ? { label: t('Undo'), icon: I.undo, run: undo } : undefined);
 }
 
 /** Swap `target` for a text input; resolves the new value or null when cancelled. */
@@ -127,7 +130,7 @@ export function inlineEdit(target: HTMLElement, value: string): Promise<string |
     const input = el('input', 'vx-rename') as HTMLInputElement;
     input.value = value;
     input.spellcheck = false;
-    input.setAttribute('aria-label', 'New name');
+    input.setAttribute('aria-label', t('New name'));
     const prev = target.innerHTML;
     target.innerHTML = '';
     target.appendChild(input);
@@ -170,14 +173,14 @@ export function folderLookDialog(
   const known = icon ? folderIconKey(icon) : '';
   const emoji = icon && !known ? icon : '';
   box.innerHTML = `<div class="vx-look-prev"><span class="vx-look-ico"></span><b>${esc(folder.split('/').pop() || folder)}</b><small>${esc(folder)}</small></div>
-  <div class="vx-look-label">Color</div>${colorPickHTML('vxLookColor', color, { auto: true, presets: SWATCH_COLORS })}
-  <div class="vx-look-label" style="margin-top:14px">Icon</div><div class="vx-icons">${['', ...presets]
+  <div class="vx-look-label">${t('Color')}</div>${colorPickHTML('vxLookColor', color, { auto: true, presets: SWATCH_COLORS })}
+  <div class="vx-look-label" style="margin-top:14px">${t('Icon')}</div><div class="vx-icons">${['', ...presets]
     .map(
       (k) =>
-        `<button type="button" class="vx-iconpick${k === known || (!k && !icon) ? ' on' : ''}" data-i="${attr(k)}" title="${attr(k || 'default')}" aria-label="Icon ${attr(k || 'default')}">${folderGlyph(k, false)}</button>`,
+        `<button type="button" class="vx-iconpick${k === known || (!k && !icon) ? ' on' : ''}" data-i="${attr(k)}" title="${attr(k || t('default'))}" aria-label="${attr(t('Icon {name}', { name: k || t('default') }))}">${folderGlyph(k, false)}</button>`,
     )
     .join('')}</div>
-  <label class="vx-look-emoji"><span>Or any emoji</span><input type="text" maxlength="4" value="${attr(emoji)}" placeholder="e.g. 🚀" aria-label="Emoji icon"></label>`;
+  <label class="vx-look-emoji"><span>${t('Or any emoji')}</span><input type="text" maxlength="4" value="${attr(emoji)}" placeholder="${attr(t('e.g. 🚀'))}" aria-label="${attr(t('Emoji icon'))}"></label>`;
   const cur = { color: color || '', icon: icon || '' };
   const ico = box.querySelector<HTMLElement>('.vx-look-ico')!;
   const paint = (): void => {
@@ -202,13 +205,13 @@ export function folderLookDialog(
     paint();
   };
   Modal.open({
-    title: 'Folder look',
-    sub: 'Color and icon for the folder and its region in the brain',
+    title: t('Folder look'),
+    sub: t('Color and icon for the folder and its region in the brain'),
     body: box,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Save',
+        label: t('Save'),
         cls: 'primary',
         run: () => {
           Modal.close();
@@ -232,9 +235,9 @@ export function promptName(title: string, label: string, value: string, run: (v:
     title,
     body: Modal.field(label, 'vxName', { value }),
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'OK',
+        label: t('OK'),
         cls: 'primary',
         run: (body) => {
           const v = body.querySelector<HTMLInputElement>('#vxName')?.value.trim() || '';

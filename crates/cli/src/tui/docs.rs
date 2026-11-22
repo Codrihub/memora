@@ -881,7 +881,7 @@ fn more(base: &str) -> Vec<Block> {
 mod tests {
     use super::*;
 
-    const BASE: &str = "https://memory.example.com";
+    const BASE: &str = "https://memora.example.com";
 
     #[test]
     fn every_topic_renders_narrow_and_wide() {

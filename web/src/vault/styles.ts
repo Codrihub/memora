@@ -876,6 +876,12 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-menu-label{flex:1}
 .vx-menu-item kbd{font-size:10px;color:var(--muted)}
 .vx-menu-sep{height:1px;background:var(--line);margin:4px 6px}
+.vx-menu-item.rich{align-items:center;gap:11px;min-height:48px;padding-top:7px;padding-bottom:7px}
+.vx-menu-tile{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:color-mix(in srgb,var(--fg) 6%,transparent)}
+.vx-menu-tile .vx-i{width:15px;height:15px;color:var(--text-2,var(--fg))}
+.vx-menu-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;text-align:left}
+.vx-menu-txt .vx-menu-label{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vx-menu-txt small{font-size:12px;line-height:1.35;color:var(--muted);white-space:normal}
 @media (max-width:760px){.vx-menu-item{min-height:44px;font-size:15px}}
 .vx-look-label{font-size:11.5px;color:var(--muted);margin:4px 0 8px}
 .vx-look-prev{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}

@@ -5,6 +5,7 @@ import readme from '../../../README.md?raw';
 import installMd from '../../../docs/INSTALL.md?raw';
 import configMd from '../../../docs/CONFIGURATION.md?raw';
 import mcpMd from '../../../docs/MCP.md?raw';
+import mnemoMd from '../../../docs/MNEMO.md?raw';
 import apiMd from '../../../docs/API.md?raw';
 import deployMd from '../../../docs/DEPLOYMENT.md?raw';
 import archMd from '../../../docs/ARCHITECTURE.md?raw';
@@ -13,7 +14,8 @@ import permsMd from '../../../docs/contracts/tools-permissions.md?raw';
 import securityMd from '../../../SECURITY.md?raw';
 import changelogMd from '../../../CHANGELOG.md?raw';
 import { fetchTools } from '../api';
-import { esc } from '../dom';
+import { attr, esc } from '../dom';
+import { t } from '../i18n';
 import { PAGE_META, PAGES } from '../router';
 import { categoryDesc, categoryLabel, groupTools, riskChip, toolRisk, toolTitle } from '../views/tools';
 import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyle, type PromptStyleId } from './agent-prompt';
@@ -49,6 +51,7 @@ const FILE_SLUG: Record<string, string> = {
   'docs/INSTALL.md': 'install',
   'docs/CONFIGURATION.md': 'configuration',
   'docs/MCP.md': 'mcp',
+  'docs/MNEMO.md': 'mnemo',
   'docs/API.md': 'api',
   'docs/DEPLOYMENT.md': 'deployment',
   'docs/ARCHITECTURE.md': 'architecture',
@@ -272,20 +275,20 @@ function agentInstructions(c: PageCtx): string {
     ) +
     c.h2('Pick a style') +
     p('Each style comes in a full and a short version. Balanced fits most people; pick another when you want the agent to save more, less or nothing at all.') +
-    `<div class="seg dc-pstyle" role="group" aria-label="Instruction style">${PROMPT_STYLES.map(
+    `<div class="seg dc-pstyle" role="group" aria-label="${attr(t('Instruction style'))}">${PROMPT_STYLES.map(
       (s, i) =>
         `<button type="button" data-pstyle="${s.id}" aria-pressed="${s.id === style.id}"><span>${esc(s.label)}</span>${
-          i === 0 ? '<span class="rec">Recommended</span>' : ''
+          i === 0 ? `<span class="rec">${t('Recommended')}</span>` : ''
         }</button>`,
     ).join('')}</div>` +
     `<p class="dc-pstyle-desc" data-pstyle-desc aria-live="polite">${esc(style.desc)}</p>` +
     `<div data-pstyle-warn${style.warning ? '' : ' hidden'}>${calloutHTML('warning', 'Notes are not a password manager', `<p data-pstyle-warn-text>${esc(style.warning || '')}</p>`)}</div>` +
     c.h2('Full instructions') +
     p('For a system prompt, project instructions or a rules file.') +
-    prompt(style.full, 'Full prompt', 'full') +
+    prompt(style.full, t('Full prompt'), 'full') +
     c.h2('Short version') +
     p('One paragraph for clients with a small instructions field.') +
-    prompt(style.short, 'Short prompt', 'short') +
+    prompt(style.short, t('Short prompt'), 'short') +
     c.h2('Where to paste it') +
     table(
       ['Client', 'Where', 'Version'],
@@ -354,7 +357,7 @@ function connect(c: PageCtx): string {
       ['Create the key and copy the config', p('The raw key is shown once. Give each agent its own key so you can see, limit and revoke it on its own.')],
       ['Add the instructions', p(`Paste the ${docLink('agent-instructions', 'agent instructions')} into the client.`)],
     ]) +
-    `<p><a class="btn primary dc-btn" href="${esc(PAGE_META.keys.path)}" data-app="keys">Open Agents &amp; API keys</a></p>` +
+    `<p><a class="btn primary dc-btn" href="${esc(PAGE_META.keys.path)}" data-app="keys">${esc(t('Open Agents & API keys'))}</a></p>` +
     c.h2('Quick configs') +
     c.h3('Claude Code') +
     codeBlockHTML(`claude mcp add --transport http memora ${url} \\\n  --header "Authorization: Bearer memora_live_REPLACE_WITH_YOUR_KEY"`, 'bash') +
@@ -457,7 +460,7 @@ function toolReference(c: PageCtx): string {
       )}. Agents call a tool by the name in code. Tools that are switched off are hidden from agents.`,
     ) +
     `<div class="dc-legend">${riskChip('read')}${riskChip('write')}${riskChip('admin')}</div>` +
-    `<div id="dcTools" class="dc-tools" aria-busy="true"><p class="dc-muted">Loading the tool catalog…</p></div>` +
+    `<div id="dcTools" class="dc-tools" aria-busy="true"><p class="dc-muted">${t('Loading the tool catalog…')}</p></div>` +
     c.h2('Switches and permissions') +
     c.md(permsMd, 'docs/contracts/tools-permissions.md', 1)
   );
@@ -469,9 +472,10 @@ async function mountTools(root: HTMLElement, c: PageCtx): Promise<void> {
   let html = '';
   try {
     const tools = await fetchTools();
-    const off = tools.filter((t) => !t.enabled).length;
+    const off = tools.filter((x) => !x.enabled).length;
+    const offBadge = `<span class="badge">${t('Off')}</span>`;
     html =
-      p(`${tools.length} tools${off ? `, ${off} switched off on this server` : ''}.`) +
+      p(off ? t('{n} tools, {off} switched off on this server.', { n: tools.length, off }) : t('{n} tools.', { n: tools.length })) +
       groupTools(tools)
         .map(
           ([cat, list]) =>
@@ -481,7 +485,7 @@ async function mountTools(root: HTMLElement, c: PageCtx): Promise<void> {
               .map(
                 (t) => `<div class="dc-tool${t.enabled ? '' : ' off'}" id="tool-${esc(t.name)}">
                   <div class="dc-tool-h"><code>${esc(t.name)}</code><span class="dc-tool-t">${esc(toolTitle(t.name))}</span>${riskChip(toolRisk(t))}${
-                    t.enabled ? '' : '<span class="badge">Off</span>'
+                    t.enabled ? '' : offBadge
                   }</div>
                   ${t.description ? `<div class="dc-tool-d">${inline(t.description, { link: () => null, slugs: c.slugs })}</div>` : ''}
                 </div>`,
@@ -492,8 +496,8 @@ async function mountTools(root: HTMLElement, c: PageCtx): Promise<void> {
   } catch {
     html = calloutHTML(
       'warning',
-      'Could not load the tools',
-      p(`The server did not answer. The public catalog is at <a href="/tools" target="_blank" rel="noopener">/tools</a>.`),
+      t('Could not load the tools'),
+      p(t('The server did not answer. The public catalog is at {link}.', { link: '<a href="/tools" target="_blank" rel="noopener">/tools</a>' })),
     );
   }
   if (!host.isConnected) return;
@@ -504,35 +508,36 @@ async function mountTools(root: HTMLElement, c: PageCtx): Promise<void> {
 const part = (src: string, ...names: string[]): string => names.map((n) => mdPart(src, n)).join('\n\n');
 
 export const SECTIONS: DocSection[] = [
-  { slug: 'get-started', title: 'Get started', group: 'Getting started', lead: 'What Memora is and how to go from install to an agent that remembers.', source: 'README.md', render: getStarted },
-  { slug: 'agent-instructions', title: 'Agent instructions', group: 'Getting started', lead: 'Ready-made prompts, in several styles, for agents that use Memora as their memory.', render: agentInstructions, mount: mountAgentInstructions },
-  { slug: 'connect', title: 'Connect an agent', group: 'Getting started', lead: 'The MCP URL, API keys and ready-made client configs.', render: connect },
-  { slug: 'install', title: 'Install', group: 'Guides', lead: 'npm, Docker, the native installer, updates, uninstall, reverse proxy and backups.', source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
+  { slug: 'get-started', title: t('Get started'), group: t('Getting started'), lead: t('What Memora is and how to go from install to an agent that remembers.'), source: 'README.md', render: getStarted },
+  { slug: 'agent-instructions', title: t('Agent instructions'), group: t('Getting started'), lead: t('Ready-made prompts, in several styles, for agents that use Memora as their memory.'), render: agentInstructions, mount: mountAgentInstructions },
+  { slug: 'connect', title: t('Connect an agent'), group: t('Getting started'), lead: t('The MCP URL, API keys and ready-made client configs.'), render: connect },
+  { slug: 'mnemo', title: 'Mnemo', group: t('Guides'), lead: t('The notes agent built into Memora: setup, chats, plans, sub-agents, what it may use and see.'), source: 'docs/MNEMO.md', render: (c) => c.md(mnemoMd, 'docs/MNEMO.md') },
+  { slug: 'install', title: t('Install'), group: t('Guides'), lead: t('npm, Docker, the native installer, updates, uninstall, reverse proxy and backups.'), source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
   {
     slug: 'update',
-    title: 'Update & uninstall',
-    group: 'Guides',
-    lead: 'Update per install method, uninstall (also by hand on older versions) and fixes for common problems.',
+    title: t('Update & uninstall'),
+    group: t('Guides'),
+    lead: t('Update per install method, uninstall (also by hand on older versions) and fixes for common problems.'),
     source: 'docs/INSTALL.md',
     render: updateGuide,
   },
-  { slug: 'configuration', title: 'Configuration', group: 'Guides', lead: 'Every setting and where it lives.', source: 'docs/CONFIGURATION.md', render: (c) => c.md(configMd, 'docs/CONFIGURATION.md') },
-  { slug: 'mcp', title: 'MCP', group: 'Guides', lead: 'Transport, connecting clients, OAuth, results and errors.', source: 'docs/MCP.md', render: (c) => c.md(mcpMd, 'docs/MCP.md') },
-  { slug: 'tool-reference', title: 'Tool reference', group: 'Reference', lead: 'The MCP tool catalog, switches and per-key permissions.', source: 'docs/contracts/tools-permissions.md', render: toolReference, mount: mountTools },
-  { slug: 'api', title: 'API', group: 'Reference', lead: 'The HTTP API: auth, endpoints and payloads.', source: 'docs/API.md', render: (c) => c.md(apiMd, 'docs/API.md') },
+  { slug: 'configuration', title: t('Configuration'), group: t('Guides'), lead: t('Every setting and where it lives.'), source: 'docs/CONFIGURATION.md', render: (c) => c.md(configMd, 'docs/CONFIGURATION.md') },
+  { slug: 'mcp', title: 'MCP', group: t('Guides'), lead: t('Transport, connecting clients, OAuth, results and errors.'), source: 'docs/MCP.md', render: (c) => c.md(mcpMd, 'docs/MCP.md') },
+  { slug: 'tool-reference', title: t('Tool reference'), group: t('Reference'), lead: t('The MCP tool catalog, switches and per-key permissions.'), source: 'docs/contracts/tools-permissions.md', render: toolReference, mount: mountTools },
+  { slug: 'api', title: 'API', group: t('Reference'), lead: t('The HTTP API: auth, endpoints and payloads.'), source: 'docs/API.md', render: (c) => c.md(apiMd, 'docs/API.md') },
   {
     slug: 'security',
-    title: 'Security & privacy',
-    group: 'Reference',
-    lead: 'The security model, deployment guidance and how to report a vulnerability.',
+    title: t('Security & privacy'),
+    group: t('Reference'),
+    lead: t('The security model, deployment guidance and how to report a vulnerability.'),
     source: 'SECURITY.md',
     render: (c) => c.md(part(readme, 'Security notes'), 'README.md') + c.md(securityMd, 'SECURITY.md'),
   },
-  { slug: 'deployment', title: 'Deployment', group: 'Operations', lead: 'Production deployment, TLS, reverse proxies and hardening.', source: 'docs/DEPLOYMENT.md', render: (c) => c.md(deployMd, 'docs/DEPLOYMENT.md') },
-  { slug: 'architecture', title: 'Architecture', group: 'Operations', lead: 'Crates, request flow and the files in a vault.', source: 'docs/ARCHITECTURE.md', render: (c) => c.md(archMd, 'docs/ARCHITECTURE.md') },
-  { slug: 'database', title: 'Database', group: 'Operations', lead: 'The state database: schema, migrations, backup and restore.', source: 'docs/DATABASE.md', render: (c) => c.md(dbMd, 'docs/DATABASE.md') },
-  { slug: 'changelog', title: 'Changelog', group: 'More', lead: 'What changed in each release.', source: 'CHANGELOG.md', render: (c) => c.md(changelogMd, 'CHANGELOG.md') },
-  { slug: 'shortcuts', title: 'Keyboard shortcuts', group: 'More', lead: 'Every shortcut in the web UI.', render: shortcuts },
+  { slug: 'deployment', title: t('Deployment'), group: t('Operations'), lead: t('Production deployment, TLS, reverse proxies and hardening.'), source: 'docs/DEPLOYMENT.md', render: (c) => c.md(deployMd, 'docs/DEPLOYMENT.md') },
+  { slug: 'architecture', title: t('Architecture'), group: t('Operations'), lead: t('Crates, request flow and the files in a vault.'), source: 'docs/ARCHITECTURE.md', render: (c) => c.md(archMd, 'docs/ARCHITECTURE.md') },
+  { slug: 'database', title: t('Database'), group: t('Operations'), lead: t('The state database: schema, migrations, backup and restore.'), source: 'docs/DATABASE.md', render: (c) => c.md(dbMd, 'docs/DATABASE.md') },
+  { slug: 'changelog', title: t('Changelog'), group: t('More'), lead: t('What changed in each release.'), source: 'CHANGELOG.md', render: (c) => c.md(changelogMd, 'CHANGELOG.md') },
+  { slug: 'shortcuts', title: t('Keyboard shortcuts'), group: t('More'), lead: t('Every shortcut in the web UI.'), render: shortcuts },
 ];
 
 export const SOURCE_URL = (file: string): string => BLOB + file;

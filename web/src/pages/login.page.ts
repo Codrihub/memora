@@ -84,6 +84,7 @@ export function loginPage(css: string, js: string): string {
 <head>
 <script>${THEME_BOOT}</script>
 <meta charset="UTF-8">
+<meta name="memora-lang" content="">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="color-scheme" content="dark light">

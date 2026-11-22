@@ -1,5 +1,7 @@
 
 import type { KeyPermissionsUpdate, KeyRow, ToolInfo, ToolSwitchResult, ToolsResult } from './types';
+import { t } from './i18n';
+import { ts } from './i18n/server';
 
 interface ApiFailure extends Error {
   status: number;
@@ -46,7 +48,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
       cache: 'no-store',
     });
   } catch {
-    throw fail('cannot reach the server', 0, null);
+    throw fail(t('cannot reach the server'), 0, null);
   }
 
   const txt = await res.text();
@@ -66,7 +68,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
         : typeof rec.message === 'string'
           ? rec.message
           : `HTTP ${res.status}`;
-    throw fail(msg, res.status, data);
+    throw fail(ts(msg), res.status, data);
   }
   return data as T;
 }

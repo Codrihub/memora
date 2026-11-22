@@ -1,6 +1,7 @@
 // "Connect an app" wizard: for a new agent (/agents/new) or an existing agent's Setup tab.
 // On-screen setup text shows dots for the key; Copy puts the real key in.
 
+import { t, tn } from '../i18n';
 import { apiGet, apiPost } from '../api';
 import { on } from '../bus';
 import { PROMPT_STYLES, savedPromptStyle, savePromptStyle, type PromptStyleId } from '../docs/agent-prompt';
@@ -96,139 +97,139 @@ export function mcpUrl(): string {
 export function snippets(secret?: string | null): ClientSnippet[] {
   const url = mcpUrl();
   const key = secret || KEY_PLACEHOLDER;
-  const claudeRules = 'The instructions of a Claude <b>project</b>, or your personal preferences in Claude <b>Settings</b>.';
-  const paste = 'Name it <b>Memora</b> and paste your Memora address as the server URL. {action}';
+  const claudeRules = t('The instructions of a Claude <b>project</b>, or your personal preferences in Claude <b>Settings</b>.');
+  const paste = t('Name it <b>Memora</b> and paste your Memora address as the server URL. {action}');
   const app = (a: Omit<ClientSnippet, 'how' | 'code'>): ClientSnippet => ({ ...a, how: howLabel(a.method), code: setupText(a.id, url, key) });
   return [
     app({
       id: 'claude-ai',
       label: 'Claude',
-      kind: 'Web & desktop app',
+      kind: t('Web & desktop app'),
       method: 'signin',
       oauth: true,
       steps: [
-        'In Claude (web or desktop), open <b>Settings → Connectors</b> and choose <b>Add custom connector</b>.',
+        t('In Claude (web or desktop), open <b>Settings → Connectors</b> and choose <b>Add custom connector</b>.'),
         paste,
-        'Click <b>Add</b>, then <b>Connect</b>. A Memora page opens: sign in if asked and press <b>Allow</b>.',
+        t('Click <b>Add</b>, then <b>Connect</b>. A Memora page opens: sign in if asked and press <b>Allow</b>.'),
       ],
-      tech: 'Claude signs in over OAuth, so no key is pasted: it gets its own key when you press Allow. Without sign-in, connect it as <b>Other app</b> and send the header <code>Authorization: Bearer &lt;key&gt;</code>.',
+      tech: t('Claude signs in over OAuth, so no key is pasted: it gets its own key when you press Allow. Without sign-in, connect it as <b>Other app</b> and send the header <code>Authorization: Bearer &lt;key&gt;</code>.'),
       rules: claudeRules,
     }),
     app({
       id: 'chatgpt',
       label: 'ChatGPT',
-      kind: 'Web app',
+      kind: t('Web app'),
       method: 'signin',
       oauth: true,
       short: true,
       steps: [
-        'In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b>. Then choose <b>Create</b>.',
+        t('In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b>. Then choose <b>Create</b>.'),
         paste,
-        'For authentication choose <b>OAuth</b>, leave the client ID and secret empty, and click <b>Create</b>. A Memora page opens: press <b>Allow</b>.',
+        t('For authentication choose <b>OAuth</b>, leave the client ID and secret empty, and click <b>Create</b>. A Memora page opens: press <b>Allow</b>.'),
       ],
-      tech: 'ChatGPT only signs in over OAuth; it cannot send a key header.',
-      rules: 'Your <b>custom instructions</b> (Settings → Personalization), or the instructions of a ChatGPT <b>project</b>.',
+      tech: t('ChatGPT only signs in over OAuth; it cannot send a key header.'),
+      rules: t('Your <b>custom instructions</b> (Settings → Personalization), or the instructions of a ChatGPT <b>project</b>.'),
     }),
     app({
       id: 'claude-code',
       label: 'Claude Code',
-      kind: 'Runs in your terminal',
+      kind: t('Runs in your terminal'),
       method: 'command',
       steps: [
-        'Copy this command. {action}',
-        'Paste it in a terminal and press <kbd>Enter</kbd>. Then start Claude Code, or restart it: Memora loads by itself.',
+        t('Copy this command. {action}'),
+        t('Paste it in a terminal and press <kbd>Enter</kbd>. Then start Claude Code, or restart it: Memora loads by itself.'),
       ],
-      tech: 'The command adds Memora for every project (<code>--scope user</code>); leave that out to add it to the current project only. Check it with <code>claude mcp list</code>.',
-      rules: '<code>CLAUDE.md</code> in the project, or <code>~/.claude/CLAUDE.md</code> for every project.',
+      tech: t('The command adds Memora for every project (<code>--scope user</code>); leave that out to add it to the current project only. Check it with <code>claude mcp list</code>.'),
+      rules: t('<code>CLAUDE.md</code> in the project, or <code>~/.claude/CLAUDE.md</code> for every project.'),
     }),
     app({
       id: 'cursor',
       label: 'Cursor',
-      kind: 'Code editor',
+      kind: t('Code editor'),
       method: 'deeplink',
       file: '~/.cursor/mcp.json',
       steps: [
-        'Click the button to add Memora to Cursor. {action}',
-        'Cursor opens and asks to install Memora. Click <b>Install</b>; it then shows in <b>Cursor Settings → MCP</b>.',
+        t('Click the button to add Memora to Cursor. {action}'),
+        t('Cursor opens and asks to install Memora. Click <b>Install</b>; it then shows in <b>Cursor Settings → MCP</b>.'),
       ],
-      tech: 'Button does nothing? Choose <b>Copy setup instead</b> and paste it into <code>~/.cursor/mcp.json</code> (create the file when missing).',
-      rules: 'A project rule in <code>.cursor/rules</code>.',
+      tech: t('Button does nothing? Choose <b>Copy setup instead</b> and paste it into <code>~/.cursor/mcp.json</code> (create the file when missing).'),
+      rules: t('A project rule in <code>.cursor/rules</code>.'),
     }),
     app({
       id: 'vscode',
       label: 'VS Code / Copilot',
-      kind: 'Code editor',
+      kind: t('Code editor'),
       method: 'deeplink',
       file: '.vscode/mcp.json',
       steps: [
-        'Click the button to add Memora to VS Code. {action}',
-        'VS Code opens and asks to add Memora. Click <b>Install</b>, then use Copilot Chat in agent mode.',
+        t('Click the button to add Memora to VS Code. {action}'),
+        t('VS Code opens and asks to add Memora. Click <b>Install</b>, then use Copilot Chat in agent mode.'),
       ],
-      tech: 'Button does nothing? Choose <b>Copy setup instead</b>, run <b>MCP: Open User Configuration</b> from the Command Palette and paste it there. VS Code uses <code>servers</code>, not <code>mcpServers</code>.',
-      rules: '<code>.github/copilot-instructions.md</code> in the repository.',
+      tech: t('Button does nothing? Choose <b>Copy setup instead</b>, run <b>MCP: Open User Configuration</b> from the Command Palette and paste it there. VS Code uses <code>servers</code>, not <code>mcpServers</code>.'),
+      rules: t('<code>.github/copilot-instructions.md</code> in the repository.'),
     }),
     app({
       id: 'codex',
       label: 'Codex CLI',
-      kind: 'Runs in your terminal',
+      kind: t('Runs in your terminal'),
       method: 'command',
       file: '~/.codex/config.toml',
-      steps: ['Copy this command. {action}', 'Paste it in a terminal and press <kbd>Enter</kbd>, then start Codex in that same terminal.'],
-      tech: 'Codex reads the key from <code>MEMORA_KEY</code>. Add the <code>export</code> line to your shell profile (like <code>~/.bashrc</code>) so new terminals have it too. Check it with <code>codex mcp list</code>.',
-      rules: '<code>AGENTS.md</code> in the project, or <code>~/.codex/AGENTS.md</code> for every project.',
+      steps: [t('Copy this command. {action}'), t('Paste it in a terminal and press <kbd>Enter</kbd>, then start Codex in that same terminal.')],
+      tech: t('Codex reads the key from <code>MEMORA_KEY</code>. Add the <code>export</code> line to your shell profile (like <code>~/.bashrc</code>) so new terminals have it too. Check it with <code>codex mcp list</code>.'),
+      rules: t('<code>AGENTS.md</code> in the project, or <code>~/.codex/AGENTS.md</code> for every project.'),
     }),
     app({
       id: 'gemini',
       label: 'Gemini CLI',
-      kind: 'Runs in your terminal',
+      kind: t('Runs in your terminal'),
       method: 'command',
       steps: [
-        'Copy this command. {action}',
-        'Paste it in a terminal and press <kbd>Enter</kbd>. Then start Gemini CLI, or restart it, and type <code>/mcp</code> to see Memora.',
+        t('Copy this command. {action}'),
+        t('Paste it in a terminal and press <kbd>Enter</kbd>. Then start Gemini CLI, or restart it, and type <code>/mcp</code> to see Memora.'),
       ],
-      tech: 'Older Gemini CLI without <code>gemini mcp add</code>: add the server to <code>~/.gemini/settings.json</code> under <code>mcpServers</code>, with <code>httpUrl</code> and the same header.',
-      rules: '<code>GEMINI.md</code> in the project, or <code>~/.gemini/GEMINI.md</code> for every project.',
+      tech: t('Older Gemini CLI without <code>gemini mcp add</code>: add the server to <code>~/.gemini/settings.json</code> under <code>mcpServers</code>, with <code>httpUrl</code> and the same header.'),
+      rules: t('<code>GEMINI.md</code> in the project, or <code>~/.gemini/GEMINI.md</code> for every project.'),
     }),
     app({
       id: 'windsurf',
       label: 'Windsurf',
-      kind: 'Code editor',
+      kind: t('Code editor'),
       method: 'copy',
       file: '~/.codeium/windsurf/mcp_config.json',
       steps: [
-        'In Windsurf, open <b>Settings → Cascade → MCP servers</b> and choose <b>View raw config</b>.',
-        'Copy the setup. {action}',
-        'Paste it into the file and save, then press <b>Refresh</b>. Memora shows up in the list.',
+        t('In Windsurf, open <b>Settings → Cascade → MCP servers</b> and choose <b>View raw config</b>.'),
+        t('Copy the setup. {action}'),
+        t('Paste it into the file and save, then press <b>Refresh</b>. Memora shows up in the list.'),
       ],
-      tech: 'Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.',
-      rules: "Windsurf's <b>rules</b>: a global rule, or a workspace rule for one project.",
+      tech: t('Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.'),
+      rules: t("Windsurf's <b>rules</b>: a global rule, or a workspace rule for one project."),
     }),
     app({
       id: 'claude-desktop',
-      label: 'Claude Desktop (older)',
-      kind: 'Versions without Connectors',
+      label: t('Claude Desktop (older)'),
+      kind: t('Versions without Connectors'),
       method: 'copy',
       file: 'claude_desktop_config.json',
       steps: [
-        'In Claude Desktop, open <b>Settings → Developer → Edit Config</b>. On newer versions, pick <b>Claude</b> instead.',
-        'Copy the setup. {action}',
-        'Paste it into the file, save, and restart Claude Desktop. It needs Node.js on this computer.',
+        t('In Claude Desktop, open <b>Settings → Developer → Edit Config</b>. On newer versions, pick <b>Claude</b> instead.'),
+        t('Copy the setup. {action}'),
+        t('Paste it into the file, save, and restart Claude Desktop. It needs Node.js on this computer.'),
       ],
-      tech: 'Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.',
+      tech: t('Other servers in the file already? Add only the <code>memora</code> entry inside <code>mcpServers</code>.'),
       rules: claudeRules,
     }),
     app({
       id: 'http',
-      label: 'Other app',
-      kind: 'Any app that takes a server address',
+      label: t('Other app'),
+      kind: t('Any app that takes a server address'),
       method: 'copy',
       steps: [
-        'Copy your Memora address. {action}',
-        'Copy the key from the box below. The app takes it where it asks for a key, token or password.',
-        'Paste both into the app and save.',
+        t('Copy your Memora address. {action}'),
+        t('Copy the key from the box below. The app takes it where it asks for a key, token or password.'),
+        t('Paste both into the app and save.'),
       ],
-      tech: 'Memora speaks MCP over streamable HTTP. Apps send the key in the header <code>Authorization: Bearer &lt;key&gt;</code>.',
-      rules: "The app's system prompt or project instructions.",
+      tech: t('Memora speaks MCP over streamable HTTP. Apps send the key in the header <code>Authorization: Bearer &lt;key&gt;</code>.'),
+      rules: t("The app's system prompt or project instructions."),
     }),
   ];
 }
@@ -541,7 +542,7 @@ const CSS = `
 `;
 
 type StepId = 'app' | 'access' | 'setup' | 'prompt';
-const STEP_LABEL: Record<StepId, string> = { app: 'App', access: 'Name & access', setup: 'Set up', prompt: 'First prompt' };
+const STEP_LABEL: Record<StepId, string> = { app: t('App'), access: t('Name & access'), setup: t('Set up'), prompt: t('First prompt') };
 
 interface WizardOptions {
   /** Set up this existing agent; without it the wizard makes a new agent. */
@@ -688,9 +689,9 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   };
 
   const primaryLabel = (c: ClientSnippet, again = false): string => {
-    if (c.method === 'signin' || c.id === 'http') return ICO.copy + 'Copy address';
-    if (c.method === 'deeplink') return ICO.arrow + (again ? 'Open ' : 'Open in ') + esc(appAgentName(c)) + (again ? ' again' : '');
-    return ICO.copy + (c.method === 'command' ? 'Copy command' : 'Copy setup') + (again ? ' again' : '');
+    if (c.method === 'signin' || c.id === 'http') return ICO.copy + t('Copy address');
+    if (c.method === 'deeplink') return ICO.arrow + (again ? t('Open {app} again', { app: esc(appAgentName(c)) }) : t('Open in {app}', { app: esc(appAgentName(c)) }));
+    return ICO.copy + (c.method === 'command' ? (again ? t('Copy command again') : t('Copy command')) : again ? t('Copy setup again') : t('Copy setup'));
   };
 
   const troubleHTML = (c: ClientSnippet): string => {
@@ -699,75 +700,80 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const q = (id: string, title: string, body: string): string =>
       `<details class="cn-q" data-q="${id}"><summary>${ICON.right}<span>${title}</span></summary><div>${body}</div></details>`;
     const reach =
-      `<p>Apps connect to <code>${esc(url)}</code>.</p>` +
+      `<p>${t('Apps connect to {url}.', { url: `<code>${esc(url)}</code>` })}</p>` +
       (isLocalAddress(url)
         ? c.oauth
-          ? `<p>That address only opens on this computer or its network. ${app} connects from the internet, so Memora needs an internet address with https. Ask whoever runs Memora to give it one.</p>`
-          : `<p>That address only opens on this computer or its network, which is fine when ${app} runs here too.</p>`
-        : `<p>Open it in a browser on the device where ${app} runs: it should answer, not time out.</p>`) +
-      (publicOrigin() !== location.origin ? `<p>You opened this page at ${esc(location.host)}; apps use the address above.</p>` : '');
-    const parts = [q('reach', `Can ${app} reach Memora's address?`, reach)];
+          ? `<p>${t('That address only opens on this computer or its network. {app} connects from the internet, so Memora needs an internet address with https. Ask whoever runs Memora to give it one.', { app })}</p>`
+          : `<p>${t('That address only opens on this computer or its network, which is fine when {app} runs here too.', { app })}</p>`
+        : `<p>${t('Open it in a browser on the device where {app} runs: it should answer, not time out.', { app })}</p>`) +
+      (publicOrigin() !== location.origin ? `<p>${t('You opened this page at {host}; apps use the address above.', { host: esc(location.host) })}</p>` : '');
+    const parts = [q('reach', t("Can {app} reach Memora's address?", { app }), reach)];
     if (c.oauth) {
       parts.push(
         q(
           'allow',
-          'Did you press Allow on the Memora page?',
-          `<p>${app} opens a Memora page in your browser to ask for permission. If you closed it, start again from step 1.</p>`,
+          t('Did you press Allow on the Memora page?'),
+          `<p>${t('{app} opens a Memora page in your browser to ask for permission. If you closed it, start again from step 1.', { app })}</p>`,
         ),
       );
     } else {
       parts.push(
-        q('restart', `Did you restart ${app}?`, `<p>Some apps only load a new connection after a restart. Quit ${app} fully and open it again.</p>`),
+        q('restart', t('Did you restart {app}?', { app }), `<p>${t('Some apps only load a new connection after a restart. Quit {app} fully and open it again.', { app })}</p>`),
         q(
           'again',
-          'Copy it again',
-          `<p>The setup may have been pasted only partly. Copy it again, or make a new key if the old one is lost.</p>
+          t('Copy it again'),
+          `<p>${t('The setup may have been pasted only partly. Copy it again, or make a new key if the old one is lost.')}</p>
           <div class="row"><button type="button" class="btn sm" data-primary>${primaryLabel(c, true)}</button>
-          <button type="button" class="btn sm" data-roll>${ICO.key}Make a new key</button></div>`,
+          <button type="button" class="btn sm" data-roll>${ICO.key}${t('Make a new key')}</button></div>`,
         ),
-        q('refused', 'Refused attempts', '<div data-refused><p>Checking…</p></div>'),
+        q('refused', t('Refused attempts'), `<div data-refused><p>${t('Checking…')}</p></div>`),
       );
     }
-    return `<div class="cn-trouble"><h4>Not connected yet? Check these</h4>${parts.join('')}</div>`;
+    return `<div class="cn-trouble"><h4>${t('Not connected yet? Check these')}</h4>${parts.join('')}</div>`;
   };
 
   const liveFull = (c: ClientSnippet): string => {
     if (connected) {
       const id = connectedId || agent?.id || '';
       const open = !forAgent && o.onOpenAgent && id;
-      const what = connected.what ? `called <code>${esc(connected.what)}</code>` : 'made its first call';
-      return `<div class="cn-ok"><span class="big" aria-hidden="true">${ICO.check}</span><span class="tx"><h4>Connected</h4>
-        <p><b>${esc(connected.name)}</b> ${what} at ${esc(clockOf(connected.at))}.</p>${
+      const name = `<b>${esc(connected.name)}</b>`;
+      const time = esc(clockOf(connected.at));
+      return `<div class="cn-ok"><span class="big" aria-hidden="true">${ICO.check}</span><span class="tx"><h4>${t('Connected')}</h4>
+        <p>${
+          connected.what
+            ? t('{name} called {tool} at {time}.', { name, tool: `<code>${esc(connected.what)}</code>`, time })
+            : t('{name} made its first call at {time}.', { name, time })
+        }</p>${
           connectedPerms ? `<p>${esc(accessSentence(connectedPerms))}</p>` : ''
-        }${open ? `<button type="button" class="btn sm" data-open-agent>Open ${esc(connected.name)} ${ICO.arrow}</button>` : ''}</span></div>`;
+        }${open ? `<button type="button" class="btn sm" data-open-agent>${t('Open {name}', { name: esc(connected.name) })} ${ICO.arrow}</button>` : ''}</span></div>`;
     }
-    const t = target();
-    if (!t) return '';
-    const who = t.startsWith('oauth:')
-      ? `Waiting for <b>${esc(c.label)}</b> to sign in…`
+    const tg = target();
+    if (!tg) return '';
+    const who = tg.startsWith('oauth:')
+      ? t('Waiting for {app} to sign in…', { app: `<b>${esc(c.label)}</b>` })
       : agent?.used
-        ? `Waiting for the next call from <b>${esc(agent.name)}</b>…`
-        : `Waiting for the first call from <b>${esc(agent!.name)}</b>…`;
-    const ask = 'Call the Memora healthcheck tool, then search my memory for "project".';
+        ? t('Waiting for the next call from {name}…', { name: `<b>${esc(agent.name)}</b>` })
+        : t('Waiting for the first call from {name}…', { name: `<b>${esc(agent!.name)}</b>` });
+    const ask = t('Call the Memora healthcheck tool, then search my memory for "project".');
     return `<div class="cn-live"><span class="pulse" aria-hidden="true"></span><span>${who}</span></div>
-      <p class="cn-wait-sub">This page notices by itself as soon as ${esc(c.label)} connects. Keep it open.</p>${
-        t.startsWith('key:')
-          ? `<div class="cn-ask"><span>Not sure it is on? Ask ${esc(c.label)}: “${esc(ask)}”</span><button type="button" class="cc-ibtn" data-copy="${attr(
+      <p class="cn-wait-sub">${t('This page notices by itself as soon as {app} connects. Keep it open.', { app: esc(c.label) })}</p>${
+        tg.startsWith('key:')
+          ? `<div class="cn-ask"><span>${t('Not sure it is on? Ask {app}: “{question}”', { app: esc(c.label), question: esc(ask) })}</span><button type="button" class="cc-ibtn" data-copy="${attr(
               ask,
-            )}" aria-label="Copy the test question" title="Copy">${ICO.copy}</button></div>`
+            )}" aria-label="${t('Copy the test question')}" title="${t('Copy')}">${ICO.copy}</button></div>`
           : ''
       }${troubleOn() ? troubleHTML(c) : ''}`;
   };
 
   const liveMini = (c: ClientSnippet): string => {
     if (connected)
-      return `<div class="cn-live on"><span class="ok" aria-hidden="true">${ICO.check}</span><span class="grow"><b>Connected</b> · ${esc(
+      return `<div class="cn-live on"><span class="ok" aria-hidden="true">${ICO.check}</span><span class="grow"><b>${t('Connected')}</b> · ${t('{name} can use Memora now.', { name: esc(
         connected.name,
-      )} can use Memora now.</span></div>`;
-    const t = target();
-    if (!t) return '';
+      ) })}</span></div>`;
+    const tg = target();
+    if (!tg) return '';
     return `<div class="cn-live"><span class="pulse" aria-hidden="true"></span><span>${
-      t.startsWith('oauth:') ? `Waiting for <b>${esc(c.label)}</b> to sign in…` : `Waiting for <b>${esc(agent!.name)}</b> to connect…`
+      tg.startsWith('oauth:') ? t('Waiting for {app} to sign in…', { app: `<b>${esc(c.label)}</b>` }) : t('Waiting for {name} to connect…', { name: `<b>${esc(agent!.name)}</b>` })
     }</span></div>`;
   };
 
@@ -781,13 +787,13 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       .then((r) => {
         if (!el.isConnected) return;
         if (!r) {
-          el.innerHTML = '<p>Could not check right now.</p>';
+          el.innerHTML = `<p>${t('Could not check right now.')}</p>`;
           return;
         }
         const n = (r.events || []).filter((e) => e.event === 'key_fail' && Number((e as { at?: number }).at || 0) >= since).length;
         el.innerHTML = n
-          ? `<p>${n === 1 ? 'Something' : `${n} times, something`} tried to connect with a key that does not work. If that was ${esc(c.label)}, copy the setup again.</p>`
-          : `<p>None. Memora has not heard from ${esc(c.label)} at all yet, so it probably has not loaded the setup.</p>`;
+          ? `<p>${tn(n, 'Something tried to connect with a key that does not work. If that was {app}, copy the setup again.', '{n} times, something tried to connect with a key that does not work. If that was {app}, copy the setup again.', { app: esc(c.label) })}</p>`
+          : `<p>${t('None. Memora has not heard from {app} at all yet, so it probably has not loaded the setup.', { app: esc(c.label) })}</p>`;
       });
   };
 
@@ -815,8 +821,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     if (forAgent && agent && client) o.onAppChosen?.(agent.id, client);
     // The page says so itself when the check is on screen.
     const box = host.querySelector('[data-live]')?.getBoundingClientRect();
-    if (!box || box.bottom < 0 || box.top > window.innerHeight) toast(who + ' is connected', 'ok');
-    say(`Connected. ${who} made its first call.`);
+    if (!box || box.bottom < 0 || box.top > window.innerHeight) toast(t('{name} is connected', { name: who }), 'ok');
+    say(t('Connected. {name} made its first call.', { name: who }));
     if (step === 'prompt') paint();
     else paintLive();
     o.onChange?.();
@@ -824,12 +830,12 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   };
 
   const watch = (): void => {
-    const t = target();
-    if (t === watchFor) return;
+    const tg = target();
+    if (tg === watchFor) return;
     stopWatch();
-    watchFor = t;
+    watchFor = tg;
     connected = null;
-    if (!t) return;
+    if (!tg) return;
     armTrouble();
     const since = Date.now();
     let timer = 0;
@@ -849,7 +855,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     };
     const a = agent;
     const c = cur();
-    if (t.startsWith('key:') && a) {
+    if (tg.startsWith('key:') && a) {
       // Live over the socket, with a poll of the key's call count as a fallback.
       unsub = onAgents((_n, seen) => {
         const m = seen.find(
@@ -862,7 +868,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         if (!alive()) return;
         const d = await apiGet<KeysResult | KeyRow[]>('/api/keys').catch(() => null);
         const row = d ? (Array.isArray(d) ? d : d.keys || []).find((k) => k.id === a.id) : undefined;
-        if (!row || watchFor !== t) return;
+        if (!row || watchFor !== tg) return;
         if (base === null) base = row.uses || 0;
         else if ((row.uses || 0) > base) hit(a.name, '', a.id);
       };
@@ -873,7 +879,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       const poll = async (): Promise<void> => {
         if (!alive()) return;
         const d = await apiGet<{ connections?: { key_id: string }[] }>('/api/oauth/clients').catch(() => null);
-        if (!d || watchFor !== t) return;
+        if (!d || watchFor !== tg) return;
         const ids = (d.connections || []).map((x) => x.key_id);
         if (!base) {
           base = new Set(ids);
@@ -934,10 +940,10 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     cnt.shown = n;
     box.classList.toggle('got', n > 0);
     box.querySelector<HTMLElement>('.sub')!.textContent = n
-      ? `${cnt.name} saved ${n} note${n === 1 ? '' : 's'} so far.`
+      ? tn(n, '{name} saved {n} note so far.', '{name} saved {n} notes so far.', { name: cnt.name })
       : cnt.id
-        ? `Waiting for the first note from ${cnt.name}…`
-        : `Counting starts once ${c.label} is connected.`;
+        ? t('Waiting for the first note from {name}…', { name: cnt.name })
+        : t('Counting starts once {app} is connected.', { app: c.label });
     box.querySelector<HTMLElement>('.wr')!.innerHTML = cnt.writing ? `<i aria-hidden="true"></i><span>${esc(cnt.writing)}</span>` : '';
     box.querySelector<HTMLElement>('ul')!.innerHTML = cnt.notes
       .slice(0, 30)
@@ -1001,7 +1007,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       on('activity', (ev) => {
         if (ev.kind === 'user' || (ev.actorId ? ev.actorId !== cnt.id : ev.actor !== cnt.name)) return;
         const note = ev.phase === 'start' && ev.paths[0] ? titleOfPath(ev.paths[0]) : '';
-        if (ev.phase === 'start') cnt.writing = note ? `${cnt.name} is working on ${note}…` : `${cnt.name} is working…`;
+        if (ev.phase === 'start') cnt.writing = note ? t('{name} is working on {note}…', { name: cnt.name, note }) : t('{name} is working…', { name: cnt.name });
         else soon();
         // Not every call reports its end, so the line clears by itself.
         clearTimeout(cnt.wr);
@@ -1029,14 +1035,14 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
   const progHTML = (): string => {
     const ids = steps();
     const at = ids.indexOf(step);
-    return `<nav class="cn-prog" aria-label="Progress"><p class="cn-prog-m" aria-hidden="true">Step ${at + 1} of ${ids.length} · <b>${esc(
+    return `<nav class="cn-prog" aria-label="${t('Progress')}"><p class="cn-prog-m" aria-hidden="true">${t('Step {n} of {total}', { n: at + 1, total: ids.length })} · <b>${esc(
       STEP_LABEL[step],
     )}</b></p><ol>${ids
       .map((id, i) => {
         const cls = i < at ? 'done' : i === at ? 'on' : '';
         return `<li class="${cls}"><button type="button" data-go="${id}"${reachable(id) ? '' : ' disabled'}${
           i === at ? ' aria-current="step"' : ''
-        } aria-label="Step ${i + 1} of ${ids.length}: ${attr(STEP_LABEL[id])}${i < at ? ', done' : ''}"><span class="n" aria-hidden="true">${
+        } aria-label="${attr(i < at ? t('Step {n} of {total}: {name}, done', { n: i + 1, total: ids.length, name: STEP_LABEL[id] }) : t('Step {n} of {total}: {name}', { n: i + 1, total: ids.length, name: STEP_LABEL[id] }))}"><span class="n" aria-hidden="true">${
           i < at ? ICO.check : i + 1
         }</span><span class="l" aria-hidden="true">${esc(STEP_LABEL[id])}</span></button></li>`;
       })
@@ -1048,13 +1054,13 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
 
   const tile = (s: ClientSnippet): string => {
     const used = forAgent ? [] : sameApp(s.id);
-    const usedNote = used.length ? `${used.length === 1 ? used[0] : used.length + ' agents'} already use${used.length === 1 ? 's' : ''} it` : '';
+    const usedNote = used.length ? (used.length === 1 ? t('{name} already uses it', { name: used[0] }) : t('{n} agents already use it', { n: used.length })) : '';
     const one = s.how === 'One click';
     return `<button type="button" class="cn-tile" data-client="${attr(s.id)}" data-q="${attr(
       (s.label + ' ' + s.kind + ' ' + s.how).toLowerCase(),
     )}" aria-pressed="${s.id === client}"${usedNote ? ` aria-description="${attr(usedNote)}"` : ''}>${appIconHTML(s.label, 34)}<span class="tx"><b>${esc(
       s.label,
-    )}</b><small>${used.length ? `<span class="cn-in">${ICO.check}${used.length === 1 ? 'Already added' : used.length + ' already added'}</span>` : esc(s.kind)}</small><span class="cn-how${one ? ' one' : ''}">${one ? ICON.bolt : ICO.copy}${esc(s.how)}</span></span>${ICON.chev}</button>`;
+    )}</b><small>${used.length ? `<span class="cn-in">${ICO.check}${used.length === 1 ? t('Already added') : t('{n} already added', { n: used.length })}</span>` : esc(s.kind)}</small><span class="cn-how${one ? ' one' : ''}">${one ? ICON.bolt : ICO.copy}${esc(t(s.how))}</span></span>${ICON.chev}</button>`;
   };
 
   /** "You already have Cursor for Cursor": shown once an app with an agent is picked; continuing is fine. */
@@ -1067,50 +1073,51 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       used.length === 1
         ? esc(used[0])
         : used.length === 2
-          ? `${esc(used[0])} and ${esc(used[1])}`
-          : `${esc(used[0])}, ${esc(used[1])} and ${used.length - 2} more`;
-    return `<div class="cn-same" role="note"><span class="ic">${ICON.info}</span><span>You already have <b>${who}</b> for ${esc(
+          ? t('{list} and {last}', { list: esc(used[0]), last: esc(used[1]) })
+          : t('{list} and {n} more', { list: `${esc(used[0])}, ${esc(used[1])}`, n: used.length - 2 });
+    return `<div class="cn-same" role="note"><span class="ic">${ICON.info}</span><span>${t('You already have {who} for {app}. A separate agent per device keeps activity apart, so go ahead if this is another computer or setup.', { who: `<b>${who}</b>`, app: esc(
       c.label,
-    )}. A separate agent per device keeps activity apart, so go ahead if this is another computer or setup.</span></div>`;
+    ) })}</span></div>`;
   };
 
   const stepApp = (): string => {
     const all = snippets();
-    const head = forAgent ? `Which app is ${esc(agent!.name)} used with?` : 'Which app do you want to connect?';
+    const head = forAgent ? t('Which app is {name} used with?', { name: esc(agent!.name) }) : t('Which app do you want to connect?');
     const sub = forAgent
-      ? `The setup is shown for that app, with ${esc(agent!.name)}'s key filled in.`
-      : `Give each app or device its own agent. Activity then shows exactly who did what, and you can turn one off without touching the others.`;
+      ? t("The setup is shown for that app, with {name}'s key filled in.", { name: esc(agent!.name) })
+      : t('Give each app or device its own agent. Activity then shows exactly who did what, and you can turn one off without touching the others.');
     const oauth = all.filter((s) => s.oauth);
     const keyed = all.filter((s) => !s.oauth);
     return `<h3 class="cn-h" tabindex="-1" data-autofocus>${head}</h3><p class="cn-sub">${sub}</p>
-      <label class="cn-search">${ICO.search}<span class="sr-only">Search apps</span><input class="ui-input" type="search" id="cnQ" placeholder="Search apps" autocomplete="off"></label>
-      <section class="cn-group" data-group><h4>Sign in <span>Claude and ChatGPT sign in with your Memora account. Nothing to copy.</span></h4>
+      <label class="cn-search">${ICO.search}<span class="sr-only">${t('Search apps')}</span><input class="ui-input" type="search" id="cnQ" placeholder="${t('Search apps')}" autocomplete="off"></label>
+      <section class="cn-group" data-group><h4>${t('Sign in')} <span>${t('Claude and ChatGPT sign in with your Memora account. Nothing to copy.')}</span></h4>
         <div class="cn-grid">${oauth.map(tile).join('')}</div></section>
-      <section class="cn-group" data-group><h4>Apps on your computer <span>Each one gets its own key from Memora.</span></h4>
+      <section class="cn-group" data-group><h4>${t('Apps on your computer')} <span>${t('Each one gets its own key from Memora.')}</span></h4>
         <div class="cn-grid">${keyed.map(tile).join('')}</div></section>
-      <p class="cn-empty" id="cnNone" hidden>No app matches. <b>Other app</b> works with any app that takes a server address.</p>`;
+      <p class="cn-empty" id="cnNone" hidden>${t('No app matches. {other} works with any app that takes a server address.', { other: `<b>${t('Other app')}</b>` })}</p>`;
   };
 
   const accessHTML = (): string => {
     const c = cur()!;
     if (agent) {
-      return `<h3 class="cn-h" tabindex="-1" data-autofocus>Name &amp; access</h3><p class="cn-sub">The agent for ${esc(c.label)} is made.</p>
-        <div class="cn-done">${avatarHTML(agent.name, 40, '', agent.id)}<span class="tx"><b>${esc(agent.name)} is ready</b><small>${esc(
-          agent.perms ? summaryText(agent.perms) : 'Its key is filled in on the next step',
-        )}. Change its permissions any time from its page.</small></span></div>`;
+      return `<h3 class="cn-h" tabindex="-1" data-autofocus>${esc(t('Name & access'))}</h3><p class="cn-sub">${t('The agent for {app} is made.', { app: esc(c.label) })}</p>
+        <div class="cn-done">${avatarHTML(agent.name, 40, '', agent.id)}<span class="tx"><b>${t('{name} is ready', { name: esc(agent.name) })}</b><small>${esc(
+          agent.perms ? summaryText(agent.perms) : t('Its key is filled in on the next step'),
+        )}. ${t('Change its permissions any time from its page.')}</small></span></div>`;
     }
-    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Name it and choose what it may do</h3>
-      <p class="cn-sub">${esc(c.label)} gets its own agent and key. The key is made when you continue.</p>
-      ${sameAppNote()}<div class="ui-fld"><label for="cnName">Agent name</label>
+    return `<h3 class="cn-h" tabindex="-1" data-autofocus>${t('Name it and choose what it may do')}</h3>
+      <p class="cn-sub">${t('{app} gets its own agent and key. The key is made when you continue.', { app: esc(c.label) })}</p>
+      ${sameAppNote()}<div class="ui-fld"><label for="cnName">${t('Agent name')}</label>
         <input class="ui-input" id="cnName" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(nameEdited ? name : defaultName())}">
-        <span class="ui-help">It shows up under this name in Activity, the brain and the graph. Name it after the device when you use ${esc(
-          c.label,
-        )} in more than one place, like "${esc(appAgentName(c))} laptop".</span></div>
-      <div class="ui-fld" style="margin:0"><span class="ui-lbl" id="cnAccL">Access</span>
+        <span class="ui-help">${t('It shows up under this name in Activity, the brain and the graph. Name it after the device when you use {app} in more than one place, like "{example}".', {
+          app: esc(c.label),
+          example: t('{app} laptop', { app: esc(appAgentName(c)) }),
+        })}</span></div>
+      <div class="ui-fld" style="margin:0"><span class="ui-lbl" id="cnAccL">${t('Access')}</span>
         <div class="ui-rcs cn-acc" role="radiogroup" aria-labelledby="cnAccL">
-          ${radioCardHTML('rw', preset === 'rw', 'Can read and change', 'Searches, reads and saves notes. It cannot manage Memora or other agents.', 'Recommended')}
-          ${radioCardHTML('ro', preset === 'ro', 'Can only read', 'Searches and reads notes. Any change it tries is refused.')}
-          ${radioCardHTML('custom', preset === 'custom', 'Custom…', 'Pick exactly what it may do, tool by tool.')}
+          ${radioCardHTML('rw', preset === 'rw', t('Can read and change'), t('Searches, reads and saves notes. It cannot manage Memora or other agents.'), t('Recommended'))}
+          ${radioCardHTML('ro', preset === 'ro', t('Can only read'), t('Searches and reads notes. Any change it tries is refused.'))}
+          ${radioCardHTML('custom', preset === 'custom', t('Custom…'), t('Pick exactly what it may do, tool by tool.'))}
         </div></div>
       <div class="cn-custom" id="cnCustom" hidden></div>`;
   };
@@ -1120,29 +1127,29 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const a = agent;
     if (!a || (c.oauth && a.oauth)) {
       return c.oauth
-        ? `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>No key needed.</b> ${esc(
+        ? `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>${t('No key needed.')}</b> ${t('{app} signs in with your Memora account and shows up as its own agent.', { app: esc(
             c.label,
-          )} signs in with your Memora account and shows up as its own agent.</span></div>`
+          ) })}</span></div>`
         : '';
     }
     if (secrets.get(a.id)) return '';
     if (a.oauth) {
-      return `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>${esc(
+      return `<div class="cn-note"><span class="ic">${ICO.check}</span><span class="tx"><b>${t('{name} signed in with your Memora account.', { name: esc(
         a.name,
-      )} signed in with your Memora account.</b> The app holds its own key, so there is nothing to paste. To use ${esc(c.label)} with a key, connect it as a new agent.</span></div>`;
+      ) })}</b> ${t('The app holds its own key, so there is nothing to paste. To use {app} with a key, connect it as a new agent.', { app: esc(c.label) })}</span></div>`;
     }
     if (a.revealable) {
-      return `<form class="cn-unlock" id="cnUnlock"><div class="hd"><span class="ic">${ICON.lock}</span><span><b>Unlock ${esc(
+      return `<form class="cn-unlock" id="cnUnlock"><div class="hd"><span class="ic">${ICON.lock}</span><span><b>${t("Unlock {name}'s key first", { name: esc(
         a.name,
-      )}'s key first</b><small>It is kept locked on the server. Enter your Memora password and the buttons below put it in for you.</small></span></div>
-        <div class="row"><input class="ui-input" type="password" id="cnPw" autocomplete="current-password" placeholder="Your Memora password" aria-label="Your Memora password">
-        <button type="submit" class="btn primary">${ICON.lock}Unlock key</button></div>
-        <p class="alt">Or <button type="button" class="cn-link" data-roll>make a new key instead</button>; the current one stops working.</p></form>`;
+      ) })}</b><small>${t('It is kept locked on the server. Enter your Memora password and the buttons below put it in for you.')}</small></span></div>
+        <div class="row"><input class="ui-input" type="password" id="cnPw" autocomplete="current-password" placeholder="${t('Your Memora password')}" aria-label="${t('Your Memora password')}">
+        <button type="submit" class="btn primary">${ICON.lock}${t('Unlock key')}</button></div>
+        <p class="alt">${t('Or {link}; the current one stops working.', { link: `<button type="button" class="cn-link" data-roll>${t('make a new key instead')}</button>` })}</p></form>`;
     }
-    return `<div class="cn-unlock"><div class="hd"><span class="ic">${ICO.key}</span><span><b>Make a new key for ${esc(
+    return `<div class="cn-unlock"><div class="hd"><span class="ic">${ICO.key}</span><span><b>${t('Make a new key for {name} first', { name: esc(
       a.name,
-    )} first</b><small>Its key was shown only once, when it was made. A new key replaces it and the old one stops working at once.</small></span></div>
-      <div class="row"><button type="button" class="btn primary" data-roll>${ICO.key}Make a new key</button></div></div>`;
+    ) })}</b><small>${t('Its key was shown only once, when it was made. A new key replaces it and the old one stops working at once.')}</small></span></div>
+      <div class="row"><button type="button" class="btn primary" data-roll>${ICO.key}${t('Make a new key')}</button></div></div>`;
   };
 
   /** After the steps: the key in its own box, shown once when it was just made. */
@@ -1153,30 +1160,30 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const once = fresh.has(a.id);
     const note =
       c.id === 'http'
-        ? 'Paste it into the app where it asks for a key.'
-        : `The button above already puts it in; copy it only if you need it somewhere else.`;
-    return `<div class="cn-key${once ? ' once' : ''}">${avatarHTML(a.name, 32, '', a.id)}<span class="kt"><b>${esc(a.name)}'s key${
-      once ? ' · shown once' : ''
+        ? t('Paste it into the app where it asks for a key.')
+        : t('The button above already puts it in; copy it only if you need it somewhere else.');
+    return `<div class="cn-key${once ? ' once' : ''}">${avatarHTML(a.name, 32, '', a.id)}<span class="kt"><b>${t("{name}'s key", { name: esc(a.name) })}${
+      once ? ` · ${t('shown once')}` : ''
     }</b><code class="${shown ? 'full' : ''}">${esc(shown ? s : maskKey(s))}</code><small>${note}${
-      once ? ` Anyone with it can use your notes as ${esc(a.name)}.` : ''
+      once ? ` ${t('Anyone with it can use your notes as {name}.', { name: esc(a.name) })}` : ''
     }</small></span>
-      <span class="acts"><button type="button" class="btn sm" id="cnKeyEye" aria-pressed="${shown}">${shown ? 'Hide' : 'Show'}</button>
-      <button type="button" class="btn sm" id="cnKeyCopy">${ICO.copy}Copy key</button></span></div>`;
+      <span class="acts"><button type="button" class="btn sm" id="cnKeyEye" aria-pressed="${shown}">${shown ? t('Hide') : t('Show')}</button>
+      <button type="button" class="btn sm" id="cnKeyCopy">${ICO.copy}${t('Copy key')}</button></span></div>`;
   };
 
   /** The button (and what it copies, with dots for the key) inside a step. */
   const actionHTML = (c: ClientSnippet): string => {
     if (c.method === 'signin' || c.id === 'http')
       return `<pre class="cc-code cn-pre">${esc(mcpUrl())}</pre><div class="cn-copy"><span>${
-        c.oauth ? 'Paste it into ' + esc(c.label) : 'Your Memora address'
+        c.oauth ? t('Paste it into {app}', { app: esc(c.label) }) : t('Your Memora address')
       }</span><button type="button" class="btn primary" data-primary>${primaryLabel(c)}</button></div>`;
     if (c.method === 'deeplink')
       return `<div class="cn-act"><button type="button" class="btn primary" data-primary>${primaryLabel(
         c,
-      )}</button><button type="button" class="cn-link" data-alt>Copy setup instead</button></div>`;
-    return `<pre class="cc-code cn-pre" aria-label="${attr(c.method === 'command' ? 'The command' : 'The setup')}">${esc(
+      )}</button><button type="button" class="cn-link" data-alt>${t('Copy setup instead')}</button></div>`;
+    return `<pre class="cc-code cn-pre" aria-label="${attr(c.method === 'command' ? t('The command') : t('The setup'))}">${esc(
       setupText(c.id, mcpUrl(), KEY_DOTS),
-    )}</pre><div class="cn-copy"><span>${secret() ? 'The dots stand for the key; Copy puts it in.' : 'The dots stand for the key. Unlock it above first.'}</span>
+    )}</pre><div class="cn-copy"><span>${secret() ? t('The dots stand for the key; Copy puts it in.') : t('The dots stand for the key. Unlock it above first.')}</span>
       <button type="button" class="btn primary" data-primary>${primaryLabel(c)}</button></div>`;
   };
 
@@ -1184,36 +1191,36 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const url = mcpUrl();
     const away =
       publicOrigin() !== location.origin
-        ? `<p>Apps use this address (set with <code>MEMORA_BASE_URL</code>), even though this page is open at ${esc(location.host)}.</p>`
+        ? `<p>${t('Apps use this address (set with {env}), even though this page is open at {host}.', { env: '<code>MEMORA_BASE_URL</code>', host: esc(location.host) })}</p>`
         : '';
     const conf =
       c.method === 'deeplink' || (c.method === 'copy' && c.id !== 'http')
-        ? `<h5>Setup${c.file ? ` · <code>${esc(c.file)}</code>` : ''}</h5><pre>${esc(setupText(c.id, url, KEY_DOTS))}</pre>`
+        ? `<h5>${t('Setup')}${c.file ? ` · <code>${esc(c.file)}</code>` : ''}</h5><pre>${esc(setupText(c.id, url, KEY_DOTS))}</pre>`
         : c.file
-          ? `<h5>File</h5><p><code>${esc(c.file)}</code></p>`
+          ? `<h5>${t('File')}</h5><p><code>${esc(c.file)}</code></p>`
           : '';
     const test =
       c.id === 'http'
-        ? `<h5>Test it</h5><pre>${esc(testCommand(url, KEY_DOTS))}</pre><p>A list of tools in the answer means the key works.</p>`
+        ? `<h5>${t('Test it')}</h5><pre>${esc(testCommand(url, KEY_DOTS))}</pre><p>${t('A list of tools in the answer means the key works.')}</p>`
         : '';
-    return `<details class="cn-tech"${techOpen ? ' open' : ''}><summary>${ICON.right}Technical details</summary><div>
-      <h5>Memora address (MCP endpoint)</h5><pre>${esc(url)}</pre>${away}${conf}${test}${c.tech ? `<p>${c.tech}</p>` : ''}</div></details>`;
+    return `<details class="cn-tech"${techOpen ? ' open' : ''}><summary>${ICON.right}${t('Technical details')}</summary><div>
+      <h5>${t('Memora address (MCP endpoint)')}</h5><pre>${esc(url)}</pre>${away}${conf}${test}${c.tech ? `<p>${c.tech}</p>` : ''}</div></details>`;
   };
 
   const stepSetup = (): string => {
     const c = cur()!;
     const steps = c.steps.map((st) => `<li>${st.includes('{action}') ? st.replace('{action}', '') + actionHTML(c) : st}</li>`).join('');
-    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Connect ${esc(c.label)}</h3>
-      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(c.how)}</span></div>${agent ? '' : sameAppNote()}${keyFirstHTML(c)}
+    return `<h3 class="cn-h" tabindex="-1" data-autofocus>${t('Connect {app}', { app: esc(c.label) })}</h3>
+      <div class="cn-meta">${appIconHTML(c.label, 22)}<span>${esc(c.kind)} · ${esc(t(c.how))}</span></div>${agent ? '' : sameAppNote()}${keyFirstHTML(c)}
       <ol class="cn-steps">${steps}</ol>${keyBoxHTML(c)}
-      <section class="cn-test" aria-label="Connection check"><p class="sr-only" role="status" aria-live="polite" data-say></p><div data-live="full"></div></section>
+      <section class="cn-test" aria-label="${t('Connection check')}"><p class="sr-only" role="status" aria-live="polite" data-say></p><div data-live="full"></div></section>
       ${techHTML(c)}`;
   };
 
   const countHTML = (who: string): string =>
-    `<aside class="cn-count" data-count aria-labelledby="cnCountH"><h4 id="cnCountH">Notes from ${esc(who)}</h4>
+    `<aside class="cn-count" data-count aria-labelledby="cnCountH"><h4 id="cnCountH">${t('Notes from {name}', { name: esc(who) })}</h4>
       <div class="nr"><span class="n" aria-hidden="true">0</span><p class="sub" role="status" aria-live="polite"></p></div><p class="wr"></p>
-      <ul aria-label="Notes it saved"></ul><p class="hint" hidden>No notes yet. Did you send the prompt? Sometimes the app asks before it uses Memora the first time: allow it.</p></aside>`;
+      <ul aria-label="${t('Notes it saved')}"></ul><p class="hint" hidden>${t('No notes yet. Did you send the prompt? Sometimes the app asks before it uses Memora the first time: allow it.')}</p></aside>`;
 
   const stepPrompt = (): string => {
     const c = cur()!;
@@ -1224,39 +1231,39 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const rec = c.short ? 'short' : 'full';
     const tab = (k: 'full' | 'short', label: string): string =>
       `<button type="button" role="tab" data-pk="${k}" aria-selected="${kind === k}" aria-controls="cnPrompt" tabindex="${kind === k ? 0 : -1}">${label}${
-        rec === k ? '<span class="rec">Recommended</span>' : ''
+        rec === k ? `<span class="rec">${t('Recommended')}</span>` : ''
       }</button>`;
     const cards = firstPrompts(c.id)
       .map(
-        (p, i) => `<section class="cn-card${p.recommended ? ' rec' : ''}" aria-labelledby="cnP${i}"><h4 id="cnP${i}">${esc(p.title)}${
-          p.recommended ? '<span class="tag">Recommended</span>' : ''
-        }</h4><blockquote>${esc(p.text)}</blockquote>
-        <div class="row"><button type="button" class="btn${p.recommended ? ' primary' : ''}" data-prompt="${i}" aria-label="Copy: ${attr(p.title)}">${ICO.copy}Copy</button></div></section>`,
+        (p, i) => `<section class="cn-card${p.recommended ? ' rec' : ''}" aria-labelledby="cnP${i}"><h4 id="cnP${i}">${esc(t(p.title))}${
+          p.recommended ? `<span class="tag">${t('Recommended')}</span>` : ''
+        }</h4><blockquote>${esc(t(p.text))}</blockquote>
+        <div class="row"><button type="button" class="btn${p.recommended ? ' primary' : ''}" data-prompt="${i}" aria-label="${attr(t('Copy: {title}', { title: t(p.title) }))}">${ICO.copy}${t('Copy')}</button></div></section>`,
       )
       .join('');
-    return `<h3 class="cn-h" tabindex="-1" data-autofocus>Now ask ${esc(who)} to save what it knows</h3>
-      <p class="cn-sub">Copy one of these and send it to ${esc(c.label)} like a normal message. The notes it saves show up here as they arrive.</p>
+    return `<h3 class="cn-h" tabindex="-1" data-autofocus>${t('Now ask {name} to save what it knows', { name: esc(who) })}</h3>
+      <p class="cn-sub">${t('Copy one of these and send it to {app} like a normal message. The notes it saves show up here as they arrive.', { app: esc(c.label) })}</p>
       <div class="cn-test mini" data-live="mini"></div>
       <div class="cn-fp"><div class="cn-cards">${cards}</div>${countHTML(who)}</div>
-      <details class="cn-more"${moreOpen ? ' open' : ''}><summary>${ICON.right}<span>More instruction styles <small>· for every conversation</small></span></summary><div>
-      <p class="lead">Paste these once where ${esc(c.label)} reads its standing instructions, so it uses Memora in every conversation, not only when asked.</p>
-      <div class="cn-where"><span class="ic">${ICON.pin}</span><span><b class="k">Where to paste it</b>${c.rules}</span></div>
-      <div class="cc-seg cn-pstyle" role="group" aria-label="Instruction style">${PROMPT_STYLES.map(
+      <details class="cn-more"${moreOpen ? ' open' : ''}><summary>${ICON.right}<span>${t('More instruction styles')} <small>· ${t('for every conversation')}</small></span></summary><div>
+      <p class="lead">${t('Paste these once where {app} reads its standing instructions, so it uses Memora in every conversation, not only when asked.', { app: esc(c.label) })}</p>
+      <div class="cn-where"><span class="ic">${ICON.pin}</span><span><b class="k">${t('Where to paste it')}</b>${c.rules}</span></div>
+      <div class="cc-seg cn-pstyle" role="group" aria-label="${t('Instruction style')}">${PROMPT_STYLES.map(
         (st, i) =>
-          `<button type="button" data-pstyle="${st.id}" aria-pressed="${st.id === style.id}">${esc(st.label)}${i === 0 ? '<span class="rec">Recommended</span>' : ''}</button>`,
+          `<button type="button" data-pstyle="${st.id}" aria-pressed="${st.id === style.id}">${esc(st.label)}${i === 0 ? `<span class="rec">${t('Recommended')}</span>` : ''}</button>`,
       ).join('')}</div>
       <p class="cn-pdesc">${esc(style.desc)}</p>
-      ${style.warning ? `<div class="cn-once" role="note">${ICON.lock}<span><b>Notes are not a password manager.</b> ${esc(style.warning)}</span></div>` : ''}
-      <div class="cc-seg cn-ptabs" role="tablist" aria-label="Instructions">${tab('full', 'Full')}${tab('short', 'Short')}</div>
-      <div class="cn-prompt" id="cnPrompt" role="tabpanel">${codeHTML(text, 'Copy the instructions')}
-        <div class="cn-copy"><span>${kind === 'short' ? 'A few lines, for small context windows' : 'The complete guide, best for most agents'}</span>
-        <button type="button" class="btn primary" data-copy="${attr(text)}">${ICO.copy}Copy ${kind === 'short' ? 'short' : 'full'} instructions</button></div></div>
-      <a class="cn-doc" href="/docs/agent-instructions" id="cnDoc">Read the full documentation ${ICO.arrow}</a></div></details>`;
+      ${style.warning ? `<div class="cn-once" role="note">${ICON.lock}<span><b>${t('Notes are not a password manager.')}</b> ${esc(style.warning)}</span></div>` : ''}
+      <div class="cc-seg cn-ptabs" role="tablist" aria-label="${t('Instructions')}">${tab('full', t('Full'))}${tab('short', t('Short'))}</div>
+      <div class="cn-prompt" id="cnPrompt" role="tabpanel">${codeHTML(text, t('Copy the instructions'))}
+        <div class="cn-copy"><span>${kind === 'short' ? t('A few lines, for small context windows') : t('The complete guide, best for most agents')}</span>
+        <button type="button" class="btn primary" data-copy="${attr(text)}">${ICO.copy}${kind === 'short' ? t('Copy short instructions') : t('Copy full instructions')}</button></div></div>
+      <a class="cn-doc" href="/docs/agent-instructions" id="cnDoc">${t('Read the full documentation')} ${ICO.arrow}</a></div></details>`;
   };
 
   const nav = (): void => {
     const first = steps().indexOf(step) <= 0;
-    const next = step === 'prompt' ? 'Done' : step === 'access' && !agent ? 'Create key' : 'Continue';
+    const next = step === 'prompt' ? t('Done') : step === 'access' && !agent ? t('Create key') : t('Continue');
     o.setNav({ back: !first, next });
   };
 
@@ -1274,7 +1281,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       void startCount();
       paintCount();
     } else stopCount();
-    o.setSub?.(cur()?.label || (forAgent ? agent!.name : 'Pick an app'));
+    o.setSub?.(cur()?.label || (forAgent ? agent!.name : t('Pick an app')));
     o.onInfo?.(info());
     if (focus) {
       // The step starts at its top, progress included, wherever the page was scrolled.
@@ -1290,8 +1297,8 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     if (agent?.perms) access = summaryText(agent.perms);
     else if (!agent && cur() && !cur()!.oauth) {
       const p = preset === 'custom' ? (editor ? editor.read() : custom) : presetPerms(preset, cachedCatalog());
-      access = p ? summaryText(p) : preset === 'custom' ? 'Custom' : '';
-    } else if (cur()?.oauth && !agent) access = 'Chosen when it signs in';
+      access = p ? summaryText(p) : preset === 'custom' ? t('Custom') : '';
+    } else if (cur()?.oauth && !agent) access = t('Chosen when it signs in');
     return { step, client: cur() || null, agent, name: agent ? agent.name : typed, access, connectedId, connected: !!connected };
   };
 
@@ -1305,7 +1312,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
 
   const go = (id: StepId): void => {
     if (!reachable(id)) {
-      if (!cur()) toast('Pick an app first', 'warn');
+      if (!cur()) toast(t('Pick an app first'), 'warn');
       return;
     }
     keepAccess();
@@ -1339,7 +1346,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const input = host.querySelector<HTMLInputElement>('#cnName')!;
     const n = input.value.trim();
     if (!n) {
-      toast('Give the agent a name', 'warn');
+      toast(t('Give the agent a name'), 'warn');
       input.focus();
       return;
     }
@@ -1368,18 +1375,18 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     const c = cur();
     if (!c) return;
     if (c.method === 'signin' || c.id === 'http') {
-      await copyText(mcpUrl(), 'Address copied');
+      await copyText(mcpUrl(), t('Address copied'));
     } else {
       const s = secret();
       if (!s) {
-        toast(agent?.revealable ? 'Unlock the key first' : 'Make a new key first', 'warn');
+        toast(agent?.revealable ? t('Unlock the key first') : t('Make a new key first'), 'warn');
         host.querySelector<HTMLElement>('#cnPw, .cn-unlock [data-roll]')?.focus();
         return;
       }
       if (c.method === 'deeplink' && !alt) {
         window.location.href = oneClickLink(c.id, mcpUrl(), s);
-        toast(`Opening ${appAgentName(c)}…`, 'info', 2400);
-      } else await copyText(setupText(c.id, mcpUrl(), s), c.method === 'command' ? 'Command copied. Paste it in your terminal.' : 'Setup copied');
+        toast(t('Opening {app}…', { app: appAgentName(c) }), 'info', 2400);
+      } else await copyText(setupText(c.id, mcpUrl(), s), c.method === 'command' ? t('Command copied. Paste it in your terminal.') : t('Setup copied'));
     }
     if (!connected && target()) {
       armTrouble();
@@ -1396,9 +1403,9 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
       if (!a) return;
       roll.onclick = () =>
         Modal.confirm(
-          'Make a new key',
-          `${a.name}'s current key stops working at once. The new one is put in here; update the app that uses the old one.`,
-          'Make a new key',
+          t('Make a new key'),
+          t("{name}'s current key stops working at once. The new one is put in here; update the app that uses the old one.", { name: a.name }),
+          t('Make a new key'),
           async () => {
             try {
               const r = await apiPost<{ key?: string }>('/api/keys/roll', { id: a.id });
@@ -1408,12 +1415,12 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
                 fresh.add(a.id);
                 shown = false;
                 o.onChange?.();
-                toast('New key made', 'ok');
+                toast(t('New key made'), 'ok');
                 if (!connected && target()) armTrouble();
                 paint();
               }
             } catch (err) {
-              toast('Could not make a new key: ' + (err as Error).message, 'err');
+              toast(t('Could not make a new key: {error}', { error: (err as Error).message }), 'err');
             }
           },
           false,
@@ -1474,7 +1481,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         host.querySelector<HTMLElement>('#cnKeyEye')?.focus();
       };
     const copy = host.querySelector<HTMLButtonElement>('#cnKeyCopy');
-    if (copy) copy.onclick = () => void copyText(secret(), 'Key copied');
+    if (copy) copy.onclick = () => void copyText(secret(), t('Key copied'));
     const a = agent;
     const unlock = host.querySelector<HTMLFormElement>('#cnUnlock');
     if (unlock && a) {
@@ -1482,7 +1489,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         e.preventDefault();
         const pw = host.querySelector<HTMLInputElement>('#cnPw')!;
         if (!pw.value) {
-          toast('Enter your Memora password', 'warn');
+          toast(t('Enter your Memora password'), 'warn');
           pw.focus();
           return;
         }
@@ -1490,14 +1497,14 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
         btn.disabled = true;
         try {
           const r = await apiPost<{ key?: string }>('/api/keys/reveal', { id: a.id, current: pw.value });
-          if (!r || !r.key) throw new Error('the server returned no key');
+          if (!r || !r.key) throw new Error(t('the server returned no key'));
           secrets.set(a.id, r.key);
-          toast('Key unlocked', 'ok');
+          toast(t('Key unlocked'), 'ok');
           paint();
           host.querySelector<HTMLElement>('[data-primary]')?.focus();
         } catch (err) {
           btn.disabled = false;
-          toast((err as Error).message || 'Could not unlock the key', 'err');
+          toast((err as Error).message || t('Could not unlock the key'), 'err');
           pw.select();
         }
       };
@@ -1509,7 +1516,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     host.querySelectorAll<HTMLButtonElement>('[data-prompt]').forEach((b) => {
       const c = cur();
       const p = c ? firstPrompts(c.id)[Number(b.dataset.prompt)] : undefined;
-      if (c && p) b.onclick = () => void copyText(p.text, `Copied. Now paste it in ${c.label} and send it.`);
+      if (c && p) b.onclick = () => void copyText(t(p.text), t('Copied. Now paste it in {app} and send it.', { app: c.label }));
     });
     host.querySelectorAll<HTMLButtonElement>('[data-pstyle]').forEach((b) => {
       b.onclick = () => {
@@ -1550,7 +1557,7 @@ export function mountConnectWizard(host: HTMLElement, o: WizardOptions): Wizard 
     next: async () => {
       if (step === 'prompt') return true;
       if (step === 'app') {
-        if (!cur()) toast('Pick an app first', 'warn');
+        if (!cur()) toast(t('Pick an app first'), 'warn');
         else chooseApp(client);
         return false;
       }

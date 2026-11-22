@@ -3,6 +3,8 @@
 
 import { apiGet, apiPost } from '../api';
 import { attr, el, esc, useStyles } from '../dom';
+import { t, tn } from '../i18n';
+import { ts } from '../i18n/server';
 import { Modal } from '../modal';
 import { toast } from '../toast';
 import { I } from './icons';
@@ -81,7 +83,7 @@ export async function uploadImage(note: string, file: Blob, name?: string): Prom
     body: file,
   });
   const data = (await res.json().catch(() => ({}))) as Partial<Uploaded> & { error?: string };
-  if (!res.ok) throw new Error(data.error || `could not upload (HTTP ${res.status})`);
+  if (!res.ok) throw new Error((data.error && ts(data.error)) || t('could not upload (HTTP {status})', { status: res.status }));
   // Storage health is checked again (the banner follows).
   window.dispatchEvent(new Event('memora:storage-check'));
   return data as Uploaded;
@@ -97,7 +99,7 @@ export function noteImages(note: string): Promise<NoteImages> {
 
 function usedLabel(img: VaultImage): string {
   const n = img.used_in.length;
-  return n === 0 ? 'Not shown in a note' : n === 1 ? 'In 1 note' : `In ${n} notes`;
+  return n === 0 ? t('Not shown in a note') : tn(n, 'In {n} note', 'In {n} notes');
 }
 
 /** A grid of thumbnails; a click opens the viewer. `changed` runs after a delete. */
@@ -133,24 +135,24 @@ export function openImageViewer(img: VaultImage, changed?: () => void): void {
   const md = `![${img.name.replace(/\.[^.]+$/, '')}](path:${img.name})`;
   body.innerHTML = `<figure class="vx-iv-fig"><img alt="${attr(img.name)}" src="${attr(img.url)}"></figure>
     <dl class="vx-iv-meta">
-      <div><dt>Folder</dt><dd>${esc(img.folder || ROOT_LABEL)}</dd></div>
-      <div><dt>Size</dt><dd>${esc(fmtBytes(img.bytes))}<span data-dim></span></dd></div>
-      <div><dt>In notes</dt><dd>${img.used_in.length}</dd></div>
+      <div><dt>${t('Folder')}</dt><dd>${esc(img.folder || ROOT_LABEL)}</dd></div>
+      <div><dt>${t('Size')}</dt><dd>${esc(fmtBytes(img.bytes))}<span data-dim></span></dd></div>
+      <div><dt>${t('In notes')}</dt><dd>${img.used_in.length}</dd></div>
     </dl>
-    <h4 class="vx-iv-h">Shown in</h4>
+    <h4 class="vx-iv-h">${t('Shown in')}</h4>
     ${
       img.used_in.length
         ? `<div class="vx-iv-uses">${img.used_in
             .map(
               (u, i) =>
                 `<button type="button" class="vx-iv-use" data-u="${i}">${I.note}<span><b>${esc(u.title)}</b><small>${esc(
-                  u.heading ? `Section: ${u.heading}` : 'Before the first heading',
+                  u.heading ? t('Section: {heading}', { heading: u.heading }) : t('Before the first heading'),
                 )}</small></span>${I.caret}</button>`,
             )
             .join('')}</div>`
-        : '<p class="vx-iv-none">No note of this folder shows it yet. Add the line below to a note in the same folder.</p>'
+        : `<p class="vx-iv-none">${t('No note of this folder shows it yet. Add the line below to a note in the same folder.')}</p>`
     }
-    <div class="vx-iv-md"><code>${esc(md)}</code><button type="button" class="btn sm ghost" data-copy>${I.copy}<span>Copy</span></button></div>`;
+    <div class="vx-iv-md"><code>${esc(md)}</code><button type="button" class="btn sm ghost" data-copy>${I.copy}<span>${t('Copy')}</span></button></div>`;
   const pic = body.querySelector<HTMLImageElement>('.vx-iv-fig img')!;
   pic.onload = () => {
     body.querySelector('[data-dim]')!.textContent = ` · ${pic.naturalWidth} × ${pic.naturalHeight}`;
@@ -163,32 +165,36 @@ export function openImageViewer(img: VaultImage, changed?: () => void): void {
   });
   body.querySelector<HTMLElement>('[data-copy]')!.onclick = () => {
     void navigator.clipboard?.writeText(md).then(
-      () => toast('Image line copied', 'ok'),
-      () => toast('Could not copy', 'err'),
+      () => toast(t('Image line copied'), 'ok'),
+      () => toast(t('Could not copy'), 'err'),
     );
   };
   Modal.open({
     title: img.name,
-    sub: 'Image',
+    sub: t('Image'),
     body,
     wide: true,
     actions: [
       {
-        label: 'Delete image',
+        label: t('Delete image'),
         cls: 'danger ghost',
         run: () => {
           const shown = img.used_in.length;
           Modal.confirm(
-            'Delete this image?',
+            t('Delete this image?'),
             shown
-              ? `${shown === 1 ? 'One note shows' : `${shown} notes show`} this image; it will show as missing there. The version history keeps it.`
-              : 'The image file is deleted. The version history keeps it.',
-            'Delete image',
+              ? tn(
+                  shown,
+                  'One note shows this image; it will show as missing there. The version history keeps it.',
+                  '{n} notes show this image; it will show as missing there. The version history keeps it.',
+                )
+              : t('The image file is deleted. The version history keeps it.'),
+            t('Delete image'),
             async () => {
               try {
                 await apiPost('/api/vault/image/delete', { path: img.path });
                 Modal.close();
-                toast('Image deleted', 'ok');
+                toast(t('Image deleted'), 'ok');
                 changed?.();
               } catch (e) {
                 toast((e as Error).message, 'err');
@@ -197,8 +203,8 @@ export function openImageViewer(img: VaultImage, changed?: () => void): void {
           );
         },
       },
-      { label: 'Open original', cls: 'ghost', run: () => window.open(img.url, '_blank', 'noopener') },
-      { label: 'Close', cls: 'primary', run: () => Modal.close() },
+      { label: t('Open original'), cls: 'ghost', run: () => window.open(img.url, '_blank', 'noopener') },
+      { label: t('Close'), cls: 'primary', run: () => Modal.close() },
     ],
   });
 }

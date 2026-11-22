@@ -2,6 +2,7 @@
 // images are dropped because the docs page never loads remote or repository files.
 
 import { esc } from '../dom';
+import { t } from '../i18n';
 
 /** Where a link in a document points, decided by the caller. */
 export type LinkTarget =
@@ -42,13 +43,13 @@ export function uniqueSlug(text: string, slugs: Map<string, number>): string {
 export function headingHTML(level: number, anchor: string, inner: string): string {
   return `<h${level} id="${HEADING_PREFIX}${esc(anchor)}" class="dc-h"><span>${inner}</span><a class="dc-anchor" href="#${esc(
     anchor,
-  )}" data-anchor="${esc(anchor)}" aria-label="Link to this section">#</a></h${level}>`;
+  )}" data-anchor="${esc(anchor)}" aria-label="${esc(t('Link to this section'))}">#</a></h${level}>`;
 }
 
 /** A code block with a language label and a Copy button (the view wires it). */
 export function codeBlockHTML(code: string, lang = '', label = ''): string {
   const tag = label || lang || 'text';
-  return `<div class="dc-code"><div class="dc-code-bar"><span>${esc(tag)}</span><button type="button" class="dc-copy" data-copy-code aria-label="Copy code">Copy</button></div><pre><code>${esc(
+  return `<div class="dc-code"><div class="dc-code-bar"><span>${esc(tag)}</span><button type="button" class="dc-copy" data-copy-code aria-label="${esc(t('Copy code'))}">${esc(t('Copy'))}</button></div><pre><code>${esc(
     code,
   )}</code></pre></div>`;
 }

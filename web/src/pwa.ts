@@ -2,6 +2,7 @@ import { buildOf, isNewBuild } from './build-version';
 import { $ } from './dom';
 import { Modal } from './modal';
 import { toast } from './toast';
+import { t } from './i18n';
 
 export const PWA = {
   prompt: null as (Event & { prompt: () => void; userChoice: Promise<unknown> }) | null,
@@ -25,7 +26,7 @@ export const PWA = {
     window.addEventListener('appinstalled', () => {
       this.prompt = null;
       $('#pwaBtn').classList.add('hidden');
-      toast('App installed', 'ok', 2600);
+      toast(t('App installed'), 'ok', 2600);
     });
     // iOS Safari has no beforeinstallprompt event, so show the manual button.
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -46,13 +47,13 @@ export const PWA = {
       return;
     }
     Modal.open({
-      title: 'Install Memora',
+      title: t('Install Memora'),
       body: `<div class="panel-body" style="padding:0">
-        <p><b>Desktop (Chrome or Edge)</b> - click the install icon at the right end of the address bar, or open the <span class="mono">&#8942;</span> menu and choose <i>Install</i>.</p>
-        <p><b>Android (Chrome)</b> - open the <span class="mono">&#8942;</span> menu and choose <i>Add to home screen</i>.</p>
-        <p><b>iPhone or iPad (Safari)</b> - tap <i>Share</i> and choose <i>Add to Home Screen</i>.</p>
-        <p style="color:var(--muted)">Once installed, the app has its own icon, opens full screen and stays reachable when the network drops.</p></div>`,
-      actions: [{ label: 'Got it', cls: 'primary', run: () => Modal.close() }],
+        <p><b>${t('Desktop (Chrome or Edge)')}</b> - ${t('click the install icon at the right end of the address bar, or open the {menu} menu and choose {install}.', { menu: '<span class="mono">&#8942;</span>', install: `<i>${t('Install')}</i>` })}</p>
+        <p><b>${t('Android (Chrome)')}</b> - ${t('open the {menu} menu and choose {add}.', { menu: '<span class="mono">&#8942;</span>', add: `<i>${t('Add to home screen')}</i>` })}</p>
+        <p><b>${t('iPhone or iPad (Safari)')}</b> - ${t('tap {share} and choose {add}.', { share: `<i>${t('Share')}</i>`, add: `<i>${t('Add to Home Screen')}</i>` })}</p>
+        <p style="color:var(--muted)">${t('Once installed, the app has its own icon, opens full screen and stays reachable when the network drops.')}</p></div>`,
+      actions: [{ label: t('Got it'), cls: 'primary', run: () => Modal.close() }],
     });
   },
 };
@@ -74,7 +75,7 @@ let told = false;
 
 function reloadWhenSafe(): void {
   if (document.querySelector('.note-editor')) {
-    if (!told) toast('A new version of Memora is ready. Reload when you are done editing.', 'info', 8000);
+    if (!told) toast(t('A new version of Memora is ready. Reload when you are done editing.'), 'info', 8000);
     told = true;
     return;
   }

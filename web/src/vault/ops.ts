@@ -3,6 +3,7 @@
 import { apiPost } from '../api';
 import { noteName, stemTitle } from '../format';
 import { hooks } from '../hooks';
+import { t, tn } from '../i18n';
 import { noteTitle, state } from '../state';
 import type { OkResult } from '../types';
 import {
@@ -107,10 +108,10 @@ export async function moveNotes(paths: string[], folder: string, withUndo = true
   }
   await reload();
   done.forEach((m) => markMoving(m.to, null));
-  if (errors.length) undoToast(`${errors.length} could not be moved. ${errors[0]}`, null, 'err');
+  if (errors.length) undoToast(t('{n} could not be moved. {error}', { n: errors.length, error: errors[0] }), null, 'err');
   if (done.length && withUndo) {
-    const label = done.length === 1 ? `"${noteTitle(done[0].from)}"` : `${done.length} notes`;
-    undoToast(`Moved ${label} to ${folder || ROOT_LABEL}`, async () => {
+    const label = done.length === 1 ? `"${noteTitle(done[0].from)}"` : tn(done.length, '{n} note', '{n} notes');
+    undoToast(t('Moved {what} to {folder}', { what: label, folder: folder || ROOT_LABEL }), async () => {
       for (const m of done.slice().reverse()) {
         try {
           await moveOne(m.to, dirOf(m.from));
@@ -139,7 +140,7 @@ export async function relocateFolder(src: string, dest: string, verb: string, wi
   try {
     await go(src, dest);
   } catch (e) {
-    undoToast(`Could not ${verb.toLowerCase()} "${baseName(src)}": ${(e as Error).message}`, null, 'err');
+    undoToast(t('Could not {verb} "{name}": {error}', { verb: t(verb).toLowerCase(), name: baseName(src), error: (e as Error).message }), null, 'err');
     return false;
   }
   folderPathChanged(src, dest);
@@ -152,12 +153,12 @@ export async function relocateFolder(src: string, dest: string, verb: string, wi
   saveOpen();
   await reload();
   if (withUndo) {
-    undoToast(`${verb} "${baseName(src)}" → ${dest}`, async () => {
+    undoToast(t('{verb} "{name}" → {dest}', { verb: t(verb), name: baseName(src), dest }), async () => {
       try {
         await go(dest, src);
         folderPathChanged(dest, src);
       } catch (e) {
-        undoToast('Undo failed: ' + (e as Error).message, null, 'err');
+        undoToast(t('Undo failed: {error}', { error: (e as Error).message }), null, 'err');
       }
       await reload();
     });
@@ -174,10 +175,10 @@ export async function moveFolderContents(src: string, into: string): Promise<boo
     saveOpen();
     await reload();
     const n = (r && r.moved && r.moved.length) || 0;
-    undoToast(`Moved ${n} item${n === 1 ? '' : 's'} from "${baseName(src)}" to ${into || ROOT_LABEL}`, null, 'info');
+    undoToast(tn(n, 'Moved {n} item from "{name}" to {folder}', 'Moved {n} items from "{name}" to {folder}', { name: baseName(src), folder: into || ROOT_LABEL }), null, 'info');
     return true;
   } catch (e) {
-    undoToast('Could not move the contents: ' + (e as Error).message, null, 'err');
+    undoToast(t('Could not move the contents: {error}', { error: (e as Error).message }), null, 'err');
     return false;
   }
 }
@@ -194,20 +195,20 @@ export async function renameNote(path: string, name: string): Promise<string | n
     pathChanged(path, to);
     await reload();
     markMoving(to, null);
-    undoToast(`Renamed to "${clean}"`, async () => {
+    undoToast(t('Renamed to "{name}"', { name: clean }), async () => {
       markMoving(to, 'Renaming');
       try {
         const back = await apiPost<OkResult>('/api/rename', { path: to, name: noteName(path) });
         pathChanged(to, (back && back.path) || path);
       } catch (e) {
-        undoToast('Undo failed: ' + (e as Error).message, null, 'err');
+        undoToast(t('Undo failed: {error}', { error: (e as Error).message }), null, 'err');
       }
       await reload();
       markMoving(to, null);
     });
     return to;
   } catch (e) {
-    undoToast('Rename failed: ' + (e as Error).message, null, 'err');
+    undoToast(t('Rename failed: {error}', { error: (e as Error).message }), null, 'err');
     return null;
   } finally {
     markMoving(path, null);
@@ -231,7 +232,7 @@ export async function createNote(folder: string, title: string): Promise<string 
     await reload();
     return (r && r.path) || null;
   } catch (e) {
-    undoToast('Could not create the note: ' + (e as Error).message, null, 'err');
+    undoToast(t('Could not create the note: {error}', { error: (e as Error).message }), null, 'err');
     return null;
   }
 }
@@ -250,7 +251,7 @@ export async function createFolder(parent: string, name: string): Promise<string
     await reload();
     return path;
   } catch (e) {
-    undoToast('Could not create the folder: ' + (e as Error).message, null, 'err');
+    undoToast(t('Could not create the folder: {error}', { error: (e as Error).message }), null, 'err');
     return null;
   }
 }
@@ -270,7 +271,7 @@ export async function trashNotes(paths: string[]): Promise<Trashed[]> {
       notePathChanged(p, null);
       done.push({ path: p, name: baseName(r.to || p) });
     } catch (e) {
-      undoToast(`Could not move "${noteTitle(p)}" to the Trash: ${(e as Error).message}`, null, 'err');
+      undoToast(t('Could not move "{name}" to the Trash: {error}', { name: noteTitle(p), error: (e as Error).message }), null, 'err');
     }
   }
   await reload();
@@ -304,7 +305,7 @@ export async function deleteFolder(path: string, choice: FolderDeleteChoice): Pr
     await reload();
     return choice.mode === 'trash' ? (r.count ?? notes.length) : moved.size;
   } catch (e) {
-    undoToast('Could not delete the folder: ' + (e as Error).message, null, 'err');
+    undoToast(t('Could not delete the folder: {error}', { error: (e as Error).message }), null, 'err');
     await reload();
     return null;
   }
@@ -324,7 +325,7 @@ export async function setFolderMeta(folder: string, patch: { color?: string; ico
     refreshers.forEach((fn) => fn());
     hooks.renderTree();
   } catch (e) {
-    undoToast('Failed: ' + (e as Error).message, null, 'err');
+    undoToast(t('Failed: {error}', { error: (e as Error).message }), null, 'err');
   }
 }
 

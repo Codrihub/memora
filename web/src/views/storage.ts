@@ -12,6 +12,8 @@ import { icon } from '../ui/icons';
 import { openLightbox } from '../ui/lightbox';
 import { requestSettingsSection } from '../version';
 import { openOnPage } from '../assistant/page';
+import { t, tn } from '../i18n';
+import { ts } from '../i18n/server';
 
 export type StoreKind = 'notes' | 'images' | 'chats';
 type Level = 'ok' | 'almost' | 'full';
@@ -39,8 +41,14 @@ export interface StorageHealth {
 /** Ask for a fresh check (after an image upload, from anywhere). */
 export const STORAGE_CHECK = 'memora:storage-check';
 
-const KIND_LABEL: Record<StoreKind, string> = { notes: 'Notes', images: 'Images', chats: 'Chats' };
-const COUNT_WORD: Record<StoreKind, [string, string]> = { notes: ['note', 'notes'], images: ['image', 'images'], chats: ['chat', 'chats'] };
+const KIND_LABEL: Record<StoreKind, string> = { notes: t('Notes'), images: t('Images'), chats: t('Chats') };
+/** "12 notes", "1 image". */
+function countText(kind: StoreKind, n: number): string {
+  const v = { n: n.toLocaleString('en-US') };
+  if (kind === 'notes') return tn(n, '{n} note', '{n} notes', v);
+  if (kind === 'images') return tn(n, '{n} image', '{n} images', v);
+  return tn(n, '{n} chat', '{n} chats', v);
+}
 
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -112,7 +120,8 @@ function toShow(h: StorageHealth): KindHealth[] {
 }
 
 function lineText(k: KindHealth): string {
-  return `${KIND_LABEL[k.kind]} storage is ${k.level === 'full' ? 'full' : 'almost full'}: ${Math.round(k.percent)}% used.`;
+  const v = { kind: KIND_LABEL[k.kind], pct: Math.round(k.percent) };
+  return k.level === 'full' ? t('{kind} storage is full: {pct}% used.', v) : t('{kind} storage is almost full: {pct}% used.', v);
 }
 
 function paintBanner(h: StorageHealth): void {
@@ -136,9 +145,9 @@ function paintBanner(h: StorageHealth): void {
   bar.innerHTML = `<div class="sto-ban-l">${list
     .map(
       (k) =>
-        `<div class="sto-ban-i" data-k="${k.kind}">${icon('alert')}<span title="${attr(k.message || '')}">${esc(lineText(k))}</span><button type="button" class="sto-ban-a" data-manage="${k.kind}">Manage</button></div>`,
+        `<div class="sto-ban-i" data-k="${k.kind}">${icon('alert')}<span title="${attr(ts(k.message || ''))}">${esc(lineText(k))}</span><button type="button" class="sto-ban-a" data-manage="${k.kind}">${t('Manage')}</button></div>`,
     )
-    .join('')}</div><button type="button" class="sto-ban-x" aria-label="Dismiss" title="Dismiss">${icon('close')}</button>`;
+    .join('')}</div><button type="button" class="sto-ban-x" aria-label="${t('Dismiss')}" title="${t('Dismiss')}">${icon('close')}</button>`;
   bar.querySelectorAll<HTMLElement>('[data-manage]').forEach((b) => {
     b.onclick = () => manageStorage(b.dataset.manage as StoreKind);
   });
@@ -171,20 +180,19 @@ export function initStorageBanner(): void {
 // ---- Settings: Storage ----
 
 export function storageSectionHTML(): string {
-  return `<div class="st-card"><div id="stoKinds" class="sto-kinds"><span class="st-note">Measuring…</span></div></div>`;
+  return `<div class="st-card"><div id="stoKinds" class="sto-kinds"><span class="st-note">${t('Measuring…')}</span></div></div>`;
 }
 
 function kindRow(k: KindHealth): string {
-  const [one, many] = COUNT_WORD[k.kind];
-  const room = k.room === 'limit' ? 'limit' : k.room === 'disk' ? 'free disk' : 'room unknown';
-  const of = k.room_bytes ? ` of ${fmtBytes(k.room_bytes)} (${room})` : '';
+  const room = k.room === 'limit' ? t('limit') : k.room === 'disk' ? t('free disk') : t('room unknown');
+  const of = k.room_bytes ? ' ' + t('of {size} ({room})', { size: fmtBytes(k.room_bytes), room }) : '';
   const pct = Math.max(0, Math.min(100, k.percent));
   return `<div class="sto-k" data-k="${k.kind}">
     <div class="sto-k-h"><b>${KIND_LABEL[k.kind]}</b><span class="sto-k-p lv-${k.level}">${Math.round(k.percent)}%</span></div>
-    <div class="sto-bar lv-${k.level}" role="progressbar" aria-label="${KIND_LABEL[k.kind]} storage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}"><i style="width:${pct.toFixed(1)}%"></i></div>
-    <div class="sto-k-f"><small>${fmtBytes(k.used_bytes)}${of} · ${k.count.toLocaleString('en-US')} ${k.count === 1 ? one : many}</small>
-      <label class="sto-lim">Limit<span><input type="number" min="0" step="1" inputmode="numeric" data-lim="${k.kind}" value="${k.limit_mb ? attr(String(k.limit_mb)) : ''}" placeholder="None" aria-label="${KIND_LABEL[k.kind]} limit in MB"> MB</span></label></div>
-    ${k.message && k.level !== 'ok' ? `<p class="sto-k-m lv-${k.level}">${esc(k.message)}</p>` : ''}
+    <div class="sto-bar lv-${k.level}" role="progressbar" aria-label="${t('{kind} storage', { kind: KIND_LABEL[k.kind] })}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}"><i style="width:${pct.toFixed(1)}%"></i></div>
+    <div class="sto-k-f"><small>${fmtBytes(k.used_bytes)}${of} · ${countText(k.kind, k.count)}</small>
+      <label class="sto-lim">${t('Limit')}<span><input type="number" min="0" step="1" inputmode="numeric" data-lim="${k.kind}" value="${k.limit_mb ? attr(String(k.limit_mb)) : ''}" placeholder="${t('None')}" aria-label="${t('{kind} limit in MB', { kind: KIND_LABEL[k.kind] })}"> MB</span></label></div>
+    ${k.message && k.level !== 'ok' ? `<p class="sto-k-m lv-${k.level}">${esc(ts(k.message))}</p>` : ''}
   </div>`;
 }
 
@@ -198,18 +206,23 @@ export async function wireStorageSection(host: HTMLElement): Promise<void> {
     if (active && box.contains(active) && active.dataset.lim) return;
     box.innerHTML =
       h.kinds.map(kindRow).join('') +
-      `<p class="st-note">Each kind is measured against its own room: its limit when set, else what it uses plus the free disk space${
-        h.disk ? ` (${fmtBytes(h.disk.free_bytes)} free of ${fmtBytes(h.disk.total_bytes)})` : ''
-      }. Empty limit: none.</p>`;
+      `<p class="st-note">${t('Each kind is measured against its own room: its limit when set, else what it uses plus the free disk space{disk}. Empty limit: none.', {
+        disk: h.disk ? ` (${t('{free} free of {total}', { free: fmtBytes(h.disk.free_bytes), total: fmtBytes(h.disk.total_bytes) })})` : '',
+      })}</p>`;
     box.querySelectorAll<HTMLInputElement>('[data-lim]').forEach((inp) => {
       inp.onchange = async () => {
         const v = inp.value.trim();
         const mb = v === '' ? null : Math.max(0, Math.round(Number(v)));
-        if (mb !== null && !Number.isFinite(mb)) return toast('Type a number of MB, or leave it empty', 'err');
+        if (mb !== null && !Number.isFinite(mb)) return toast(t('Type a number of MB, or leave it empty'), 'err');
         try {
           await saveLimits({ [`${inp.dataset.lim}_mb`]: mb || null });
           inp.blur();
-          toast(mb ? `${KIND_LABEL[inp.dataset.lim as StoreKind]} limited to ${mb} MB` : `No limit for ${KIND_LABEL[inp.dataset.lim as StoreKind].toLowerCase()}`, 'ok');
+          toast(
+            mb
+              ? t('{kind} limited to {n} MB', { kind: KIND_LABEL[inp.dataset.lim as StoreKind], n: mb })
+              : t('No limit for {kind}', { kind: KIND_LABEL[inp.dataset.lim as StoreKind].toLowerCase() }),
+            'ok',
+          );
         } catch (e) {
           toast((e as Error).message, 'err');
         }
@@ -221,7 +234,7 @@ export async function wireStorageSection(host: HTMLElement): Promise<void> {
   try {
     await loadHealth(true);
   } catch (e) {
-    box.innerHTML = `<span class="st-note">Could not measure the storage: ${esc((e as Error).message)}</span>`;
+    box.innerHTML = `<span class="st-note">${t('Could not measure the storage: {error}', { error: esc((e as Error).message) })}</span>`;
   }
 }
 
@@ -252,8 +265,8 @@ interface AllImages {
 const PAGE = 60;
 
 export function galleryHTML(): string {
-  return `<div class="st-card sto-gal" id="stoGal"><div class="st-ch"><h3>All images</h3><p>Every image in the notes folder and where it is shown, and the pictures kept for Mnemo chats.</p></div>
-    <div class="sto-gal-b"><span class="st-note">Opens when you scroll here.</span></div></div>`;
+  return `<div class="st-card sto-gal" id="stoGal"><div class="st-ch"><h3>${t('All images')}</h3><p>${t('Every image in the notes folder and where it is shown, and the pictures kept for Mnemo chats.')}</p></div>
+    <div class="sto-gal-b"><span class="st-note">${t('Opens when you scroll here.')}</span></div></div>`;
 }
 
 export function wireGallery(host: HTMLElement): void {
@@ -266,18 +279,18 @@ export function wireGallery(host: HTMLElement): void {
   let sort: 'new' | 'big' = 'new';
   let shown = PAGE;
   const load = async (): Promise<void> => {
-    body.innerHTML = '<span class="st-note">Loading images…</span>';
+    body.innerHTML = `<span class="st-note">${t('Loading images…')}</span>`;
     try {
       data = await apiGet<AllImages>('/api/vault/images/all');
       paint();
     } catch (e) {
-      body.innerHTML = `<span class="st-note">Could not list the images: ${esc((e as Error).message)}</span>`;
+      body.innerHTML = `<span class="st-note">${t('Could not list the images: {error}', { error: esc((e as Error).message) })}</span>`;
     }
   };
-  const tile = (src: string, name: string, meta: string, used: string, attrs: string): string =>
-    `<div class="sto-t"${attrs}><button type="button" class="sto-t-img" data-open title="${attr(name)}" aria-label="${attr('Open ' + name)}"><img alt="" loading="lazy" src="${attr(
+  const tile = (src: string, name: string, meta: string, used: string, attrs: string, del = ''): string =>
+    `<div class="sto-t"${attrs}><button type="button" class="sto-t-img" data-open title="${attr(name)}" aria-label="${attr(t('Open {name}', { name }))}"><img alt="" loading="lazy" src="${attr(
       src,
-    )}" onerror="this.parentElement.classList.add('gone')"></button><div class="sto-t-b"><b title="${attr(name)}">${esc(name)}</b><small>${esc(meta)}</small>${used}</div></div>`;
+    )}" onerror="this.parentElement.classList.add('gone')"></button><div class="sto-t-b"><b title="${attr(name)}">${esc(name)}</b><small>${esc(meta)}</small>${used}</div>${del}</div>`;
   const paint = (): void => {
     if (!data) return;
     const vault = data.images.slice().sort((a, b) => (sort === 'big' ? b.bytes - a.bytes : b.mtime - a.mtime));
@@ -293,12 +306,12 @@ export function wireGallery(host: HTMLElement): void {
         .map((c) =>
           tile(
             c.url,
-            c.name || 'Picture',
+            c.name || t('Picture'),
             fmtBytes(c.bytes),
             `<div class="sto-used">${
               c.chats.length
-                ? c.chats.map((x) => `<button type="button" class="sto-link" data-chat="${attr(x.id)}" title="${attr(x.title)}">${esc(x.title || 'Chat')}</button>`).join('')
-                : '<span class="sto-none">No chat</span>'
+                ? c.chats.map((x) => `<button type="button" class="sto-link" data-chat="${attr(x.id)}" title="${attr(x.title)}">${esc(x.title || t('Chat'))}</button>`).join('')
+                : `<span class="sto-none">${t('No chat')}</span>`
             }</div>`,
             ` data-src="${attr(c.url)}"`,
           ),
@@ -312,7 +325,7 @@ export function wireGallery(host: HTMLElement): void {
           tile(
             i.url,
             i.name,
-            `${fmtBytes(i.bytes)} · ${i.folder || 'Top level'}`,
+            `${fmtBytes(i.bytes)} · ${i.folder || t('Top level')}`,
             `<div class="sto-used">${
               i.used_in.length
                 ? i.used_in
@@ -324,64 +337,69 @@ export function wireGallery(host: HTMLElement): void {
                         )}</button>`,
                     )
                     .join('') + (i.used_in.length > 3 ? `<small>+${i.used_in.length - 3}</small>` : '')
-                : '<span class="sto-none">Not used</span>'
-            }</div><button type="button" class="sto-del" data-del title="Delete image" aria-label="Delete ${attr(i.name)}">${icon('trash')}</button>`,
+                : `<span class="sto-none">${t('Not used')}</span>`
+            }</div>`,
             ` data-src="${attr(i.url)}" data-path="${attr(i.path)}"`,
+            `<button type="button" class="sto-del" data-del title="${t('Delete image')}" aria-label="${t('Delete {name}', { name: attr(i.name) })}">${icon('trash')}</button>`,
           ),
         )
         .join('');
     }
-    body.innerHTML = `<div class="sto-gal-bar"><div class="sto-seg" role="radiogroup" aria-label="Show">${seg('all', 'All', vault.length)}${seg('unused', 'Not used', unused.length)}${seg(
+    body.innerHTML = `<div class="sto-gal-bar"><div class="sto-seg" role="radiogroup" aria-label="${t('Show')}">${seg('all', t('All'), vault.length)}${seg('unused', t('Not used'), unused.length)}${seg(
       'chat',
-      'Chat pictures',
+      t('Chat pictures'),
       chats.length,
-    )}</div><div class="sto-seg" role="radiogroup" aria-label="Sort"><button type="button" role="radio" aria-checked="${sort === 'new'}" class="${sort === 'new' ? 'on' : ''}" data-s="new">Newest</button><button type="button" role="radio" aria-checked="${
+    )}</div><div class="sto-seg" role="radiogroup" aria-label="${t('Sort')}"><button type="button" role="radio" aria-checked="${sort === 'new'}" class="${sort === 'new' ? 'on' : ''}" data-s="new">${t('Newest')}</button><button type="button" role="radio" aria-checked="${
       sort === 'big'
-    }" class="${sort === 'big' ? 'on' : ''}" data-s="big">Largest</button></div><small class="sto-gal-n">${fmtBytes(data.bytes)} in the notes folder</small></div>
-      ${tiles ? `<div class="sto-grid">${tiles}</div>` : `<p class="st-note">${filter === 'unused' ? 'Every image is used in a note.' : filter === 'chat' ? 'No pictures kept for chats.' : 'No images yet.'}</p>`}
-      ${total > shown ? `<button type="button" class="btn sm sto-more" data-more>Show more (${total - shown} left)</button>` : ''}`;
+    }" class="${sort === 'big' ? 'on' : ''}" data-s="big">${t('Largest')}</button></div><small class="sto-gal-n">${t('{size} in the notes folder', { size: fmtBytes(data.bytes) })}</small></div>
+      ${tiles ? `<div class="sto-grid">${tiles}</div>` : `<p class="st-note">${filter === 'unused' ? t('Every image is used in a note.') : filter === 'chat' ? t('No pictures kept for chats.') : t('No images yet.')}</p>`}
+      ${total > shown ? `<button type="button" class="btn sm sto-more" data-more>${t('Show more ({n} left)', { n: total - shown })}</button>` : ''}`;
   };
   body.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    const f = t.closest<HTMLElement>('[data-f]');
+    const tg = e.target as HTMLElement;
+    const f = tg.closest<HTMLElement>('[data-f]');
     if (f) {
       filter = f.dataset.f as typeof filter;
       shown = PAGE;
       return paint();
     }
-    const s = t.closest<HTMLElement>('[data-s]');
+    const s = tg.closest<HTMLElement>('[data-s]');
     if (s) {
       sort = s.dataset.s as typeof sort;
       shown = PAGE;
       return paint();
     }
-    if (t.closest('[data-more]')) {
+    if (tg.closest('[data-more]')) {
       shown += PAGE;
       return paint();
     }
-    const note = t.closest<HTMLElement>('[data-note]');
+    const note = tg.closest<HTMLElement>('[data-note]');
     if (note) return hooks.openNote(note.dataset.note!);
-    const chat = t.closest<HTMLElement>('[data-chat]');
+    const chat = tg.closest<HTMLElement>('[data-chat]');
     if (chat) {
       openOnPage(chat.dataset.chat!);
       hooks.go('assistant');
       return;
     }
-    const tileEl = t.closest<HTMLElement>('.sto-t');
+    const tileEl = tg.closest<HTMLElement>('.sto-t');
     if (!tileEl) return;
-    if (t.closest('[data-del]')) {
+    if (tg.closest('[data-del]')) {
       const path = tileEl.dataset.path!;
       const img = data?.images.find((x) => x.path === path);
       const n = img?.used_in.length || 0;
       Modal.confirm(
-        'Delete this image?',
-        n ? `${n === 1 ? 'One note shows' : `${n} notes show`} this image; it will show as missing there. The version history keeps it.` : 'The image file is deleted. The version history keeps it.',
-        'Delete image',
+        t('Delete this image?'),
+        n
+          ? n === 1
+            ? t('One note shows this image; it will show as missing there. The version history keeps it.')
+            : t('{n} notes show this image; it will show as missing there. The version history keeps it.', { n })
+          : t('The image file is deleted. The version history keeps it.'),
+        t('Delete image'),
         async () => {
           try {
             await apiPost('/api/vault/image/delete', { path });
             Modal.close();
-            toast('Image deleted', 'ok');
+            toast(t('Image deleted'), 'ok');
             if (data) data.images = data.images.filter((x) => x.path !== path);
             paint();
             window.dispatchEvent(new Event(STORAGE_CHECK));
@@ -392,7 +410,7 @@ export function wireGallery(host: HTMLElement): void {
       );
       return;
     }
-    if (t.closest('[data-open]')) {
+    if (tg.closest('[data-open]')) {
       const tiles = Array.from(body.querySelectorAll<HTMLElement>('.sto-t'));
       const set = tiles.map((x) => ({ src: x.dataset.src!, caption: x.querySelector('b')?.textContent || '' }));
       openLightbox(tileEl.dataset.src!, tileEl.querySelector('b')?.textContent || '', set, Math.max(0, tiles.indexOf(tileEl)));
@@ -447,23 +465,39 @@ const CSS = `
 .sto-seg button span{opacity:.75;font-variant-numeric:tabular-nums}
 .sto-seg button.on{background:var(--seg-thumb,var(--surface-0));color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.1)}
 .sto-gal-n{margin-left:auto;font-size:12px;color:var(--muted)}
-.sto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.sto-t{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-0,var(--bg))}
-.sto-t-img{display:block;width:100%;aspect-ratio:4/3;padding:0;border:0;background:color-mix(in srgb,var(--fg) 5%,transparent);cursor:zoom-in}
-.sto-t-img img{display:block;width:100%;height:100%;object-fit:cover}
+/* The gallery: every tile the same square card whatever the picture's shape (cover-cropped),
+   its name and size on a soft dark fade at the bottom, Pinterest-like; where it is used and
+   Delete come up on hover or focus (always shown on touch screens). */
+.sto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
+.sto-t{position:relative;aspect-ratio:1/1;min-width:0;border-radius:14px;overflow:hidden;isolation:isolate;
+  background:color-mix(in srgb,var(--fg) 6%,var(--surface-0,var(--bg)));box-shadow:0 0 0 1px color-mix(in srgb,var(--line) 70%,transparent)}
+.sto-t-img{position:absolute;inset:0;display:block;width:100%;height:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.sto-t-img img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .5s cubic-bezier(.22,.8,.24,1)}
 .sto-t-img.gone img{display:none}
-.sto-t-b{display:flex;flex-direction:column;gap:3px;padding:7px 9px 9px;min-width:0}
-.sto-t-b b{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sto-t-b small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sto-used{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-.sto-link{max-width:100%;padding:1px 6px;border:0;border-radius:6px;background:var(--accent-soft);color:var(--fg);font:inherit;font-size:11.5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sto-link:hover{text-decoration:underline}
-.sto-none{padding:1px 6px;border-radius:6px;font-size:11.5px;font-weight:600;color:var(--warn,#d97706);background:color-mix(in srgb,var(--warn,#d97706) 12%,transparent)}
-.sto-del{position:absolute;top:6px;right:6px;display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;color:var(--muted);cursor:pointer;
-  background:color-mix(in srgb,var(--surface-0,var(--bg)) 88%,transparent)}
+.sto-t-img:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:14px}
+.sto-t-b{position:absolute;inset:auto 0 0 0;display:flex;flex-direction:column;gap:3px;min-width:0;padding:36px 11px 10px;pointer-events:none;color:#fff;
+  background:linear-gradient(to top,rgba(8,10,14,.82) 0%,rgba(8,10,14,.5) 45%,rgba(8,10,14,0) 100%);transition:padding .3s cubic-bezier(.22,.8,.24,1)}
+.sto-t-b b{font-size:12.5px;font-weight:620;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.sto-t-b small{font-size:11px;color:rgba(255,255,255,.72);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sto-used{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;min-width:0;overflow:hidden;pointer-events:auto;
+  max-height:0;opacity:0;margin-top:0;transition:max-height .3s cubic-bezier(.22,.8,.24,1),opacity .2s,margin-top .3s}
+.sto-used>small{flex:none;color:rgba(255,255,255,.75)}
+.sto-link{flex:0 1 auto;min-width:0;max-width:100%;padding:2px 7px;border:0;border-radius:6px;background:rgba(255,255,255,.18);color:#fff;font:inherit;font-size:11px;
+  cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:background .15s}
+.sto-link:hover{background:rgba(255,255,255,.3)}
+.sto-link:focus-visible{outline:2px solid #fff;outline-offset:1px}
+.sto-none{flex:none;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:600;color:#fcd34d;background:rgba(252,211,77,.18)}
+.sto-del{position:absolute;top:8px;right:8px;z-index:1;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:9px;color:#fff;cursor:pointer;
+  background:rgba(8,10,14,.45);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);opacity:0;transform:translateY(-4px);transition:opacity .2s,transform .25s,background .15s}
 .sto-del .i{width:15px;height:15px}
-.sto-del:hover{color:var(--danger)}
+.sto-del:hover{background:var(--danger,#dc2626)}
+.sto-del:focus-visible{opacity:1;transform:none;outline:2px solid #fff;outline-offset:1px}
+.sto-t:is(:hover,:focus-within) .sto-t-img img{transform:scale(1.045)}
+.sto-t:is(:hover,:focus-within) .sto-used{max-height:26px;opacity:1;margin-top:3px}
+.sto-t:is(:hover,:focus-within) .sto-del{opacity:1;transform:none}
+@media (hover:none){.sto-used{max-height:26px;opacity:1;margin-top:3px}.sto-del{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.sto-t-img img,.sto-t-b,.sto-used,.sto-del{transition:none}.sto-t:hover .sto-t-img img{transform:none}}
 .sto-more{margin-top:12px}
-@media (max-width:640px){.sto-gal-b{padding:0 16px 16px}.sto-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sto-gal-n{margin-left:0;width:100%}}
+@media (max-width:640px){.sto-gal-b{padding:0 16px 16px}.sto-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sto-gal-n{margin-left:0;width:100%}}
 @media (prefers-reduced-motion:reduce){.sto-bar i{transition:none}}
 `;

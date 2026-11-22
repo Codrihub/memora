@@ -16,6 +16,7 @@ import { Simulation } from './sim';
 import { graphStyles } from './styles';
 import { helpHTML, sliderHTML, toggleHTML, ViewChrome } from '../ui/view-chrome';
 import { NodeCard, type CardLink } from '../ui/node-card';
+import { t, tn } from '../i18n';
 
 const ICON: Record<string, string> = {
   force: '<circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="7" r="1.6"/><circle cx="7" cy="19" r="1.6"/><path d="M10 10.5 6.3 7M14 11l3.6-3M10.4 14 8 17.6"/>',
@@ -196,7 +197,7 @@ export class GraphApp {
         g = data;
         this.layout = layout;
       } catch (e) {
-        this.showEmpty('Could not load the graph', (e as Error).message);
+        this.showEmpty(t('Could not load the graph'), (e as Error).message);
         return;
       }
       const first = !this.loaded;
@@ -462,7 +463,7 @@ export class GraphApp {
 
   private template(): string {
     return `
-<canvas class="gx-cv" tabindex="0" aria-label="Knowledge graph"></canvas>
+<canvas class="gx-cv" tabindex="0" aria-label="${t('Knowledge graph')}"></canvas>
 <div class="gx-empty gx-hide"><b></b><span></span></div>
 <div class="gx-tip gx-glass gx-hide"></div>
 `;
@@ -473,7 +474,7 @@ export class GraphApp {
       page: 'graph',
       root: this.root,
       search: {
-        placeholder: 'Find a note, #tag or in:folder',
+        placeholder: t('Find a note, #tag or in:folder'),
         find: {
           items: () =>
             this.nodes
@@ -519,8 +520,8 @@ export class GraphApp {
           this.kick();
         },
         help: {
-          nodes: 'Names next to the notes. The note under the pointer and its neighbours always show theirs.',
-          folders: 'Folder names: the point of each folder and the title over the area its notes fill.',
+          nodes: t('Names next to the notes. The note under the pointer and its neighbours always show theirs.'),
+          folders: t('Folder names: the point of each folder and the title over the area its notes fill.'),
         },
       },
       filter: (host) => this.renderPanel(host),
@@ -646,9 +647,9 @@ export class GraphApp {
       const nb = this.nbr.get(n)?.size || 0;
       const sub =
         n.kind === 'folder'
-          ? `Folder · ${n.degree} item${n.degree === 1 ? '' : 's'}`
-          : `${esc(n.dir || 'Vault root')} · ${nb} connection${nb === 1 ? '' : 's'}`;
-      tip.innerHTML = `<b>${esc(n.label)}</b><span>${sub}${n.pinned ? ' · pinned' : ''}</span>`;
+          ? tn(n.degree, 'Folder · {n} item', 'Folder · {n} items')
+          : `${esc(n.dir || t('Vault root'))} · ${tn(nb, '{n} connection', '{n} connections')}`;
+      tip.innerHTML = `<b>${esc(n.label)}</b><span>${sub}${n.pinned ? ' · ' + t('pinned') : ''}</span>`;
       tip.style.left = Math.min(sx, this.cam.w - 270) + 'px';
       tip.style.top = Math.min(sy, this.cam.h - 70) + 'px';
       tip.classList.remove('gx-hide');
@@ -998,7 +999,7 @@ export class GraphApp {
         return [
           {
             id: 'pin',
-            label: n.pinned ? 'Unpin (P): let it move again' : 'Pin (P): keep it where it is',
+            label: n.pinned ? t('Unpin (P): let it move again') : t('Pin (P): keep it where it is'),
             icon: svg('pin'),
             on: !!n.pinned,
             run: () => this.togglePin(n),
@@ -1033,28 +1034,28 @@ export class GraphApp {
       return;
     }
     const lay = (m: LayoutMode, label: string): string =>
-      `<button type="button" data-mode="${m}" class="${this.prefs.mode === m ? 'on' : ''}" title="${label} layout (${m === 'force' ? 1 : m === 'radial' ? 2 : 3})">${svg(m)}${label}</button>`;
+      `<button type="button" data-mode="${m}" class="${this.prefs.mode === m ? 'on' : ''}" title="${t('{name} layout ({n})', { name: label, n: m === 'force' ? 1 : m === 'radial' ? 2 : 3 })}">${svg(m)}${label}</button>`;
     const mode = this.prefs.mode;
     const layHelp: Record<LayoutMode, string> = {
-      force: 'Force: linked notes pull together and the rest push apart, so clusters form by themselves.',
-      radial: 'Radial: folders sit on rings around the vault, their notes fanned out beneath them.',
-      clusters: 'Clusters: each folder gathers into its own island.',
+      force: t('Force: linked notes pull together and the rest push apart, so clusters form by themselves.'),
+      radial: t('Radial: folders sit on rings around the vault, their notes fanned out beneath them.'),
+      clusters: t('Clusters: each folder gathers into its own island.'),
     };
     const spHelp: Record<LayoutMode, string> = {
-      force: 'How hard notes push each other apart in the Force layout.',
-      radial: 'How far apart the rings of the Radial layout are.',
-      clusters: 'How far apart the folder islands of the Clusters layout are.',
+      force: t('How hard notes push each other apart in the Force layout.'),
+      radial: t('How far apart the rings of the Radial layout are.'),
+      clusters: t('How far apart the folder islands of the Clusters layout are.'),
     };
     host.innerHTML = `
-<h4>Layout ${helpHTML(layHelp[mode])}</h4>
-<div class="vc-seg" role="group" aria-label="Layout">${lay('force', 'Force')}${lay('radial', 'Radial')}${lay('clusters', 'Clusters')}</div>
-${sliderHTML('spacing', 'Spacing', 0.4, 2.5, 0.05, this.prefs.spacingBy[mode], spHelp[mode])}
-<h4>Graph</h4>
-${toggleHTML('folders', 'Folder hubs', this.prefs.folders, 'A point for every folder, linked to the notes inside it.')}
-${toggleHTML('hulls', 'Folder hulls', this.prefs.hulls, 'A soft shape around the notes of each folder (Force and Clusters).')}
-${toggleHTML('orphans', 'Nodes without links', this.prefs.orphans, 'Notes that link nowhere and are linked from nowhere.')}
-${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>Clear tag filter (${this.filters.tags.size})</button>` : ''}
-<div class="vc-hint">Drag notes · double-click to pin · / search · #tag finds tags · F fit · 1 2 3 layouts</div>`;
+<h4>${t('Layout')} ${helpHTML(layHelp[mode])}</h4>
+<div class="vc-seg" role="group" aria-label="${t('Layout')}">${lay('force', t('Force'))}${lay('radial', t('Radial'))}${lay('clusters', t('Clusters'))}</div>
+${sliderHTML('spacing', t('Spacing'), 0.4, 2.5, 0.05, this.prefs.spacingBy[mode], spHelp[mode])}
+<h4>${t('Graph')}</h4>
+${toggleHTML('folders', t('Folder hubs'), this.prefs.folders, t('A point for every folder, linked to the notes inside it.'))}
+${toggleHTML('hulls', t('Folder hulls'), this.prefs.hulls, t('A soft shape around the notes of each folder (Force and Clusters).'))}
+${toggleHTML('orphans', t('Nodes without links'), this.prefs.orphans, t('Notes that link nowhere and are linked from nowhere.'))}
+${this.filters.tags.size ? `<button type="button" class="vc-act" data-clear>${t('Clear tag filter ({n})', { n: this.filters.tags.size })}</button>` : ''}
+<div class="vc-hint">${t('Drag notes · double-click to pin · / search · #tag finds tags · F fit · 1 2 3 layouts')}</div>`;
     host.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => {
       b.onclick = () => {
         this.setMode(b.dataset.mode as LayoutMode);

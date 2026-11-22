@@ -8,7 +8,7 @@ import { avatarHTML, setAgentColors } from '../control/agents';
 import { openAgentPage, runUndo, useActivityStyles, wireActRows } from '../control/activity';
 import { actionLabel, groupBursts, isSystem } from '../control/sentence';
 import { fromAuth, fromLog, loadFeed, onLive, PausedQueue, pushLive, type ActivityItem, type Source } from '../control/feed';
-import { ICO, openMenu, plural, systemHeader, useControlStyles, whileVisible } from '../control/ui';
+import { ICO, openMenu, systemHeader, useControlStyles, whileVisible } from '../control/ui';
 import type { KeyRow, KeysResult, LogsResult } from '../types';
 import { toast } from '../toast';
 import { logsTimeline, onNavigate, replaceHistory, setKeysRoute, setLogsTimeline, syncUrl, takeRouteAgent } from '../router';
@@ -67,6 +67,7 @@ import {
   wireTimeline,
 } from './activity-views';
 import { openFilters, refreshFilters } from './activity-filters';
+import { t, tn } from '../i18n';
 
 const CSS = `
 .ax{container:ax/inline-size;--r14:14px;--tile:color-mix(in srgb,var(--fg) 5%,transparent)}
@@ -333,8 +334,8 @@ function applyView(): void {
   const was = root.dataset.view;
   root.dataset.view = tl ? 'timeline' : 'summary';
   root.querySelector('.sys-t p')!.textContent = tl
-    ? 'Every action, newest first, with search and filters.'
-    : 'What your AIs read, write and search in your notes.';
+    ? t('Every action, newest first, with search and filters.')
+    : t('What your AIs read, write and search in your notes.');
   root.querySelectorAll<HTMLElement>('.ax-tab').forEach((t) => {
     if (t.dataset.v === root.dataset.view) t.setAttribute('aria-current', 'page');
     else t.removeAttribute('aria-current');
@@ -388,7 +389,7 @@ async function redirect(slug: string): Promise<boolean> {
     }
     const q = document.getElementById('axQ') as HTMLInputElement | null;
     if (q) q.value = '';
-  } else toast(`Nothing in the log goes by “${slug}”. Showing all activity.`, 'info');
+  } else toast(t('Nothing in the log goes by “{name}”. Showing all activity.', { name: slug }), 'info');
   return false;
 }
 
@@ -396,34 +397,34 @@ function build(h: HTMLElement): void {
   h.innerHTML = `<div id="axRoot" class="cc ax">
     ${systemHeader(
       'logs',
-      'Activity',
-      'What your AIs read, write and search in your notes.',
+      t('Activity'),
+      t('What your AIs read, write and search in your notes.'),
       `<span id="axTime"></span><button type="button" class="lg-live" id="lgLive" aria-pressed="${live}"></button>
-        <button type="button" class="cc-ibtn" id="axMore" aria-haspopup="menu" aria-label="More: reload, export" title="More">${ICO.more}</button>`,
+        <button type="button" class="cc-ibtn" id="axMore" aria-haspopup="menu" aria-label="${t('More: reload, export')}" title="${t('More')}">${ICO.more}</button>`,
     )}
-    <nav class="ax-tabs" aria-label="Activity views"><div class="ax-tabs-in">
-      <a class="ax-tab" href="/activity" data-v="summary">${ICO.summary}Summary</a>
-      <a class="ax-tab" href="/activity/timeline" data-v="timeline">${ICO.activity}Timeline<b id="axTabN"></b></a>
+    <nav class="ax-tabs" aria-label="${t('Activity views')}"><div class="ax-tabs-in">
+      <a class="ax-tab" href="/activity" data-v="summary">${ICO.summary}${t('Summary')}</a>
+      <a class="ax-tab" href="/activity/timeline" data-v="timeline">${ICO.activity}${t('Timeline')}<b id="axTabN"></b></a>
     </div></nav>
     <p class="ax-wait" id="axWait" role="status" hidden></p>
-    <section class="ax-sm" id="axSm" aria-label="Summary">
+    <section class="ax-sm" id="axSm" aria-label="${t('Summary')}">
       <div class="ax-kpis" id="axKpis"></div>
       <div class="ax-grid">
-        <section class="sm-card ax-chart" aria-labelledby="axChartH"><div class="sm-card-h"><h2 id="axChartH">Actions over time</h2><span class="sub" id="axChartS"></span></div>
+        <section class="sm-card ax-chart" aria-labelledby="axChartH"><div class="sm-card-h"><h2 id="axChartH">${t('Actions over time')}</h2><span class="sub" id="axChartS"></span></div>
           <div class="sm-card-b" id="axChart"></div></section>
-        <section class="sm-card ax-top" aria-labelledby="axTopH"><div class="sm-card-h"><h2 id="axTopH">What agents do most</h2></div><div class="sm-card-b" id="axTop"></div></section>
-        <section class="sm-card ax-agents" aria-labelledby="axAgH"><div class="sm-card-h"><h2 id="axAgH">Agents</h2><span class="sub" id="axAgS"></span>
-          <a class="sm-lnk" href="/agents" id="axAgLnk">Manage ${ICO.arrow}</a></div><div id="axAgs"></div></section>
+        <section class="sm-card ax-top" aria-labelledby="axTopH"><div class="sm-card-h"><h2 id="axTopH">${t('What agents do most')}</h2></div><div class="sm-card-b" id="axTop"></div></section>
+        <section class="sm-card ax-agents" aria-labelledby="axAgH"><div class="sm-card-h"><h2 id="axAgH">${t('Agents')}</h2><span class="sub" id="axAgS"></span>
+          <a class="sm-lnk" href="/agents" id="axAgLnk">${t('Manage')} ${ICO.arrow}</a></div><div id="axAgs"></div></section>
         <div class="ax-side">
-          <section class="sm-card ax-probs" aria-labelledby="axPrH"><div class="sm-card-h"><h2 id="axPrH">Problems</h2><span id="axPrA"></span></div><div id="axProbs"></div></section>
-          <section class="sm-card ax-notes" aria-labelledby="axNtH"><div class="sm-card-h"><h2 id="axNtH">Most touched notes</h2></div><div id="axNotes"></div></section>
+          <section class="sm-card ax-probs" aria-labelledby="axPrH"><div class="sm-card-h"><h2 id="axPrH">${t('Problems')}</h2><span id="axPrA"></span></div><div id="axProbs"></div></section>
+          <section class="sm-card ax-notes" aria-labelledby="axNtH"><div class="sm-card-h"><h2 id="axNtH">${t('Most touched notes')}</h2></div><div id="axNotes"></div></section>
         </div>
       </div>
 
     </section>
     <section class="tl ax-tl" id="axTl" aria-labelledby="axTlH">
-      <div class="tl-h"><h2 id="axTlH">Timeline</h2><span class="sub">Every action, newest first</span></div>
-      ${timelineHTML('ax', F.q, 'Search AIs, notes, words')}
+      <div class="tl-h"><h2 id="axTlH">${t('Timeline')}</h2><span class="sub">${t('Every action, newest first')}</span></div>
+      ${timelineHTML('ax', F.q, t('Search AIs, notes, words'))}
     </section>
   </div>`;
   const root = $('#axRoot');
@@ -638,8 +639,8 @@ function wire(h: HTMLElement, root: HTMLElement): void {
       e.currentTarget as HTMLElement,
       [
         {
-          label: 'Reload',
-          desc: 'Fetch the activity again from the server.',
+          label: t('Reload'),
+          desc: t('Fetch the activity again from the server.'),
           icon: ICO.refresh,
           run: () => {
             keys = [];
@@ -647,10 +648,10 @@ function wire(h: HTMLElement, root: HTMLElement): void {
           },
         },
         { sep: true, label: '' },
-        { label: 'Export timeline as JSON', desc: 'The actions the timeline shows, for scripts.', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'json') },
-        { label: 'Export timeline as CSV', desc: 'The actions the timeline shows, for a spreadsheet.', icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'csv') },
+        { label: t('Export timeline as JSON'), desc: t('The actions the timeline shows, for scripts.'), icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'json') },
+        { label: t('Export timeline as CSV'), desc: t('The actions the timeline shows, for a spreadsheet.'), icon: ICO.download, run: () => exportRows(scoped().filter((x) => matches(x)), 'csv') },
       ],
-      { title: 'Activity' },
+      { title: t('Activity') },
     );
 
   // "/" jumps to the timeline search.
@@ -741,12 +742,12 @@ function paintLive(): void {
   const b = document.getElementById('lgLive');
   if (!b) return;
   b.setAttribute('aria-pressed', String(live));
-  b.innerHTML = live ? '<span class="cc-dot ok"></span>Live' : '<span class="cc-dot idle"></span>Paused';
-  b.title = live ? 'Pause: new activity waits until you show it' : 'Resume: show new activity as it happens';
+  b.innerHTML = live ? `<span class="cc-dot ok"></span>${t('Live')}` : `<span class="cc-dot idle"></span>${t('Paused')}`;
+  b.title = live ? t('Pause: new activity waits until you show it') : t('Resume: show new activity as it happens');
   const nb = $('#axNew') as HTMLButtonElement;
   nb.hidden = !pendingShown;
-  nb.textContent = `${pendingShown} new · Show`;
-  nb.setAttribute('aria-label', `Show ${plural(pendingShown, 'new action')}`);
+  nb.textContent = t('{n} new · Show', { n: pendingShown });
+  nb.setAttribute('aria-label', tn(pendingShown, 'Show {n} new action', 'Show {n} new actions'));
   nb.onclick = () => {
     live = true;
     flushPending();
@@ -850,7 +851,7 @@ async function reload(soft = false, now = false): Promise<void> {
     remember(range, soft ? (rangeCache.get(range)?.whole ?? false) : true);
   } catch (e) {
     if (seq !== loadSeq) return;
-    toast('Could not load activity: ' + (e as Error).message, 'err');
+    toast(t('Could not load activity: {error}', { error: (e as Error).message }), 'err');
     // Do not ask again and again from the end of the list.
     if (now) older = false;
   }
@@ -881,13 +882,13 @@ function kpisHTML(rows: ActivityItem[], agents: AgentInfo[]): string {
   const ais = new Set(rows.filter((x) => x.source === 'agent').map((x) => x.actor));
   const working = agents.filter((a) => a.cls === 'active').length;
   const fails = rows.filter((x) => stOf(x) === 'fail').length;
-  const t = touchedCount(rows);
+  const tc = touchedCount(rows);
   // The first number follows the chosen range; today's count goes under it.
   const short = F.time === 'today' || F.time === '1h';
-  return `${short ? statTile(timeLabel(), rows.length, `${week} in the last 7 days`) : statTile(timeLabel(), rows.length, `${today} today`)}
-    ${statTile('Agents used', ais.size, working ? `${working} active right now` : 'None active right now')}
-    ${statTile('Problems', fails, rows.length ? `${Math.round((fails / rows.length) * 100)}% failed or refused` : 'Nothing in this range', fails > 0, fails ? 'status:fail' : '')}
-    ${statTile('Notes touched', t.n, t.top ? `Most: ${t.top}` : 'None in this range')}`;
+  return `${short ? statTile(timeLabel(), rows.length, t('{n} in the last 7 days', { n: week })) : statTile(timeLabel(), rows.length, t('{n} today', { n: today }))}
+    ${statTile(t('Agents used'), ais.size, working ? t('{n} active right now', { n: working }) : t('None active right now'))}
+    ${statTile(t('Problems'), fails, rows.length ? t('{pct}% failed or refused', { pct: Math.round((fails / rows.length) * 100) }) : t('Nothing in this range'), fails > 0, fails ? 'status:fail' : '')}
+    ${statTile(t('Notes touched'), tc.n, tc.top ? t('Most: {name}', { name: tc.top }) : t('None in this range'))}`;
 }
 
 function summarySkeleton(): void {
@@ -911,8 +912,8 @@ function paintWait(): void {
   if (on)
     w.innerHTML = `<i aria-hidden="true"></i>${
       loading
-        ? `Gathering the real activity for ${esc(timeLabel().toLowerCase())}. This can take a moment on a big log, please wait.`
-        : `Showing the newest first. Still bringing in older activity for ${esc(timeLabel().toLowerCase())}: the numbers fill in as it arrives.`
+        ? t('Gathering the real activity for {range}. This can take a moment on a big log, please wait.', { range: esc(timeLabel().toLowerCase()) })
+        : t('Showing the newest first. Still bringing in older activity for {range}: the numbers fill in as it arrives.', { range: esc(timeLabel().toLowerCase()) })
     }`;
 }
 
@@ -929,11 +930,11 @@ function paintSummary(force = false): void {
   const agents = agentsOf(sc);
   const w = timeWindow();
   $('#axKpis').innerHTML = kpisHTML(rows, agents);
-  $('#axChartH').textContent = rows.length ? chartTitle(rows, w) : 'Actions over time';
-  $('#axChartS').innerHTML = rows.length ? `${plural(rows.length, 'action')} · ${timeLabel()}${rows.some((x) => stOf(x) === 'fail') ? ' · <i class="ax-key"></i>problems' : ''}` : timeLabel();
+  $('#axChartH').textContent = rows.length ? chartTitle(rows, w) : t('Actions over time');
+  $('#axChartS').innerHTML = rows.length ? `${tn(rows.length, '{n} action', '{n} actions')} · ${timeLabel()}${rows.some((x) => stOf(x) === 'fail') ? ` · <i class="ax-key"></i>${t('problems')}` : ''}` : timeLabel();
   $('#axChart').innerHTML = timeChart(rows, w);
   $('#axTop').innerHTML = topActionsHTML(rows.filter((x) => x.source === 'agent'));
-  if (!rows.some((x) => x.source === 'agent')) $('#axTop').innerHTML = '<div class="ax-bempty">No agent actions in this range</div>';
+  if (!rows.some((x) => x.source === 'agent')) $('#axTop').innerHTML = `<div class="ax-bempty">${t('No agent actions in this range')}</div>`;
 
   // One row per agent: connected keys always, others when they did something in the range.
   const byActor = new Map<string, ActivityItem[]>();
@@ -944,16 +945,16 @@ function paintSummary(force = false): void {
   const shown = agents.filter((a) => byActor.has(a.name) || (a.id && a.cls !== 'removed' && a.cls !== 'people'));
   const connected = agents.filter((a) => a.id && a.cls !== 'removed' && a.cls !== 'people');
   const active = connected.filter((a) => a.cls === 'active').length;
-  $('#axAgS').textContent = connected.length ? `${connected.length} connected${active ? ` · ${active} active` : ''}` : '';
+  $('#axAgS').textContent = connected.length ? `${t('{n} connected', { n: connected.length })}${active ? ` · ${t('{n} active', { n: active })}` : ''}` : '';
   const cap = allAgents ? shown.length : AG_CAP;
   $('#axAgs').innerHTML =
     agentRowsHTML(shown, (a) => byActor.get(a.name) || [], w, cap) +
     (shown.length > AG_CAP
-      ? `<button type="button" class="sm-more" data-allag aria-expanded="${allAgents}">${allAgents ? 'Show fewer' : `Show all ${shown.length}`}</button>`
+      ? `<button type="button" class="sm-more" data-allag aria-expanded="${allAgents}">${allAgents ? t('Show fewer') : t('Show all {n}', { n: shown.length })}</button>`
       : '');
 
   const fails = rows.filter((x) => stOf(x) === 'fail').length;
-  $('#axPrA').innerHTML = fails ? `<button type="button" class="sm-lnk" data-f="status:fail">Show all ${fails} ${ICO.arrow}</button>` : '';
+  $('#axPrA').innerHTML = fails ? `<button type="button" class="sm-lnk" data-f="status:fail">${t('Show all {n}', { n: fails })} ${ICO.arrow}</button>` : '';
   $('#axProbs').innerHTML = problemsHTML(rows);
   $('#axNotes').innerHTML = notesHTML(rows);
   const n = rows.length;
@@ -964,20 +965,20 @@ function chipsOf(): string[] {
   const c: string[] = [];
   // A pill already shows its action types and status; chips only for another mix.
   if (!quickOf()) {
-    F.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', 'Result ')));
+    F.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', t('Result') + ' ')));
     F.cats.forEach((k) => c.push(chip('cats:' + k, CATS.find((x) => x.id === k)!.label, `<i class="sw" style="--c:${CAT_COLOR[k]}"></i>`)));
   }
   F.actions.forEach((a) => c.push(chip('actions:' + a, actionLabel(a), '', '')));
   F.agents.forEach((a) => c.push(chip('agents:' + a, a, avatarHTML(a, 22))));
-  F.srcs.forEach((s) => c.push(chip('srcs:' + s, SRCS.find((x) => x.id === s)!.label, '', 'From ')));
-  if (F.system) c.push(chip('system:1', 'System lines shown', '', ''));
+  F.srcs.forEach((s) => c.push(chip('srcs:' + s, SRCS.find((x) => x.id === s)!.label, '', t('From') + ' ')));
+  if (F.system) c.push(chip('system:1', t('System lines shown'), '', ''));
   return c;
 }
 
 function paintSum(rows: ActivityItem[], sc: ActivityItem[]): void {
   const el = $('#axSum');
   if (loading) {
-    el.innerHTML = '<span>Loading…</span>';
+    el.innerHTML = `<span>${t('Loading…')}</span>`;
     return;
   }
   // System lines the other filters would show, were they not hidden.
@@ -985,9 +986,9 @@ function paintSum(rows: ActivityItem[], sc: ActivityItem[]): void {
   const actors = new Set(rows.map((x) => x.actor)).size;
   el.innerHTML = sumHTML({
     n: rows.length.toLocaleString('en-US'),
-    unit: ['action', 'actions'],
+    unit: [t('action'), t('actions')],
     note: timeLabel(),
-    extra: `<span class="ppl"><b>${actors}</b> ${actors === 1 ? 'AI or person' : 'AIs and people'}</span>`,
+    extra: `<span class="ppl">${tn(actors, '{n} AI or person', '{n} AIs and people', { n: `<b>${actors}</b>` })}</span>`,
     fails: rows.filter((x) => stOf(x) === 'fail').length,
     hidden,
     compact,

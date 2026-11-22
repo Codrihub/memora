@@ -3,6 +3,7 @@
 import { $, $$ } from './dom';
 import { clearPeek } from './peek';
 import { allNotes, noteTitle, onNoteChange, state, type Page } from './state';
+import { t } from './i18n';
 
 type NavGroup = 'content' | 'system';
 
@@ -19,21 +20,21 @@ interface PageMeta {
 
 /** Every page, in navigation order; Alt+1..9 follow it. */
 export const PAGE_META: Record<Page, PageMeta> = {
-  home: { label: 'Overview', title: 'Overview', hint: 'Your notes and agents at a glance', icon: 'overview', group: 'system', path: '/overview' },
-  brain: { label: 'Brain', title: 'Brain', hint: 'Your memory as a living brain', icon: 'brain', group: 'content', path: '/brain' },
-  vault: { label: 'Notes', title: 'Notes', hint: 'Browse, read and write your notes', icon: 'note', group: 'content', path: '/nodes' },
-  graph: { label: 'Graph', title: 'Graph', hint: 'Map of every link between notes', icon: 'graph', group: 'content', path: '/brain?mode=graph' },
-  canvas: { label: 'Canvas', title: 'Canvas', hint: 'Arrange notes on an open board', icon: 'canvas', group: 'content', path: '/brain?mode=canvas' },
-  tags: { label: 'Tags', title: 'Tags', hint: 'Every tag and its notes', icon: 'tags', group: 'content', path: '/tags' },
-  logs: { label: 'Activity', title: 'Activity', hint: 'What your agents read and changed', icon: 'activity', group: 'system', path: '/activity' },
-  keys: { label: 'Agents', title: 'Agents & API keys', hint: 'Connect AI apps and choose what they may do', icon: 'key', group: 'system', path: '/agents' },
-  tools: { label: 'Tools', title: 'MCP tools', hint: 'Turn agent tools on or off', icon: 'tools', group: 'system', path: '/tools' },
-  access: { label: 'Access rules', title: 'Access rules', hint: 'Which addresses may reach Memora', icon: 'shield', group: 'system', path: '/access' },
-  settings: { label: 'Settings', title: 'Settings', hint: 'Account, appearance and preferences', icon: 'settings', group: 'system', path: '/settings' },
-  docs: { label: 'Documentation', title: 'Documentation', hint: 'Guides, agent instructions and reference', icon: 'book', group: 'system', path: '/docs' },
-  assistant: { label: 'Mnemo', title: 'Mnemo', hint: 'Your notes agent: ask, find, write and tidy', icon: 'mnemo', group: 'content', path: '/mnemo' },
+  home: { label: t('Overview'), title: t('Overview'), hint: t('Your notes and agents at a glance'), icon: 'overview', group: 'system', path: '/overview' },
+  brain: { label: t('Brain'), title: t('Brain'), hint: t('Your memory as a living brain'), icon: 'brain', group: 'content', path: '/brain' },
+  vault: { label: t('Notes'), title: t('Notes'), hint: t('Browse, read and write your notes'), icon: 'note', group: 'content', path: '/nodes' },
+  graph: { label: t('Graph'), title: t('Graph'), hint: t('Map of every link between notes'), icon: 'graph', group: 'content', path: '/brain?mode=graph' },
+  canvas: { label: t('Canvas'), title: t('Canvas'), hint: t('Arrange notes on an open board'), icon: 'canvas', group: 'content', path: '/brain?mode=canvas' },
+  tags: { label: t('Tags'), title: t('Tags'), hint: t('Every tag and its notes'), icon: 'tags', group: 'content', path: '/tags' },
+  logs: { label: t('Activity'), title: t('Activity'), hint: t('What your agents read and changed'), icon: 'activity', group: 'system', path: '/activity' },
+  keys: { label: t('Agents'), title: t('Agents & API keys'), hint: t('Connect AI apps and choose what they may do'), icon: 'key', group: 'system', path: '/agents' },
+  tools: { label: t('Tools'), title: t('MCP tools'), hint: t('Turn agent tools on or off'), icon: 'tools', group: 'system', path: '/tools' },
+  access: { label: t('Access rules'), title: t('Access rules'), hint: t('Which addresses may reach Memora'), icon: 'shield', group: 'system', path: '/access' },
+  settings: { label: t('Settings'), title: t('Settings'), hint: t('Account, appearance and preferences'), icon: 'settings', group: 'system', path: '/settings' },
+  docs: { label: t('Documentation'), title: t('Documentation'), hint: t('Guides, agent instructions and reference'), icon: 'book', group: 'system', path: '/docs' },
+  assistant: { label: 'Mnemo', title: 'Mnemo', hint: t('Your notes agent: ask, find, write and tidy'), icon: 'mnemo', group: 'content', path: '/mnemo' },
   // Last, so the Alt+1..9 shortcuts of the other pages stay where they are.
-  trash: { label: 'Trash', title: 'Trash', hint: 'Deleted notes, ready to restore', icon: 'trash', group: 'system', path: '/trash' },
+  trash: { label: t('Trash'), title: t('Trash'), hint: t('Deleted notes, ready to restore'), icon: 'trash', group: 'system', path: '/trash' },
 };
 
 export const PAGES = Object.keys(PAGE_META) as Page[];

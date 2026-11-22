@@ -1,6 +1,8 @@
 // Mnemo, the notes agent: types and calls for /api/assistant/*, and the streaming chat reader.
 
 import { apiGet, apiPost } from '../api';
+import { langName, t } from '../i18n';
+import { ts } from '../i18n/server';
 
 export const MNEMO = 'Mnemo';
 
@@ -45,6 +47,8 @@ export interface Prefs {
   context_tokens?: number | null;
   max_steps?: number | null;
   launcher?: boolean | null;
+  /** The language of the owner's screen (`Indonesian`), for what Mnemo writes unasked. */
+  ui_lang?: string | null;
   /** "ask": changes and sub-agents wait for the owner's OK; "auto": Mnemo goes ahead;
    *  "read": Mnemo only reads and answers, it never changes notes. */
   permission?: 'ask' | 'auto' | 'read' | null;
@@ -57,6 +61,11 @@ export interface Prefs {
   voice?: string | null;
   /** Mnemo may note things about the owner on its own. */
   learn_me?: boolean | null;
+  /** Tools switched off for Mnemo itself, and for its sub-agents. */
+  tools_off_main?: string[] | null;
+  tools_off_sub?: string[] | null;
+  /** The "tell Mnemo about you" card was answered or skipped. */
+  intro_done?: boolean | null;
   /** Mnemo asks the owner before sub-agents run (they use tokens of their own). */
   confirm_subagents?: boolean | null;
 }
@@ -101,6 +110,8 @@ export interface MnemoState {
   models: Model[];
   prefs: Prefs;
   tools: string[];
+  /** Mnemo's own tools (images, chats, plans, sub-agents…), switchable like the Memora ones. */
+  own_tools?: string[];
   defaults: { context_tokens: number; max_output_tokens: number; max_steps: number };
   fetched?: number;
 }
@@ -165,7 +176,7 @@ export async function uploadChatImage(file: File): Promise<{ id: string; name: s
     body: file,
   });
   const data = (await res.json().catch(() => ({}))) as { id?: string; name?: string; bytes?: number; url?: string; error?: string };
-  if (!res.ok || !data.id) throw new Error(data.error || `could not attach the image (HTTP ${res.status})`);
+  if (!res.ok || !data.id) throw new Error((data.error && ts(data.error)) || t('could not attach the image (HTTP {status})', { status: res.status }));
   window.dispatchEvent(new Event('memora:storage-check'));
   return data as { id: string; name: string; bytes: number; url: string };
 }
@@ -258,11 +269,21 @@ export function mnemoState(): MnemoState | null {
 }
 
 /** Load (or reuse) the state; `fresh` asks the server again. */
+let langSent = false;
+
 export function loadState(fresh = false): Promise<MnemoState> {
   if (cached && !fresh) return Promise.resolve(cached);
   if (!loading) {
     loading = apiGet<MnemoState>('/api/assistant/state')
-      .then((s) => setState(s))
+      .then((s) => {
+        // Mnemo writes suggestions in the owner's language: tell it the screen's.
+        const ln = langName();
+        if (s.ready && s.prefs.ui_lang !== ln && !langSent) {
+          langSent = true;
+          void savePrefs({ ui_lang: ln }).catch(() => undefined);
+        }
+        return setState(s);
+      })
       .finally(() => {
         loading = null;
       });
@@ -367,7 +388,8 @@ export interface Suggestions {
   own: string[];
   ai: string[];
 }
-export const getSuggestions = (): Promise<Suggestions> => apiGet('/api/assistant/suggestions');
+/** Mnemo's suggestions, written in the language of this screen (`lang`, e.g. Indonesian). */
+export const getSuggestions = (): Promise<Suggestions> => apiGet(`/api/assistant/suggestions?lang=${encodeURIComponent(langName())}`);
 export const saveSuggestions = (own: string[]): Promise<{ own: string[] }> => apiPost('/api/assistant/suggestions', { own });
 /** "Fresh ideas": Mnemo writes its suggestions again (the owner's own stay). */
 export const refreshSuggestions = (): Promise<Suggestions & { fresh: boolean }> => apiPost('/api/assistant/suggestions/refresh', {});
@@ -519,22 +541,20 @@ async function readEvents(res: Response, onEvent: (e: ChatEvent) => void): Promi
 
 // ---- what Mnemo knows about the owner ----
 
-export type MemoryKind = 'style' | 'about' | 'prefers';
-export const MEMORY_KINDS: { kind: MemoryKind; label: string }[] = [
-  { kind: 'style', label: 'How to answer me' },
-  { kind: 'about', label: 'About me' },
-  { kind: 'prefers', label: 'What I like' },
-];
+/** What "Describe me from my notes" sends: Mnemo reads the vault and keeps what it learns. */
+const DESCRIBE_ME_EN = `Get to know me from my notes. Look through my vault (recent notes, journals, projects, anything about me) and keep what you learn with remember_owner: who I am, what I work on, how I like answers, what I like. Short, lasting things only, never secrets. Then tell me in a few lines what you kept.`;
+/** What "Describe me from my notes" sends, in the owner's language. */
+export const describeMe = (): string => t(DESCRIBE_ME_EN);
+
 export interface OwnerMemory {
   id: string;
   text: string;
-  kind: MemoryKind;
   by: 'mnemo' | 'owner';
   at: number;
 }
 export const listOwnerMemory = (): Promise<{ items: OwnerMemory[]; learn: boolean }> => apiGet('/api/assistant/memory');
-export const addOwnerMemory = (text: string, kind: MemoryKind): Promise<{ item: OwnerMemory }> => apiPost('/api/assistant/memory', { text, kind });
-export const editOwnerMemory = (id: string, b: { text?: string; kind?: MemoryKind }): Promise<{ item: OwnerMemory }> =>
+export const addOwnerMemory = (text: string): Promise<{ item: OwnerMemory }> => apiPost('/api/assistant/memory', { text });
+export const editOwnerMemory = (id: string, b: { text?: string }): Promise<{ item: OwnerMemory }> =>
   apiPost(`/api/assistant/memory/${encodeURIComponent(id)}`, b);
 /** Switch a sub-agent's model in one chat ('' goes back to Auto: the default model, then the fallbacks). */
 export const setSubModel = (sid: string, agent: string, model: string): Promise<{ ok: boolean; agent: string; model: string }> =>
@@ -556,7 +576,7 @@ export function takeSettingsPart(): string {
 
 async function failOf(res: Response, what: string): Promise<Error> {
   const data = (await res.json().catch(() => ({}))) as { error?: string };
-  return new Error(data.error || `could not ${what} (HTTP ${res.status})`);
+  return new Error((data.error && ts(data.error)) || t('could not {what} (HTTP {status})', { what, status: res.status }));
 }
 
 /** Text read aloud by the speech model, as audio. */
@@ -569,7 +589,7 @@ export async function speak(text: string, signal?: AbortSignal): Promise<Blob> {
     signal,
     cache: 'no-store',
   });
-  if (!res.ok) throw await failOf(res, 'read it aloud');
+  if (!res.ok) throw await failOf(res, t('read it aloud'));
   return res.blob();
 }
 
@@ -582,7 +602,7 @@ export async function transcribe(audio: Blob): Promise<string> {
     body: audio,
     cache: 'no-store',
   });
-  if (!res.ok) throw await failOf(res, 'turn the recording into text');
+  if (!res.ok) throw await failOf(res, t('turn the recording into text'));
   const data = (await res.json().catch(() => ({}))) as { text?: string };
   return (data.text || '').trim();
 }
@@ -591,7 +611,7 @@ export async function transcribe(audio: Blob): Promise<string> {
 
 /** The name of a provider type. */
 export function providerName(kind: string): string {
-  return kind === 'openai' ? 'OpenAI' : kind === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible';
+  return kind === 'openai' ? 'OpenAI' : kind === 'anthropic' ? 'Anthropic' : t('OpenAI-compatible');
 }
 
 export function providerOf(s: MnemoState | null, id: string): Provider | undefined {
@@ -644,6 +664,6 @@ export function fmtTokens(n: number): string {
 
 export function scopeLabel(scope: string): string {
   if (scope.startsWith('note:')) return scope.slice(5).split('/').pop()!.replace(/\.md$/i, '');
-  if (scope.startsWith('folder:')) return scope.slice(7) || 'All notes';
-  return 'Whole vault';
+  if (scope.startsWith('folder:')) return scope.slice(7) || t('All notes');
+  return t('Whole vault');
 }

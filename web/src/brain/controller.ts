@@ -13,6 +13,7 @@ import { BRAIN_CSS } from './styles';
 import { toggleHTML, ViewChrome } from '../ui/view-chrome';
 import { setFlightTarget } from '../ui/agent-flight';
 import { NodeCard, type CardLink } from '../ui/node-card';
+import { t, tn } from '../i18n';
 
 interface Note {
   path: string;
@@ -129,7 +130,7 @@ export class BrainController {
     } catch (e) {
       console.warn('brain: WebGL unavailable', e);
       clearInterval(this.chromeTimer);
-      this.els.stage.innerHTML = `<div class="brain-msg"><div>3D needs WebGL, which this browser or device does not provide.<br><button class="bh-btn" data-go="graph">Open the 2D graph</button></div></div>`;
+      this.els.stage.innerHTML = `<div class="brain-msg"><div>${t('3D needs WebGL, which this browser or device does not provide.')}<br><button class="bh-btn" data-go="graph">${t('Open the 2D graph')}</button></div></div>`;
       this.els.stage.querySelector<HTMLElement>('[data-go]')!.onclick = () => hooks.go('graph');
       return;
     }
@@ -184,7 +185,7 @@ export class BrainController {
 <div class="brain-stage" data-el="stage"></div>
 <div class="brain-labels" data-el="labels"></div>
 <div class="brain-tip hidden" data-el="tip"></div>
-<div class="brain-foot"><span class="brain-hint" data-el="hint">Drag to turn · scroll to zoom · click a point to open its note</span></div>`;
+<div class="brain-foot"><span class="brain-hint" data-el="hint">${t('Drag to turn · scroll to zoom · click a point to open its note')}</span></div>`;
   }
 
   private chrome!: ViewChrome;
@@ -197,7 +198,7 @@ export class BrainController {
       page: 'brain',
       root: this.root,
       search: {
-        placeholder: 'Find a note, #tag or in:folder',
+        placeholder: t('Find a note, #tag or in:folder'),
         find: {
           items: () =>
             this.notes.map((n) => ({
@@ -230,8 +231,8 @@ export class BrainController {
           this.scene?.setLabels(this.prefs.labels, this.prefs.regionLabels);
         },
         help: {
-          nodes: 'Names next to the most linked notes in the brain. The note under the pointer and the selected one always show theirs.',
-          folders: 'Folder names floating over the part of the brain that holds their notes.',
+          nodes: t('Names next to the most linked notes in the brain. The note under the pointer and the selected one always show theirs.'),
+          folders: t('Folder names floating over the part of the brain that holds their notes.'),
         },
       },
       filter: (host) => this.renderFilter(host),
@@ -313,11 +314,11 @@ export class BrainController {
 
   private renderFilter(host: HTMLElement): void {
     host.innerHTML =
-      '<h4>Brain</h4>' +
+      `<h4>${t('Brain')}</h4>` +
       (this.reduced
         ? ''
-        : toggleHTML('rotate', 'Rotate when idle', this.prefs.rotate, 'The brain turns slowly by itself two seconds after you stop moving it. Only the 3D brain has this.')) +
-      '<div class="vc-hint">Drag to turn · scroll to zoom · click a point to open its note · / to search · #tag finds tags</div>';
+        : toggleHTML('rotate', t('Rotate when idle'), this.prefs.rotate, t('The brain turns slowly by itself two seconds after you stop moving it. Only the 3D brain has this.'))) +
+      `<div class="vc-hint">${t('Drag to turn · scroll to zoom · click a point to open its note · / to search · #tag finds tags')}</div>`;
     const b = host.querySelector<HTMLElement>('[data-t=rotate]');
     if (b)
       b.onclick = () => {
@@ -442,7 +443,7 @@ export class BrainController {
         state.graph.links = g.links || [];
         this.apply(g.nodes || [], g.links || []);
       } catch (err) {
-        if (!this.notes.length) this.els.hint.textContent = 'Could not load the graph: ' + (err as Error).message;
+        if (!this.notes.length) this.els.hint.textContent = t('Could not load the graph: {error}', { error: (err as Error).message });
       } finally {
         this.loading = null;
       }
@@ -626,7 +627,7 @@ export class BrainController {
     const r = this.regions.get(n.folder);
     const links = (this.out.get(i)?.length || 0) + (this.inc.get(i)?.length || 0);
     tip.innerHTML =
-      `<b>${esc(n.name)}</b><div class="bt-f" style="--c:${attr(r?.color || '#888')}"><i></i>${esc(n.folder)} · ${links} link${links === 1 ? '' : 's'}</div>` +
+      `<b>${esc(n.name)}</b><div class="bt-f" style="--c:${attr(r?.color || '#888')}"><i></i>${esc(n.folder)} · ${tn(links, '{n} link', '{n} links')}</div>` +
       (n.tags.length ? `<div class="brain-tags">${n.tags.slice(0, 5).map((t) => `<span>#${esc(t)}</span>`).join('')}</div>` : '');
     tip.classList.remove('hidden');
     const w = this.root.clientWidth;

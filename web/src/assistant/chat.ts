@@ -23,6 +23,8 @@ import { closePreview, mountArt } from './art';
 import { markSeen } from './unread';
 import { MNEMO_CSS, markHTML } from './styles';
 import { applyTextSize } from './textsize';
+import { t, tn } from '../i18n';
+import { ts } from '../i18n/server';
 
 // The chosen text size (per device) applies to every Mnemo chat.
 applyTextSize();
@@ -98,6 +100,8 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
 const RICH = new Set(['describe_image', 'generate_image']);
 /** A task handed to a sub-agent: drawn as a small live panel in the reply, not a step. */
 const DELEGATE = 'delegate';
+/** Mnemo's plan: a checklist above the message box, not a step. */
+const PLAN = 'update_plan';
 /** Tools that change what Mnemo knows about the owner: a quiet line in the reply, not a step. */
 const OWNER_MEMORY = new Set(['remember_owner', 'update_owner_memory', 'forget_owner_memory']);
 
@@ -108,16 +112,16 @@ function argStr(args: unknown, key: string): string {
 
 /** A tool card's title and the line under it. */
 function toolTitle(name: string, args: unknown): [string, string] {
-  if (name === 'delegate') return [argStr(args, 'agent') ? `Asked ${argStr(args, 'agent')}` : toolWords(name), argStr(args, 'task')];
+  if (name === 'delegate') return [argStr(args, 'agent') ? t('Asked {agent}', { agent: argStr(args, 'agent') }) : toolWords(name), argStr(args, 'task')];
   if (name === 'generate_image') return [toolWords(name), argStr(args, 'prompt')];
   if (name === 'describe_image') return [toolWords(name), argStr(args, 'question') || subject(args)];
   return [toolWords(name), subject(args)];
 }
 
 function ownerMemoryText(name: string, args: unknown): string {
-  if (name === 'remember_owner') return argStr(args, 'text') ? `Noted about you: ${argStr(args, 'text')}` : 'Noted something about you';
-  if (name === 'update_owner_memory') return 'Updated what I know about you';
-  return 'Forgot something about you';
+  if (name === 'remember_owner') return argStr(args, 'text') ? t('Noted about you: {text}', { text: argStr(args, 'text') }) : t('Noted something about you');
+  if (name === 'update_owner_memory') return t('Updated what I know about you');
+  return t('Forgot something about you');
 }
 
 function parseOut(output: unknown): Record<string, unknown> | null {
@@ -156,8 +160,8 @@ let playing: { btn: HTMLElement; audio: HTMLAudioElement; ctrl: AbortController;
 function paintListen(btn: HTMLElement, on: boolean): void {
   btn.classList.toggle('on', on);
   btn.innerHTML = icon(on ? 'stop' : 'volume');
-  btn.title = on ? 'Stop reading' : 'Listen';
-  btn.setAttribute('aria-label', on ? 'Stop reading' : 'Listen to the reply');
+  btn.title = on ? t('Stop reading') : t('Listen');
+  btn.setAttribute('aria-label', on ? t('Stop reading') : t('Listen to the reply'));
 }
 
 function stopListening(): void {
@@ -198,7 +202,8 @@ async function listen(btn: HTMLElement): Promise<void> {
 const canRecord = (): boolean => typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
 function toolWords(name: string): string {
-  return TOOL_WORDS[name]?.[0] ?? name.replace(/_/g, ' ');
+  const w = TOOL_WORDS[name]?.[0];
+  return w ? t(w) : name.replace(/_/g, ' ');
 }
 
 function changesNotes(name: string): boolean {
@@ -214,7 +219,7 @@ function subject(args: unknown): string {
     const v = a[k];
     if (typeof v === 'string' && v) return v.replace(/\.md$/i, '');
   }
-  if (Array.isArray(a.paths)) return `${a.paths.length} notes`;
+  if (Array.isArray(a.paths)) return tn(a.paths.length, '{n} note', '{n} notes');
   return '';
 }
 
@@ -337,23 +342,26 @@ export interface ChatOptions {
   onAgents?: () => void;
   /** Show the Agents panel (the page's side panel or sheet); without it a dialog opens. */
   openAgents?: () => void;
+  /** Whether the Agents panel is open now, and closing it (the live line toggles it). */
+  agentsOpen?: () => boolean;
+  closeAgents?: () => void;
 }
 
 /** Thinking levels, for models that can think. */
 const THINK_LEVELS: { v: A.ThinkLevel; label: string; hint: string }[] = [
-  { v: 'auto', label: 'Auto', hint: 'The model decides how much to think' },
-  { v: 'off', label: 'Off', hint: 'Answer straight away' },
-  { v: 'low', label: 'Low', hint: 'A little thinking, quick' },
-  { v: 'medium', label: 'Medium', hint: 'Balanced' },
-  { v: 'high', label: 'High', hint: 'Think it through, slower' },
+  { v: 'auto', label: t('Auto'), hint: t('The model decides how much to think') },
+  { v: 'off', label: t('Off'), hint: t('Answer straight away') },
+  { v: 'low', label: t('Low'), hint: t('A little thinking, quick') },
+  { v: 'medium', label: t('Medium'), hint: t('Balanced') },
+  { v: 'high', label: t('High'), hint: t('Think it through, slower') },
 ];
 
 /** Permission modes: what Mnemo may do without asking (one setting for every chat). */
 type PermMode = 'ask' | 'auto' | 'read';
 const PERM_MODES: { v: PermMode; label: string; hint: string; icon: string; toast: string }[] = [
-  { v: 'ask', label: 'Ask first', hint: 'Asks before it changes notes or runs sub-agents', icon: 'shield', toast: `Ask first: ${A.MNEMO} asks before it changes notes or runs sub-agents` },
-  { v: 'auto', label: 'Auto', hint: 'Changes and sub-agents go ahead without asking', icon: 'bolt', toast: `Auto: ${A.MNEMO} makes changes and runs sub-agents without asking` },
-  { v: 'read', label: 'Read only', hint: 'Only reads and answers; never changes notes', icon: 'eye', toast: `Read only: ${A.MNEMO} reads and answers, and never changes your notes` },
+  { v: 'ask', label: t('Ask first'), hint: t('Asks before it changes notes or runs sub-agents'), icon: 'shield', toast: t('Ask first: {mnemo} asks before it changes notes or runs sub-agents', { mnemo: A.MNEMO }) },
+  { v: 'auto', label: t('Auto'), hint: t('Changes and sub-agents go ahead without asking'), icon: 'bolt', toast: t('Auto: {mnemo} makes changes and runs sub-agents without asking', { mnemo: A.MNEMO }) },
+  { v: 'read', label: t('Read only'), hint: t('Only reads and answers; never changes notes'), icon: 'eye', toast: t('Read only: {mnemo} reads and answers, and never changes your notes', { mnemo: A.MNEMO }) },
 ];
 const permMode = (p: string | null | undefined): PermMode => (p === 'auto' || p === 'read' ? p : 'ask');
 
@@ -425,35 +433,62 @@ export class ChatView {
   private offState: () => void;
   /** The one-line live status above the composer, shown only while a reply runs. */
   private liveEl!: HTMLButtonElement;
+  /** The context meter, so the page can show it in its header on wide screens. */
+  get meterEl(): HTMLElement {
+    return this.meter;
+  }
+  /** Where the page puts its Fleeting button (right of the row under the header). */
+  get topRightEl(): HTMLElement {
+    return this.el.querySelector<HTMLElement>('.mn-top-r')!;
+  }
+  /** Where the page puts its Agents button (with the meter and Think, beside send). */
+  get agentsSlotEl(): HTMLElement {
+    return this.el.querySelector<HTMLElement>('.mn-ag-slot')!;
+  }
+  /** The checklist above the composer: Mnemo's plan, or the reply's sub-agents. */
+  private planEl!: HTMLElement;
+  /** The tray on top of the message box: the live line, the plan and the queue, together. */
+  private trayEl!: HTMLElement;
+  /** Bumped on each plan change, so a late clean-up never wipes a newer plan. */
+  private planGen = 0;
+  /** The chat was at its end before the last resize (it stays there while the tray moves). */
+  private stuck = true;
+  /** The plan came from Mnemo (update_plan), so sub-agents do not replace it. */
+  private planOwn = false;
 
   constructor(private o: ChatOptions) {
     useStyles('mnemo-css', MNEMO_CSS);
     this.el = el('div', 'mn-chat' + (o.compact ? ' compact' : ''));
     this.el.innerHTML = `
-      <div class="mn-log" role="log" aria-live="polite" aria-label="Conversation with ${A.MNEMO}"></div>
-      <nav class="mn-rail" aria-label="Jump to a message" hidden></nav>
+      <div class="mn-top"><div class="mn-top-l"><button type="button" class="mn-pin" hidden>${icon('pin')}</button><span class="mn-model-slot"></span></div><div class="mn-top-r"></div></div>
+      <div class="mn-log" role="log" aria-live="polite" aria-label="${t('Conversation with {mnemo}', { mnemo: A.MNEMO })}"></div>
+      <nav class="mn-rail" aria-label="${t('Jump to a message')}" hidden></nav>
       <form class="mn-comp" autocomplete="off">
-        <button type="button" class="mn-down" aria-label="Scroll to the bottom" title="Scroll to the bottom" tabindex="-1">${icon('chev-down')}</button>
-        <button type="button" class="mn-live" hidden aria-live="polite"><i aria-hidden="true"></i><span class="mn-live-t"></span><span class="mn-live-s"></span>${icon('chev-right')}</button>
+        <button type="button" class="mn-down" aria-label="${t('Scroll to the bottom')}" title="${t('Scroll to the bottom')}" tabindex="-1"><span>${t('Scroll to')}</span>${icon('arrow-down')}</button>
+        <div class="mn-tray mn-col"><div class="mn-col-in"><div class="mn-tray-box">
+          <div class="mn-col mn-tray-hc"><div class="mn-col-in"><div class="mn-tray-h">
+            <button type="button" class="mn-live" hidden aria-live="polite"><i aria-hidden="true"></i><span class="mn-live-t"></span><span class="mn-live-s"></span>${icon('chev-right')}</button>
+            <b class="mn-plan-ttl"></b>
+            <button type="button" class="mn-plan-h" aria-expanded="true"><span class="mn-plan-n"></span><i class="mn-plan-bar" aria-hidden="true"><i></i></i>${icon('chev-down', 'i mn-plan-chev')}</button>
+          </div></div></div>
+          <div class="mn-col mn-plan-c"><div class="mn-col-in"><div class="mn-plan" role="list" aria-label="${t('Plan')}"></div></div></div>
+          <div class="mn-col mn-queue-c"><div class="mn-col-in"><div class="mn-queue"></div></div></div>
+        </div></div></div>
         <div class="mn-comp-box">
-          <div class="mn-queue" hidden></div>
           <div class="mn-att" aria-live="polite"><div class="mn-att-in"></div></div>
-          <textarea rows="1" maxlength="40000" placeholder="Ask ${A.MNEMO} about your notes…" aria-label="Message to ${A.MNEMO}"></textarea>
+          <textarea rows="1" maxlength="40000" placeholder="${t('Ask {mnemo} about your notes…', { mnemo: A.MNEMO })}" aria-label="${t('Message to {mnemo}', { mnemo: A.MNEMO })}"></textarea>
           <div class="mn-comp-bar">
-            <button type="button" class="mn-plus" aria-label="Attach notes or folders from your vault" title="Attach notes or folders from your vault">${icon('plus')}</button>
-            <button type="button" class="mn-mic" hidden aria-label="Speak a message" title="Speak a message">${icon('mic')}<i class="mn-mic-dot" aria-hidden="true"></i><span class="mn-mic-t"></span></button>
+            <button type="button" class="mn-plus" aria-label="${t('Attach notes or folders from your vault')}" title="${t('Attach notes or folders from your vault')}">${icon('plus')}</button>
+            <button type="button" class="mn-mic" hidden aria-label="${t('Speak a message')}" title="${t('Speak a message')}">${icon('mic')}<i class="mn-mic-dot" aria-hidden="true"></i><span class="mn-mic-t"></span></button>
             <span class="mn-perm-slot" hidden></span>
             <span class="mn-grow"></span>
-            <span class="mn-think-slot"></span>
-            <button type="submit" class="mn-send" aria-label="Send">${icon('send')}</button>
+            <button type="submit" class="mn-send" aria-label="${t('Send')}">${icon('send')}</button>
           </div>
         </div>
         <div class="mn-under">
-          <p class="mn-fine">${A.MNEMO} only works in your notes. Each change shows in Activity and can be undone from History.</p>
+          <p class="mn-fine">${t('{mnemo} only works in your notes. Each change shows in Activity and can be undone from History.', { mnemo: A.MNEMO })}</p>
           <span class="mn-grow"></span>
-          <span class="mn-model-slot"></span>
-          <button type="button" class="mn-pin" hidden>${icon('pin')}</button>
-          <button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button>
+          <span class="mn-under-r"><span class="mn-ag-slot"></span><span class="mn-think-slot"></span><button type="button" class="mn-meter" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" class="t"/><circle cx="10" cy="10" r="7.5" class="v" pathLength="100"/></svg></button></span>
         </div>
       </form>`;
     this.log = this.el.querySelector('.mn-log')!;
@@ -472,13 +507,52 @@ export class ChatView {
     this.agents.el.addEventListener('click', (e) => this.onAgentsClick(e));
     this.rail = this.el.querySelector('.mn-rail')!;
     this.wireRail();
-    // The live status above the composer: a click opens what is at work (the sub-agents in
-    // the Agents panel, else the reply itself).
+    // The live status above the composer: a click opens what is at work, the sub-agents in
+    // the Agents panel or the reply's Activity; with nothing to open it is plain text.
     this.liveEl = this.el.querySelector('.mn-live')!;
-    this.liveEl.onclick = () => {
+    this.planEl = this.el.querySelector('.mn-plan')!;
+    this.trayEl = this.el.querySelector('.mn-tray')!;
+    this.el.querySelector<HTMLButtonElement>('.mn-plan-h')!.onclick = () => {
+      this.planFolded = !this.planFolded;
+      this.trayEl.classList.toggle('folded', this.planFolded);
+      this.el.querySelector('.mn-plan-h')!.setAttribute('aria-expanded', String(!this.planFolded));
+    };
+    // Coming back to the window or tab puts the cursor in the message box, ready to type
+    // (desktop only; a click elsewhere on the page still folds the box away).
+    const comeBack = (): void => {
+      if (document.visibilityState !== 'visible' || !this.el.isConnected || !this.el.offsetParent) return;
+      if (!matchMedia('(min-width: 761px) and (pointer: fine)').matches) return;
+      const a = document.activeElement as HTMLElement | null;
+      // Focus coming back from an embedded preview is not a return to the window.
+      if (a instanceof HTMLIFrameElement) return;
+      if (a && a !== document.body && a !== this.input && a.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], .modal-backdrop, .wl-tour')) return;
+      this.input.focus({ preventScroll: true });
+    };
+    window.addEventListener('focus', comeBack);
+    document.addEventListener('visibilitychange', comeBack);
+    // The tray opens and closes smoothly and the chat above it shrinks or grows with it: a
+    // chat that was at its end stays there the whole way, so the newest message never hides.
+    this.log.addEventListener('scroll', () => {
+      this.stuck = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 40;
+    }, { passive: true });
+    if (typeof ResizeObserver !== 'undefined')
+      new ResizeObserver(() => {
+        if (this.stuck) this.log.scrollTop = this.log.scrollHeight;
+      }).observe(this.log);
+    this.liveEl.onclick = (e) => {
+      if (e.detail) this.liveEl.blur();
       const ids = (this.liveEl.dataset.subs || '').split(',').filter(Boolean);
-      if (ids.length) this.openAgents(ids);
-      else this.log.querySelector('.mn-turn.live')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      // A second click closes what the first opened.
+      if (ids.length) {
+        if (this.o.agentsOpen?.()) this.o.closeAgents?.();
+        else this.openAgents(ids);
+        return;
+      }
+      const act = this.log.querySelector<HTMLDetailsElement>('.mn-turn.live .mn-act');
+      if (!act) return;
+      act.open = !act.open;
+      if (act.open) act.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     };
     this.log.addEventListener('scroll', () => {
       if (!this.railFrame) this.railFrame = requestAnimationFrame(() => this.syncRail());
@@ -522,8 +596,8 @@ export class ChatView {
     window.addEventListener('pagehide', () => this.leaveFleeting());
     // Capsule <-> full composer: open on focus, fold back when the owner taps or tabs away
     // (menus and pickers the composer opened do not count as away).
-    const away = (t: EventTarget | null): boolean =>
-      t instanceof Element && !form.contains(t) && !t.closest('[role=menu],[role=dialog],[role=listbox],.ui-sel-pop,.vx-menu');
+    const away = (tg: EventTarget | null): boolean =>
+      tg instanceof Element && !form.contains(tg) && !tg.closest('[role=menu],[role=dialog],[role=listbox],.ui-sel-pop,.vx-menu');
     form.addEventListener('focusin', () => {
       this.focused = true;
       // The keyboard takes half the screen on phones: keep the latest reply in sight.
@@ -539,6 +613,14 @@ export class ChatView {
     const outside = (e: PointerEvent): void => {
       if (this.focused && away(e.target)) this.fold();
     };
+    // A press on the box itself (its padding, the empty bar) counts as the message field: the
+    // field keeps focus, so the box does not fold and open again.
+    form.querySelector<HTMLElement>('.mn-comp-box')!.addEventListener('pointerdown', (e) => {
+      const tg = e.target as Element;
+      if (tg === this.input || tg.closest('button, a, input, select, textarea, [role=button], .ui-sel, .mn-att-c')) return;
+      e.preventDefault();
+      if (document.activeElement !== this.input) this.input.focus({ preventScroll: true });
+    });
     document.addEventListener('pointerdown', outside, true);
     this.offOutside = () => document.removeEventListener('pointerdown', outside, true);
     // Paste or drop an image straight into the prompt.
@@ -634,10 +716,10 @@ export class ChatView {
     });
     // Chips in the composer: "Connect a model" opens Settings; the meter explains itself.
     form.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest('[data-setup]')) openMnemoSettings();
-      else if (t.closest('.mn-meter')) this.contextMenu();
-      else if (t.classList.contains('mn-comp-box')) this.focus();
+      const tg = e.target as HTMLElement;
+      if (tg.closest('[data-setup]')) openMnemoSettings();
+      else if (tg.closest('.mn-meter')) this.contextMenu();
+      else if (tg.classList.contains('mn-comp-box')) this.focus();
     });
     this.log.addEventListener('click', (e) => this.onLogClick(e));
     // The answer typed under Other on a question card.
@@ -671,7 +753,7 @@ export class ChatView {
       window.clearInterval(rec.tick);
       rec.r.onstop = null;
       if (rec.r.state !== 'inactive') rec.r.stop();
-      rec.stream.getTracks().forEach((t) => t.stop());
+      rec.stream.getTracks().forEach((tr) => tr.stop());
     }
     if (playing && this.el.contains(playing.btn)) stopListening();
     this.detach();
@@ -705,15 +787,15 @@ export class ChatView {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
       const n = (e as Error).name;
-      toast(n === 'NotAllowedError' || n === 'SecurityError' ? 'The browser did not allow the microphone' : n === 'NotFoundError' ? 'No microphone found' : (e as Error).message, 'err');
+      toast(n === 'NotAllowedError' || n === 'SecurityError' ? t('The browser did not allow the microphone') : n === 'NotFoundError' ? t('No microphone found') : (e as Error).message, 'err');
       return;
     }
-    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find((mt) => MediaRecorder.isTypeSupported?.(mt)) || '';
     let r: MediaRecorder;
     try {
       r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
     } catch (e) {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((tr) => tr.stop());
       toast((e as Error).message, 'err');
       return;
     }
@@ -733,7 +815,7 @@ export class ChatView {
     this.mic.classList.toggle('rec', on);
     const secs = this.rec ? Math.floor((Date.now() - this.rec.t0) / 1000) : 0;
     this.mic.querySelector('.mn-mic-t')!.textContent = on ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : '';
-    this.mic.title = on ? 'Stop and turn into text' : 'Speak a message';
+    this.mic.title = on ? t('Stop and turn into text') : t('Speak a message');
     this.mic.setAttribute('aria-label', this.mic.title);
     this.mic.setAttribute('aria-pressed', String(on));
     this.paintOpen();
@@ -744,7 +826,7 @@ export class ChatView {
     this.rec = null;
     if (rec) {
       window.clearInterval(rec.tick);
-      rec.stream.getTracks().forEach((t) => t.stop());
+      rec.stream.getTracks().forEach((tr) => tr.stop());
     }
     this.paintRec();
     const blob = new Blob(chunks, { type: (type || 'audio/webm').split(';')[0] });
@@ -754,7 +836,7 @@ export class ChatView {
     try {
       const text = await A.transcribe(blob);
       if (text) this.insertText(text);
-      else toast('Nothing was heard', 'info');
+      else toast(t('Nothing was heard'), 'info');
     } catch (e) {
       toast((e as Error).message, 'err');
     } finally {
@@ -782,13 +864,13 @@ export class ChatView {
 
   /** Bring message `mid` into view and flash it (a search hit). */
   reveal(mid: number): void {
-    const t = this.log.querySelector<HTMLElement>(`[data-mid="${mid}"]`);
-    if (!t) return;
-    t.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-    t.classList.remove('mn-flash');
-    void t.offsetWidth;
-    t.classList.add('mn-flash');
-    window.setTimeout(() => t.classList.remove('mn-flash'), 2200);
+    const hit = this.log.querySelector<HTMLElement>(`[data-mid="${mid}"]`);
+    if (!hit) return;
+    hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    hit.classList.remove('mn-flash');
+    void hit.offsetWidth;
+    hit.classList.add('mn-flash');
+    window.setTimeout(() => hit.classList.remove('mn-flash'), 2200);
   }
 
   /** Everything this chat attached, used, changed or showed (the artifacts panel). */
@@ -851,29 +933,32 @@ export class ChatView {
    *  now (cuts the reply running), move up and down, and remove. */
   private paintQueue(): void {
     const box = this.el.querySelector<HTMLElement>('.mn-queue')!;
-    box.hidden = !this.queue.length;
+    this.paintTray();
     if (!this.queue.length) {
-      box.innerHTML = '';
       this.qAll = false;
+      // Kept while the section folds away, then emptied (unless something was queued since).
+      window.setTimeout(() => {
+        if (!this.queue.length) box.innerHTML = '';
+      }, 420);
       return;
     }
     const n = this.queue.length;
     const head = this.qHeld
-      ? `<span class="mn-queue-ht warn">${icon('alert')}Paused after an error · ${n} waiting</span>`
-      : `<span class="mn-queue-ht">${icon('chat')}${n} queued · ${this.busy ? `goes out when ${A.MNEMO} finishes` : 'sending…'}</span>`;
+      ? `<span class="mn-queue-ht warn">${icon('alert')}${t('Paused after an error · {n} waiting', { n })}</span>`
+      : `<span class="mn-queue-ht">${icon('chat')}${t('{n} queued', { n })} · ${this.busy ? t('goes out when {mnemo} finishes', { mnemo: A.MNEMO }) : t('sending…')}</span>`;
     const tools = [
-      this.qHeld ? `<button type="button" class="mn-qh-b acc" data-qa="resume" title="Send the queue now">${icon('send')}<span>Resume</span></button>` : '',
-      n > 3 ? `<button type="button" class="mn-qh-b" data-qa="all" aria-expanded="${this.qAll}">${this.qAll ? 'Show less' : `Show all (${n})`}</button>` : '',
-      `<button type="button" class="mn-qh-b" data-qa="clear" title="Remove every queued message">${icon('trash')}<span>Clear</span></button>`,
+      this.qHeld ? `<button type="button" class="mn-qh-b acc" data-qa="resume" title="${t('Send the queue now')}">${icon('send')}<span>${t('Resume')}</span></button>` : '',
+      n > 3 ? `<button type="button" class="mn-qh-b" data-qa="all" aria-expanded="${this.qAll}">${this.qAll ? t('Show less') : t('Show all ({n})', { n })}</button>` : '',
+      `<button type="button" class="mn-qh-b" data-qa="clear" title="${t('Remove every queued message')}">${icon('trash')}<span>${t('Clear')}</span></button>`,
     ].join('');
-    const sendTitle = this.busy ? 'Send now: cuts the reply and answers this' : 'Send now';
+    const sendTitle = this.busy ? t('Send now: cuts the reply and answers this') : t('Send now');
     box.innerHTML = `<div class="mn-queue-h">${head}<span class="mn-grow"></span>${tools}</div><div class="mn-q-list${this.qAll ? ' all' : ''}">${this.queue
       .map(
         (q, i) => `<div class="mn-q-i" data-q="${q.id}" draggable="true"><span class="mn-q-n">${i + 1}</span><span class="mn-q-t" title="${attr(q.text)}">${esc(q.text)}${
           q.attach.length ? ` <small>+${q.attach.length}</small>` : ''
-        }</span><span class="mn-q-a"><button type="button" class="mn-ibtn" data-qa="send" title="${sendTitle}" aria-label="Send now">${icon('send-now')}</button><button type="button" class="mn-ibtn" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="Move down" aria-label="Move down"${
+        }</span><span class="mn-q-a"><button type="button" class="mn-ibtn" data-qa="send" title="${sendTitle}" aria-label="${t('Send now')}">${icon('send-now')}</button><button type="button" class="mn-ibtn" data-qa="up" title="${t('Move up')}" aria-label="${t('Move up')}"${i === 0 ? ' disabled' : ''}>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="down" title="${t('Move down')}" aria-label="${t('Move down')}"${
           i === n - 1 ? ' disabled' : ''
-        }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="Remove" aria-label="Remove">${icon('close')}</button></span></div>`,
+        }>${icon('arrow')}</button><button type="button" class="mn-ibtn" data-qa="del" title="${t('Remove')}" aria-label="${t('Remove')}">${icon('close')}</button></span></div>`,
       )
       .join('')}</div>`;
     requestAnimationFrame(() => this.fadeQueue());
@@ -957,7 +1042,7 @@ export class ChatView {
         this.setQueue(ev);
         break;
       case 'queue_error':
-        toast(`A queued message could not go out: ${ev.message}`, 'warn');
+        toast(t('A queued message could not go out: {msg}', { msg: ts(ev.message) }), 'warn');
         break;
       case 'compacted':
       case 'reload':
@@ -979,7 +1064,7 @@ export class ChatView {
     const name = st ? A.modelLabel(st, key) : key;
     const d = el('div', 'mn-modelchg' + (why ? ' fb' : ''));
     d.setAttribute('role', 'note');
-    d.innerHTML = `<span>${icon(why ? 'refresh' : 'bolt')}<b>${esc(name)}</b>${why ? `<em>${esc(why)}</em>` : '<em>answers from here</em>'}</span>`;
+    d.innerHTML = `<span>${icon(why ? 'refresh' : 'bolt')}<b>${esc(name)}</b>${why ? `<em>${esc(why)}</em>` : `<em>${t('answers from here')}</em>`}</span>`;
     d.title = key;
     return d;
   }
@@ -1031,7 +1116,7 @@ export class ChatView {
   private addAttach(a: A.Attach): void {
     if (this.attach.some((x) => x.kind === a.kind && x.path === a.path)) return;
     if (this.attach.length >= 8) {
-      toast('Up to 8 notes or folders per message', 'warn');
+      toast(t('Up to 8 notes or folders per message'), 'warn');
       return;
     }
     this.attach.push(a);
@@ -1045,11 +1130,11 @@ export class ChatView {
     box.innerHTML = carouselHTML(this.attach
       .map(
         (a, i) =>
-          `<span class="mn-att-c${a.kind === 'image' ? ' img' : ''}" style="--i:${i}" data-at="${i}" title="${attr(a.kind === 'image' ? `${a.title} (tap to preview)` : a.path || 'All notes')}">${
+          `<span class="mn-att-c${a.kind === 'image' ? ' img' : ''}" style="--i:${i}" data-at="${i}" title="${attr(a.kind === 'image' ? t('{title} (tap to preview)', { title: a.title }) : a.path || t('All notes'))}">${
             a.kind === 'image' && a.url ? `<img alt="" src="${attr(a.url)}">` : icon(a.kind === 'note' ? 'note' : a.kind === 'image' ? 'image' : 'folder')
           }<span>${esc(a.title)}</span>${
             a.kind === 'folder' && a.notes ? `<small>${a.notes}</small>` : ''
-          }<button type="button" data-unattach="${i}" aria-label="Remove ${attr(a.title)}" title="Remove">${icon('close')}</button></span>`,
+          }<button type="button" data-unattach="${i}" aria-label="${t('Remove {name}', { name: attr(a.title) })}" title="${t('Remove')}">${icon('close')}</button></span>`,
       )
       .join(''));
     this.attEl.classList.toggle('has', this.attach.length > 0);
@@ -1067,22 +1152,23 @@ export class ChatView {
     openMenu(
       [
         ...(here && !has(here.kind, here.path)
-          ? [{ label: `This ${here.kind} · ${A.scopeLabel(ctx)}`, icon: icon(here.kind === 'note' ? 'note' : 'folder', 'vx-i'), run: () => this.addAttach({ ...here, title: A.scopeLabel(ctx) }) }]
+          ? [{ label: here.kind === 'note' ? t('This note') : t('This folder'), desc: A.scopeLabel(ctx), icon: icon(here.kind === 'note' ? 'note' : 'folder', 'vx-i'), run: () => this.addAttach({ ...here, title: A.scopeLabel(ctx) }) }]
           : []),
-        { label: 'Image', icon: icon('image', 'vx-i'), run: () => this.pickImages() },
-        { label: 'Notes', icon: icon('note', 'vx-i'), run: () => pickNote((ps) => ps.forEach((p) => this.addAttach({ kind: 'note', path: p, title: nameOf(p) })), 8 - this.attach.length) },
+        { label: t('Image'), desc: t('A picture from this device'), icon: icon('image', 'vx-i'), run: () => this.pickImages() },
+        { label: t('Notes'), desc: t('Pick notes from your vault'), icon: icon('note', 'vx-i'), run: () => pickNote((ps) => ps.forEach((p) => this.addAttach({ kind: 'note', path: p, title: nameOf(p) })), 8 - this.attach.length) },
         {
-          label: 'Folder',
+          label: t('Folder'),
+          desc: t('Everything in one folder'),
           icon: icon('folder', 'vx-i'),
           run: () =>
             pickFolderDialog({
-              title: 'Folder',
+              title: t('Folder'),
               folders: pickerFolders(),
-              verb: 'Attach',
-              run: (f) => this.addAttach({ kind: 'folder', path: f, title: f ? f.split('/').pop()! : 'All notes' }),
+              verb: t('Attach'),
+              run: (f) => this.addAttach({ kind: 'folder', path: f, title: f ? f.split('/').pop()! : t('All notes') }),
             }),
         },
-        ...(has('folder', '') ? [] : [{ label: 'All notes', icon: icon('vault', 'vx-i'), run: () => this.addAttach({ kind: 'folder', path: '', title: 'All notes' }) }]),
+        ...(has('folder', '') ? [] : [{ label: t('All notes'), desc: t('The whole vault'), icon: icon('vault', 'vx-i'), run: () => this.addAttach({ kind: 'folder', path: '', title: t('All notes') }) }]),
       ],
       this.plusEl,
     );
@@ -1104,7 +1190,7 @@ export class ChatView {
   private async addImages(files: File[]): Promise<void> {
     const have = this.attach.filter((a) => a.kind === 'image').length;
     const room = Math.min(IMAGES_PER_MESSAGE - have, 8 - this.attach.length);
-    if (files.length > room) toast(`Up to ${IMAGES_PER_MESSAGE} images per message`, 'warn');
+    if (files.length > room) toast(t('Up to {n} images per message', { n: IMAGES_PER_MESSAGE }), 'warn');
     for (const f of files.slice(0, Math.max(0, room))) {
       try {
         const r = await A.uploadChatImage(f);
@@ -1137,14 +1223,14 @@ export class ChatView {
     const key = c?.model || this.model || this.select?.value || (s ? A.fallbackModel(s) : '');
     const pop = el('div', 'mn-cx');
     pop.setAttribute('role', 'dialog');
-    pop.setAttribute('aria-label', 'Chat memory');
+    pop.setAttribute('aria-label', t('Chat memory'));
     const n = c?.compactions || 0;
-    pop.innerHTML = `<div class="mn-cx-h"><b>Chat memory</b><small>${esc(A.modelLabel(s, key))}</small></div>
-      <div class="mn-cx-bar" style="--p:${pct.toFixed(1)}%;--c:${win ? ((at / win) * 100).toFixed(1) : 75}%"><i></i><u title="Compacts here"></u></div>
-      <div class="mn-cx-n"><b>${A.fmtTokens(used)}</b> of ${A.fmtTokens(win)} tokens · ${Math.round(pct)}%</div>
-      <p>${this.session ? 'This chat' : 'A chat'} keeps everything from its first message to the last for this model. Near ${A.fmtTokens(at)} tokens ${A.MNEMO} folds the older messages into a summary and carries on.</p>
-      ${n ? `<p class="mn-cx-k">${icon('refresh')}<span>Compacted ${n === 1 ? 'once' : `${n} times`} so far.</span></p>` : ''}
-      <div class="mn-cx-a">${this.session && this.messages.length > 2 ? `<button type="button" class="btn sm" data-cx="compact">Compact now</button>` : ''}<button type="button" class="btn ghost sm" data-cx="new">${icon('plus')}<span>New chat</span></button></div>`;
+    pop.innerHTML = `<div class="mn-cx-h"><b>${t('Chat memory')}</b><small>${esc(A.modelLabel(s, key))}</small></div>
+      <div class="mn-cx-bar" style="--p:${pct.toFixed(1)}%;--c:${win ? ((at / win) * 100).toFixed(1) : 75}%"><i></i><u title="${t('Compacts here')}"></u></div>
+      <div class="mn-cx-n">${t('{used} of {win} tokens · {pct}%', { used: `<b>${A.fmtTokens(used)}</b>`, win: A.fmtTokens(win), pct: Math.round(pct) })}</div>
+      <p>${this.session ? t('This chat keeps everything from its first message to the last for this model. Near {n} tokens {mnemo} folds the older messages into a summary and carries on.', { n: A.fmtTokens(at), mnemo: A.MNEMO }) : t('A chat keeps everything from its first message to the last for this model. Near {n} tokens {mnemo} folds the older messages into a summary and carries on.', { n: A.fmtTokens(at), mnemo: A.MNEMO })}</p>
+      ${n ? `<p class="mn-cx-k">${icon('refresh')}<span>${tn(n, 'Compacted once so far.', 'Compacted {n} times so far.')}</span></p>` : ''}
+      <div class="mn-cx-a">${this.session && this.messages.length > 2 ? `<button type="button" class="btn sm" data-cx="compact">${t('Compact now')}</button>` : ''}<button type="button" class="btn ghost sm" data-cx="new">${icon('plus')}<span>${t('New chat')}</span></button></div>`;
     document.body.append(pop);
     const r = this.meter.getBoundingClientRect();
     const w = Math.min(300, window.innerWidth - 24);
@@ -1178,7 +1264,7 @@ export class ChatView {
       }
       if (!this.session) return;
       b.disabled = true;
-      b.textContent = 'Compacting…';
+      b.textContent = t('Compacting…');
       close();
       const live = this.compactLive();
       this.log.append(live);
@@ -1189,14 +1275,14 @@ export class ChatView {
         if (res.ok) {
           // The summary is right there: open the divider to read it.
           live.replaceWith(this.compactNote(res.messages || 0, res.summary || '', Number(live.dataset.t0)));
-          toast(`Compacted ${res.messages} older messages into a summary`, 'ok');
+          toast(t('Compacted {n} older messages into a summary', { n: res.messages ?? 0 }), 'ok');
           this.setContext(res.context);
           void A.getSession(sid).then((r) => {
             if (this.session?.id === sid && !this.busy) this.messages = r.messages;
           });
         } else {
           live.remove();
-          toast(res.reason || 'Nothing to compact yet', 'info');
+          toast((res.reason && ts(res.reason)) || t('Nothing to compact yet'), 'info');
           this.setContext(res.context);
         }
       } catch (err) {
@@ -1214,7 +1300,7 @@ export class ChatView {
     const isDefault = s.prefs.default_model === key;
     try {
       await A.savePrefs({ default_model: isDefault ? null : key });
-      toast(isDefault ? 'New chats use the first pinned model again' : `New chats now start with ${A.modelLabel(s, key)}, here and in the terminal`, 'ok');
+      toast(isDefault ? t('New chats use the first pinned model again') : t('New chats now start with {model}, here and in the terminal', { model: A.modelLabel(s, key) }), 'ok');
     } catch (e) {
       toast((e as Error).message, 'err');
     }
@@ -1237,7 +1323,7 @@ export class ChatView {
       this.permSel = createSelect({
         options: opts,
         value: mode,
-        label: 'Permission',
+        label: t('Permission'),
         className: 'mn-model mn-perm',
         align: 'start',
         minWidth: 260,
@@ -1282,9 +1368,9 @@ export class ChatView {
     const on = A.fallbackModel(s) === key;
     const explicit = s.prefs.default_model === key;
     this.pinBtn.classList.toggle('on', on);
-    const t = explicit ? 'Default for new chats. Tap to unpin.' : on ? 'Used for new chats (first pinned). Tap to make it the default.' : 'Use this model for new chats';
-    this.pinBtn.title = t;
-    this.pinBtn.setAttribute('aria-label', t);
+    const tip = explicit ? t('Default for new chats. Tap to unpin.') : on ? t('Used for new chats (first pinned). Tap to make it the default.') : t('Use this model for new chats');
+    this.pinBtn.title = tip;
+    this.pinBtn.setAttribute('aria-label', tip);
     this.pinBtn.setAttribute('aria-pressed', String(explicit));
   }
 
@@ -1319,9 +1405,9 @@ export class ChatView {
     this.rail.style.setProperty('--rwin', this.railWin + 'px');
     this.rail.innerHTML = `<div class="mn-rwin"><div class="mn-rtrack">${us
       .map((u, i) => {
-        const t = (u.querySelector('.mn-ub')?.textContent || '').trim();
-        const w = 8 + Math.min(14, Math.round(Math.sqrt(t.length) * 1.4));
-        return `<button type="button" class="mn-rb" data-at="${i}" style="--w:${w}px" aria-label="${attr(t.slice(0, 80) || 'Message')}" tabindex="-1"><i></i></button>`;
+        const txt = (u.querySelector('.mn-ub')?.textContent || '').trim();
+        const w = 8 + Math.min(14, Math.round(Math.sqrt(txt.length) * 1.4));
+        return `<button type="button" class="mn-rb" data-at="${i}" style="--w:${w}px" aria-label="${attr(txt.slice(0, 80) || t('Message'))}" tabindex="-1"><i></i></button>`;
       })
       .join('')}</div></div><span class="mn-rknob" aria-hidden="true"></span><span class="mn-rlab" aria-hidden="true"></span>`;
     this.railOff = 0;
@@ -1374,8 +1460,8 @@ export class ChatView {
       const b = bars()[i];
       if (!lab || !b) return;
       const u = this.log.querySelectorAll<HTMLElement>('.mn-u')[i];
-      const t = (u?.querySelector('.mn-ub')?.textContent || '').trim();
-      lab.innerHTML = `<b>${i + 1}/${bars().length}</b>${esc(t.slice(0, 90) || 'Message')}`;
+      const txt = (u?.querySelector('.mn-ub')?.textContent || '').trim();
+      lab.innerHTML = `<b>${i + 1}/${bars().length}</b>${esc(txt.slice(0, 90) || t('Message'))}`;
       const r = b.getBoundingClientRect();
       lab.style.top = r.top + r.height / 2 - this.rail.getBoundingClientRect().top + 'px';
       lab.classList.add('in');
@@ -1500,8 +1586,8 @@ export class ChatView {
     const mid = this.log.clientHeight * 0.35;
     let cur = 0;
     const tops = Array.from(us, (u) => u.getBoundingClientRect().top - box);
-    tops.forEach((t, i) => {
-      if (t <= mid) cur = i;
+    tops.forEach((tp, i) => {
+      if (tp <= mid) cur = i;
     });
     // How far between this question and the next the view is: the bars glide, not jump.
     let f = cur;
@@ -1544,16 +1630,14 @@ export class ChatView {
     const box = el(
       'div',
       'mn-earlier',
-      `<div class="mn-earlier-h">${icon('chat')}<span><b>${list.length === 1 ? 'There is a chat' : `There are ${list.length} chats`} about ${esc(
-        about.title,
-      )}</b><small>Carry on in one, or just type below to start a new chat.</small></span></div>
+      `<div class="mn-earlier-h">${icon('chat')}<span><b>${tn(list.length, 'There is a chat about {title}', 'There are {n} chats about {title}', { title: esc(about.title) })}</b><small>${t('Carry on in one, or just type below to start a new chat.')}</small></span></div>
       <div class="mn-earlier-l">${list
         .slice(0, 3)
         .map(
           (x) =>
             `<button type="button" class="mn-earlier-i" data-earlier="${attr(x.id)}"><span class="mn-earlier-t"><b>${esc(x.title)}</b><small>${esc(
               relTs(x.updated_at),
-            )} · ${x.messages} message${x.messages === 1 ? '' : 's'}</small></span><span class="mn-earlier-go">Continue${icon('chev')}</span></button>`,
+            )} · ${tn(x.messages, '{n} message', '{n} messages')}</small></span><span class="mn-earlier-go">${t('Continue')}${icon('chev')}</span></button>`,
         )
         .join('')}</div>`,
     );
@@ -1595,7 +1679,7 @@ export class ChatView {
   /** The prompt's hint says a fleeting chat is private. */
   private paintPlaceholder(): void {
     const ta = this.el.querySelector<HTMLTextAreaElement>('.mn-comp textarea, textarea');
-    if (ta) ta.placeholder = this.fleetingOn ? 'Ask privately… nothing here is kept' : `Ask ${A.MNEMO} about your notes…`;
+    if (ta) ta.placeholder = this.fleetingOn ? t('Ask privately… nothing here is kept') : t('Ask {mnemo} about your notes…', { mnemo: A.MNEMO });
   }
 
   /** Leave a fleeting chat: it is deleted on the server, images and all. */
@@ -1625,7 +1709,7 @@ export class ChatView {
     if (!box) {
       box = el('div', 'mn-slash');
       box.setAttribute('role', 'listbox');
-      box.setAttribute('aria-label', 'Skills');
+      box.setAttribute('aria-label', t('Skills'));
       this.el.querySelector('form.mn-comp')!.append(box);
       box.addEventListener('mousedown', (e) => e.preventDefault());
       box.addEventListener('click', (e) => {
@@ -1635,7 +1719,7 @@ export class ChatView {
     }
     this.slash = { box, list: found, at: Math.min(this.slash?.at ?? 0, Math.max(0, found.length - 1)) };
     box.innerHTML =
-      `<div class="mn-slash-h">${icon('bolt')}<span>Skills</span><small>kept in the Skills folder</small></div>` +
+      `<div class="mn-slash-h">${icon('bolt')}<span>${t('Skills')}</span><small>${t('kept in the Skills folder')}</small></div>` +
       (found.length
         ? found
             .slice(0, 8)
@@ -1647,7 +1731,7 @@ export class ChatView {
             )
             .join('')
         : `<p class="mn-slash-none">${
-            list.length ? 'No skill by that name.' : `No skills yet. Ask ${A.MNEMO}, for example: “make a skill that tidies my meeting notes”.`
+            list.length ? t('No skill by that name.') : t('No skills yet. Ask {mnemo}, for example: “make a skill that tidies my meeting notes”.', { mnemo: A.MNEMO })
           }</p>`);
   }
 
@@ -1717,7 +1801,7 @@ export class ChatView {
       this.setQueue(undefined);
     }
     this.detach();
-    this.log.innerHTML = `<div class="mn-loading">${markHTML('lg pulse')}<span>Opening the chat…</span></div>`;
+    this.log.innerHTML = `<div class="mn-loading">${markHTML('lg pulse')}<span>${t('Opening the chat…')}</span></div>`;
     try {
       const r = await A.getSession(id);
       this.session = r.session;
@@ -1767,10 +1851,10 @@ export class ChatView {
 
   /** Fade the prompt's top or bottom edge while there is more text that way. */
   private fadeInput(): void {
-    const t = this.input;
-    const max = t.scrollHeight - t.clientHeight;
-    t.classList.toggle('ft', t.scrollTop > 2);
-    t.classList.toggle('fb', max - t.scrollTop > 2);
+    const ta = this.input;
+    const max = ta.scrollHeight - ta.clientHeight;
+    ta.classList.toggle('ft', ta.scrollTop > 2);
+    ta.classList.toggle('fb', max - ta.scrollTop > 2);
   }
 
   private contextWindow(): number {
@@ -1788,7 +1872,7 @@ export class ChatView {
     if (!list.length) {
       this.select?.close();
       this.select = null;
-      this.modelSlot.innerHTML = `<button type="button" class="mn-chip warn" data-setup title="Add a provider and a model in Settings, Mnemo">${icon('settings')}<span>Connect a model</span></button>`;
+      this.modelSlot.innerHTML = `<button type="button" class="mn-chip warn" data-setup title="${t('Add a provider and a model in Settings, Mnemo')}">${icon('settings')}<span>${t('Connect a model')}</span></button>`;
       this.meter.hidden = true;
       this.pinBtn.hidden = true;
       return;
@@ -1796,29 +1880,50 @@ export class ChatView {
     const opts: SelectOption[] = list.map((m) => ({
       value: A.modelKey(m),
       label: m.label || m.model_id,
-      hint: [A.modelKey(m) === A.fallbackModel(s) ? 'Default' : '', A.providerLabel(s, m.provider_id), m.context_window ? `${A.fmtTokens(m.context_window)} context` : ''].filter(Boolean).join(' · '),
-      group: m.pinned ? 'Pinned' : A.providerLabel(s, m.provider_id),
+      // The pinned default wears its own badge; with none set, the model new chats fall back to
+      // says Default in its line.
+      hint: [!s.prefs.default_model && A.modelKey(m) === A.fallbackModel(s) ? t('Default') : '', A.providerLabel(s, m.provider_id), m.context_window ? t('{n} context', { n: A.fmtTokens(m.context_window) }) : ''].filter(Boolean).join(' · '),
+      group: m.pinned ? t('Pinned') : A.providerLabel(s, m.provider_id),
       lead: m.pinned
         ? `<span class="mn-star">${icon('star')}</span>`
         : `<span class="mn-pdot" data-p="${attr(A.providerOf(s, m.provider_id)?.kind || '')}"></span>`,
+      // Pin as the default for new chats, straight from the list.
+      trail: {
+        html: s.prefs.default_model === A.modelKey(m) ? `${icon('pin')}<span>${t('Default')}</span>` : icon('pin'),
+        label: s.prefs.default_model === A.modelKey(m) ? t('Default for new chats. Tap to unpin.') : t('Use this model for new chats'),
+        on: s.prefs.default_model === A.modelKey(m),
+        run: () => {
+          const key = A.modelKey(m);
+          const off = A.mnemoState()?.prefs.default_model === key;
+          void A.savePrefs({ default_model: off ? null : key }).then(
+            () => toast(off ? t('No default model: new chats use the first pinned one') : t('{model} is the default for new chats', { model: m.label || m.model_id }), 'ok'),
+            (e) => toast((e as Error).message, 'err'),
+          );
+        },
+      },
     }));
     // The chat's own model stays shown even when it is hidden from the picker.
     const own = this.model && !opts.some((x) => x.value === this.model) ? s.models.find((x) => A.modelKey(x) === this.model) : undefined;
-    if (own) opts.unshift({ value: this.model, label: own.label || own.model_id, hint: 'This chat · hidden', group: 'This chat' });
+    if (own) opts.unshift({ value: this.model, label: own.label || own.model_id, hint: t('This chat · hidden'), group: t('This chat') });
     const value = this.model && opts.some((x) => x.value === this.model) ? this.model : A.fallbackModel(s);
     if (!this.select) {
       this.modelSlot.innerHTML = '';
       this.select = createSelect({
         options: opts,
         value,
-        label: 'Model',
+        label: t('Model'),
         searchable: opts.length > 7,
-        className: 'mn-model',
-        align: 'end',
-        minWidth: 260,
-        render: (o) => `<span class="mn-model-v">${o ? esc(o.label) : 'Model'}</span>`,
+        className: 'mn-model mn-model-pick',
+        popClass: 'mn-model-pop',
+        align: 'start',
+        minWidth: 360,
+        // The pinned default shows a small pin after its name, so it is clear at a glance.
+        render: (o) =>
+          `<span class="mn-model-v">${o ? esc(o.label) : t('Model')}</span>${
+            o && A.mnemoState()?.prefs.default_model === o.value ? `<span class="mn-model-def" title="${attr(t('Default for new chats. Tap to unpin.'))}">${icon('pin')}</span>` : ''
+          }${icon('chev-down', 'i mn-model-chev')}`,
         onChange: (v) => void this.chooseModel(v),
-        footer: { label: 'Manage models and providers', icon: icon('settings'), run: () => openMnemoSettings() },
+        footer: { label: t('Manage models and providers'), icon: icon('settings'), run: () => openMnemoSettings() },
       });
       this.modelSlot.append(this.select.el);
     } else this.select.setOptions(opts, value);
@@ -1836,35 +1941,37 @@ export class ChatView {
     const sid = this.session.id;
     const st = subSt(card);
     const prev = st.model;
-    const name = (k: string): string => (k ? A.modelLabel(s, k) : 'Auto');
+    const name = (k: string): string => (k ? A.modelLabel(s, k) : t('Auto'));
     const opts: SelectOption[] = [
-      { value: '', label: 'Auto', hint: 'Default model, then the fallbacks' },
-      ...A.usableModels(s).map((m) => ({ value: A.modelKey(m), label: m.label || m.model_id, hint: A.providerLabel(s, m.provider_id), group: m.pinned ? 'Pinned' : A.providerLabel(s, m.provider_id) })),
+      { value: '', label: t('Auto'), hint: t('Default model, then the fallbacks') },
+      ...A.usableModels(s).map((m) => ({ value: A.modelKey(m), label: m.label || m.model_id, hint: A.providerLabel(s, m.provider_id), group: m.pinned ? t('Pinned') : A.providerLabel(s, m.provider_id) })),
     ];
     card.querySelectorAll('.mn-sub-sel').forEach((x) => x.remove());
     const sel = createSelect({
       options: opts,
       value: prev,
-      label: `Model for ${st.agent}`,
+      label: t('Model for {agent}', { agent: st.agent }),
       searchable: opts.length > 8,
       minWidth: 260,
       onChange: (key) => {
         sel.el.remove();
         if (key === prev) return;
         Modal.open({
-          title: `Switch ${esc(st.agent)}'s model?`,
-          body: `<p><b>${esc(name(key))}</b> takes over from ${esc(st.agent)}'s next step${
-            card.dataset.state === 'run' ? ' (it is working now)' : ''
-          }, and answers its follow-ups in this chat. It may work a little differently from <b>${esc(name(prev))}</b>.</p>`,
+          title: t("Switch {agent}'s model?", { agent: esc(st.agent) }),
+          body: `<p>${
+            card.dataset.state === 'run'
+              ? t("{model} takes over from {agent}'s next step (it is working now), and answers its follow-ups in this chat. It may work a little differently from {prev}.", { model: `<b>${esc(name(key))}</b>`, agent: esc(st.agent), prev: `<b>${esc(name(prev))}</b>` })
+              : t("{model} takes over from {agent}'s next step, and answers its follow-ups in this chat. It may work a little differently from {prev}.", { model: `<b>${esc(name(key))}</b>`, agent: esc(st.agent), prev: `<b>${esc(name(prev))}</b>` })
+          }</p>`,
           actions: [
-            { label: 'Keep ' + name(prev), cls: 'ghost', run: () => Modal.close() },
+            { label: t('Keep {model}', { model: name(prev) }), cls: 'ghost', run: () => Modal.close() },
             {
-              label: 'Switch',
+              label: t('Switch'),
               cls: 'primary',
               run: () => {
                 Modal.close();
                 A.setSubModel(sid, st.agent, key).then(
-                  () => toast(`${st.agent} now uses ${name(key)}`, 'ok'),
+                  () => toast(t('{agent} now uses {model}', { agent: st.agent, model: name(key) }), 'ok'),
                   (e) => toast((e as Error).message, 'err'),
                 );
               },
@@ -1887,13 +1994,15 @@ export class ChatView {
       const name = (k: string): string => (st ? A.modelLabel(st, k) : k);
       const ok = await new Promise<boolean>((done) => {
         Modal.open({
-          title: 'Switch the model for this chat?',
-          body: `<p>This chat so far was answered by <b>${esc(name(prev))}</b>. From the next message on, <b>${esc(name(key))}</b> answers, with the whole chat as context. Its answers may read a little differently${
-            this.ctx && this.ctx.used > 0 ? ', and its memory for this chat may be smaller or larger' : ''
-          }.</p>`,
+          title: t('Switch the model for this chat?'),
+          body: `<p>${
+            this.ctx && this.ctx.used > 0
+              ? t('This chat so far was answered by {prev}. From the next message on, {model} answers, with the whole chat as context. Its answers may read a little differently, and its memory for this chat may be smaller or larger.', { prev: `<b>${esc(name(prev))}</b>`, model: `<b>${esc(name(key))}</b>` })
+              : t('This chat so far was answered by {prev}. From the next message on, {model} answers, with the whole chat as context. Its answers may read a little differently.', { prev: `<b>${esc(name(prev))}</b>`, model: `<b>${esc(name(key))}</b>` })
+          }</p>`,
           actions: [
-            { label: 'Keep ' + name(prev), cls: 'ghost', run: () => (Modal.close(), done(false)) },
-            { label: 'Switch', cls: 'primary', run: () => (Modal.close(), done(true)) },
+            { label: t('Keep {model}', { model: name(prev) }), cls: 'ghost', run: () => (Modal.close(), done(false)) },
+            { label: t('Switch'), cls: 'primary', run: () => (Modal.close(), done(true)) },
           ],
         });
       });
@@ -1933,27 +2042,36 @@ export class ChatView {
     }
     const level = (s.prefs.thinking || 'auto') as A.ThinkLevel;
     const opts: SelectOption[] = THINK_LEVELS.map((l) => ({ value: l.v, label: l.label, hint: l.hint }));
+    const tip = (v: string): void => {
+      if (!this.thinkSel) return;
+      const lbl = THINK_LEVELS.find((l) => l.v === v)?.label ?? v;
+      this.thinkSel.el.title = v === 'auto' ? t('Thinking: the model decides how much') : t('Thinking: {level}', { level: lbl.toLowerCase() });
+      this.thinkSel.el.classList.toggle('set', v !== 'auto');
+    };
     if (this.thinkSel) {
       this.thinkSel.setOptions(opts, level);
+      tip(level);
       return;
     }
     this.thinkSel = createSelect({
       options: opts,
       value: level,
-      label: 'Thinking',
+      label: t('Thinking'),
       className: 'mn-model mn-think',
       align: 'end',
       minWidth: 230,
-      render: (o) => `${icon('brain')}<span class="mn-model-v">${o ? esc(o.value === 'auto' ? 'Think' : o.label) : 'Think'}</span>`,
+      render: (o) => `${icon('brain')}<span class="mn-model-v">${o ? esc(o.value === 'auto' ? t('Think') : o.label) : t('Think')}</span>`,
       onChange: (v) => {
+        tip(v);
         void A.savePrefs({ thinking: v as A.ThinkLevel }).then(
-          () => toast(v === 'off' ? 'Thinking off: quicker, plainer answers' : v === 'auto' ? 'Thinking: the model decides how much' : `Thinking: ${v}`, 'ok'),
+          () => toast(v === 'off' ? t('Thinking off: quicker, plainer answers') : v === 'auto' ? t('Thinking: the model decides how much') : t('Thinking: {level}', { level: THINK_LEVELS.find((l) => l.v === v)?.label.toLowerCase() ?? v }), 'ok'),
           (e) => toast((e as Error).message, 'err'),
         );
       },
     });
     slot.innerHTML = '';
     slot.append(this.thinkSel.el);
+    tip(level);
   }
 
   private thinkSel: Select | null = null;
@@ -1965,47 +2083,144 @@ export class ChatView {
     this.meter.classList.toggle('hot', pct > 80);
     const s = A.mnemoState();
     this.meter.hidden = !window || !s || !A.usableModels(s).length;
-    const t = window ? `Context used: about ${A.fmtTokens(used)} of ${A.fmtTokens(window)} tokens (${Math.round(pct)}%). Tap for details.` : '';
-    this.meter.title = t;
-    this.meter.setAttribute('aria-label', t || 'Context used');
+    const tip = window ? t('Context used: about {used} of {win} tokens ({pct}%). Tap for details.', { used: A.fmtTokens(used), win: A.fmtTokens(window), pct: Math.round(pct) }) : '';
+    this.meter.title = tip;
+    this.meter.setAttribute('aria-label', tip || t('Context used'));
   }
 
   private paintEmpty(): void {
     if (this.session || this.messages.length) return;
+    // A new chat starts without another chat's checklist.
+    this.showPlan(null);
     const s = A.mnemoState();
     const sc = this.newScope();
     const kind = sc.startsWith('note:') ? 'note' : sc.startsWith('folder:') ? 'folder' : 'global';
     const ready = !!s && A.usableModels(s).length > 0;
     const about =
-      kind === 'note' ? `Ask about <b>${esc(A.scopeLabel(sc))}</b>, or anything in your vault.` : kind === 'folder' ? `Ask about the folder <b>${esc(A.scopeLabel(sc))}</b>, or anything in your vault.` : 'I find, read, write, tag, link and tidy your notes. No web, no shell: only your vault.';
+      kind === 'note' ? t('Ask about {name}, or anything in your vault.', { name: `<b>${esc(A.scopeLabel(sc))}</b>` }) : kind === 'folder' ? t('Ask about the folder {name}, or anything in your vault.', { name: `<b>${esc(A.scopeLabel(sc))}</b>` }) : t('I find, read, write, tag, link and tidy your notes. No web, no shell: only your vault.');
     this.log.innerHTML = `<div class="mn-hello">
         ${
           this.fleetingOn
             ? `<div class="mn-incog" aria-hidden="true">${icon('incognito')}</div>
-        <h2>Fleeting chat</h2>
-        <p>Nothing said here is kept.</p>
-        <dl class="mn-fleet">
-          <div><dt>Gone</dt><dd>this chat and its pictures, once you leave</dd></div>
-          <div><dt>Unseen</dt><dd>chat list, search, ${esc(A.MNEMO)}'s memory of you and your chats</dd></div>
-          <div><dt>Kept</dt><dd>changes to your notes, in Activity and History</dd></div>
-        </dl>`
+        <h2>${t('Fleeting chat')}</h2>
+        <p>${t('Nothing said here is kept.')}</p>
+        <p class="mn-fleet-n">${t('It is gone when you leave, pictures included. Changes to your notes still show in Activity and History.')}</p>`
             : `<div class="mn-hello-mark">${markHTML('xl')}</div>
-        <h2>${this.o.compact ? `Hi, I'm ${A.MNEMO}` : `${A.MNEMO} looks after your notes`}</h2>
+        <h2>${this.o.compact ? t("Hi, I'm {mnemo}", { mnemo: A.MNEMO }) : t('{mnemo} looks after your notes', { mnemo: A.MNEMO })}</h2>
         <p>${about}</p>`
         }
         ${
-          ready && !this.fleetingOn
-            ? `<div class="mn-sugs" data-kind="${kind}"></div>${
+          ready
+            ? `${
+                !this.fleetingOn && kind === 'global' && !s?.prefs.intro_done
+                  ? `<form class="mn-intro" data-intro autocomplete="off"><b>${t('Tell {mnemo} about you', { mnemo: A.MNEMO })}</b><span>${t('Optional. A few words on who you are, what you work on, how you like answers. {mnemo} keeps them and you can change them any time in Settings.', { mnemo: A.MNEMO })}</span>
+              <textarea class="ui-input" rows="2" maxlength="4000" placeholder="${attr(t('e.g. I write in English, like short answers, and keep my projects in Work/'))}" aria-label="${t('About you')}"></textarea>
+              <div class="mn-intro-a"><button type="submit" class="btn primary sm">${icon('check')}<span>${t('Save')}</span></button><button type="button" class="btn sm" data-intro-notes>${icon('sparkle')}<span>${t('Describe me from my notes')}</span></button><button type="button" class="btn ghost sm" data-intro-skip>${t('Skip')}</button></div></form>`
+                  : ''
+              }<div class="mn-sugs" data-kind="${kind}"></div>${
                 kind === 'global'
-                  ? `<div class="mn-sug-bar"><button type="button" class="mn-sug-act" data-amaze title="${A.MNEMO} writes new suggestions from your recent notes (yours stay)">${icon('sparkle')}<span>Fresh ideas</span></button><button type="button" class="mn-sug-act" data-own-sugs title="Your own suggestions, kept until you change them">${icon('edit')}<span>Your suggestions</span></button></div><div class="mn-sk-row" hidden></div>`
+                  ? `<div class="mn-sug-bar"><button type="button" class="mn-sug-act" data-amaze title="${t('{mnemo} writes new suggestions from your recent notes (yours stay)', { mnemo: A.MNEMO })}">${icon('sparkle')}<span>${t('Fresh ideas')}</span></button><button type="button" class="mn-sug-act" data-own-sugs title="${t('Your own suggestions, kept until you change them')}">${icon('edit')}<span>${t('Your suggestions')}</span></button></div><div class="mn-sk-row" hidden></div>`
                   : ''
               }`
-            : s
-              ? `<div class="mn-setup"><b>Connect a model first</b><span>Add an OpenAI, Anthropic or OpenAI-compatible API key in Settings. The key stays sealed on your server.</span><button type="button" class="btn primary sm" data-setup>${icon('settings')}<span>Set up ${A.MNEMO}</span></button></div>`
+            : s && !ready
+              ? `<div class="mn-setup"><b>${t('Connect a model first')}</b><span>${t('Add an OpenAI, Anthropic or OpenAI-compatible API key in Settings. The key stays sealed on your server.')}</span><button type="button" class="btn primary sm" data-setup>${icon('settings')}<span>${t('Set up {mnemo}', { mnemo: A.MNEMO })}</span></button></div>`
               : ''
         }
       </div>`;
-    if (ready && !this.fleetingOn) this.fillSugs(kind);
+    if (ready) this.fillSugs(kind);
+    this.wireIntro();
+  }
+
+  /** Draw the checklist (null folds it away): its title, progress and fold button sit in the
+   *  tray's top row (beside the live line), then each step not started, in progress or done.
+   *  Folded, only the step at work shows. */
+  private showPlan(steps: PlanStep[] | null, own = true): void {
+    const gen = ++this.planGen;
+    if (!steps?.length) {
+      this.planOwn = false;
+      if (!this.trayEl.classList.contains('has-plan')) return;
+      this.trayEl.classList.remove('has-plan');
+      this.paintTray();
+      // The steps stay while the section folds away, then go.
+      window.setTimeout(() => {
+        if (gen === this.planGen) this.planEl.innerHTML = '';
+      }, 420);
+      return;
+    }
+    this.planOwn = own;
+    const was = new Map(Array.from(this.planEl.querySelectorAll<HTMLElement>('.mn-ps')).map((r) => [r.dataset.t || '', r.dataset.s || '']));
+    const done = steps.filter((s) => s.status === 'done').length;
+    this.planEl.innerHTML = steps
+      .map((s) => {
+        const st = s.status === 'done' || s.status === 'in_progress' ? s.status : 'pending';
+        const ic = st === 'done' ? icon('check') : st === 'in_progress' ? '<i class="mn-spin"></i>' : '<i class="mn-ps-o"></i>';
+        const fresh = was.has(s.text) && was.get(s.text) !== st ? ' now' : '';
+        return `<div class="mn-ps ${st}${fresh}" role="listitem" data-t="${attr(s.text)}" data-s="${st}"><span class="mn-ps-i" aria-hidden="true">${ic}</span><span class="mn-ps-t">${esc(s.text)}${
+          s.sub ? `<small>${esc(s.sub)}</small>` : ''
+        }</span><span class="sr-only">${st === 'done' ? t('done') : st === 'in_progress' ? t('in progress') : t('not started')}</span></div>`;
+      })
+      .join('');
+    this.el.querySelector('.mn-plan-ttl')!.textContent = own ? t('Plan') : t('Sub-agents');
+    this.el.querySelector('.mn-plan-n')!.textContent = t('{done} of {total}', { done, total: steps.length });
+    this.el.querySelector<HTMLElement>('.mn-plan-bar > i')!.style.width = `${Math.round((done / steps.length) * 100)}%`;
+    this.trayEl.classList.toggle('folded', this.planFolded);
+    this.trayEl.classList.add('has-plan');
+    this.paintTray();
+  }
+
+  /** Open or fold each part of the tray (and the tray itself) for what there is now. */
+  private paintTray(): void {
+    const live = !this.liveEl.hidden;
+    const plan = this.trayEl.classList.contains('has-plan');
+    const queued = this.queue.length > 0;
+    this.el.querySelector('.mn-tray-hc')!.classList.toggle('on', live || plan);
+    this.el.querySelector('.mn-plan-c')!.classList.toggle('on', plan);
+    this.el.querySelector('.mn-queue-c')!.classList.toggle('on', queued);
+    this.trayEl.classList.toggle('on', live || plan || queued);
+  }
+
+  /** Fold the checklist away a moment after its last step is done (the reply has ended). */
+  private planDone(): void {
+    const allDone = (): boolean => {
+      const rows = [...this.planEl.querySelectorAll<HTMLElement>('.mn-ps')];
+      return this.trayEl.classList.contains('has-plan') && rows.length > 0 && rows.every((r) => r.dataset.s === 'done');
+    };
+    if (!allDone()) return;
+    const gen = this.planGen;
+    window.setTimeout(() => {
+      if (gen === this.planGen && allDone()) this.showPlan(null);
+    }, 1400);
+  }
+
+  /** The checklist shows only its header and the step at work. */
+  private planFolded = false;
+
+  /** The one-time "tell Mnemo about you" card: each line kept as a note about the owner, or
+   *  Mnemo learns from the notes, or it is skipped; any answer puts it away for good. */
+  private wireIntro(): void {
+    const f = this.log.querySelector<HTMLFormElement>('[data-intro]');
+    if (!f) return;
+    const done = (): void => {
+      f.remove();
+      void A.savePrefs({ intro_done: true }).catch(() => undefined);
+    };
+    const ta = f.querySelector<HTMLTextAreaElement>('textarea')!;
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const lines = ta.value
+        .split(/\n+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (!lines.length) return ta.focus();
+      for (const text of lines) await A.addOwnerMemory(text).catch(() => undefined);
+      toast(t('{mnemo} will keep that in mind', { mnemo: A.MNEMO }), 'ok');
+      done();
+    };
+    f.querySelector<HTMLButtonElement>('[data-intro-skip]')!.onclick = done;
+    f.querySelector<HTMLButtonElement>('[data-intro-notes]')!.onclick = () => {
+      done();
+      this.prefill(A.describeMe(), true);
+    };
   }
 
   /** Four suggestions: some of yours and some of Mnemo's (on a vault-wide chat), the rest picked
@@ -2014,14 +2229,14 @@ export class ChatView {
     const box = this.log.querySelector<HTMLElement>('.mn-sugs');
     if (!box) return;
     const picked: { t: string; k: 'own' | 'ai' | 'base' }[] = [];
-    const has = (t: string): boolean => picked.some((p) => p.t.toLowerCase() === t.toLowerCase());
+    const has = (x: string): boolean => picked.some((p) => p.t.toLowerCase() === x.toLowerCase());
     if (kind === 'global' && sugCache) {
-      for (const t of shuffled(sugCache.own).slice(0, aiFirst ? 1 : 2)) if (!has(t)) picked.push({ t, k: 'own' });
-      for (const t of shuffled(sugCache.ai).slice(0, aiFirst ? 3 : 2)) if (!has(t) && picked.length < 4) picked.push({ t, k: 'ai' });
+      for (const sg of shuffled(sugCache.own).slice(0, aiFirst ? 1 : 2)) if (!has(sg)) picked.push({ t: sg, k: 'own' });
+      for (const sg of shuffled(sugCache.ai).slice(0, aiFirst ? 3 : 2)) if (!has(sg) && picked.length < 4) picked.push({ t: sg, k: 'ai' });
     }
-    for (const t of shuffled(SUGGEST[kind])) if (picked.length < 4 && !has(t)) picked.push({ t, k: 'base' });
+    for (const sg of shuffled(SUGGEST[kind].map((x) => t(x)))) if (picked.length < 4 && !has(sg)) picked.push({ t: sg, k: 'base' });
     const ic = { own: 'pin', ai: 'sparkle', base: 'chat' } as const;
-    const tag = { own: 'Yours', ai: 'For you', base: '' } as const;
+    const tag = { own: t('Yours'), ai: t('For you'), base: '' };
     box.innerHTML = picked
       .map(
         (p, i) =>
@@ -2043,7 +2258,7 @@ export class ChatView {
       const row = this.log.querySelector<HTMLElement>('.mn-sk-row');
       if (!row || !list.length) return;
       row.hidden = false;
-      row.innerHTML = `<span>Your skills</span>${list
+      row.innerHTML = `<span>${t('Your skills')}</span>${list
         .slice(0, 6)
         .map((k) => `<button type="button" class="mn-sk-chip" data-skill="/${attr(k.name)} " title="${attr(k.description || k.path)}">/${esc(k.name)}</button>`)
         .join('')}`;
@@ -2054,20 +2269,20 @@ export class ChatView {
     b.disabled = true;
     b.classList.add('busy');
     const label = b.querySelector('span')!;
-    label.textContent = 'Finding ideas…';
+    label.textContent = t('Finding ideas…');
     const box = this.log.querySelector<HTMLElement>('.mn-sugs');
     box?.classList.add('loading');
     try {
       const r = await A.refreshSuggestions();
       sugCache = { own: r.own, ai: r.ai };
       this.fillSugs('global', true);
-      if (!r.fresh) toast(`${A.MNEMO} could not write new ones just now. Check the model in Settings.`, 'info');
+      if (!r.fresh) toast(t('{mnemo} could not write new ones just now. Check the model in Settings.', { mnemo: A.MNEMO }), 'info');
     } catch (e) {
       toast((e as Error).message, 'err');
     } finally {
       b.disabled = false;
       b.classList.remove('busy');
-      label.textContent = 'Fresh ideas';
+      label.textContent = t('Fresh ideas');
       this.log.querySelector('.mn-sugs')?.classList.remove('loading');
     }
   }
@@ -2077,17 +2292,17 @@ export class ChatView {
     const body = el(
       'div',
       'mn-own-sugs',
-      `<p>One per line. They show among the suggestions on a new chat, marked Yours, and stay until you change them.</p><textarea rows="8" placeholder="Summarise my meeting notes from this week&#10;What should I write about next?"></textarea>`,
+      `<p>${t('One per line. They show among the suggestions on a new chat, marked Yours, and stay until you change them.')}</p><textarea rows="8" placeholder="${t('Summarise my meeting notes from this week')}&#10;${t('What should I write about next?')}"></textarea>`,
     );
     const ta = body.querySelector('textarea')!;
     ta.value = (sugCache?.own || []).join('\n');
     Modal.open({
-      title: 'Your suggestions',
+      title: t('Your suggestions'),
       body,
       actions: [
-        { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+        { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
         {
-          label: 'Save',
+          label: t('Save'),
           cls: 'primary',
           run: async () => {
             try {
@@ -2095,7 +2310,7 @@ export class ChatView {
               sugCache = { own: r.own, ai: sugCache?.ai || [] };
               Modal.close();
               this.fillSugs('global');
-              toast('Suggestions saved', 'ok');
+              toast(t('Suggestions saved'), 'ok');
             } catch (e) {
               toast((e as Error).message, 'err');
             }
@@ -2112,6 +2327,7 @@ export class ChatView {
     closePreview();
     this.log.innerHTML = '';
     this.agents.reset();
+    this.showPlan(null);
     if (!this.messages.length) {
       this.paintEmpty();
       return;
@@ -2120,6 +2336,7 @@ export class ChatView {
     let tokens = { in: 0, out: 0, model: '' };
     let lastUser = 0;
     let lastModel = '';
+    let lastPlan: PlanStep[] | null = null;
     const finishTurn = (): void => {
       if (turn) this.finishAct(turn.querySelector<HTMLElement>('.mn-tb')!);
       if (turn) this.footer(turn, tokens.model, tokens.in, tokens.out);
@@ -2133,6 +2350,7 @@ export class ChatView {
       if (m.role === 'user') {
         finishTurn();
         turn = null;
+        lastPlan = null;
         const ub = this.userBubble(m.content, m.created_at, (m.meta?.attach as A.Attach[] | undefined) || []);
         ub.dataset.mid = String(m.id);
         lastUser = m.id;
@@ -2157,7 +2375,7 @@ export class ChatView {
         // mid-way, as after a fallback).
         if (typeof meta.model === 'string' && meta.model) {
           if (lastModel && meta.model !== lastModel) {
-            const why = typeof meta.fallback_from === 'string' ? `took over: ${A.modelLabel(A.mnemoState(), meta.fallback_from)} did not answer` : '';
+            const why = typeof meta.fallback_from === 'string' ? t('took over: {model} did not answer', { model: A.modelLabel(A.mnemoState(), meta.fallback_from) }) : '';
             if (body.childElementCount) body.append(this.modelLine(meta.model, why));
             else turn.before(this.modelLine(meta.model, why));
           }
@@ -2184,6 +2402,7 @@ export class ChatView {
           if (c.name === ASK) body.append(askEl({ id: c.id, ...(askOf(c.arguments) || { question: '', options: [], allow_other: true }) }, answerTo(this.messages, c.id)));
           else if (OWNER_MEMORY.has(c.name)) body.append(memLine(c.id, c.name, c.arguments));
           else if (c.name === DELEGATE) subCard(body, c.id, c.arguments, this.agents);
+          else if (c.name === PLAN) lastPlan = planOf(c.arguments);
           else if (c.name !== SHOW) this.toolCard(body, c.id, c.name, c.arguments);
         }
       } else if (m.role === 'tool' && m.tool_name === DELEGATE) {
@@ -2207,6 +2426,9 @@ export class ChatView {
       }
     }
     finishTurn();
+    // A plan left unfinished (the reply was stopped) stays until the next message; a finished
+    // one is not brought back.
+    this.showPlan(lastPlan && lastPlan.some((x) => x.status !== 'done') ? lastPlan : null);
     // A stored task with no result: the reply was stopped while it ran.
     this.agents.cards().forEach((c) => subStop(c));
     this.shownModel = lastModel;
@@ -2221,7 +2443,7 @@ export class ChatView {
   private compactNote(n: number, summary: string, t0 = 0): HTMLElement {
     const d = el('details', 'mn-compact');
     const took = t0 ? Math.max(1, Math.round((performance.now() - t0) / 1000)) : 0;
-    d.innerHTML = `<summary title="${n ? 'Open to read the summary' : ''}"><span>${icon('refresh')}${n ? 'Compacted' : 'Compacting…'}${
+    d.innerHTML = `<summary title="${n ? t('Open to read the summary') : ''}"><span>${icon('refresh')}${n ? t('Compacted') : t('Compacting…')}${
       took ? `<em class="mn-compact-t">${took}s</em>` : ''
     }</span></summary>${summary ? `<div class="mn-md mn-compact-b">${renderReply(summary)}</div>` : ''}`;
     return d;
@@ -2234,8 +2456,8 @@ export class ChatView {
     const t0 = performance.now();
     d.dataset.t0 = String(t0);
     d.setAttribute('role', 'status');
-    d.innerHTML = `<div class="mn-compact-s"><span><i class="mn-compact-spin" aria-hidden="true"></i><b>Compacting conversation</b><em class="mn-compact-t">0s</em></span></div>
-      <p class="mn-compact-why">The chat filled ${A.MNEMO}'s memory for this model, so the older messages are being folded into a summary. The reply continues right after.</p>`;
+    d.innerHTML = `<div class="mn-compact-s"><span><i class="mn-compact-spin" aria-hidden="true"></i><b>${t('Compacting conversation')}</b><em class="mn-compact-t">0s</em></span></div>
+      <p class="mn-compact-why">${t("The chat filled {mnemo}'s memory for this model, so the older messages are being folded into a summary. The reply continues right after.", { mnemo: A.MNEMO })}</p>`;
     const tick = window.setInterval(() => {
       if (!d.isConnected) return window.clearInterval(tick);
       d.querySelector('.mn-compact-t')!.textContent = `${Math.round((performance.now() - t0) / 1000)}s`;
@@ -2252,10 +2474,10 @@ export class ChatView {
           att
             .map((a) =>
               a.kind === 'image'
-                ? `<button type="button" class="mn-u-img" data-img="${attr(a.path)}" title="${attr(a.title)}" aria-label="${attr('Image ' + a.title)}"><img alt="" loading="lazy" src="/api/assistant/uploads/${attr(
+                ? `<button type="button" class="mn-u-img" data-img="${attr(a.path)}" title="${attr(a.title)}" aria-label="${attr(t('Image {name}', { name: a.title }))}"><img alt="" loading="lazy" src="/api/assistant/uploads/${attr(
                     a.path,
                   )}" onerror="this.parentElement.classList.add('gone')"><span>${esc(a.title)}</span></button>`
-                : `<span class="mn-att-c sm"${a.kind === 'note' ? ` data-note="${attr(a.path)}" role="button" tabindex="0"` : ''} title="${attr(a.path || 'All notes')}">${icon(
+                : `<span class="mn-att-c sm"${a.kind === 'note' ? ` data-note="${attr(a.path)}" role="button" tabindex="0"` : ''} title="${attr(a.path || t('All notes'))}">${icon(
                     a.kind === 'note' ? 'note' : 'folder',
                   )}<span>${esc(a.title)}</span></span>`,
             )
@@ -2265,9 +2487,9 @@ export class ChatView {
     // Under the bubble, along its right edge: when it was sent, then copy and try again.
     b.innerHTML = `${chips}<div class="mn-ub">${esc(text)}</div><div class="mn-u-act">${
       ts ? `<time title="${attr(new Date(ts * 1000).toLocaleString())}">${esc(relTs(ts))}</time>` : ''
-    }<span class="mn-u-btns"><button type="button" class="mn-ibtn" data-copy-u title="Copy the message" aria-label="Copy the message">${icon(
+    }<span class="mn-u-btns"><button type="button" class="mn-ibtn" data-copy-u title="${t('Copy the message')}" aria-label="${t('Copy the message')}">${icon(
       'copy',
-    )}</button><button type="button" class="mn-ibtn" data-retry title="Try again: send this message again" aria-label="Try again">${icon('refresh')}</button></span></div>`;
+    )}</button><button type="button" class="mn-ibtn" data-retry title="${t('Try again: send this message again')}" aria-label="${t('Try again')}">${icon('refresh')}</button></span></div>`;
     return b;
   }
 
@@ -2283,9 +2505,9 @@ export class ChatView {
     return el(
       'div',
       'mn-err',
-      `${icon('alert')}<span class="mn-err-t">${esc(f.text)}</span><span class="mn-err-a"><button type="button" class="btn sm" data-retry>${icon('refresh')}<span>Try again</span></button>${
-        f.setup ? `<button type="button" class="btn ghost sm" data-setup>Open settings</button>` : ''
-      }</span>${more ? `<details class="mn-err-d"><summary>Show the full error</summary><pre>${esc(more)}</pre></details>` : ''}`,
+      `${icon('alert')}<span class="mn-err-t">${esc(f.text)}</span><span class="mn-err-a"><button type="button" class="btn sm" data-retry>${icon('refresh')}<span>${t('Try again')}</span></button>${
+        f.setup ? `<button type="button" class="btn ghost sm" data-setup>${t('Open settings')}</button>` : ''
+      }</span>${more ? `<details class="mn-err-d"><summary>${t('Show the full error')}</summary><pre>${esc(more)}</pre></details>` : ''}`,
     );
   }
 
@@ -2295,7 +2517,7 @@ export class ChatView {
     if (!a) {
       a = el('details', 'mn-act live');
       // Closed unless the owner opens it: the title says what is happening meanwhile.
-      a.innerHTML = `<summary><span class="mn-act-ic"><i class="mn-spin"></i></span><span class="mn-act-t"><b>Working</b><small></small></span>${icon(
+      a.innerHTML = `<summary><span class="mn-act-ic"><i class="mn-spin"></i></span><span class="mn-act-t"><b>${t('Working')}</b><small></small></span>${icon(
         'chev',
         'i mn-act-chev',
       )}</summary><div class="mn-act-b"><div class="mn-tools"></div><div class="mn-act-notes"></div></div>`;
@@ -2315,13 +2537,13 @@ export class ChatView {
     const read = Array.from(st.read).filter((p) => !st.changed.has(p));
     const time = elapsed ?? st.ms;
     const title = changed.length
-      ? `Changed ${changed.length} note${changed.length === 1 ? '' : 's'}`
+      ? tn(changed.length, 'Changed {n} note', 'Changed {n} notes')
       : read.length
-        ? `Looked at ${read.length} note${read.length === 1 ? '' : 's'}`
+        ? tn(read.length, 'Looked at {n} note', 'Looked at {n} notes')
         : st.steps
-          ? `Used ${st.steps} tool${st.steps === 1 ? '' : 's'}`
-          : 'Thought it through';
-    const bits = [st.steps ? `${st.steps} step${st.steps === 1 ? '' : 's'}` : st.thought ? 'thinking' : '', read.length ? `read ${read.length}` : '', changed.length ? `changed ${changed.length}` : '', st.failed ? `${st.failed} failed` : '', time ? (time < 1000 ? `${time} ms` : `${(time / 1000).toFixed(1)} s`) : '']
+          ? tn(st.steps, 'Used {n} tool', 'Used {n} tools')
+          : t('Thought it through');
+    const bits = [st.steps ? tn(st.steps, '{n} step', '{n} steps') : st.thought ? t('thinking') : '', read.length ? t('read {n}', { n: read.length }) : '', changed.length ? t('changed {n}', { n: changed.length }) : '', st.failed ? t('{n} failed', { n: st.failed }) : '', time ? (time < 1000 ? `${time} ms` : `${(time / 1000).toFixed(1)} s`) : '']
       .filter(Boolean)
       .join(' · ');
     a.querySelector('.mn-act-ic')!.innerHTML = icon(st.failed && !changed.length && !read.length ? 'alert' : 'check');
@@ -2336,7 +2558,7 @@ export class ChatView {
     const notes = a.querySelector<HTMLElement>('.mn-act-notes')!;
     notes.innerHTML =
       changed.length || read.length
-        ? `${changed.length ? `<div><b>Changed</b>${changed.map((p) => chip(p, true)).join('')}</div>` : ''}${read.length ? `<div><b>Read</b>${read.slice(0, 24).map((p) => chip(p, false)).join('')}${read.length > 24 ? `<small>+${read.length - 24} more</small>` : ''}</div>` : ''}`
+        ? `${changed.length ? `<div><b>${t('Changed')}</b>${changed.map((p) => chip(p, true)).join('')}</div>` : ''}${read.length ? `<div><b>${t('Read')}</b>${read.slice(0, 24).map((p) => chip(p, false)).join('')}${read.length > 24 ? `<small>${t('+{n} more', { n: read.length - 24 })}</small>` : ''}</div>` : ''}`
         : '';
   }
 
@@ -2349,22 +2571,22 @@ export class ChatView {
       seg = el('div', 'mn-thought', `<div class="mn-thought-t"></div>`);
       steps.append(seg);
     }
-    const t = seg.querySelector<HTMLElement>('.mn-thought-t')!;
-    t.textContent = (t.textContent || '') + text;
+    const tx = seg.querySelector<HTMLElement>('.mn-thought-t')!;
+    tx.textContent = (tx.textContent || '') + text;
     const st = ACTS.get(a)!;
     st.thought = true;
     const live = a.querySelector<HTMLElement>('.mn-act-t small');
     if (live && a.classList.contains('live')) {
-      const lines = (t.textContent || '').trim().split(/\n+/);
+      const lines = (tx.textContent || '').trim().split(/\n+/);
       live.textContent = lines[lines.length - 1].slice(-140);
-      a.querySelector<HTMLElement>('.mn-act-t b')!.textContent = 'Thinking';
+      a.querySelector<HTMLElement>('.mn-act-t b')!.textContent = t('Thinking');
     }
   }
 
   private toolCard(body: HTMLElement, id: string, name: string, args: unknown): HTMLElement {
     const a = this.act(body);
     const tb = a.querySelector<HTMLElement>('.mn-act-t b');
-    if (tb && a.classList.contains('live')) tb.textContent = 'Working';
+    if (tb && a.classList.contains('live')) tb.textContent = t('Working');
     const stack = a.querySelector<HTMLElement>('.mn-tools')!;
     const st = ACTS.get(a)!;
     st.steps++;
@@ -2392,8 +2614,8 @@ export class ChatView {
       if (!ok) st.failed++;
     }
     const s = card.querySelector<HTMLElement>('.mn-tool-s')!;
-    const bits = [summary, ms ? (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`) : ''].filter(Boolean).join(' · ');
-    s.innerHTML = `${ok ? icon('check') : icon('alert')}<span>${esc(bits || (ok ? 'Done' : 'Failed'))}</span>`;
+    const bits = [ts(summary), ms ? (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`) : ''].filter(Boolean).join(' · ');
+    s.innerHTML = `${ok ? icon('check') : icon('alert')}<span>${esc(bits || (ok ? t('Done') : t('Failed')))}</span>`;
     if (output !== undefined && output !== null && output !== '') this.toolResult(card, output);
   }
 
@@ -2408,26 +2630,26 @@ export class ChatView {
     const err = o && typeof o.error === 'string' ? o.error : '';
     const model = o && typeof o.model === 'string' && o.model ? ` · ${A.modelLabel(A.mnemoState(), o.model)}` : '';
     if (o && !err && name === 'describe_image' && typeof o.text === 'string') {
-      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">What it shows${esc(model)}</div><div class="mn-md mn-tool-ans">${renderReply(o.text)}</div>`);
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('What it shows')}${esc(model)}</div><div class="mn-md mn-tool-ans">${renderReply(o.text)}</div>`);
       return;
     }
     if (o && !err && name === 'generate_image' && typeof o.upload === 'string' && o.upload) {
-      const nm = typeof o.name === 'string' ? o.name : 'Image';
+      const nm = typeof o.name === 'string' ? o.name : t('Image');
       const src = `/api/assistant/uploads/${encodeURIComponent(o.upload)}`;
       const tile = (cls: string): string =>
-        `<button type="button" class="${cls}" data-img="${attr(o.upload as string)}" title="${attr(nm)}" aria-label="${attr('Open ' + nm)}"><img alt="" loading="lazy" src="${attr(
+        `<button type="button" class="${cls}" data-img="${attr(o.upload as string)}" title="${attr(nm)}" aria-label="${attr(t('Open {name}', { name: nm }))}"><img alt="" loading="lazy" src="${attr(
           src,
         )}" onerror="this.parentElement.classList.add('gone')"></button>`;
-      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Picture${esc(model)}</div>${tile('mn-gen sm')}`);
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('Picture')}${esc(model)}</div>${tile('mn-gen sm')}`);
       const body = card.closest<HTMLElement>('.mn-tb');
       if (body && !body.querySelector(`.mn-gen:not(.sm)[data-img="${CSS.escape(o.upload)}"]`)) body.append(el('div', 'mn-gen-row', tile('mn-gen')));
       return;
     }
     if (err) {
-      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Error</div><pre>${esc(err)}</pre>`);
+      b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('Error')}</div><pre>${esc(ts(err))}</pre>`);
       return;
     }
-    b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Result</div><pre>${esc(pretty(output))}</pre>`);
+    b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('Result')}</div><pre>${esc(pretty(output))}</pre>`);
   }
 
   /** Results that came after the live reply (answers, pictures) from the stored chat. */
@@ -2457,18 +2679,18 @@ export class ChatView {
       .map((x) => x.dataset.raw || '')
       .join('\n\n')
       .trim();
-    const bits = [model ? A.modelLabel(A.mnemoState(), model) : '', tin || tout ? `${A.fmtTokens(tin)} in · ${A.fmtTokens(tout)} out` : ''].filter(Boolean);
+    const bits = [model ? A.modelLabel(A.mnemoState(), model) : '', tin || tout ? t('{tin} in · {tout} out', { tin: A.fmtTokens(tin), tout: A.fmtTokens(tout) }) : ''].filter(Boolean);
     const f = el(
       'div',
       'mn-foot',
       // Actions first (where the eye ends after reading), then what answered and its cost.
       `<span class="mn-foot-a">${
         raw
-          ? `<button type="button" class="mn-ibtn" data-copy title="Copy the reply" aria-label="Copy the reply">${icon('copy')}</button><button type="button" class="mn-ibtn mn-listen" data-listen title="Listen" aria-label="Listen to the reply">${icon(
+          ? `<button type="button" class="mn-ibtn" data-copy title="${t('Copy the reply')}" aria-label="${t('Copy the reply')}">${icon('copy')}</button><button type="button" class="mn-ibtn mn-listen" data-listen title="${t('Listen')}" aria-label="${t('Listen to the reply')}">${icon(
               'volume',
             )}</button>`
           : ''
-      }<button type="button" class="mn-ibtn" data-regen title="Regenerate this reply" aria-label="Regenerate this reply">${icon('refresh')}</button></span>${
+      }<button type="button" class="mn-ibtn" data-regen title="${t('Regenerate this reply')}" aria-label="${t('Regenerate this reply')}">${icon('refresh')}</button></span>${
         bits.length ? `<span class="mn-foot-m">${bits.map((b) => `<span>${esc(b)}</span>`).join('<i></i>')}</span>` : ''
       }`,
     );
@@ -2492,56 +2714,56 @@ export class ChatView {
   /** Open the Agents panel (the page's panel, or a dialog in the small chat), at `ids`. */
   openAgents(ids: string[] = []): void {
     if (this.o.openAgents) this.o.openAgents();
-    else Modal.open({ title: 'Agents', body: this.agents.el, wide: true });
+    else Modal.open({ title: t('Agents'), body: this.agents.el, wide: true });
     requestAnimationFrame(() => this.agents.reveal(ids));
   }
 
   /** Clicks in the Agents panel: a sub-agent's model, its whole task, links in its answer. */
   private onAgentsClick(e: MouseEvent): void {
-    const t = e.target as HTMLElement;
-    const subModel = t.closest<HTMLElement>('[data-submodel]');
+    const tg = e.target as HTMLElement;
+    const subModel = tg.closest<HTMLElement>('[data-submodel]');
     if (subModel) {
       const card = subModel.closest<HTMLElement>('.mn-sub');
       if (card) void this.pickSubModel(card, subModel);
       return;
     }
-    const task = t.closest<HTMLElement>('[data-subtask]');
+    const task = tg.closest<HTMLElement>('[data-subtask]');
     if (task) {
       const open = task.getAttribute('aria-expanded') !== 'true';
       task.setAttribute('aria-expanded', String(open));
-      task.title = open ? 'Show less' : 'Show the whole task';
+      task.title = open ? t('Show less') : t('Show the whole task');
       return;
     }
-    if (t.closest('.mn-md, [data-img]')) this.onLogClick(e);
+    if (tg.closest('.mn-md, [data-img]')) this.onLogClick(e);
   }
 
   private onLogClick(e: MouseEvent): void {
-    const t = e.target as HTMLElement;
-    const skill = t.closest<HTMLElement>('[data-skill]');
+    const tg = e.target as HTMLElement;
+    const skill = tg.closest<HTMLElement>('[data-skill]');
     if (skill) {
       this.prefill(skill.dataset.skill || '');
       return;
     }
-    const amaze = t.closest<HTMLButtonElement>('[data-amaze]');
+    const amaze = tg.closest<HTMLButtonElement>('[data-amaze]');
     if (amaze) {
       void this.amaze(amaze);
       return;
     }
-    if (t.closest('[data-own-sugs]')) {
+    if (tg.closest('[data-own-sugs]')) {
       this.editOwnSugs();
       return;
     }
-    const sug = t.closest<HTMLElement>('[data-sug]');
+    const sug = tg.closest<HTMLElement>('[data-sug]');
     if (sug) {
       this.prefill(sug.dataset.sug || '', true);
       return;
     }
-    if (t.closest('[data-setup]')) {
+    if (tg.closest('[data-setup]')) {
       openMnemoSettings();
       return;
     }
     // Links in a reply: the app's Docs open in place, other sites in a new tab.
-    const link = t.closest<HTMLAnchorElement>('.mn-md a[href]');
+    const link = tg.closest<HTMLAnchorElement>('.mn-md a[href]');
     if (link && !link.dataset.note) {
       const href = link.getAttribute('href') || '';
       const doc = /^\/docs(?:\/([^#?]+))?(?:#(.+))?$/.exec(href);
@@ -2556,14 +2778,14 @@ export class ChatView {
         return;
       }
     }
-    const wl = t.closest<HTMLElement>('[data-note]');
+    const wl = tg.closest<HTMLElement>('[data-note]');
     if (wl) {
       e.preventDefault();
       hooks.openNote(wl.dataset.note!);
       return;
     }
     // A question from Mnemo: an option answers it; Other lets the owner type the answer.
-    const opt = t.closest<HTMLElement>('[data-ask-opt]');
+    const opt = tg.closest<HTMLElement>('[data-ask-opt]');
     if (opt && !this.busy) {
       const card = opt.closest<HTMLElement>('.mn-ask')!;
       if (card.classList.contains('done')) return;
@@ -2582,13 +2804,13 @@ export class ChatView {
       return;
     }
     // Carousel arrows, and a picture of a message opened full size (with its neighbours).
-    const arrow = t.closest<HTMLElement>('[data-car]');
+    const arrow = tg.closest<HTMLElement>('[data-car]');
     if (arrow) {
       const row = arrow.closest('.mn-car')?.querySelector<HTMLElement>('.mn-car-row');
       row?.scrollBy({ left: (arrow.dataset.car === 'l' ? -1 : 1) * row.clientWidth * 0.8, behavior: 'smooth' });
       return;
     }
-    const tile = t.closest<HTMLElement>('[data-img]');
+    const tile = tg.closest<HTMLElement>('[data-img]');
     if (tile) {
       const tiles = Array.from(tile.closest('.mn-car-row')?.querySelectorAll<HTMLElement>('[data-img]:not(.gone)') || [tile]);
       const set = tiles.map((x) => ({ src: `/api/assistant/uploads/${x.dataset.img}`, caption: x.title }));
@@ -2596,13 +2818,13 @@ export class ChatView {
       return;
     }
     // A card Mnemo handed over: open the note, the folder, the image or the vault.
-    const cd = t.closest<HTMLElement>('[data-card]');
+    const cd = tg.closest<HTMLElement>('[data-card]');
     if (cd) {
       openShown(cd.dataset.card || '', cd.dataset.path || '');
       return;
     }
     // Touch screens: a tap on a message of yours shows its time, Copy and Try again.
-    const ubub = t.closest<HTMLElement>('.mn-ub');
+    const ubub = tg.closest<HTMLElement>('.mn-ub');
     if (ubub && matchMedia('(hover: none)').matches) {
       const u = ubub.closest<HTMLElement>('.mn-u')!;
       const on = !u.classList.contains('show-act');
@@ -2610,7 +2832,7 @@ export class ChatView {
       u.classList.toggle('show-act', on);
       return;
     }
-    const again = t.closest<HTMLElement>('[data-regen],[data-retry]');
+    const again = tg.closest<HTMLElement>('[data-regen],[data-retry]');
     if (again) {
       const own = again.closest<HTMLElement>('.mn-u');
       let uid = Number(own?.dataset.mid || again.closest<HTMLElement>('.mn-turn')?.dataset.uid || 0);
@@ -2619,52 +2841,52 @@ export class ChatView {
       void this.rerun(uid);
       return;
     }
-    const copyU = t.closest<HTMLElement>('[data-copy-u]');
+    const copyU = tg.closest<HTMLElement>('[data-copy-u]');
     if (copyU) {
       const text = copyU.closest('.mn-u')?.querySelector('.mn-ub')?.textContent || '';
       void navigator.clipboard?.writeText(text).then(
-        () => toast('Message copied', 'ok'),
-        () => toast('Could not copy', 'err'),
+        () => toast(t('Message copied'), 'ok'),
+        () => toast(t('Could not copy'), 'err'),
       );
       return;
     }
     // The one line a group of sub-agents leaves in the reply: open the Agents panel there.
-    const team = t.closest<HTMLElement>('.mn-team-line');
+    const team = tg.closest<HTMLElement>('.mn-team-line');
     if (team && this.log.contains(team)) {
       this.openAgents(teamIds(team));
       return;
     }
     // A notice with something to do about it: set a model for a job, or switch this chat's.
-    const act = t.closest<HTMLElement>('[data-notice-open]');
+    const act = tg.closest<HTMLElement>('[data-notice-open]');
     if (act) {
       if (act.dataset.noticeOpen === 'model') this.select?.open();
       else openMnemoSettings('jobs');
       return;
     }
-    const hear = t.closest<HTMLElement>('[data-listen]');
+    const hear = tg.closest<HTMLElement>('[data-listen]');
     if (hear) {
       void listen(hear);
       return;
     }
-    if (t.closest('[data-seemem]')) {
+    if (tg.closest('[data-seemem]')) {
       openMnemoSettings('memory');
       return;
     }
-    const copy = t.closest<HTMLElement>('[data-copy]');
+    const copy = tg.closest<HTMLElement>('[data-copy]');
     if (copy) {
       const raw = copy.closest<HTMLElement>('.mn-foot')?.dataset.raw || '';
       void navigator.clipboard?.writeText(raw).then(
-        () => toast('Reply copied', 'ok'),
-        () => toast('Could not copy', 'err'),
+        () => toast(t('Reply copied'), 'ok'),
+        () => toast(t('Could not copy'), 'err'),
       );
       return;
     }
-    const code = t.closest<HTMLElement>('[data-copy-code]');
+    const code = tg.closest<HTMLElement>('[data-copy-code]');
     if (code) {
       const text = code.closest('.dc-code')?.querySelector('pre')?.textContent || '';
       void navigator.clipboard?.writeText(text).then(() => {
-        code.textContent = 'Copied';
-        window.setTimeout(() => (code.textContent = 'Copy'), 1500);
+        code.textContent = t('Copied');
+        window.setTimeout(() => (code.textContent = t('Copy')), 1500);
       });
     }
   }
@@ -2712,6 +2934,7 @@ export class ChatView {
     if (!this.ctrl) return;
     this.run++;
     this.liveEl.hidden = true;
+    this.paintTray();
     this.ctrl.abort();
     this.ctrl = null;
     this.setBusy(false);
@@ -2734,17 +2957,17 @@ export class ChatView {
     this.sendBtn.innerHTML = icon(stop ? 'stop' : 'send');
     this.sendBtn.classList.toggle('queue', queue);
     this.sendBtn.classList.toggle('stopping', stop && this.stopping);
-    const t = stop
+    const tip = stop
       ? this.stopping
-        ? 'Stopping…'
+        ? t('Stopping…')
         : this.queue.length
-          ? 'Stop this reply (the next queued message goes out)'
-          : 'Stop'
+          ? t('Stop this reply (the next queued message goes out)')
+          : t('Stop')
       : queue
-        ? 'Add to the queue (Enter) · Ctrl+Enter sends it now'
-        : 'Send (Enter)';
-    this.sendBtn.title = t;
-    this.sendBtn.setAttribute('aria-label', stop ? 'Stop' : queue ? 'Add to the queue' : 'Send');
+        ? t('Add to the queue (Enter) · Ctrl+Enter sends it now')
+        : t('Send (Enter)');
+    this.sendBtn.title = tip;
+    this.sendBtn.setAttribute('aria-label', stop ? t('Stop') : queue ? t('Add to the queue') : t('Send'));
   }
 
   async send(raw: string, answer?: A.Answer): Promise<void> {
@@ -2752,7 +2975,7 @@ export class ChatView {
     if (!text || this.busy) return;
     const s = A.mnemoState() ?? (await A.loadState().catch(() => null));
     if (!s || !A.usableModels(s).length) {
-      toast(`Connect a model for ${A.MNEMO} first`, 'err');
+      toast(t('Connect a model for {mnemo} first', { mnemo: A.MNEMO }), 'err');
       openMnemoSettings();
       return;
     }
@@ -2810,11 +3033,11 @@ export class ChatView {
     if (later) {
       const go = await new Promise<boolean>((done) => {
         Modal.open({
-          title: 'Run this message again?',
-          body: '<p>The messages that came after it in this chat are replaced by the new reply.</p>',
+          title: t('Run this message again?'),
+          body: `<p>${t('The messages that came after it in this chat are replaced by the new reply.')}</p>`,
           actions: [
-            { label: 'Cancel', cls: 'ghost', run: () => (Modal.close(), done(false)) },
-            { label: 'Run again', cls: 'primary', run: () => (Modal.close(), done(true)) },
+            { label: t('Cancel'), cls: 'ghost', run: () => (Modal.close(), done(false)) },
+            { label: t('Run again'), cls: 'primary', run: () => (Modal.close(), done(true)) },
           ],
         });
       });
@@ -2822,7 +3045,7 @@ export class ChatView {
     }
     const ub = this.log.querySelector<HTMLElement>(`.mn-u[data-mid="${uid}"]`);
     if (!ub) {
-      toast('Open the chat again to run that message again', 'warn');
+      toast(t('Open the chat again to run that message again'), 'warn');
       return;
     }
     while (ub.nextSibling) ub.nextSibling.remove();
@@ -2858,10 +3081,14 @@ export class ChatView {
     };
     // The live status above the composer, outside the reply: what Mnemo is doing now and for
     // how long, and while sub-agents work, how many are at it (their work is in the Agents panel).
-    let phase = 'Thinking';
+    const THINKING = t('Thinking');
+    let phase = THINKING;
     let phaseAt = performance.now();
     /** This reply's sub-agents (delegate call ids) and whether each has finished. */
     const subs = new Map<string, boolean>();
+    const subInfo = new Map<string, { agent: string; task: string }>();
+    // A new message of the owner's starts without the last reply's checklist.
+    if (!live) this.showPlan(null);
     const secs = (ms: number): string => {
       const n = Math.floor(ms / 1000);
       return n < 60 ? `${n}s` : `${Math.floor(n / 60)}m ${String(n % 60).padStart(2, '0')}s`;
@@ -2874,27 +3101,40 @@ export class ChatView {
       const waited = now - phaseAt;
       let head = phase;
       // A model that has not begun after a while: say so (Stop cuts it, a message queued goes on).
-      if (phase === 'Thinking' && waited > 45_000 && !raw2) head += ' · the model has not started answering yet';
+      if (phase === THINKING && waited > 45_000 && !raw2) head += ' · ' + t('the model has not started answering yet');
       if (running.length) {
         const done = subs.size - running.length;
-        head = `${running.length} sub-agent${running.length === 1 ? '' : 's'} working${done ? ` · ${done} done` : ''}`;
+        head = `${tn(running.length, '{n} sub-agent working', '{n} sub-agents working')}${done ? ` · ${t('{n} done', { n: done })}` : ''}`;
       }
       bar.dataset.subs = running.map(([id]) => id).join(',');
-      bar.title = running.length ? 'Open the Agents panel' : 'Go to the reply';
+      // No plan of Mnemo's: the checklist lists this reply's sub-agents.
+      if (!this.planOwn && subs.size)
+        this.showPlan(
+          [...subs.entries()].map(([id, fin]) => ({ text: subInfo.get(id)?.agent || t('Sub-agent'), sub: (subInfo.get(id)?.task || '').slice(0, 90), status: fin ? 'done' : 'in_progress' })),
+          false,
+        );
+      const opens = running.length > 0 || !!body.querySelector(':scope > .mn-act');
+      bar.classList.toggle('still', !opens);
+      bar.tabIndex = opens ? 0 : -1;
+      bar.title = running.length ? t('Open the Agents panel') : opens ? t('Show the steps') : '';
       bar.querySelector('.mn-live-t')!.textContent = head;
       bar.querySelector('.mn-live-s')!.textContent = secs(waited);
     };
     const ticker = window.setInterval(tick, 1000);
-    const think = (on: boolean, label = 'Thinking'): void => {
+    const think = (on: boolean, label = THINKING): void => {
       if (my !== this.run) return;
       if (on) {
+        // A reply at work on this chat always shows Stop, however it was started.
+        if (!this.busy) this.setBusy(true);
         if (label !== phase || bar.hidden) phaseAt = performance.now();
         phase = label;
         bar.hidden = false;
+        this.paintTray();
         tick();
       } else {
         bar.hidden = true;
         delete bar.dataset.subs;
+        this.paintTray();
       }
     };
     think(true);
@@ -2973,7 +3213,7 @@ export class ChatView {
               return st ? A.modelLabel(st, k) : k;
             };
             {
-              const line = this.modelLine(ev.model, `took over: ${name(ev.from)} did not answer (${ev.reason})`);
+              const line = this.modelLine(ev.model, t('took over: {model} did not answer ({reason})', { model: name(ev.from), reason: ts(ev.reason) }));
               if (ev.detail) line.title = ev.detail;
               body.append(line);
             }
@@ -2986,9 +3226,9 @@ export class ChatView {
               this.paintThink();
               this.paintPin();
               this.session = { ...this.session, model: ev.model };
-              toast(`${name(ev.from)} did not answer, so this chat now uses ${name(ev.model)}`, 'info');
+              toast(t('{from} did not answer, so this chat now uses {model}', { from: name(ev.from), model: name(ev.model) }), 'info');
             }
-            think(true, `${name(ev.model)} is answering`);
+            think(true, t('{model} is answering', { model: name(ev.model) }));
             this.scrollEnd();
             break;
           }
@@ -2996,12 +3236,12 @@ export class ChatView {
             const go = ev.action && (ev.action.open === 'jobs' || ev.action.open === 'model') && ev.action.label;
             body.insertAdjacentHTML(
               'beforeend',
-              `<div class="mn-notice">${icon('info')}<span>${esc(ev.text)}</span>${
-                go ? `<button type="button" class="mn-notice-a" data-notice-open="${attr(ev.action!.open)}">${esc(ev.action!.label)}</button>` : ''
+              `<div class="mn-notice">${icon('info')}<span>${esc(ts(ev.text))}</span>${
+                go ? `<button type="button" class="mn-notice-a" data-notice-open="${attr(ev.action!.open)}">${esc(ts(ev.action!.label))}</button>` : ''
               }</div>`,
             );
             // A model that did not answer is asked again: say so while waiting.
-            if (/trying again/i.test(ev.text)) think(true, 'Waiting for the model to answer again');
+            if (/trying again/i.test(ev.text)) think(true, t('Waiting for the model to answer again'));
             break;
           }
           case 'thinking':
@@ -3031,10 +3271,16 @@ export class ChatView {
               think(true);
               break;
             }
+            if (ev.name === PLAN) {
+              this.showPlan(planOf(ev.args));
+              think(true);
+              break;
+            }
             if (ev.name === DELEGATE) {
               subCard(body, ev.id, ev.args, this.agents);
+              subInfo.set(ev.id, { agent: argStr(ev.args, 'agent') || t('Sub-agent'), task: argStr(ev.args, 'task') });
               if (!subs.has(ev.id)) subs.set(ev.id, false);
-              think(true, 'Sub-agents at work');
+              think(true, t('Sub-agents at work'));
               this.scrollEnd();
               break;
             }
@@ -3046,6 +3292,10 @@ export class ChatView {
           case 'tool_end': {
             if (ev.name === ASK) {
               think(false);
+              break;
+            }
+            if (ev.name === PLAN) {
+              think(true);
               break;
             }
             if (ev.name === SHOW) {
@@ -3105,7 +3355,12 @@ export class ChatView {
       } else body.append(this.errorCard(err.message));
     } finally {
       window.clearInterval(ticker);
+      tick();
       think(false);
+      // Sub-agents left unfinished (the reply was stopped): their checklist goes, no spinners stay.
+      if (my === this.run && !this.planOwn && [...subs.values()].some((x) => !x)) this.showPlan(null);
+      // Every step done once the reply ends: the checklist folds away by itself.
+      if (my === this.run) this.planDone();
       // Left for another chat: the reply goes on on the server; nothing here is ours now.
       if (my !== this.run) {
         if (frame) cancelAnimationFrame(frame);
@@ -3145,7 +3400,7 @@ export class ChatView {
       }
       this.finishAct(body, Math.round(performance.now() - t0));
       turn.classList.remove('live');
-      if (!body.childElementCount) body.append(this.errorCard('No reply came back.'));
+      if (!body.childElementCount) body.append(this.errorCard(t('No reply came back.')));
       this.ctrl = null;
       this.setBusy(false);
       if (this.session) {
@@ -3273,7 +3528,7 @@ function relatedHTML(body: HTMLElement): string {
         `<span class="mn-att-c sm${i.cls}" data-card="${attr(i.kind)}" data-path="${attr(i.path)}" role="button" tabindex="0" title="${attr(i.path || i.title)}">${icon(i.ic)}<span>${esc(i.title)}</span></span>`,
     )
     .join('');
-  return `<div class="mn-rel"><span class="mn-rel-h">Related</span>${carouselHTML(chips + (items.length > cap ? `<small class="mn-rel-more">+${items.length - cap}</small>` : ''))}</div>`;
+  return `<div class="mn-rel"><span class="mn-rel-h">${t('Related')}</span>${carouselHTML(chips + (items.length > cap ? `<small class="mn-rel-more">+${items.length - cap}</small>` : ''))}</div>`;
 }
 
 /** Mnemo's tool that asks the owner a question with options. */
@@ -3305,7 +3560,7 @@ function skipAsk(card: HTMLElement): void {
   card.classList.add('done', 'skipped');
   card.querySelectorAll<HTMLInputElement | HTMLButtonElement>('button,input').forEach((x) => (x.disabled = true));
   card.querySelector('.mn-ask-f')?.setAttribute('hidden', '');
-  card.querySelector('.mn-ask-q')!.insertAdjacentHTML('beforeend', '<em class="mn-ask-skip">Skipped</em>');
+  card.querySelector('.mn-ask-q')!.insertAdjacentHTML('beforeend', `<em class="mn-ask-skip">${t('Skipped')}</em>`);
 }
 
 /** A question card: the options listed one under another (the chosen one marked once
@@ -3315,16 +3570,16 @@ function askEl(q: A.Ask, answered: string | false | null): HTMLElement {
   const box = el('div', 'mn-ask' + (done ? ' done' : '') + (answered === false ? ' skipped' : ''));
   box.dataset.ask = q.id;
   const dis = done ? ' disabled' : '';
-  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(q.question)}</span>${answered === false ? '<em class="mn-ask-skip">Skipped</em>' : ''}</div><div class="mn-ask-o">${q.options
+  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(ts(q.question))}</span>${answered === false ? `<em class="mn-ask-skip">${t('Skipped')}</em>` : ''}</div><div class="mn-ask-o">${q.options
     .map(
       (o, i) =>
         `<button type="button" class="mn-ask-b${o.approve ? ' ok' : ''}${answered === o.label ? ' on' : ''}" data-ask-opt="1" data-label="${attr(o.label)}" data-approve="${o.approve ? '1' : ''}"${dis}><span class="mn-ask-n">${
           i + 1
-        }</span><span class="mn-ask-c"><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></button>`,
+        }</span><span class="mn-ask-c"><b>${esc(ts(o.label))}</b>${o.description ? `<small>${esc(ts(o.description))}</small>` : ''}</span></button>`,
     )
     .join('')}${
     q.allow_other
-      ? `<button type="button" class="mn-ask-b other${answered === '' ? ' on' : ''}" data-ask-opt="other"${dis}><span class="mn-ask-n">${icon('edit')}</span><span class="mn-ask-c"><b>Other</b><small>Type your own answer</small></span></button><form class="mn-ask-f" hidden><input type="text" placeholder="Type your answer…" aria-label="Your answer" autocomplete="off"${dis}><button type="submit" class="mn-ibtn" title="Send the answer (Enter)" aria-label="Send the answer"${dis}>${icon(
+      ? `<button type="button" class="mn-ask-b other${answered === '' ? ' on' : ''}" data-ask-opt="other"${dis}><span class="mn-ask-n">${icon('edit')}</span><span class="mn-ask-c"><b>${t('Other')}</b><small>${t('Type your own answer')}</small></span></button><form class="mn-ask-f" hidden><input type="text" placeholder="${t('Type your answer…')}" aria-label="${t('Your answer')}" autocomplete="off"${dis}><button type="submit" class="mn-ibtn" title="${t('Send the answer (Enter)')}" aria-label="${t('Send the answer')}"${dis}>${icon(
           'enter',
         )}</button></form>`
       : ''
@@ -3335,18 +3590,18 @@ function askEl(q: A.Ask, answered: string | false | null): HTMLElement {
 /** An error's text without HTML: an error page becomes its title, spaces folded. */
 function plainError(msg: string): string {
   const title = /<title[^>]*>([^<]*)<\/title>/i.exec(msg)?.[1]?.trim();
-  const t = msg.replace(/<!doctype[\s\S]*?<\/html>/gi, title || 'an HTML error page').replace(/<[^>]+>/g, ' ');
-  return t.replace(/\s+/g, ' ').trim();
+  const plain = msg.replace(/<!doctype[\s\S]*?<\/html>/gi, title || t('an HTML error page')).replace(/<[^>]+>/g, ' ');
+  return plain.replace(/\s+/g, ' ').trim();
 }
 
 /** A provider error in plain words; HTTP codes and raw bodies stay behind "Show the full error".
  *  The status the provider answered with decides first (numbers inside a body can be anything). */
 function friendlyError(msg: string): { text: string; setup: boolean } {
-  const KEY = { text: 'The AI provider did not accept the key. Check it in Settings.', setup: true };
-  const LOST = { text: 'The AI provider could not find this model or address. Check it in Settings.', setup: true };
-  const BUSY = { text: 'The AI provider is busy or out of quota. Try again in a moment.', setup: false };
-  const DOWN = { text: 'The AI provider is not answering right now. Try again in a moment.', setup: false };
-  const NET = { text: 'Could not reach the AI provider. Check the connection and try again.', setup: false };
+  const KEY = { text: t('The AI provider did not accept the key. Check it in Settings.'), setup: true };
+  const LOST = { text: t('The AI provider could not find this model or address. Check it in Settings.'), setup: true };
+  const BUSY = { text: t('The AI provider is busy or out of quota. Try again in a moment.'), setup: false };
+  const DOWN = { text: t('The AI provider is not answering right now. Try again in a moment.'), setup: false };
+  const NET = { text: t('Could not reach the AI provider. Check the connection and try again.'), setup: false };
   const code = Number(/answered (\d{3})/i.exec(msg)?.[1] || 0);
   if (code === 401 || code === 403) return KEY;
   if (code === 404) return LOST;
@@ -3359,12 +3614,15 @@ function friendlyError(msg: string): { text: string; setup: boolean } {
   if (has('rate limit', 'quota', 'too many requests')) return BUSY;
   if (has('overload', 'unavailable', 'bad gateway', 'gateway timeout')) return DOWN;
   if (has('could not reach', 'timed out', 'timeout', 'failed to fetch', 'networkerror', 'connection refused', 'dns')) return NET;
-  if (!m.trim() || m.includes('no reply came back')) return { text: 'No reply came back.', setup: false };
-  if (has('no provider', 'add a provider', 'no model')) return { text: msg.trim(), setup: true };
+  if (!m.trim() || m.includes('no reply came back')) return { text: t('No reply came back.'), setup: false };
+  if (has('no provider', 'add a provider', 'no model')) return { text: ts(msg.trim()), setup: true };
   // Memora's own short messages are already plain; raw provider bodies are not.
-  const t = msg.trim();
-  if (!code && t.length <= 160 && !/[{}<>]|\b\d{3}\b/.test(t)) return { text: t.charAt(0).toUpperCase() + t.slice(1), setup: false };
-  return { text: 'Something went wrong with this reply.', setup: false };
+  const short = msg.trim();
+  if (!code && short.length <= 160 && !/[{}<>]|\b\d{3}\b/.test(short)) {
+    const tr = ts(short);
+    return { text: tr.charAt(0).toUpperCase() + tr.slice(1), setup: false };
+  }
+  return { text: t('Something went wrong with this reply.'), setup: false };
 }
 
 /** Most pictures one message may carry (each goes to the model as an image). */
@@ -3372,9 +3630,9 @@ const IMAGES_PER_MESSAGE = 4;
 
 /** A row of chips that slides sideways (no scrollbar), with arrows when it overflows. */
 function carouselHTML(inner: string): string {
-  return `<div class="mn-car"><button type="button" class="mn-car-a l" data-car="l" aria-label="Scroll left" tabindex="-1">${icon(
+  return `<div class="mn-car"><button type="button" class="mn-car-a l" data-car="l" aria-label="${t('Scroll left')}" tabindex="-1">${icon(
     'chev-left',
-  )}</button><div class="mn-car-row">${inner}</div><button type="button" class="mn-car-a r" data-car="r" aria-label="Scroll right" tabindex="-1">${icon('chev-right')}</button></div>`;
+  )}</button><div class="mn-car-row">${inner}</div><button type="button" class="mn-car-a r" data-car="r" aria-label="${t('Scroll right')}" tabindex="-1">${icon('chev-right')}</button></div>`;
 }
 
 /** Show each arrow only while there is more that way. */
@@ -3393,6 +3651,22 @@ function syncCarousel(car: HTMLElement): void {
 /** Mnemo's tool that hands over notes, folders, images or the vault as cards. */
 const SHOW = 'show_items';
 
+interface PlanStep {
+  text: string;
+  status: string;
+  sub?: string;
+}
+
+/** The steps of an update_plan call. */
+function planOf(args: unknown): PlanStep[] | null {
+  const steps = (args as { steps?: unknown } | null)?.steps;
+  if (!Array.isArray(steps)) return null;
+  const out = steps
+    .map((x) => ({ text: String((x as PlanStep)?.text || '').slice(0, 120), status: String((x as PlanStep)?.status || 'pending') }))
+    .filter((x) => x.text);
+  return out.length ? out : null;
+}
+
 const imgUrl = (path: string): string => `/api/vault/file?path=${encodeURIComponent(path)}`;
 
 /** The cards of one show_items call. */
@@ -3401,14 +3675,14 @@ function cardsEl(items: A.Shown[]): HTMLElement {
   box.innerHTML = items
     .map((it) => {
       const dir = it.path.includes('/') ? it.path.slice(0, it.path.lastIndexOf('/')) : '';
-      const sub = it.kind === 'vault' ? 'Every note' : it.kind === 'folder' ? (it.path ? 'Folder' + (dir ? ` in ${dir}` : '') : 'Folder') : dir || 'Top level';
+      const sub = it.kind === 'vault' ? t('Every note') : it.kind === 'folder' ? (it.path && dir ? t('Folder in {dir}', { dir }) : t('Folder')) : dir || t('Top level');
       const title = it.kind === 'note' ? noteTitle(it.path) || it.title : it.title;
       const lead =
         it.kind === 'image'
           ? `<span class="mn-card-img"><img alt="" loading="lazy" src="${attr(imgUrl(it.path))}" onerror="this.parentElement.classList.add('broken')"></span>`
           : `<span class="mn-card-ic">${icon(it.kind === 'note' ? 'note' : it.kind === 'folder' ? 'folder' : 'vault')}</span>`;
       return `<button type="button" class="mn-card k-${it.kind}" data-card="${attr(it.kind)}" data-path="${attr(it.path)}" title="${attr(
-        it.kind === 'vault' ? 'Open your notes' : `Open ${it.path || 'All notes'}`,
+        it.kind === 'vault' ? t('Open your notes') : t('Open {name}', { name: it.path || t('All notes') }),
       )}">${lead}<span class="mn-card-t"><b>${esc(title)}</b><small>${esc(sub)}</small></span>${icon('chev', 'i mn-card-go')}</button>`;
     })
     .join('');
@@ -3427,7 +3701,7 @@ export function openMnemoSettings(part = ''): void {
     window.setTimeout(() => {
       const card = document.getElementById(id);
       if (!card) return;
-      if (part === 'memory' && (!card.querySelector('.mns-mg2, .mns-none:not(:empty)') || card.textContent?.includes('Loading…'))) return;
+      if (part === 'memory' && (!card.querySelector('.mns-ml, .mns-none:not(:empty)') || card.textContent?.includes(t('Loading…')))) return;
       A.takeSettingsPart();
       card.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }, 350);
@@ -3466,10 +3740,20 @@ class AgentsPanel {
 
   constructor(private changed: () => void) {
     this.el = el('div', 'mn-agents');
-    this.el.innerHTML = `<p class="mn-ag-none">No sub-agents in this chat yet. When ${A.MNEMO} hands a task to one, it shows here.</p>
-      <section class="mn-ag-sec" data-sec="run" hidden><h4>Running<span></span></h4><div class="mn-ag-l"></div></section>
-      <section class="mn-ag-sec" data-sec="idle" hidden><h4>Idle<span></span><small>Can take a follow-up</small></h4><div class="mn-ag-l"></div></section>
-      <details class="mn-ag-sec mn-ag-done" data-sec="done" hidden><summary><h4>Done<span></span></h4>${icon('chev', 'i mn-ag-chev')}</summary><div class="mn-ag-l"></div></details>`;
+    this.el.innerHTML = `<p class="mn-ag-none">${t('No sub-agents in this chat yet. When {mnemo} hands a task to one, it shows here.', { mnemo: A.MNEMO })}</p>
+      <section class="mn-ag-sec" data-sec="run" hidden><h4>${t('Running')}<span></span></h4><div class="mn-ag-l"></div></section>
+      <section class="mn-ag-sec" data-sec="idle" hidden><h4>${t('Idle')}<span></span><small>${t('Can take a follow-up')}</small></h4><div class="mn-ag-l"></div></section>
+      <details class="mn-ag-sec mn-ag-done" data-sec="done" hidden><summary><h4>${t('Done')}<span></span></h4>${icon('chev', 'i mn-ag-chev')}</summary><div class="mn-ag-l"></div></details>`;
+    this.el.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-suball]');
+      const c = b?.closest<HTMLElement>('.mn-sub');
+      if (c) subAll(c);
+    });
+    // A card's activity opening (a section unfolding) measures again.
+    this.el.addEventListener('toggle', (e) => {
+      const c = (e.target as HTMLElement).closest?.<HTMLElement>('.mn-sub');
+      if (c) subFit(c);
+    }, true);
   }
 
   private list(sec: AgentSec): HTMLElement {
@@ -3529,13 +3813,13 @@ class AgentsPanel {
     if (act) {
       act.open = sec === 'run';
       const k = c.querySelectorAll('.mn-sub-log > .mn-tool').length;
-      act.querySelector('em')!.textContent = k ? `${k} tool${k === 1 ? '' : 's'}` : '';
+      act.querySelector('em')!.textContent = k ? tn(k, '{n} tool', '{n} tools') : '';
     }
     const l = this.list(sec);
     if (c.parentElement === l) return;
     const n = seqOf(c);
-    // Running: in the order they were sent. Idle and done: the newest first.
-    const before = Array.from(l.children).find((x) => (sec === 'run' ? seqOf(x) > n : seqOf(x) < n));
+    // The newest sub-agent of the chat first, in every section.
+    const before = Array.from(l.children).find((x) => seqOf(x) < n);
     l.insertBefore(c, before || null);
   }
 
@@ -3577,7 +3861,7 @@ function teamIds(line: HTMLElement): string[] {
 /** A new card in the Agents panel for a `delegate` call; the reply gets (or adds to) the one
  *  line for the group of tasks it was sent with. */
 function subCard(body: HTMLElement, id: string, args: unknown, panel: AgentsPanel): HTMLElement {
-  const agent = argStr(args, 'agent') || 'Sub-agent';
+  const agent = argStr(args, 'agent') || t('Sub-agent');
   const task = argStr(args, 'task');
   let line = body.lastElementChild as HTMLElement | null;
   if (!line || !line.classList.contains('mn-team-line')) {
@@ -3591,10 +3875,10 @@ function subCard(body: HTMLElement, id: string, args: unknown, panel: AgentsPane
   c.dataset.state = 'run';
   c.innerHTML = `<div class="mn-sub-h"><span class="mn-sub-av" aria-hidden="true">${esc(agent.charAt(0).toUpperCase())}</span><span class="mn-sub-t"><b>${esc(
     agent,
-  )}</b><small></small></span><span class="mn-sub-chip"><i class="mn-spin"></i><span>Working</span></span></div>
+  )}</b><small></small></span><span class="mn-sub-chip"><i class="mn-spin"></i><span>${t('Working')}</span></span></div>
     <div class="mn-sub-m" hidden><span class="mn-sub-bar" title=""><i></i></span><span class="mn-sub-tok"></span></div>
-    ${task ? `<button type="button" class="mn-sub-task" data-subtask aria-expanded="false" title="Show the whole task">${esc(task)}</button>` : ''}
-    <details class="mn-sub-act" open><summary>${icon('chev', 'i mn-sub-chev')}<span>Activity</span><em></em></summary><div class="mn-sub-log mn-tools"></div></details>
+    ${task ? `<button type="button" class="mn-sub-task" data-subtask aria-expanded="false" title="${t('Show the whole task')}">${esc(task)}</button>` : ''}
+    <details class="mn-sub-act" open><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Activity')}</span><em></em></summary><div class="mn-sub-log mn-tools"></div><button type="button" class="mn-sub-all" data-suball hidden aria-expanded="false">${t('Show all')}</button></details>
     <div class="mn-sub-pre" hidden></div>`;
   SUBS.set(c, { agent, model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 });
   CARD_LINE.set(c, line);
@@ -3607,7 +3891,7 @@ function subCard(body: HTMLElement, id: string, args: unknown, panel: AgentsPane
 function subSt(c: HTMLElement): SubState {
   let st = SUBS.get(c);
   if (!st) {
-    st = { agent: c.querySelector('.mn-sub-t b')?.textContent || 'Sub-agent', model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 };
+    st = { agent: c.querySelector('.mn-sub-t b')?.textContent || t('Sub-agent'), model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 };
     SUBS.set(c, st);
   }
   return st;
@@ -3630,9 +3914,9 @@ function subMeta(c: HTMLElement, followUp?: boolean): void {
   if (followUp !== undefined) c.classList.toggle('follow', followUp);
   // The model is a button: switch this sub-agent's model, like the chat's own.
   const model = st.model
-    ? `<button type="button" class="mn-sub-model" data-submodel title="Switch ${attr(st.agent)}'s model">${esc(A.modelLabel(A.mnemoState(), st.model))}${icon('chev-down')}</button>`
+    ? `<button type="button" class="mn-sub-model" data-submodel title="${t("Switch {agent}'s model", { agent: attr(st.agent) })}">${esc(A.modelLabel(A.mnemoState(), st.model))}${icon('chev-down')}</button>`
     : '';
-  small.innerHTML = [model, c.classList.contains('follow') ? 'Follow-up' : ''].filter(Boolean).join(' · ');
+  small.innerHTML = [model, c.classList.contains('follow') ? t('Follow-up') : ''].filter(Boolean).join(' · ');
 }
 
 function subMeter(c: HTMLElement): void {
@@ -3645,8 +3929,8 @@ function subMeter(c: HTMLElement): void {
   bar.hidden = !st.window;
   bar.classList.toggle('hi', pct >= 85);
   bar.querySelector<HTMLElement>('i')!.style.width = pct.toFixed(1) + '%';
-  bar.title = st.window ? `Memory used: ${fmtT(st.context)} of ${fmtT(st.window)}` : '';
-  m.querySelector<HTMLElement>('.mn-sub-tok')!.textContent = `${st.window ? `${fmtT(st.context)} of ${fmtT(st.window)} · ` : ''}${fmtT(st.tin)} in · ${fmtT(st.tout)} out`;
+  bar.title = st.window ? t('Memory used: {used} of {win}', { used: fmtT(st.context), win: fmtT(st.window) }) : '';
+  m.querySelector<HTMLElement>('.mn-sub-tok')!.textContent = `${st.window ? `${t('{used} of {win}', { used: fmtT(st.context), win: fmtT(st.window) })} · ` : ''}${t('{tin} in · {tout} out', { tin: fmtT(st.tin), tout: fmtT(st.tout) })}`;
 }
 
 /** A tool the sub-agent runs: the same step card as the chat's own tools. */
@@ -3658,29 +3942,31 @@ function subLogTool(c: HTMLElement, name: string, args: unknown): void {
   const shown = args !== null && args !== undefined;
   d.innerHTML = `<summary><span class="mn-tool-ic">${icon(ic)}</span><span class="mn-tool-t"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="mn-tool-s"><i class="mn-spin"></i></span>${icon('chev', 'i mn-tool-chev')}</summary>
     <div class="mn-tool-b"><div class="mn-tool-k">${esc(name)}</div>${shown ? `<pre>${esc(pretty(args, 1200))}</pre>` : ''}</div>`;
-  c.querySelector('.mn-sub-log')!.append(d);
+  c.querySelector('.mn-sub-log')!.prepend(d);
+  subFit(c);
 }
 
 function subLogToolEnd(c: HTMLElement, name: string, ok: boolean, summary: string): void {
   let d = Array.from(c.querySelectorAll<HTMLElement>('.mn-sub-log > .mn-tool.run')).find((x) => x.dataset.name === name);
   if (!d) {
     subLogTool(c, name, null);
-    d = c.querySelector<HTMLElement>('.mn-sub-log')!.lastElementChild as HTMLElement;
+    d = c.querySelector<HTMLElement>('.mn-sub-log')!.firstElementChild as HTMLElement;
   }
   d.classList.remove('run');
   d.classList.add(ok ? 'ok' : 'err');
-  d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon(ok ? 'check' : 'alert')}<span>${esc(summary || (ok ? 'Done' : 'Failed'))}</span>`;
-  if (summary) d.querySelector('.mn-tool-b')!.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">Result</div><pre>${esc(summary)}</pre>`);
+  const line = ts(summary);
+  d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon(ok ? 'check' : 'alert')}<span>${esc(line || (ok ? t('Done') : t('Failed')))}</span>`;
+  if (line) d.querySelector('.mn-tool-b')!.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('Result')}</div><pre>${esc(line)}</pre>`);
 }
 
 function subLogAsk(c: HTMLElement, question: string, answer?: string): void {
   const agent = subSt(c).agent;
   const log = c.querySelector('.mn-sub-log')!;
-  let li = answer === undefined ? null : (Array.from(log.querySelectorAll<HTMLElement>('.mn-sub-li.ask.wait')).pop() ?? null);
+  let li = answer === undefined ? null : log.querySelector<HTMLElement>('.mn-sub-li.ask.wait');
   if (!li) {
     li = el('div', 'mn-sub-li ask' + (answer === undefined ? ' wait' : ''));
     li.innerHTML = `${icon('chat')}<span class="mn-sub-x"><span><b>${esc(agent)} → ${A.MNEMO}:</b> ${esc(question)}</span></span>`;
-    log.append(li);
+    log.prepend(li);
   }
   if (answer !== undefined) {
     li.classList.remove('wait');
@@ -3690,7 +3976,51 @@ function subLogAsk(c: HTMLElement, question: string, answer?: string): void {
 
 /** A quiet line in a sub-agent's activity (a model switch, a summary, an error). */
 function subNote(c: HTMLElement, ic: string, text: string, cls = ''): void {
-  c.querySelector('.mn-sub-log')!.insertAdjacentHTML('beforeend', `<div class="mn-sub-li${cls ? ' ' + cls : ''}">${icon(ic)}<span>${esc(text)}</span></div>`);
+  c.querySelector('.mn-sub-log')!.insertAdjacentHTML('afterbegin', `<div class="mn-sub-li${cls ? ' ' + cls : ''}">${icon(ic)}<span>${esc(text)}</span></div>`);
+  subFit(c);
+}
+
+/** A sub-agent's activity, newest first, stays a short window (scrollable, fading out at the
+ *  bottom) with Show all when there is more; expanded it follows its content. */
+function subFit(c: HTMLElement): void {
+  const log = c.querySelector<HTMLElement>('.mn-sub-log');
+  const btn = c.querySelector<HTMLButtonElement>('.mn-sub-all');
+  if (!log || !btn) return;
+  requestAnimationFrame(() => {
+    const all = log.classList.contains('all');
+    if (all) log.style.maxHeight = `${log.scrollHeight}px`;
+    else if (log.scrollTop < 40) log.scrollTop = 0;
+    const more = all || log.scrollHeight > log.clientHeight + 4;
+    btn.hidden = !more;
+    log.classList.toggle('more', more && !all);
+  });
+}
+
+/** Show all of a sub-agent's activity (it grows down smoothly) or fold it back (it rises). */
+function subAll(c: HTMLElement): void {
+  const log = c.querySelector<HTMLElement>('.mn-sub-log');
+  const btn = c.querySelector<HTMLButtonElement>('.mn-sub-all');
+  if (!log || !btn) return;
+  const open = !log.classList.contains('all');
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (open) {
+    log.style.maxHeight = `${log.clientHeight}px`;
+    void log.offsetHeight;
+    log.classList.add('all');
+    log.classList.remove('more');
+    log.style.maxHeight = `${log.scrollHeight}px`;
+    window.setTimeout(() => btn.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' }), calm ? 0 : 320);
+  } else {
+    log.style.maxHeight = `${log.scrollHeight}px`;
+    void log.offsetHeight;
+    log.classList.remove('all');
+    log.style.maxHeight = '';
+    log.scrollTo({ top: 0, behavior: calm ? 'auto' : 'smooth' });
+    c.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });
+    window.setTimeout(() => subFit(c), calm ? 0 : 360);
+  }
+  btn.textContent = open ? t('Show less') : t('Show all');
+  btn.setAttribute('aria-expanded', String(open));
 }
 
 /** One progress event of a running sub-agent. */
@@ -3710,7 +4040,7 @@ function subEvent(c: HTMLElement, ev: A.SubEvent): void {
       st.step = ev.step || st.step + 1;
       st.text = '';
       pre.hidden = true;
-      subChip(c, 'run', `Working · step ${st.step}`);
+      subChip(c, 'run', t('Working · step {n}', { n: st.step }));
       break;
     case 'text': {
       st.text += ev.delta || '';
@@ -3727,11 +4057,11 @@ function subEvent(c: HTMLElement, ev: A.SubEvent): void {
       break;
     case 'ask':
       subLogAsk(c, ev.question || '');
-      subChip(c, 'ask', `Asking ${A.MNEMO}`);
+      subChip(c, 'ask', t('Asking {mnemo}', { mnemo: A.MNEMO }));
       break;
     case 'answer':
       subLogAsk(c, '', ev.answer || '');
-      subChip(c, 'run', st.step ? `Working · step ${st.step}` : 'Working');
+      subChip(c, 'run', st.step ? t('Working · step {n}', { n: st.step }) : t('Working'));
       break;
     case 'usage':
       if (typeof ev.input_tokens === 'number') st.tin = ev.input_tokens;
@@ -3742,29 +4072,29 @@ function subEvent(c: HTMLElement, ev: A.SubEvent): void {
       break;
     case 'done':
       pre.hidden = true;
-      subChip(c, 'done', `Done · ${ev.steps ?? st.step} step${(ev.steps ?? st.step) === 1 ? '' : 's'}`);
+      subChip(c, 'done', tn(ev.steps ?? st.step, 'Done · {n} step', 'Done · {n} steps'));
       break;
     case 'fallback':
     case 'switched': {
       const s = A.mnemoState();
       const to = s ? A.modelLabel(s, ev.to || '') : ev.to || '';
-      subNote(c, 'refresh', ev.phase === 'fallback' ? `${s ? A.modelLabel(s, ev.from || '') : ev.from} did not answer (${ev.reason || 'error'}); ${to} carries on` : `Switched to ${to}`);
+      subNote(c, 'refresh', ev.phase === 'fallback' ? t('{from} did not answer ({reason}); {to} carries on', { from: (s ? A.modelLabel(s, ev.from || '') : ev.from) || '', reason: ev.reason ? ts(ev.reason) : t('error'), to }) : t('Switched to {model}', { model: to }));
       break;
     }
     case 'notice':
-      if (ev.text) subNote(c, 'info', ev.text);
+      if (ev.text) subNote(c, 'info', ts(ev.text));
       break;
     case 'compacting':
-      subChip(c, 'run', 'Summarising its work');
+      subChip(c, 'run', t('Summarising its work'));
       break;
     case 'compacted':
-      subNote(c, 'sparkle', `Summarised ${ev.messages ?? ''} earlier messages to make room`);
-      subChip(c, 'run', st.step ? `Working · step ${st.step}` : 'Working');
+      subNote(c, 'sparkle', t('Summarised {n} earlier messages to make room', { n: ev.messages ?? '' }));
+      subChip(c, 'run', st.step ? t('Working · step {n}', { n: st.step }) : t('Working'));
       break;
     case 'error':
       pre.hidden = true;
-      if (ev.message) subNote(c, 'alert', ev.message, 'err');
-      subChip(c, 'err', 'Failed');
+      if (ev.message) subNote(c, 'alert', ts(ev.message), 'err');
+      subChip(c, 'err', t('Failed'));
       break;
   }
 }
@@ -3795,15 +4125,15 @@ function subFinal(c: HTMLElement, output: unknown, ok: boolean): void {
   c.querySelector<HTMLElement>('.mn-sub-pre')!.hidden = true;
   const err = typeof o.error === 'string' && o.error ? o.error : '';
   if (!ok || err) {
-    if (err && !log.querySelector('.mn-sub-li.err')) subNote(c, 'alert', err, 'err');
-    subChip(c, 'err', 'Failed');
+    if (err && !log.querySelector('.mn-sub-li.err')) subNote(c, 'alert', ts(err), 'err');
+    subChip(c, 'err', t('Failed'));
     return;
   }
   const steps = o.steps ?? st.step;
   if (o.answer) {
-    c.insertAdjacentHTML('beforeend', `<details class="mn-sub-ans"><summary>${icon('chev', 'i mn-sub-chev')}<span>Answer</span></summary><div class="mn-md">${renderReply(o.answer)}</div></details>`);
+    c.insertAdjacentHTML('beforeend', `<details class="mn-sub-ans"><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Answer')}</span></summary><div class="mn-md">${renderReply(o.answer)}</div></details>`);
   }
-  subChip(c, 'done', steps ? `Done · ${steps} step${steps === 1 ? '' : 's'}` : 'Done');
+  subChip(c, 'done', steps ? tn(steps, 'Done · {n} step', 'Done · {n} steps') : t('Done'));
 }
 
 /** A task cut off with the reply. */
@@ -3813,10 +4143,10 @@ function subStop(c: HTMLElement): void {
   c.querySelector<HTMLElement>('.mn-sub-pre')!.hidden = true;
   c.querySelectorAll<HTMLElement>('.mn-sub-log > .mn-tool.run').forEach((d) => {
     d.classList.remove('run');
-    d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon('stop')}<span>Stopped</span>`;
+    d.querySelector<HTMLElement>('.mn-tool-s')!.innerHTML = `${icon('stop')}<span>${t('Stopped')}</span>`;
   });
   c.querySelectorAll('.mn-sub-li.wait').forEach((x) => x.classList.remove('wait'));
-  subChip(c, 'stop', 'Stopped');
+  subChip(c, 'stop', t('Stopped'));
 }
 
 /** The one line a group of sub-agents leaves in the reply: how many, how many are working
@@ -3831,14 +4161,14 @@ function paintTeam(line: HTMLElement): void {
   const stopped = cards.filter((c) => c.dataset.state === 'stop').length;
   const text =
     n === 1
-      ? `${subSt(cards[0]).agent} · ${cards[0].querySelector('.mn-sub-chip span')?.textContent || 'Working'}`
-      : [`${n} sub-agents`, busy ? `${busy} working` : '', done ? `${done} done` : '', failed ? `${failed} failed` : '', stopped ? `${stopped} stopped` : ''].filter(Boolean).join(' · ');
+      ? `${subSt(cards[0]).agent} · ${cards[0].querySelector('.mn-sub-chip span')?.textContent || t('Working')}`
+      : [t('{n} sub-agents', { n }), busy ? t('{n} working', { n: busy }) : '', done ? t('{n} done', { n: done }) : '', failed ? t('{n} failed', { n: failed }) : '', stopped ? t('{n} stopped', { n: stopped }) : ''].filter(Boolean).join(' · ');
   const lead = busy ? '<i class="mn-spin"></i>' : icon(failed ? 'alert' : stopped && !done ? 'stop' : 'check');
   line.className = 'mn-team-line ' + (busy ? 'run' : failed ? 'err' : stopped && !done ? 'stop' : 'ok');
-  line.innerHTML = `<span class="mn-team-ic">${lead}</span><span class="mn-team-t">${esc(text)}</span><span class="mn-team-go">View${icon('chev')}</span>`;
-  const t = `${text}. Open the Agents panel`;
-  line.title = t;
-  line.setAttribute('aria-label', t);
+  line.innerHTML = `<span class="mn-team-ic">${lead}</span><span class="mn-team-t">${esc(text)}</span><span class="mn-team-go">${t('View')}${icon('chev')}</span>`;
+  const tip = t('{text}. Open the Agents panel', { text });
+  line.title = tip;
+  line.setAttribute('aria-label', tip);
 }
 
 /** A quiet line in a reply: Mnemo noted, changed or forgot something about the owner. */
@@ -3846,7 +4176,7 @@ function memLine(id: string, name: string, args: unknown): HTMLElement {
   const d = el(
     'div',
     'mn-memline',
-    `${icon('user')}<span>${esc(ownerMemoryText(name, args))}</span><button type="button" class="mn-memline-a" data-seemem>See all</button>`,
+    `${icon('user')}<span>${esc(ownerMemoryText(name, args))}</span><button type="button" class="mn-memline-a" data-seemem>${t('See all')}</button>`,
   );
   d.dataset.id = id;
   return d;
@@ -3856,7 +4186,7 @@ function endMemLine(body: HTMLElement, id: string, ok: boolean): void {
   const d = body.querySelector<HTMLElement>(`.mn-memline[data-id="${CSS.escape(id)}"]`);
   if (!d || ok) return;
   d.classList.add('err');
-  d.querySelector('span')!.textContent = 'Could not change what I know about you';
+  d.querySelector('span')!.textContent = t('Could not change what I know about you');
 }
 
 // ---- chat width (per device) ----
@@ -3890,7 +4220,7 @@ export function setChatWidth(w: ChatWidth): void {
 /** A small searchable list of notes; `run` gets the chosen path. */
 function pickNote(run: (paths: string[]) => void, room = 8): void {
   const body = el('div', 'mn-pick');
-  body.innerHTML = `<label class="mn-pick-q">${icon('search')}<input type="search" placeholder="Search notes" autocomplete="off" aria-label="Search notes"></label><div class="mn-pick-l" role="listbox" aria-multiselectable="true"></div>`;
+  body.innerHTML = `<label class="mn-pick-q">${icon('search')}<input type="search" placeholder="${t('Search notes')}" autocomplete="off" aria-label="${t('Search notes')}"></label><div class="mn-pick-l" role="listbox" aria-multiselectable="true"></div>`;
   const input = body.querySelector('input')!;
   const list = body.querySelector<HTMLElement>('.mn-pick-l')!;
   const picked: string[] = [];
@@ -3901,7 +4231,7 @@ function pickNote(run: (paths: string[]) => void, room = 8): void {
   const paintGo = (): void => {
     if (!go) return;
     go.disabled = !picked.length;
-    go.textContent = picked.length > 1 ? `Attach ${picked.length} notes` : 'Attach';
+    go.textContent = picked.length > 1 ? t('Attach {n} notes', { n: picked.length }) : t('Attach');
   };
   const paint = (): void => {
     const q = input.value.trim().toLowerCase();
@@ -3911,11 +4241,11 @@ function pickNote(run: (paths: string[]) => void, room = 8): void {
           .map((n) => {
             const on = picked.includes(n.path);
             return `<button type="button" class="mn-pick-i${on ? ' on' : ''}" role="option" aria-selected="${on}" data-p="${attr(n.path)}">${icon('note')}<span><b>${esc(n.title)}</b><small>${esc(
-              n.folder || 'Top level',
+              n.folder || t('Top level'),
             )}</small></span><i class="mn-pick-ck" aria-hidden="true">${icon('check')}</i></button>`;
           })
           .join('')
-      : '<p class="mn-pick-none">No note matches.</p>';
+      : `<p class="mn-pick-none">${t('No note matches.')}</p>`;
   };
   input.oninput = paint;
   list.onclick = (e) => {
@@ -3925,19 +4255,19 @@ function pickNote(run: (paths: string[]) => void, room = 8): void {
     const i = picked.indexOf(p);
     if (i >= 0) picked.splice(i, 1);
     else if (picked.length < room) picked.push(p);
-    else return toast(`Up to ${room} more this message`, 'warn');
+    else return toast(t('Up to {n} more this message', { n: room }), 'warn');
     b.classList.toggle('on', i < 0);
     b.setAttribute('aria-selected', String(i < 0));
     paintGo();
   };
   paint();
   Modal.open({
-    title: 'Notes',
+    title: t('Notes'),
     body,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Attach',
+        label: t('Attach'),
         cls: 'primary',
         run: () => {
           if (!picked.length) return;

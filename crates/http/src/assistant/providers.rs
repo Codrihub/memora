@@ -1362,10 +1362,10 @@ mod tests {
 
     #[test]
     fn an_html_error_page_reads_as_its_title() {
-        let raw = "[x/deepseek] [502]: <!DOCTYPE html> <html lang=\"en\"> <head> <title>holver.id | 502: Bad gateway</title> </head> <body> Ray 4011 </body> </html> (reset after 30s)";
+        let raw = "[x/deepseek] [502]: <!DOCTYPE html> <html lang=\"en\"> <head> <title>proxy.example | 502: Bad gateway</title> </head> <body> Ray 4011 </body> </html> (reset after 30s)";
         assert_eq!(
             condense_error(raw),
-            "[x/deepseek] [502]: holver.id | 502: Bad gateway (reset after 30s)"
+            "[x/deepseek] [502]: proxy.example | 502: Bad gateway (reset after 30s)"
         );
         assert_eq!(
             condense_error("plain  message\n here"),

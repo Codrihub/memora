@@ -69,6 +69,7 @@ pub fn apply_event(tx: &Transaction<'_>, ev: &PathEvent) -> memora_state::Result
 fn key_ref(keys: &[ApiKey], id: &str) -> Value {
     match keys.iter().find(|k| k.id == id) {
         Some(k) => json!({"id": k.id, "name": k.name, "color": k.color}),
+        None if id == MNEMO_ID => json!({"id": id, "name": MNEMO_NAME, "color": null}),
         None => json!({"id": id, "name": id, "color": null}),
     }
 }
@@ -93,9 +94,17 @@ pub fn list_json(conn: &Connection) -> memora_state::Result<Value> {
     }))
 }
 
+/// Mnemo, the agent built into Memora, can be kept out of notes, folders and pictures like any
+/// agent: its key id in rules is `mnemo` (its sub-agents act under it too).
+pub const MNEMO_ID: &str = "mnemo";
+const MNEMO_NAME: &str = "Mnemo";
+
 fn agents_json(keys: &[ApiKey]) -> Vec<Value> {
-    keys.iter()
-        .map(|k| json!({"id": k.id, "name": k.name, "color": k.color, "enabled": k.enabled}))
+    std::iter::once(json!({"id": MNEMO_ID, "name": MNEMO_NAME, "color": null, "enabled": true, "builtin": true}))
+        .chain(
+            keys.iter()
+                .map(|k| json!({"id": k.id, "name": k.name, "color": k.color, "enabled": k.enabled})),
+        )
         .collect()
 }
 
@@ -114,19 +123,26 @@ pub fn describe(conn: &Connection, path: &str, kind: Kind) -> memora_state::Resu
         .iter()
         .filter(|r| !own_ids.contains(&r.id))
         .collect();
-    let agents: Vec<Value> = keys
-        .iter()
-        .map(|k| {
-            let by: Vec<Value> = covering
-                .iter()
-                .filter(|r| r.hides_from(&k.id))
-                .map(|r| json!({"path": r.path, "kind": r.kind, "own": own_ids.contains(&r.id)}))
-                .collect();
-            json!({
-                "id": k.id, "name": k.name, "color": k.color, "enabled": k.enabled,
-                "can_see": by.is_empty(), "hidden_by": by,
-            })
-        })
+    let row = |id: &str, name: &str, color: Value, enabled: bool, builtin: bool| {
+        let by: Vec<Value> = covering
+            .iter()
+            .filter(|r| r.hides_from(id))
+            .map(|r| json!({"path": r.path, "kind": r.kind, "own": own_ids.contains(&r.id)}))
+            .collect();
+        let mut v = json!({
+            "id": id, "name": name, "color": color, "enabled": enabled,
+            "can_see": by.is_empty(), "hidden_by": by,
+        });
+        if builtin {
+            v["builtin"] = json!(true);
+        }
+        v
+    };
+    let agents: Vec<Value> = std::iter::once(row(MNEMO_ID, MNEMO_NAME, Value::Null, true, true))
+        .chain(
+            keys.iter()
+                .map(|k| row(&k.id, &k.name, json!(k.color), k.enabled, false)),
+        )
         .collect();
     // The rule as the panel edits it: the first own rule (saving replaces them all).
     let editable = own
@@ -157,6 +173,10 @@ pub fn resolve_keys(
         }
         if let Some(k) = keys.iter().find(|k| k.id == w) {
             out.insert(k.id.clone());
+            continue;
+        }
+        if w.eq_ignore_ascii_case(MNEMO_ID) {
+            out.insert(MNEMO_ID.to_string());
             continue;
         }
         let named: Vec<&ApiKey> = keys

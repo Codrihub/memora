@@ -57,14 +57,14 @@ the scopes `mcp`, `read` and `write` and may call every tool. See
 narrow it.
 
 Use `http://localhost:8400/mcp` for a local install, or your public URL such as
-`https://memory.example.com/mcp` behind a reverse proxy. When the server sets
+`https://memora.example.com/mcp` behind a reverse proxy. When the server sets
 `MEMORA_DOMAIN` or `MEMORA_BASE_URL`, requests for any other host get `404`, so
 use that domain.
 
 Claude Code:
 
 ```bash
-claude mcp add --transport http memora https://memory.example.com/mcp \
+claude mcp add --transport http memora https://memora.example.com/mcp \
   --header "Authorization: Bearer memora_live_REPLACE_WITH_YOUR_KEY"
 ```
 
@@ -90,7 +90,7 @@ environment variable:
 
 ```toml
 [mcp_servers.memora]
-url = "https://memory.example.com/mcp"
+url = "https://memora.example.com/mcp"
 bearer_token_env_var = "MEMORA_API_KEY"
 ```
 
@@ -103,7 +103,7 @@ file, can bridge with `mcp-remote` (needs Node.js):
     "memora": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote", "https://memory.example.com/mcp",
+        "-y", "mcp-remote", "https://memora.example.com/mcp",
         "--header", "Authorization: Bearer memora_live_REPLACE_WITH_YOUR_KEY"
       ]
     }
@@ -120,13 +120,13 @@ Clients that support MCP authorization (for example Claude and ChatGPT custom
 connectors, or Claude Code without a `--header`) can connect with only the URL:
 
 ```bash
-claude mcp add --transport http memora https://memory.example.com/mcp
+claude mcp add --transport http memora https://memora.example.com/mcp
 ```
 
 The flow:
 
 1. The client calls `/mcp` without credentials and gets `401` with
-   `WWW-Authenticate: Bearer resource_metadata="https://memory.example.com/.well-known/oauth-protected-resource"`.
+   `WWW-Authenticate: Bearer resource_metadata="https://memora.example.com/.well-known/oauth-protected-resource"`.
 2. It reads the protected resource metadata (RFC 9728) and the authorization
    server metadata at `/.well-known/oauth-authorization-server` (RFC 8414; also
    served at `/.well-known/openid-configuration` and under a `/mcp` suffix).
@@ -148,7 +148,7 @@ there. The access token has no expiry. A `refresh_token` grant replaces it with
 a fresh one (the old token stops working at once) and rotates the refresh token.
 Disabling or deleting the key ends the connection.
 
-Set `MEMORA_BASE_URL` (for example `https://memory.example.com`) when the server
+Set `MEMORA_BASE_URL` (for example `https://memora.example.com`) when the server
 runs behind a proxy, so the issuer and endpoint URLs in the metadata are the
 public ones. Without it the server derives them from the request headers.
 

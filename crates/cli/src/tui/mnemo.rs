@@ -1748,7 +1748,7 @@ mod tests {
             "Something went wrong with this reply."
         );
         assert!(friendly_error(
-            "the provider answered 503: [x] [502]: holver.id | 502: Bad gateway, Ray 4011ab"
+            "the provider answered 503: [x] [502]: proxy.example | 502: Bad gateway, Ray 4011ab"
         )
         .contains("not answering"));
     }

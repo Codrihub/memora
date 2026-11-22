@@ -6,7 +6,7 @@ import { hooks } from '../hooks';
 import { runUndo, wireActRows } from '../control/activity';
 import { groupBursts } from '../control/sentence';
 import { fromAuth, fromLog, mergePhases, PausedQueue, pushLive, verb, type ActivityItem } from '../control/feed';
-import { ICO, openDrawer, openMenu, plural } from '../control/ui';
+import { ICO, openDrawer, openMenu } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
 import type { Select } from '../ui/select';
 import { toast } from '../toast';
@@ -57,6 +57,7 @@ import {
   wireTimeline,
 } from './activity-views';
 import { count, opt, toggle } from './activity-filters';
+import { t, tn } from '../i18n';
 
 const CSS = `
 .at{display:flex;flex-direction:column;gap:20px;min-width:0;container:at/inline-size}
@@ -254,7 +255,7 @@ async function load(soft: boolean, now = false): Promise<void> {
     loadedRange = range;
   } catch (e) {
     if (my !== seq) return;
-    toast('Could not load activity: ' + (e as Error).message, 'err');
+    toast(t('Could not load activity: {error}', { error: (e as Error).message }), 'err');
     if (now) older = false;
   }
   loading = false;
@@ -294,13 +295,13 @@ function paintLive(): void {
   const b = root?.querySelector<HTMLElement>('#adLive');
   if (!b) return;
   b.setAttribute('aria-pressed', String(live));
-  b.innerHTML = live ? '<span class="cc-dot ok"></span>Live' : `<span class="cc-dot idle"></span>Paused`;
-  b.title = live ? 'Pause: new activity waits until you show it' : 'Resume: show new activity as it happens';
+  b.innerHTML = live ? `<span class="cc-dot ok"></span>${t('Live')}` : `<span class="cc-dot idle"></span>${t('Paused')}`;
+  b.title = live ? t('Pause: new activity waits until you show it') : t('Resume: show new activity as it happens');
   const nb = root!.querySelector<HTMLButtonElement>('#adNew');
   if (nb) {
     nb.hidden = live || !pending.length;
-    nb.textContent = `${pending.length} new · Show`;
-    nb.setAttribute('aria-label', `Show ${plural(pending.length, 'new action')}`);
+    nb.textContent = t('{n} new · Show', { n: pending.length });
+    nb.setAttribute('aria-label', tn(pending.length, 'Show {n} new action', 'Show {n} new actions'));
   }
 }
 
@@ -391,21 +392,21 @@ function sheetHTML(): string {
   const acts = [...count(cr, (x) => x.action).entries()].sort((a, b) => b[1] - a[1]);
   D.actions.forEach((a) => acts.some(([x]) => x === a) || acts.push([a, 0]));
   const today = isoDay(Date.now() / 1000);
-  return `<section class="ax-fg"><h3>Time</h3>
+  return `<section class="ax-fg"><h3>${t('Time')}</h3>
       <div class="ax-opts">${TIMES.map((t) => opt('time', t.id, t.label, D.time === t.id)).join('')}</div>
       <div class="ax-range${D.time === 'custom' ? ' on' : ''}">
-        <label><span>From</span><input type="date" data-date="from" value="${attr(D.from)}" max="${today}"></label>
-        <label><span>To</span><input type="date" data-date="to" value="${attr(D.to)}" max="${today}"></label>
+        <label><span>${t('From')}</span><input type="date" data-date="from" value="${attr(D.from)}" max="${today}"></label>
+        <label><span>${t('To')}</span><input type="date" data-date="to" value="${attr(D.to)}" max="${today}"></label>
       </div></section>
-    <section class="ax-fg"><h3>Result</h3><div class="ax-opts">${STATUSES.map((s) =>
+    <section class="ax-fg"><h3>${t('Result')}</h3><div class="ax-opts">${STATUSES.map((s) =>
       opt('status', s.id, s.label, D.status.has(s.id), st.get(s.id) || 0, `<span class="cc-dot ${s.id === 'fail' ? 'err' : s.id === 'running' ? 'run' : 'ok'}"></span>`),
     ).join('')}</div></section>
-    <section class="ax-fg"><h3>What</h3><div class="ax-opts">${CATS.filter((c) => cats.get(c.id) || D.cats.has(c.id) || c.id !== 'other')
+    <section class="ax-fg"><h3>${t('What')}</h3><div class="ax-opts">${CATS.filter((c) => cats.get(c.id) || D.cats.has(c.id) || c.id !== 'other')
       .map((c) => opt('cats', c.id, c.label, D.cats.has(c.id), cats.get(c.id) || 0, `<i class="sw" style="--c:${CAT_COLOR[c.id]}"></i>`, c.hint))
       .join('')}</div>
       ${
         acts.length
-          ? `<details class="ax-acts"${D.actions.size ? ' open' : ''}><summary>Specific actions<span class="n">${acts.length}</span></summary>
+          ? `<details class="ax-acts"${D.actions.size ? ' open' : ''}><summary>${t('Specific actions')}<span class="n">${acts.length}</span></summary>
         <div class="ax-opts">${acts.map(([a, n]) => opt('actions', a, verb(a), D.actions.has(a), n, '', a)).join('')}</div></details>`
           : ''
       }</section>`;
@@ -436,17 +437,17 @@ function paintSheet(): void {
   });
   const n = rows().length;
   const done = sheet.querySelector<HTMLElement>('[data-done]');
-  if (done) done.textContent = `Show ${plural(n, 'action')}`;
+  if (done) done.textContent = tn(n, 'Show {n} action', 'Show {n} actions');
   const sub = sheet.querySelector<HTMLElement>('.cc-drawer-h .s');
-  if (sub) sub.textContent = `${who?.name || ''} · ${n} of ${plural(scoped().length, 'action')} match`;
+  if (sub) sub.textContent = `${who?.name || ''} · ${tn(scoped().length, '{m} of {n} action match', '{m} of {n} actions match', { m: n })}`;
 }
 
 function openSheet(): void {
   const d = openDrawer({
-    title: 'Filters',
+    title: t('Filters'),
     sub: ' ',
     body: '',
-    foot: `<button type="button" class="btn ghost" data-reset>Reset</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>Show actions</button>`,
+    foot: `<button type="button" class="btn ghost" data-reset>${t('Reset')}</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>${t('Show actions')}</button>`,
   });
   d.classList.add('ax-sheet');
   sheet = d;
@@ -480,24 +481,24 @@ function openSheet(): void {
 
 function shell(): void {
   if (!root || !who) return;
-  root.innerHTML = `<div class="at-none sm-card" id="adNone" hidden><span class="at-none-i">${ICO.plug}</span><b>No activity yet</b>
-      <span>Once ${esc(who.name)} is connected, everything it reads, writes and searches shows up here, live.</span>
-      <button type="button" class="btn" data-setup>Open the setup guide</button></div>
+  root.innerHTML = `<div class="at-none sm-card" id="adNone" hidden><span class="at-none-i">${ICO.plug}</span><b>${t('No activity yet')}</b>
+      <span>${t('Once {name} is connected, everything it reads, writes and searches shows up here, live.', { name: esc(who.name) })}</span>
+      <button type="button" class="btn" data-setup>${t('Open the setup guide')}</button></div>
     <div class="at" id="adMain">
     <div class="at-ctl"><span id="adTime"></span><span class="at-span" id="adSpan"></span><span class="grow"></span>
       <button type="button" class="lg-live" id="adLive" aria-pressed="${live}"></button>
-      <button type="button" class="cc-ibtn" id="adMore" aria-haspopup="menu" aria-label="More: export, all activity" title="More">${ICO.more}</button></div>
+      <button type="button" class="cc-ibtn" id="adMore" aria-haspopup="menu" aria-label="${t('More: export, all activity')}" title="${t('More')}">${ICO.more}</button></div>
     <div class="ax-kpis" id="adKpis"></div>
     <div class="at-grid">
-      <section class="sm-card at-chart" aria-labelledby="adChartH"><div class="sm-card-h"><h2 id="adChartH">Actions over time</h2><span class="sub" id="adChartS"></span></div>
+      <section class="sm-card at-chart" aria-labelledby="adChartH"><div class="sm-card-h"><h2 id="adChartH">${t('Actions over time')}</h2><span class="sub" id="adChartS"></span></div>
         <div class="sm-card-b" id="adChart"></div></section>
-      <section class="sm-card at-top" aria-labelledby="adTopH"><div class="sm-card-h"><h2 id="adTopH">What it does most</h2></div><div class="sm-card-b" id="adTop"></div></section>
-      <section class="sm-card at-probs" aria-labelledby="adPrH"><div class="sm-card-h"><h2 id="adPrH">Problems</h2><span id="adPrA"></span></div><div id="adProbs"></div></section>
-      <section class="sm-card at-notes" aria-labelledby="adNtH"><div class="sm-card-h"><h2 id="adNtH">Most touched notes</h2></div><div id="adNotes"></div></section>
+      <section class="sm-card at-top" aria-labelledby="adTopH"><div class="sm-card-h"><h2 id="adTopH">${t('What it does most')}</h2></div><div class="sm-card-b" id="adTop"></div></section>
+      <section class="sm-card at-probs" aria-labelledby="adPrH"><div class="sm-card-h"><h2 id="adPrH">${t('Problems')}</h2><span id="adPrA"></span></div><div id="adProbs"></div></section>
+      <section class="sm-card at-notes" aria-labelledby="adNtH"><div class="sm-card-h"><h2 id="adNtH">${t('Most touched notes')}</h2></div><div id="adNotes"></div></section>
     </div>
     <section class="tl at-tl" id="adTl" aria-labelledby="adTlH">
-      <div class="tl-h"><h2 id="adTlH">Timeline</h2><span class="sub">Everything ${esc(who.name)} did, newest first</span></div>
-      ${timelineHTML('ad', D.q, 'Search notes and actions')}
+      <div class="tl-h"><h2 id="adTlH">${t('Timeline')}</h2><span class="sub">${t('Everything {name} did, newest first', { name: esc(who.name) })}</span></div>
+      ${timelineHTML('ad', D.q, t('Search notes and actions'))}
     </section>
   </div>`;
   timeSel = timeSelect(
@@ -573,14 +574,14 @@ function wire(top: () => number): void {
       more,
       [
         {
-          label: 'Reload',
-          desc: 'Fetch its activity again from the server.',
+          label: t('Reload'),
+          desc: t('Fetch its activity again from the server.'),
           icon: ICO.refresh,
           run: () => void load(false),
         },
         {
-          label: 'See it among all activity',
-          desc: 'The Activity page, showing only this agent.',
+          label: t('See it among all activity'),
+          desc: t('The Activity page, showing only this agent.'),
           icon: ICO.filter,
           run: () => {
             try {
@@ -592,10 +593,10 @@ function wire(top: () => number): void {
           },
         },
         { sep: true, label: '' },
-        { label: 'Export timeline as JSON', desc: 'The actions the timeline shows, for scripts.', icon: ICO.download, run: () => exportRows(rows(), 'json', who?.name) },
-        { label: 'Export timeline as CSV', desc: 'The actions the timeline shows, for a spreadsheet.', icon: ICO.download, run: () => exportRows(rows(), 'csv', who?.name) },
+        { label: t('Export timeline as JSON'), desc: t('The actions the timeline shows, for scripts.'), icon: ICO.download, run: () => exportRows(rows(), 'json', who?.name) },
+        { label: t('Export timeline as CSV'), desc: t('The actions the timeline shows, for a spreadsheet.'), icon: ICO.download, run: () => exportRows(rows(), 'csv', who?.name) },
       ],
-      { title: who?.name || 'Activity' },
+      { title: who?.name || t('Activity') },
     );
   // The summary filters the timeline or opens a note.
   r.querySelector<HTMLElement>('.at')!.addEventListener('click', (e) => {
@@ -660,7 +661,7 @@ function wire(top: () => number): void {
 function chipsOf(): string[] {
   const c: string[] = [];
   if (!quickOf(D)) {
-    D.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', 'Result ')));
+    D.status.forEach((s) => c.push(chip('status:' + s, STATUSES.find((x) => x.id === s)!.label, '', t('Result') + ' ')));
     D.cats.forEach((k) => c.push(chip('cats:' + k, CATS.find((x) => x.id === k)!.label, `<i class="sw" style="--c:${CAT_COLOR[k]}"></i>`)));
   }
   D.actions.forEach((a) => c.push(chip('actions:' + a, verb(a), '', '')));
@@ -677,7 +678,7 @@ function kpisHTML(sc: ActivityItem[]): string {
   const today = atLeast(mine.filter((x) => x.ts >= midTs).length, midTs, oldest, older);
   const week = atLeast(mine.filter((x) => x.ts >= now - 7 * 86400).length, now - 7 * 86400, oldest, older);
   const fails = sc.filter((x) => stOf(x) === 'fail').length;
-  const t = touchedCount(sc);
+  const tc = touchedCount(sc);
   const w = win();
   const first = sc.length ? sc[sc.length - 1].ts : now;
   const since = w.since > 0 ? w.since : first;
@@ -688,10 +689,10 @@ function kpisHTML(sc: ActivityItem[]): string {
   const avg = sc.length / days;
   // The first number follows the chosen range; today's count goes under it.
   const short = D.time === 'today' || D.time === '1h';
-  return `${short ? statTile(labelOf(D), sc.length, `${week} in the last 7 days`) : statTile(labelOf(D), sc.length, `${today} today`)}
-    ${statTile('Problems', fails, sc.length ? `${Math.round((fails / sc.length) * 100)}% of ${plural(sc.length, 'action')}` : 'Nothing in this range', fails > 0, fails ? 'status:fail' : '')}
-    ${statTile('Notes touched', t.n, t.top ? `Most: ${t.top}` : 'None in this range')}
-    ${statTile(hourly ? 'Per hour' : 'Per day', (avg >= 10 ? String(Math.round(avg)) : avg.toFixed(1).replace(/\.0$/, '')) + (older && oldest > since ? '+' : ''), `Average over ${plural(days, hourly ? 'hour' : 'day')}`)}`;
+  return `${short ? statTile(labelOf(D), sc.length, t('{n} in the last 7 days', { n: week })) : statTile(labelOf(D), sc.length, t('{n} today', { n: today }))}
+    ${statTile(t('Problems'), fails, sc.length ? tn(sc.length, '{pct}% of {n} action', '{pct}% of {n} actions', { pct: Math.round((fails / sc.length) * 100) }) : t('Nothing in this range'), fails > 0, fails ? 'status:fail' : '')}
+    ${statTile(t('Notes touched'), tc.n, tc.top ? t('Most: {name}', { name: tc.top }) : t('None in this range'))}
+    ${statTile(hourly ? t('Per hour') : t('Per day'), (avg >= 10 ? String(Math.round(avg)) : avg.toFixed(1).replace(/\.0$/, '')) + (older && oldest > since ? '+' : ''), hourly ? tn(days, 'Average over {n} hour', 'Average over {n} hours') : tn(days, 'Average over {n} day', 'Average over {n} days'))}`;
 }
 
 function summary(): void {
@@ -707,14 +708,14 @@ function summary(): void {
   }
   const sc = scoped().filter((x) => !x.echo);
   const w = win();
-  q('adSpan').textContent = plural(sc.length, 'action');
+  q('adSpan').textContent = tn(sc.length, '{n} action', '{n} actions');
   q('adKpis').innerHTML = kpisHTML(sc);
-  q('adChartH').textContent = sc.length ? chartTitle(sc, w) : 'Actions over time';
-  q('adChartS').innerHTML = sc.some((x) => stOf(x) === 'fail') ? '<i class="ax-key"></i>problems' : '';
+  q('adChartH').textContent = sc.length ? chartTitle(sc, w) : t('Actions over time');
+  q('adChartS').innerHTML = sc.some((x) => stOf(x) === 'fail') ? `<i class="ax-key"></i>${t('problems')}` : '';
   q('adChart').innerHTML = timeChart(sc, w);
   q('adTop').innerHTML = topActionsHTML(sc, 6);
   const fails = sc.filter((x) => stOf(x) === 'fail').length;
-  q('adPrA').innerHTML = fails ? `<button type="button" class="sm-lnk" data-f="status:fail">Show all ${fails} ${ICO.arrow}</button>` : '';
+  q('adPrA').innerHTML = fails ? `<button type="button" class="sm-lnk" data-f="status:fail">${t('Show all {n}', { n: fails })} ${ICO.arrow}</button>` : '';
   q('adProbs').innerHTML = problemsHTML(sc, 4, false);
   q('adNotes').innerHTML = notesHTML(sc, 6);
 }
@@ -755,7 +756,7 @@ function paint(keepPlace = true): void {
   paintChips(root!, 'ad', chipsOf(), filterCount());
   const sum = root!.querySelector<HTMLElement>('#adSum')!;
   if (loading && !all.length) {
-    sum.innerHTML = '<span>Loading…</span>';
+    sum.innerHTML = `<span>${t('Loading…')}</span>`;
     body.setAttribute('aria-busy', 'true');
     body.innerHTML = daySkeleton();
     return;
@@ -766,7 +767,7 @@ function paint(keepPlace = true): void {
   const trimmed = older && oldestLoaded() > win().since;
   sum.innerHTML = sumHTML({
     n: atLeast(rs.length, win().since, oldestLoaded(), older),
-    unit: ['action', 'actions'],
+    unit: [t('action'), t('actions')],
     note: labelOf(D),
     fails: rs.filter((x) => stOf(x) === 'fail').length,
     compact,
@@ -781,7 +782,7 @@ function paint(keepPlace = true): void {
     older: trimmed,
     narrowed: narrowed(),
     none: !sc.length,
-    what: `What ${who.name} reads, writes and searches shows up here as it happens.`,
+    what: t('What {name} reads, writes and searches shows up here as it happens.', { name: who.name }),
   });
   restore();
   fresh.clear();

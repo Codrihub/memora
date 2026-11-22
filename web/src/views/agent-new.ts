@@ -8,6 +8,7 @@ import { ICO, whileVisible } from '../control/ui';
 import { avatarHTML } from '../control/agents';
 import { railCSS, useAgentPageStyles } from './agent-page';
 import { appFor, createAgent, data, ICO_BACK, ICO_INFO, loadAgents, nameOf, navAgents, wireAgentLinks } from './agents-data';
+import { t } from '../i18n';
 
 const CSS = `
 .an{container:an/inline-size;--ap-pt:24px;--ap-pb:64px;--r14:14px;--tile:color-mix(in srgb,var(--fg) 5%,transparent);max-width:1180px}
@@ -89,17 +90,17 @@ export async function renderNewAgent(host: HTMLElement, client: string): Promise
   wizard = null;
   shown = null;
   host.innerHTML = `<div class="cc an">
-    <nav class="ap-crumb" aria-label="Breadcrumb"><a class="ap-back" href="/agents" data-nav="">${ICO_BACK}Agents</a><span class="sep" aria-hidden="true">/</span><span class="cur" aria-current="page">New agent</span></nav>
-    <header class="an-head"><h1 tabindex="-1">New agent</h1>
-      <p>One agent per app or device: its own key, its own name in Activity, turned off on its own.</p></header>
+    <nav class="ap-crumb" aria-label="${t('Breadcrumb')}"><a class="ap-back" href="/agents" data-nav="">${ICO_BACK}${t('Agents')}</a><span class="sep" aria-hidden="true">/</span><span class="cur" aria-current="page">${t('New agent')}</span></nav>
+    <header class="an-head"><h1 tabindex="-1">${t('New agent')}</h1>
+      <p>${t('One agent per app or device: its own key, its own name in Activity, turned off on its own.')}</p></header>
     <div class="an-strip" id="anStrip" aria-hidden="true"></div>
     <div class="an-grid">
-      <section class="ap-card an-main" aria-labelledby="anH"><span id="anH" class="sr-only">New agent steps</span><div id="anWz"></div>
-        <div class="an-foot"><button type="button" class="btn ghost" id="anBack">Back</button><span class="grow"></span>
-          <button type="button" class="btn primary" id="anNext">Continue</button></div></section>
-      <aside class="an-side" aria-label="Summary"><div class="ap-card an-sum"><h2>Summary</h2><dl id="anSum"></dl>
-          <div class="an-open"><button type="button" class="btn primary" id="anOpen" hidden>Open the agent ${ICO.arrow}</button></div></div>
-        <div class="an-tip">${ICO_INFO}<span><b>Why one agent per app?</b>Activity shows which app did what, and turning one off or making it a new key never touches the others.</span></div></aside>
+      <section class="ap-card an-main" aria-labelledby="anH"><span id="anH" class="sr-only">${t('New agent steps')}</span><div id="anWz"></div>
+        <div class="an-foot"><button type="button" class="btn ghost" id="anBack">${t('Back')}</button><span class="grow"></span>
+          <button type="button" class="btn primary" id="anNext">${t('Continue')}</button></div></section>
+      <aside class="an-side" aria-label="${t('Summary')}"><div class="ap-card an-sum"><h2>${t('Summary')}</h2><dl id="anSum"></dl>
+          <div class="an-open"><button type="button" class="btn primary" id="anOpen" hidden>${t('Open the agent')} ${ICO.arrow}</button></div></div>
+        <div class="an-tip">${ICO_INFO}<span><b>${t('Why one agent per app?')}</b>${t('Activity shows which app did what, and turning one off or making it a new key never touches the others.')}</span></div></aside>
     </div></div>`;
   wireAgentLinks(host);
   host.querySelector<HTMLElement>('h1')?.focus({ preventScroll: true });
@@ -121,7 +122,7 @@ export async function renderNewAgent(host: HTMLElement, client: string): Promise
     setNav: (n) => {
       back.style.visibility = n.back ? '' : 'hidden';
       next.textContent = n.next;
-      next.title = n.next === 'Done' ? 'Open the new agent' : '';
+      next.title = n.next === 'Done' || n.next === t('Done') ? t('Open the new agent') : '';
     },
     onInfo: (i) => paintSummary(page, i),
     onOpenAgent: (id) => navAgents(id),
@@ -160,25 +161,25 @@ function paintSummary(page: HTMLElement, i: WizardInfo): void {
   const item = (lead: string, k: string, v: string, none: boolean): string =>
     `<div class="it">${lead}<span class="tx"><dt>${k}</dt><dd class="${none ? 'none' : ''}">${v}</dd></span></div>`;
   sum.innerHTML =
-    item(appIconHTML(c ? c.label : '', 30), 'App', c ? esc(c.label) : 'Not chosen yet', !c) +
+    item(appIconHTML(c ? c.label : '', 30), t('App'), c ? esc(c.label) : t('Not chosen yet'), !c) +
     item(
       i.agent ? avatarHTML(i.agent.name, 30, '', i.agent.id) : `<span class="ph">${ICO_USER}</span>`,
-      'Name',
-      named && i.name ? esc(i.name) : 'Next step',
+      t('Name'),
+      named && i.name ? esc(i.name) : t('Next step'),
       !(named && i.name),
     ) +
-    item(`<span class="ph">${ICO.shield}</span>`, 'Access', named && i.access ? esc(i.access) : 'Next step', !(named && i.access)) +
+    item(`<span class="ph">${ICO.shield}</span>`, t('Access'), named && i.access ? esc(i.access) : t('Next step'), !(named && i.access)) +
     item(
       `<span class="ph">${ICO.key}</span>`,
-      'Key',
-      i.agent ? `Made · <span class="cc-mono">${esc(i.agent.id)}</span>` : c?.oauth ? 'None: it signs in' : 'Made when you continue',
+      t('Key'),
+      i.agent ? `${t('Made')} · <span class="cc-mono">${esc(i.agent.id)}</span>` : c?.oauth ? t('None: it signs in') : t('Made when you continue'),
       !i.agent,
     ) +
     (i.step === 'setup' || i.step === 'prompt'
       ? item(
           `<span class="ph${i.connected ? ' ok' : ''}">${i.connected ? ICO.check : ICO.plug}</span>`,
-          'Connection',
-          i.connected ? 'Connected' : 'Waiting for the first call',
+          t('Connection'),
+          i.connected ? t('Connected') : t('Waiting for the first call'),
           !i.connected,
         )
       : '');

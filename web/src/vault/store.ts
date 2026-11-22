@@ -6,6 +6,7 @@ import { hashColor } from '../format';
 import { api, apiGet, apiPost } from '../api';
 import { activityToastAllowed, clearLegacyPins, legacyPins } from '../storage';
 import { toast } from '../toast';
+import { t, tn } from '../i18n';
 import { allNotes, noteTitle, state } from '../state';
 import { activeAgents } from '../realtime';
 import type { NoteRef, WsEvent } from '../types';
@@ -87,7 +88,7 @@ export function baseName(path: string): string {
   return i < 0 ? path : path.slice(i + 1);
 }
 /** What the vault root is called on screen (breadcrumbs, trees, pickers). */
-export const ROOT_LABEL = 'All notes';
+export const ROOT_LABEL = t('All notes');
 
 /** The API names the vault root "Root". */
 export function apiFolder(path: string): string {
@@ -255,13 +256,13 @@ const pinLabel = (p: PinItem): string => (p.kind === 'note' ? noteTitle(p.key) :
 function toastAgentPins(by: PinsChange, added: PinItem[], removed: PinItem[]): void {
   if (by.kind !== 'agent' || state.editing || state.page === 'brain') return;
   if (!activityToastAllowed(by.actorId)) return;
-  const say = (verb: string, list: PinItem[]): void => {
+  const say = (pinned: boolean, list: PinItem[]): void => {
     if (!list.length) return;
-    const what = list.length === 1 ? pinLabel(list[0]) : `${list.length} items`;
-    toast(`${by.actor} ${verb} ${what}`, 'ok', 3200);
+    const what = list.length === 1 ? pinLabel(list[0]) : tn(list.length, '{n} item', '{n} items');
+    toast(pinned ? t('{who} pinned {what}', { who: by.actor, what }) : t('{who} unpinned {what}', { who: by.actor, what }), 'ok', 3200);
   };
-  say('pinned', added);
-  say('unpinned', removed);
+  say(true, added);
+  say(false, removed);
 }
 
 function applyPins(r: PinsReply | null): void {
@@ -292,7 +293,7 @@ function pinRequest(run: () => Promise<PinsReply>, quiet = false): Promise<void>
     (e: Error) => {
       pinBusy--;
       if (!quiet) {
-        toast('Could not save pins: ' + e.message, 'err');
+        toast(t('Could not save pins: {error}', { error: e.message }), 'err');
         void loadPins();
       }
     },

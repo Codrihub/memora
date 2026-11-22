@@ -11,10 +11,10 @@ import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
 import { connectOnLoad } from './keys';
 import { actRowHTML, myName, openAgentPage, useActivityStyles, wireActRows } from '../control/activity';
 import { loadFeed, onLive, pushLive, settleRunning, type ActivityItem } from '../control/feed';
-import { groupBursts, isSystem, plainText, predicate, problemOf, whoOf } from '../control/sentence';
+import { groupBursts, isSystem, plainText, predicate, problemOf, whoOf, whoText } from '../control/sentence';
 import { folderCount } from '../core-data';
 import { requestSettingsSection, updateInfo, type UpdateInfo } from '../version';
-import { ago, copyText, ICO, plural, sparkSVG, useControlStyles, whileVisible } from '../control/ui';
+import { ago, copyText, ICO, sparkSVG, useControlStyles, whileVisible } from '../control/ui';
 import { RT } from '../realtime';
 import type { KeyRow, KeysResult } from '../types';
 import type { Page } from '../state';
@@ -22,6 +22,7 @@ import { nav } from '../vault/nav';
 import { openWelcome } from './welcome';
 import { rowsSkeleton } from '../ui/skeleton';
 import { firstSetupHTML, vaultEmpty, wireFirstSetup } from '../ui/first-setup';
+import { t, tn } from '../i18n';
 
 // One 12-column grid driven by container queries, so the layout follows the space the view really gets.
 const CSS = `
@@ -399,39 +400,39 @@ export async function renderHome(): Promise<void> {
       `<button type="button" class="icon-btn round" id="${id}" aria-label="${attr(what)}" title="${attr(what)}">${ICO.open}</button>`;
     host.innerHTML = `<div class="cc ov ov-loading">
       <header class="ov-head"><div class="t"><p class="ov-date">${esc(today())}</p><h1>${esc(greeting())}${user ? ', ' + esc(user) : ''}</h1><p id="ovSub">&nbsp;</p></div>
-        <div class="ov-acts"><button type="button" class="btn" id="ovNew" aria-label="New note">${ICO.plus}<span class="lbl">New note</span></button>
-          <button type="button" class="btn primary" id="ovBrain">Open the brain ${ICO.arrow}</button></div></header>
+        <div class="ov-acts"><button type="button" class="btn" id="ovNew" aria-label="${t('New note')}">${ICO.plus}<span class="lbl">${t('New note')}</span></button>
+          <button type="button" class="btn primary" id="ovBrain">${t('Open the brain')} ${ICO.arrow}</button></div></header>
       <section class="ov-welcome" id="ovWelcome" aria-labelledby="ovWelcomeT" hidden></section>
-      <section class="ov-kpis" aria-label="Your notes in numbers">
-        ${kpi('ovKNodes', 'vault', ICO.note, 'Notes')}${kpi('ovKLinks', 'graph', I.link, 'Links')}${kpi('ovKFolders', 'vault', I.folder, 'Folders')}${kpi(
+      <section class="ov-kpis" aria-label="${t('Your notes in numbers')}">
+        ${kpi('ovKNodes', 'vault', ICO.note, t('Notes'))}${kpi('ovKLinks', 'graph', I.link, t('Links'))}${kpi('ovKFolders', 'vault', I.folder, t('Folders'))}${kpi(
           'ovKAgents',
           'keys',
           I.agent,
-          'Agents',
+          t('Agents'),
         )}
       </section>
       <div class="ov-top" id="ovTop">
-        <section class="ov-card ov-needs" id="ovNeedsCard" aria-labelledby="ovNeedsT" hidden><div class="ov-card-h"><h2 id="ovNeedsT"><span class="cc-dot"></span>Needs you</h2>
-          <span class="n" id="ovNeedsN"></span><span class="ov-needs-sub">Things only you can decide</span><span class="grow"></span><p class="ov-needs-f" id="ovNeedsF"></p></div>
+        <section class="ov-card ov-needs" id="ovNeedsCard" aria-labelledby="ovNeedsT" hidden><div class="ov-card-h"><h2 id="ovNeedsT"><span class="cc-dot"></span>${t('Needs you')}</h2>
+          <span class="n" id="ovNeedsN"></span><span class="ov-needs-sub">${t('Things only you can decide')}</span><span class="grow"></span><p class="ov-needs-f" id="ovNeedsF"></p></div>
           <div class="ov-list" id="ovNeeds"></div></section>
-        <section class="ov-card ov-today" aria-labelledby="ovTodayT"><div class="ov-hero"><div class="ov-hero-top"><div class="t"><h2 id="ovTodayT">Your AIs today</h2></div>
-          ${open('ovTodayAll', 'See all activity')}</div><div class="ov-hero-n"><b id="ovTodayN">–</b><span id="ovTodayU">actions</span></div><div class="ov-legend" id="ovTodayLg"></div>
+        <section class="ov-card ov-today" aria-labelledby="ovTodayT"><div class="ov-hero"><div class="ov-hero-top"><div class="t"><h2 id="ovTodayT">${t('Your AIs today')}</h2></div>
+          ${open('ovTodayAll', t('See all activity'))}</div><div class="ov-hero-n"><b id="ovTodayN">–</b><span id="ovTodayU">${t('actions')}</span></div><div class="ov-legend" id="ovTodayLg"></div>
           <div class="ov-chart" id="ovTodayChart" aria-hidden="true"></div>
-          <div class="ov-ticks" aria-hidden="true"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>12 am</span></div></div>
-          <div class="ov-today-side"><div class="ov-card-h"><h2>Latest</h2><span class="grow"></span></div><div class="ov-list" id="ovToday">${rowsSkeleton(3)}</div></div></section>
+          <div class="ov-ticks" aria-hidden="true"><span>${t('12 am')}</span><span>${t('6 am')}</span><span>${t('12 pm')}</span><span>${t('6 pm')}</span><span>${t('12 am')}</span></div></div>
+          <div class="ov-today-side"><div class="ov-card-h"><h2>${t('Latest')}</h2><span class="grow"></span></div><div class="ov-list" id="ovToday">${rowsSkeleton(3)}</div></div></section>
       </div>
       <div class="ov-grid">
-        <section class="ov-card ov-vault" aria-labelledby="ovVaultT"><div class="ov-card-h"><h2 id="ovVaultT">Your notes</h2><span class="grow"></span>
-          ${open('ovNodes', 'Open Notes')}</div><div class="ov-card-b" id="ovVault"><div class="ov-sk-block"></div></div></section>
-        <section class="ov-card ov-recent" aria-labelledby="ovRecentT"><div class="ov-card-h"><h2 id="ovRecentT">Recent changes</h2><span class="grow"></span>
-          ${open('ovRecentAll', 'Open Notes')}</div><div class="ov-list ov-scroll" id="ovRecent">${rowsSkeleton(5, false)}</div></section>
-        <section class="ov-card ov-agents" aria-labelledby="ovAgentsT"><div class="ov-card-h"><h2 id="ovAgentsT">Agents</h2><span class="n" id="ovAgN"></span>
-          <span class="grow"></span>${open('ovKeys', 'Manage agents')}</div><div class="ov-connect" id="ovConnect"></div>
+        <section class="ov-card ov-vault" aria-labelledby="ovVaultT"><div class="ov-card-h"><h2 id="ovVaultT">${t('Your notes')}</h2><span class="grow"></span>
+          ${open('ovNodes', t('Open Notes'))}</div><div class="ov-card-b" id="ovVault"><div class="ov-sk-block"></div></div></section>
+        <section class="ov-card ov-recent" aria-labelledby="ovRecentT"><div class="ov-card-h"><h2 id="ovRecentT">${t('Recent changes')}</h2><span class="grow"></span>
+          ${open('ovRecentAll', t('Open Notes'))}</div><div class="ov-list ov-scroll" id="ovRecent">${rowsSkeleton(5, false)}</div></section>
+        <section class="ov-card ov-agents" aria-labelledby="ovAgentsT"><div class="ov-card-h"><h2 id="ovAgentsT">${t('Agents')}</h2><span class="n" id="ovAgN"></span>
+          <span class="grow"></span>${open('ovKeys', t('Manage agents'))}</div><div class="ov-connect" id="ovConnect"></div>
           <div class="ov-list ov-grow" id="ovAgents">${rowsSkeleton(4)}</div></section>
-        <section class="ov-card ov-activity" aria-labelledby="ovActT"><div class="ov-card-h"><h2 id="ovActT">Live activity</h2><span class="grow"></span>
-          ${open('ovAll', 'Open Activity')}</div>
+        <section class="ov-card ov-activity" aria-labelledby="ovActT"><div class="ov-card-h"><h2 id="ovActT">${t('Live activity')}</h2><span class="grow"></span>
+          ${open('ovAll', t('Open Activity'))}</div>
           <div class="ov-list ov-scroll" id="ovAct">${rowsSkeleton(8)}</div></section>
-        <details class="ov-card ov-health ov-tech" id="ovTech"><summary class="ov-card-h"><h2 id="ovHealthT">Technical details</h2><span class="grow"></span>
+        <details class="ov-card ov-health ov-tech" id="ovTech"><summary class="ov-card-h"><h2 id="ovHealthT">${t('Technical details')}</h2><span class="grow"></span>
           <span id="ovHealthPill"></span><svg class="cc-i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
           <div class="ov-sys" id="ovHealth"></div><div class="ov-tech-more" id="ovTechMore"></div></details>
       </div>
@@ -506,7 +507,7 @@ function today(): string {
 
 function greeting(): string {
   const h = new Date().getHours();
-  return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  return h < 5 ? t('Good night') : h < 12 ? t('Good morning') : h < 18 ? t('Good afternoon') : t('Good evening');
 }
 
 function queue(): void {
@@ -632,7 +633,7 @@ function whenTag(ts: number): string {
 /** "just now", "4m ago", "3d ago": the one time format of every list on this page. */
 function when(ts: number): string {
   const a = ago(ts);
-  return a === 'now' ? 'just now' : a === '-' ? a : a + ' ago';
+  return a === t('now') ? t('just now') : a === '-' ? a : t('{time} ago', { time: a });
 }
 
 /** "/very/long/path/vault" as head (shrinks with an ellipsis) + last segment (always shown). */
@@ -712,8 +713,8 @@ function paintSub(): void {
   // What this page is, not a recount of the numbers right below it.
   sub.textContent =
     !state.health.vault && state.health.vault_configured === false
-      ? 'No notes folder is set up yet. See Technical details below.'
-      : 'Your notes, your AIs and what they are doing, at a glance.';
+      ? t('No notes folder is set up yet. See Technical details below.')
+      : t('Your notes, your AIs and what they are doing, at a glance.');
 }
 
 function paintKpis(): void {
@@ -727,10 +728,10 @@ function paintKpis(): void {
   setKpi(
     'ovKNodes',
     nodes,
-    segShare(today, nodes, `${today} of ${nodes} notes changed today`),
-    today ? `<b>${today}</b> changed today` : last ? `Last change ${esc(relTs(last))}` : 'No notes yet',
+    segShare(today, nodes, t('{n} of {total} notes changed today', { n: today, total: nodes })),
+    today ? t('{n} changed today', { n: `<b>${today}</b>` }) : last ? t('Last change {when}', { when: esc(relTs(last)) }) : t('No notes yet'),
   );
-  setKpi('ovKLinks', s.links || 0, '', s.links ? 'Between notes' : 'No links yet');
+  setKpi('ovKLinks', s.links || 0, '', s.links ? t('Between notes') : t('No links yet'));
   const reg = regions();
   const total = reg.reduce((a, r) => a + r[1], 0) || 1;
   const biggest = reg.find(([f]) => f !== 'Root');
@@ -743,7 +744,7 @@ function paintKpis(): void {
           .map(([f, n]) => `<i style="flex:${n / total};background:${attr(regionColor(f))}"></i>`)
           .join('')}</span>`
       : '',
-    biggest ? `Largest: <b>${esc(biggest[0])}</b>` : 'No folders yet',
+    biggest ? t('Largest: {name}', { name: `<b>${esc(biggest[0])}</b>` }) : t('No folders yet'),
   );
   paintAgentKpi();
 }
@@ -759,18 +760,18 @@ function paintAgentKpi(): void {
   setKpi(
     'ovKAgents',
     keysLoaded ? enabled : loaded ? NaN : null,
-    keysLoaded && rows.length <= 24 ? segBar(busy, rows.length, `${busy} of ${rows.length} agents did something in the last 24 hours`) : '',
+    keysLoaded && rows.length <= 24 ? segBar(busy, rows.length, t('{n} of {total} agents did something in the last 24 hours', { n: busy, total: rows.length })) : '',
     !loaded
       ? '&nbsp;'
       : !keysLoaded
-        ? 'Could not load agents'
+        ? t('Could not load agents')
         : active
-        ? `<span class="cc-dot ok"></span><b>${active}</b> active now`
+        ? `<span class="cc-dot ok"></span>${t('{n} active now', { n: `<b>${active}</b>` })}`
         : calls
-          ? `<b>${calls.toLocaleString()}</b> ${calls === 1 ? 'action' : 'actions'} in 24h`
+          ? tn(calls, '{n} action in 24h', '{n} actions in 24h', { n: `<b>${calls.toLocaleString()}</b>` })
           : enabled
-            ? 'Nothing in 24h'
-            : 'None connected yet',
+            ? t('Nothing in 24h')
+            : t('None connected yet'),
   );
 }
 
@@ -822,30 +823,30 @@ function paintVault(): void {
   // The author's avatar when an agent or person is known to have made it, else a clock.
   const kid = by ? kidOf(by) : null;
   const lead = by
-    ? `<span title="${attr('by ' + by.actor)}" style="display:flex">${avatarHTML(by.actor, 32, '', kid)}</span>`
+    ? `<span title="${attr(t('by {name}', { name: by.actor }))}" style="display:flex">${avatarHTML(by.actor, 32, '', kid)}</span>`
     : `<span class="ov-tile">${I.clock}</span>`;
-  const lastChange = `<div><div class="ov-cap">Last change</div><div class="ov-row">${lead}<span class="t">${
+  const lastChange = `<div><div class="ov-cap">${t('Last change')}</div><div class="ov-row">${lead}<span class="t">${
     lastNote
       ? `<button type="button" class="ov-name" data-path="${attr(lastNote.path)}" title="${attr(lastNote.path)}">${esc(
           lastNote.name || noteName(lastNote.path),
-        )}</button><span class="ov-sub" title="${attr(fmtTs(lastNote.mtime))}">${esc(relTs(lastNote.mtime))} · ${esc(lastNote.folder || 'Top level')}${
-          by ? ` · by ${esc(whoOf(by, myName()))}` : ''
+        )}</button><span class="ov-sub" title="${attr(fmtTs(lastNote.mtime))}">${esc(relTs(lastNote.mtime))} · ${esc(lastNote.folder || t('Top level'))}${
+          by ? ` · ${t('by {name}', { name: esc(whoText(by, myName())) })}` : ''
         }</span>`
-      : '<span class="ov-name">Nothing yet</span><span class="ov-sub">Changes to notes show up here</span>'
+      : `<span class="ov-name">${t('Nothing yet')}</span><span class="ov-sub">${t('Changes to notes show up here')}</span>`
   }</span></div></div>`;
-  const folders = `<div><div class="ov-cap">Largest folders</div>${
+  const folders = `<div><div class="ov-cap">${t('Largest folders')}</div>${
     reg.length
       ? `<div class="ov-bars">${reg
           .slice(0, folderCap)
           .map(([f, n]) => {
             const c = attr(regionColor(f));
-            const name = f === 'Root' ? 'Top level' : f;
-            return `<button type="button" class="ov-bar" data-folder="${attr(f)}" aria-label="${attr(`${name}: ${plural(n, 'note')}`)}">
+            const name = f === 'Root' ? t('Top level') : f;
+            return `<button type="button" class="ov-bar" data-folder="${attr(f)}" aria-label="${attr(`${name}: ${tn(n, '{n} note', '{n} notes')}`)}">
               <span class="l"><span class="d" style="background:${c}"></span><span>${esc(name)}</span></span>
               <span class="tr"><i style="width:${Math.max(4, Math.round((n / max) * 100))}%;background:${c}"></i></span><span class="c">${n}</span></button>`;
           })
-          .join('')}</div>${reg.length > folderCap ? `<div class="ov-more">+${plural(reg.length - folderCap, 'more folder')}</div>` : ''}`
-      : '<div class="ov-sub">No notes yet.</div>'
+          .join('')}</div>${reg.length > folderCap ? `<div class="ov-more">+${tn(reg.length - folderCap, '{n} more folder', '{n} more folders')}</div>` : ''}`
+      : `<div class="ov-sub">${t('No notes yet.')}</div>`
   }</div>`;
   box.innerHTML = `<div class="ov-facts">${lastChange}${folders}</div>`;
   requestAnimationFrame(() => fitFolders(reg.length));
@@ -926,9 +927,9 @@ function paintAgents(): void {
   else if (!rows.length)
     html = emptyHTML(
       I.agent,
-      'No agents yet',
-      'Connect Claude, ChatGPT, Cursor or another AI app so it can remember things here.',
-      `<button type="button" class="btn primary sm" id="ovNewKey">${ICO.plus}New agent</button>`,
+      t('No agents yet'),
+      t('Connect Claude, ChatGPT, Cursor or another AI app so it can remember things here.'),
+      `<button type="button" class="btn primary sm" id="ovNewKey">${ICO.plus}${t('New agent')}</button>`,
     );
   else
     html =
@@ -938,12 +939,12 @@ function paintAgents(): void {
           const name = r.k.name || r.k.id;
           const off = r.k.enabled === false;
           const status = off
-            ? '<span class="ov-st off">Turned off</span>'
+            ? `<span class="ov-st off">${t('Turned off')}</span>`
             : r.active
-              ? '<span class="ov-st on"><span class="cc-dot ok" style="box-shadow:none;width:7px;height:7px"></span>Active now</span>'
+              ? `<span class="ov-st on"><span class="cc-dot ok" style="box-shadow:none;width:7px;height:7px"></span>${t('Active now')}</span>`
               : r.last
-                ? `<span class="ov-st">Seen ${whenTag(r.last.ts)}</span>`
-                : `<span class="ov-st">${oauth.has(r.k.id) ? 'Signed in, nothing in 24h' : r.k.last_used ? 'Nothing in 24h' : 'Not connected yet'}</span>`;
+                ? `<span class="ov-st">${t('Seen {when}', { when: whenTag(r.last.ts) })}</span>`
+                : `<span class="ov-st">${oauth.has(r.k.id) ? t('Signed in, nothing in 24h') : r.k.last_used ? t('Nothing in 24h') : t('Not connected yet')}</span>`;
           const what = r.last ? `<span class="sep">·</span><span>${esc(plainText(predicate(r.last)))}</span>` : '';
           const v = buckets(
             r.items.map((x) => x.ts),
@@ -951,18 +952,18 @@ function paintAgents(): void {
             60,
           );
           const n30 = v.reduce((a, b) => a + b, 0);
-          const sp = n30 ? `<span class="sp" title="${plural(n30, 'action')} in the last 30 minutes">${sparkSVG(v, 56, 24)}</span>` : '';
+          const sp = n30 ? `<span class="sp" title="${tn(n30, '{n} action in the last 30 minutes', '{n} actions in the last 30 minutes')}">${sparkSVG(v, 56, 24)}</span>` : '';
           return `<button type="button" class="ov-li" data-agent="${attr(name)}" data-kid="${attr(r.k.id)}" style="--ag:${attr(agentColor(name, r.k.id))}">${avatarHTML(
             name,
             32,
             r.active ? 'live' : '',
             r.k.id,
           )}<span class="t"><span class="n"><span>${esc(name)}</span></span><span class="s">${status}${what}</span></span>${sp}
-            <span class="m"><b>${r.items.length.toLocaleString()}</b>${r.items.length === 1 ? 'action' : 'actions'}</span></button>`;
+            <span class="m"><b>${r.items.length.toLocaleString()}</b>${r.items.length === 1 ? t('action') : t('actions')}</span></button>`;
         })
         .join('') +
       (rows.length > agentCap
-        ? `<div class="ov-foot"><button type="button" class="ov-lnk" data-more>+${plural(rows.length - agentCap, 'more agent')}</button></div>`
+        ? `<div class="ov-foot"><button type="button" class="ov-lnk" data-more>+${tn(rows.length - agentCap, '{n} more agent', '{n} more agents')}</button></div>`
         : '');
   if (!setHTML(box, html)) return;
   requestAnimationFrame(fitAgents);
@@ -999,10 +1000,10 @@ function paintRecent(): void {
   // Grouped by day, newest first: Today, Yesterday, then the weekday or the date.
   const dayOf = (ts: number): string => {
     const d = new Date(ts * 1000);
-    const t = new Date();
-    const days = Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 864e5);
-    if (days <= 0) return 'Today';
-    if (days === 1) return 'Yesterday';
+    const nw = new Date();
+    const days = Math.round((new Date(nw.getFullYear(), nw.getMonth(), nw.getDate()).getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 864e5);
+    if (days <= 0) return t('Today');
+    if (days === 1) return t('Yesterday');
     if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
@@ -1015,15 +1016,15 @@ function paintRecent(): void {
           lastDay = day;
           const it = writerOf(n.path);
           const kid = it ? kidOf(it) : null;
-          const by = it ? `<span class="sep">·</span><span class="who">${avatarHTML(it.actor, 18, '', kid)}<span>${esc(whoOf(it, myName()))}</span></span>` : '';
+          const by = it ? `<span class="sep">·</span><span class="who">${avatarHTML(it.actor, 18, '', kid)}<span>${esc(whoText(it, myName()))}</span></span>` : '';
           return `${head}<button type="button" class="ov-li" data-path="${attr(n.path)}" title="${attr(n.path)}"><span class="ov-tile fc" style="--fc:${attr(
             colorOfFolder(n.folder || ''),
           )}">${ICO.note}</span><span class="t"><span class="n"><span>${esc(n.name || noteName(n.path))}</span></span><span class="s"><span>${esc(
-            n.folder || 'Top level',
+            n.folder || t('Top level'),
           )}</span>${by}</span></span><span class="m" title="${attr(fmtTs(n.mtime))}">${whenTag(n.mtime || 0)}</span></button>`;
         })
-        .join('') + restHTML(notes.length, 'That is every note.')
-    : emptyHTML(ICO.note, 'No changes yet', 'Notes you or your AIs write show up here, newest first.');
+        .join('') + restHTML(notes.length, t('That is every note.'))
+    : emptyHTML(ICO.note, t('No changes yet'), t('Notes you or your AIs write show up here, newest first.'));
   if (!setHTML(rec, html)) return;
   rec.querySelectorAll<HTMLElement>('[data-path]').forEach((b) => (b.onclick = () => hooks.openNote(b.dataset.path!)));
 }
@@ -1046,22 +1047,22 @@ function paintActivity(): void {
             // History from keys that no longer exist stays, greyed out.
             const gone = x.source === 'agent' && kid !== 'mnemo' && (kid ? !live.has(kid) : !names.has(x.actor));
             const fresh = !!x.live && now - x.ts < 2;
-            const who = whoOf(x, me);
+            const who = whoText(x, me);
             const pred = plainText(predicate(x));
             const problem = problemOf(x);
             const st = settleRunning(x)
-              ? '<span class="ov-st"><span class="cc-dot run"></span>Working…</span>'
+              ? `<span class="ov-st"><span class="cc-dot run"></span>${t('Working…')}</span>`
               : problem
-                ? `<span class="ov-st off">${problem === 'refused' ? 'Refused' : 'Did not work'}</span>`
+                ? `<span class="ov-st off">${problem === 'refused' ? t('Refused') : t('Did not work')}</span>`
                 : '';
             return `<div class="ov-li${gone ? ' gone' : ''}${fresh ? ' new' : ''}" role="button" tabindex="0" data-act="${attr(x.id)}" style="--ag:${attr(
               agentColor(x.actor, kid || null),
-            )}" aria-label="${attr(`${who} ${pred}`)}"${gone ? ' title="No longer connected"' : ''}>${avatarHTML(x.actor, 32, x.running ? 'live' : '', kid || null)}
+            )}" aria-label="${attr(`${who} ${pred}`)}"${gone ? ` title="${t('No longer connected')}"` : ''}>${avatarHTML(x.actor, 32, x.running ? 'live' : '', kid || null)}
               <span class="t"><span class="sn"><span class="ag-who">${esc(who)}</span> ${esc(pred)}</span></span>
               <span class="m"><span title="${attr(fmtTs(x.ts))}">${whenTag(x.ts)}</span>${st}</span></div>`;
           })
-          .join('') + restHTML(list.length, 'Nothing else in the last 24 hours.')
-      : emptyHTML(I.pulse, 'Quiet for now', 'Nothing in the last 24 hours. What your AIs do shows up here as it happens.');
+          .join('') + restHTML(list.length, t('Nothing else in the last 24 hours.'))
+      : emptyHTML(I.pulse, t('Quiet for now'), t('Nothing in the last 24 hours. What your AIs do shows up here as it happens.'));
   setHTML(host, html);
 }
 
@@ -1085,12 +1086,12 @@ function paintToday(): void {
   if (!loaded) html = rowsSkeleton(3);
   else if (!groups.length)
     html = keys.length
-      ? emptyHTML(I.pulse, 'Nothing yet today', 'When your AIs read or write notes, you see it here in plain sentences.')
+      ? emptyHTML(I.pulse, t('Nothing yet today'), t('When your AIs read or write notes, you see it here in plain sentences.'))
       : emptyHTML(
           I.agent,
-          'No AI connected yet',
-          'Connect an AI app, and everything it remembers for you shows up here.',
-          `<button type="button" class="btn primary sm" data-new-agent>${ICO.plus}Connect an AI</button>`,
+          t('No AI connected yet'),
+          t('Connect an AI app, and everything it remembers for you shows up here.'),
+          `<button type="button" class="btn primary sm" data-new-agent>${ICO.plus}${t('Connect an AI')}</button>`,
         );
   else
     html =
@@ -1099,7 +1100,7 @@ function paintToday(): void {
         .map((b) => actRowHTML(b.it, { burst: b, compact: true }))
         .join('') +
       (groups.length > TODAY_ROWS
-        ? `<div class="ov-foot"><button type="button" class="ov-lnk" data-all>${plural(groups.length - TODAY_ROWS, 'more thing')} today</button></div>`
+        ? `<div class="ov-foot"><button type="button" class="ov-lnk" data-all>${tn(groups.length - TODAY_ROWS, '{n} more thing today', '{n} more things today')}</button></div>`
         : '');
   if (!setHTML(box, html.replace(/<span title="[^"]*">(\d\d:\d\d) · [^<]*<\/span>/g, '<span>$1</span>'))) return;
   box.querySelector<HTMLElement>('[data-new-agent]')?.addEventListener('click', newAgent);
@@ -1117,7 +1118,7 @@ function paintTodayChart(all: ActivityItem[], done: number): void {
   const chart = document.getElementById('ovTodayChart');
   if (!n || !u || !lg || !chart) return;
   n.textContent = loaded ? done.toLocaleString() : '–';
-  u.textContent = done === 1 ? 'action so far' : 'actions so far';
+  u.textContent = done === 1 ? t('action so far') : t('actions so far');
   const hours = Array.from({ length: 24 }, () => ({ read: 0, write: 0, refused: 0 }));
   let reads = 0;
   let writes = 0;
@@ -1139,9 +1140,9 @@ function paintTodayChart(all: ActivityItem[], done: number): void {
   setHTML(
     lg,
     loaded
-      ? dot(HERO_C.read, reads, reads === 1 ? 'read' : 'reads') +
-          dot(HERO_C.write, writes, writes === 1 ? 'change' : 'changes') +
-          (refused ? dot(HERO_C.refused, refused, 'refused') : '')
+      ? dot(HERO_C.read, reads, reads === 1 ? t('read') : t('reads')) +
+          dot(HERO_C.write, writes, writes === 1 ? t('change') : t('changes')) +
+          (refused ? dot(HERO_C.refused, refused, t('refused')) : '')
       : '&nbsp;',
   );
   setHTML(chart, todayArea(hours));
@@ -1260,7 +1261,7 @@ function needs(): { shown: Need[]; hidden: number } {
   }
   for (const [k, list] of refused) {
     const last = list[0];
-    const who = esc(whoOf(last, me));
+    const who = esc(whoText(last, me));
     const kid = kidOf(last) ?? '';
     out.push({
       id: `refused:${k}@${Math.round(last.ts)}`,
@@ -1269,8 +1270,8 @@ function needs(): { shown: Need[]; hidden: number } {
       html:
         list.length === 1
           ? `<b>${who}</b> ${predicate(last)}.`
-          : `<b>${who}</b> was refused ${list.length} times today.<small>Latest: ${esc(plainText(predicate(last)))}.</small>`,
-      action: kid ? 'Change what it may do' : 'See what happened',
+          : `${t('{name} was refused {n} times today.', { name: `<b>${who}</b>`, n: list.length })}<small>${t('Latest: {what}.', { what: esc(plainText(predicate(last))) })}</small>`,
+      action: kid ? t('Change what it may do') : t('See what happened'),
       run: () => (kid ? openAgentPage(kid, 'access') : hooks.go('logs')),
     });
   }
@@ -1283,19 +1284,19 @@ function needs(): { shown: Need[]; hidden: number } {
       id: `nc:${k.id}`,
       kind: 'waiting',
       icon: ICO.plug,
-      html: `<b>${esc(k.name || k.id)}</b> is set up but has not connected yet.`,
-      action: 'Finish connecting',
+      html: t('{name} is set up but has not connected yet.', { name: `<b>${esc(k.name || k.id)}</b>` }),
+      action: t('Finish connecting'),
       run: () => openAgentPage(k.id, 'setup'),
     });
   } else if (waiting.length > 1) {
     const names = waiting.map((k) => k.name || k.id);
-    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    const list = names.length > 1 ? t('{a} and {b}', { a: names.slice(0, -1).join(', '), b: names[names.length - 1] }) : names[0];
     out.push({
       id: 'nc:' + waiting.map((k) => k.id).sort().join(','),
       kind: 'waiting',
       icon: ICO.plug,
-      html: `${waiting.length} AIs are set up but have not connected yet: <b>${esc(list)}</b>.`,
-      action: 'See your agents',
+      html: t('{n} AIs are set up but have not connected yet: {names}.', { n: waiting.length, names: `<b>${esc(list)}</b>` }),
+      action: t('See your agents'),
       run: () => hooks.go('keys'),
     });
   }
@@ -1304,8 +1305,8 @@ function needs(): { shown: Need[]; hidden: number } {
       id: `update:${update.latest}`,
       kind: 'update',
       icon: ICO.download,
-      html: `A new version of Memora is available: <b>v${esc(update.latest)}</b>.`,
-      action: 'See what is new',
+      html: t('A new version of Memora is available: {version}.', { version: `<b>v${esc(update.latest)}</b>` }),
+      action: t('See what is new'),
       run: () => {
         requestSettingsSection('stVersion');
         hooks.go('settings');
@@ -1316,7 +1317,7 @@ function needs(): { shown: Need[]; hidden: number } {
   return { shown, hidden: out.length - shown.length };
 }
 
-const NEED_LABEL: Record<Need['kind'], string> = { refused: 'Access refused today', waiting: 'Not connected yet', update: 'Update available' };
+const NEED_LABEL: Record<Need['kind'], string> = { refused: t('Access refused today'), waiting: t('Not connected yet'), update: t('Update available') };
 
 /** The Needs you items on screen, so the next paint knows which ones are new; null before the first paint. */
 let needsShown: Set<string> | null = null;
@@ -1355,7 +1356,7 @@ function paintNeeds(): void {
   const foot = document.getElementById('ovNeedsF');
   if (foot) {
     foot.innerHTML = hidden
-      ? `${hidden} dismissed · <button type="button" class="ov-lnk" id="ovNeedsBack">Show again</button>`
+      ? `${t('{n} dismissed', { n: hidden })} · <button type="button" class="ov-lnk" id="ovNeedsBack">${t('Show again')}</button>`
       : '';
     document.getElementById('ovNeedsBack')?.addEventListener('click', undismissAll);
   }
@@ -1368,10 +1369,10 @@ function paintNeeds(): void {
       (x, i) => `<div class="ov-need" data-kind="${x.kind}" data-id="${attr(x.id)}"><span class="ov-need-ic">${x.icon}</span>
         <div class="ov-need-b"><span class="ov-need-k">${NEED_LABEL[x.kind]}</span><p class="tx">${x.html}</p>
           <button type="button" class="btn sm ov-need-go" data-need="${i}">${esc(x.action)}${ICO.arrow}</button></div>
-        <button type="button" class="ov-x" data-dismiss="${attr(x.id)}" title="Dismiss" aria-label="${attr('Dismiss: ' + plainText(x.html))}">${ICO.x}</button></div>`,
+        <button type="button" class="ov-x" data-dismiss="${attr(x.id)}" title="${t('Dismiss')}" aria-label="${attr(t('Dismiss: {what}', { what: plainText(x.html) }))}">${ICO.x}</button></div>`,
     )
     .join('')
-    : '<p class="ov-needs-none">Nothing needs you right now.</p>';
+    : `<p class="ov-needs-none">${t('Nothing needs you right now.')}</p>`;
   const before = needsShown;
   needsShown = new Set(list.map((x) => x.id));
   if (!setHTML(box, html)) return;
@@ -1401,24 +1402,24 @@ function paintHealth(): void {
     `<div><span class="cc-dot ${dot}"></span><span class="t"><small>${esc(k)}</small><b title="${attr(v.replace(/<[^>]+>/g, ''))}">${v}</b></span></div>`;
   const vaultOk = h.vault_configured !== false;
   box.innerHTML =
-    cell(ok ? 'ok' : 'err', 'Server', ok ? esc(h.version ? 'Online · v' + h.version : 'Online') : 'Unreachable') +
+    cell(ok ? 'ok' : 'err', t('Server'), ok ? esc(h.version ? t('Online') + ' · v' + h.version : t('Online')) : t('Unreachable')) +
     cell(
       rt === 'on' ? 'ok' : rt === 'off' ? 'err' : 'run',
-      'Realtime',
-      rt === 'on' ? 'Live' + (presence ? ` · ${plural(presence, 'browser')}` : '') : rt === 'off' ? 'Offline' : 'Connecting',
+      t('Realtime'),
+      rt === 'on' ? t('Live') + (presence ? ` · ${tn(presence, '{n} browser', '{n} browsers')}` : '') : rt === 'off' ? t('Offline') : t('Connecting'),
     ) +
-    cell(vaultOk ? 'ok' : 'err', 'Vault', vaultOk ? 'Ready' : 'Not configured') +
-    cell(h.locked ? 'err' : h.armed ? 'run' : 'ok', 'Gateway', h.locked ? 'Locked' : h.armed ? 'Sign-in window open' : 'Normal');
+    cell(vaultOk ? 'ok' : 'err', t('Vault'), vaultOk ? t('Ready') : t('Not configured')) +
+    cell(h.locked ? 'err' : h.armed ? 'run' : 'ok', t('Gateway'), h.locked ? t('Locked') : h.armed ? t('Sign-in window open') : t('Normal'));
   paintTech();
   paintConnect();
   const bad = !ok || rt === 'off' || !vaultOk || h.locked;
   const pill = document.getElementById('ovHealthPill');
   if (pill)
     pill.innerHTML = bad
-      ? '<span class="ov-pill err"><span class="cc-dot err"></span>Needs attention</span>'
+      ? `<span class="ov-pill err"><span class="cc-dot err"></span>${t('Needs attention')}</span>`
       : rt !== 'on' || h.armed
-        ? `<span class="ov-pill warn"><span class="cc-dot run"></span>${h.armed ? 'Sign-in window open' : 'Connecting'}</span>`
-        : '<span class="ov-pill"><span class="cc-dot ok"></span>All good</span>';
+        ? `<span class="ov-pill warn"><span class="cc-dot run"></span>${h.armed ? t('Sign-in window open') : t('Connecting')}</span>`
+        : `<span class="ov-pill"><span class="cc-dot ok"></span>${t('All good')}</span>`;
   // Something wrong is never folded away.
   const tech = document.getElementById('ovTech') as HTMLDetailsElement | null;
   if (tech && bad) tech.open = true;
@@ -1433,31 +1434,31 @@ function paintTech(): void {
   const v = state.health.vault || '';
   const s = state.stats;
   const nodes = s.notes || allNotes().length;
-  const top = allNotes().some((n) => !n.folder || n.folder === 'Root') ? ' (plus notes at the top level)' : '';
+  const top = allNotes().some((n) => !n.folder || n.folder === 'Root') ? ` (${t('plus notes at the top level')})` : '';
   const row = (icon: string, k: string, val: string, copy = ''): string =>
     `<div><span class="ov-tile">${icon}</span><span class="t"><small>${esc(k)}</small>${val}</span>${copy}</div>`;
   const html =
     row(
       ICO.plug,
-      'MCP endpoint',
-      mcp ? `<span class="ov-path" title="${attr(mcp)}"><span class="h">${esc(mcp)}</span></span>` : '<span class="v">Not known yet</span>',
-      mcp ? `<button type="button" class="cc-ibtn ov-copy" data-copy="${attr(mcp)}" data-what="MCP endpoint" aria-label="Copy the MCP endpoint" title="Copy">${ICO.copy}</button>` : '',
+      t('MCP endpoint'),
+      mcp ? `<span class="ov-path" title="${attr(mcp)}"><span class="h">${esc(mcp)}</span></span>` : `<span class="v">${t('Not known yet')}</span>`,
+      mcp ? `<button type="button" class="cc-ibtn ov-copy" data-copy="${attr(mcp)}" data-what="${t('MCP endpoint')}" aria-label="${t('Copy the MCP endpoint')}" title="${t('Copy')}">${ICO.copy}</button>` : '',
     ) +
     row(
       I.folder,
-      'Vault folder',
-      v ? pathHTML(v) : '<span class="v">Not configured: set MEMORA_VAULT to a folder of Markdown files</span>',
-      v ? `<button type="button" class="cc-ibtn ov-copy" data-copy="${attr(v)}" data-what="Vault path" aria-label="Copy the vault path" title="Copy">${ICO.copy}</button>` : '',
+      t('Vault folder'),
+      v ? pathHTML(v) : `<span class="v">${t('Not configured: set MEMORA_VAULT to a folder of Markdown files')}</span>`,
+      v ? `<button type="button" class="cc-ibtn ov-copy" data-copy="${attr(v)}" data-what="${t('Vault path')}" aria-label="${t('Copy the vault path')}" title="${t('Copy')}">${ICO.copy}</button>` : '',
     ) +
     row(
       ICO.note,
-      'Counts',
-      `<span class="v" title="${attr(`${nodes} Markdown files, ${s.links || 0} links, ${folderCount()} top-level folders${top}`)}">${nodes.toLocaleString()} notes · ${(
+      t('Counts'),
+      `<span class="v" title="${attr(t('{files} Markdown files, {links} links, {folders} top-level folders', { files: nodes, links: s.links || 0, folders: folderCount() }) + top)}">${t('{n} notes', { n: nodes.toLocaleString() })} · ${t('{n} links', { n: (
         s.links || 0
-      ).toLocaleString()} links${nodes ? ` (${((s.links || 0) / nodes).toFixed(1)} per note)` : ''} · ${plural(folderCount(), 'folder')}${esc(top)}</span>`,
+      ).toLocaleString() })}${nodes ? ` (${t('{n} per note', { n: ((s.links || 0) / nodes).toFixed(1) })})` : ''} · ${tn(folderCount(), '{n} folder', '{n} folders')}${esc(top)}</span>`,
     );
   if (!setHTML(box, html)) return;
-  box.querySelectorAll<HTMLElement>('[data-copy]').forEach((b) => (b.onclick = () => void copyText(b.dataset.copy!, `${b.dataset.what} copied`)));
+  box.querySelectorAll<HTMLElement>('[data-copy]').forEach((b) => (b.onclick = () => void copyText(b.dataset.copy!, t('{what} copied', { what: b.dataset.what || '' }))));
 }
 
 /** New agent: the Agents page with the connect flow open. */
@@ -1472,7 +1473,7 @@ function paintConnect(): void {
   if (!box) return;
   const html =
     loaded && keys.length
-      ? `<button type="button" class="ov-add" data-new-agent title="Claude, ChatGPT, Cursor and more">${ICO.plus}Connect another AI</button>`
+      ? `<button type="button" class="ov-add" data-new-agent title="${t('Claude, ChatGPT, Cursor and more')}">${ICO.plus}${t('Connect another AI')}</button>`
       : '';
   if (!setHTML(box, html)) return;
   box.querySelector<HTMLElement>('[data-new-agent]')?.addEventListener('click', newAgent);

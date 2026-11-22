@@ -361,7 +361,7 @@ fn asks_again(actor: &str, on_behalf: Option<&str>) -> bool {
 }
 
 fn note_text(st: &AppState, path: &str) -> Option<String> {
-    crate::store_as(st, None)
+    super::mnemo_store(st)
         .read_note_impl(path)
         .ok()
         .and_then(|v| v["content"].as_str().map(str::to_string))
@@ -369,6 +369,10 @@ fn note_text(st: &AppState, path: &str) -> Option<String> {
 
 /// Answer the pending mentions of one note, oldest line first.
 fn answer_all(st: &AppState, path: &str, by: &str) {
+    // A note kept private from Mnemo is never read for it, whoever wrote the mention.
+    if !super::mnemo_sees(st, path) {
+        return;
+    }
     let Some(text) = note_text(st, path) else {
         return;
     };

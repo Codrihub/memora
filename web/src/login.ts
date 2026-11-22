@@ -1,6 +1,16 @@
 // Sign-in page controller, compiled unbundled into login.html: it must stay self-contained.
 // A splash checks /api/auth/me and /api/auth/state, then exactly one view is shown.
 
+/** Interface language (set by the language file before this script); English when absent. */
+const I18N = (window as unknown as { __MEMORA_I18N__?: { t: Record<string, string> } }).__MEMORA_I18N__?.t || {};
+/** The translation of `s`, with `{name}` placeholders filled from `vars`. */
+function tr(s: string, vars?: Record<string, string | number>): string {
+  let o = I18N[s] || s;
+  const v = vars;
+  if (v) o = o.replace(/\{(\w+)\}/g, (m, k: string) => (k in v ? String(v[k]) : m));
+  return o;
+}
+
 type View = 'splash' | 'signin' | 'help' | 'setup' | 'code' | 'form' | 'notready' | 'locked' | 'cooldown' | 'oauth';
 
 interface AuthState {
@@ -240,35 +250,38 @@ async function showConsent(): Promise<void> {
     const r = await api('/api/oauth/request?' + OAUTH_Q);
     info = (await r.json()) as OAuthInfo;
   } catch {
-    info = { ok: false, error_description: 'Could not reach the server.' };
+    info = { ok: false, error_description: tr('Could not reach the server.') };
   }
   const acts = $('#oaActs');
   if (!info.ok || !info.client) {
-    $('#oaTitle').textContent = 'This connection request cannot be used';
-    $('#oaSub').textContent = info.error_description || info.error || 'The request is invalid.';
+    $('#oaTitle').textContent = tr('This connection request cannot be used');
+    $('#oaSub').textContent = info.error_description || info.error || tr('The request is invalid.');
     $('#oaList').hidden = true;
     acts.hidden = !info.redirect;
     if (info.redirect) {
       $('#oaAllow').hidden = true;
-      $('#oaDeny').textContent = 'Back to the app';
+      $('#oaDeny').textContent = tr('Back to the app');
       $('#oaDeny').onclick = () => toClient(info.redirect!);
     }
     void show('oauth');
     return;
   }
-  const name = info.client.name || 'An MCP client';
-  $('#oaTitle').textContent = `Allow ${name} to use Memora?`;
-  $('#oaSub').textContent = `${name} will connect to this vault as an agent, then return to ${info.redirect_host || 'the app'}.`;
-  $('#oaWho').textContent = info.user ? `Signed in as ${info.user}` : '';
+  const name = info.client.name || tr('An MCP client');
+  $('#oaTitle').textContent = tr('Allow {name} to use Memora?', { name });
+  $('#oaSub').textContent = tr('{name} will connect to this vault as an agent, then return to {host}.', {
+    name,
+    host: info.redirect_host || tr('the app'),
+  });
+  $('#oaWho').textContent = info.user ? tr('Signed in as {user}', { user: info.user }) : '';
   const decide = async (allow: boolean, btn: HTMLButtonElement): Promise<void> => {
     busy(btn, true);
     try {
       const r = await jsonPost('/api/oauth/approve', { query: OAUTH_Q, allow });
       const d = (await r.json().catch(() => ({}))) as { redirect?: string; error?: string; error_description?: string };
       if (d.redirect) return toClient(d.redirect);
-      showAlert(errText(d, 'Could not finish the connection'), 'warn');
+      showAlert(errText(d, tr('Could not finish the connection')), 'warn');
     } catch {
-      showAlert('Could not reach the server', 'warn');
+      showAlert(tr('Could not reach the server'), 'warn');
     }
     busy(btn, false);
   };
@@ -395,7 +408,7 @@ async function fetchState(): Promise<StateResult> {
 
 function setOnline(on: boolean): void {
   $('#dot').className = 'dot ' + (on ? 'on' : 'off');
-  $('#footState').textContent = on ? 'Connected' : 'Cannot reach the server';
+  $('#footState').textContent = tr(on ? 'Connected' : 'Cannot reach the server');
 }
 
 /** The single view the server state calls for. */
@@ -416,7 +429,7 @@ function enter(v: View, s: AuthState): void {
   switch (v) {
     case 'signin':
       if (s.ready === false) {
-        showAlert('The server cannot write to its vault or state folder. Run ' + cli + ' on the server to check it.', 'warn');
+        showAlert(tr('The server cannot write to its vault or state folder. Run {cli} on the server to check it.', { cli }), 'warn');
       }
       break;
     case 'help':
@@ -433,7 +446,7 @@ function enter(v: View, s: AuthState): void {
       const row = (id: string, ok: boolean | undefined): void => {
         const li = $(id);
         li.className = ok === false ? 'bad' : 'ok';
-        (li.querySelector('em') as HTMLElement).textContent = ok === false ? 'Not writable' : 'OK';
+        (li.querySelector('em') as HTMLElement).textContent = tr(ok === false ? 'Not writable' : 'OK');
       };
       row('#nrVault', s.checks?.vault);
       row('#nrState', s.checks?.state);
@@ -442,7 +455,7 @@ function enter(v: View, s: AuthState): void {
     }
     case 'locked':
       setCmd('#lockCmd', cli);
-      $('#lockWhy').textContent = 'Sign-in was paused on the server. Your notes are safe.';
+      $('#lockWhy').textContent = tr('Sign-in was paused on the server. Your notes are safe.');
       break;
     case 'cooldown':
       startCooldown(s.cooldown ?? 60);
@@ -554,7 +567,7 @@ async function leaveCooldown(): Promise<void> {
 /** Handle a 429: cooldown view, or a short inline note for a plain rate limit. */
 function handleLimited(lim: Limited): void {
   if (lim.cooldown) enterCooldown(lim.retry_after || 60);
-  else showAlert('Too many requests. Wait a few seconds and try again.', 'warn');
+  else showAlert(tr('Too many requests. Wait a few seconds and try again.'), 'warn');
 }
 
 const EYE_ON = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>';
@@ -568,7 +581,7 @@ function wireEye(btnSel: string, inpSel: string): () => void {
   const paint = (): void => {
     const shown = i.type === 'text';
     if (svg) svg.innerHTML = shown ? EYE_OFF : EYE_ON;
-    b.title = shown ? 'Hide password' : 'Show password';
+    b.title = tr(shown ? 'Hide password' : 'Show password');
     b.setAttribute('aria-label', b.title);
     b.style.color = shown ? 'var(--accent-2)' : '';
   };
@@ -627,34 +640,34 @@ $('#loginForm').addEventListener('submit', (e) => {
     hideAlert();
     const btn = $<HTMLButtonElement>('#submitBtn');
     const txt = $('#btnTxt');
-    busy(btn, true, 'Signing in...', txt);
+    busy(btn, true, tr('Signing in...'), txt);
     try {
       const r = await jsonPost('/api/auth/login', { username: input('#u').value.trim(), password: input('#p').value });
       const d = (await r.json().catch(() => ({}))) as { redirect?: string };
       const lim = limitedOf(r.status, d, r.headers.get('retry-after'));
       if (lim) {
-        busy(btn, false, 'Sign in', txt);
+        busy(btn, false, tr('Sign in'), txt);
         handleLimited(lim);
         return;
       }
       if (!r.ok) {
         const msg =
           r.status === 401
-            ? 'Wrong username or password.'
+            ? tr('Wrong username or password.')
             : r.status === 503
-              ? 'The server is busy. Try again in a moment.'
-              : errText(d, 'Sign-in failed (' + r.status + ').');
+              ? tr('The server is busy. Try again in a moment.')
+              : errText(d, tr('Sign-in failed ({status}).', { status: r.status }));
         showAlert(msg);
-        busy(btn, false, 'Sign in', txt);
+        busy(btn, false, tr('Sign in'), txt);
         if (r.status === 401) markBad(input('#p'));
         focusEl(input('#p'), true);
         return;
       }
-      showAlert('Signed in. Opening your vault...', 'ok');
+      showAlert(tr('Signed in. Opening your vault...'), 'ok');
       go(d.redirect);
     } catch (err) {
-      showAlert('Could not reach the server: ' + (err as Error).message);
-      busy(btn, false, 'Sign in', txt);
+      showAlert(tr('Could not reach the server: {error}', { error: (err as Error).message }));
+      busy(btn, false, tr('Sign in'), txt);
       focusEl(btn);
     }
   })();
@@ -696,11 +709,11 @@ function tickWindow(): void {
     const bar = el.querySelector('.wbar') as HTMLElement;
     if (left <= 0) {
       el.className = 'win expired';
-      txt.textContent = 'Window expired. Checking the server...';
+      txt.textContent = tr('Window expired. Checking the server...');
       bar.style.width = '0%';
     } else {
       el.className = 'win' + (left <= 45 ? ' warn' : '');
-      txt.innerHTML = 'Window open, <b>' + mmss(left) + '</b> left';
+      txt.innerHTML = tr('Window open, <b>{time}</b> left', { time: mmss(left) });
       bar.style.width = Math.round((left / WIN_TOTAL) * 100) + '%';
     }
   });
@@ -738,9 +751,9 @@ const rawCode = (v: string): string => v.toUpperCase().replace(/[^A-Z0-9]/g, '')
 function prepareCode(s: AuthState): void {
   ARM = { mode: s.mode || (s.bootstrap ? 'bootstrap' : 'reset'), min: s.min_password_len || 10, user: null, code: '' };
   const reset = isReset();
-  $('#codeTitle').textContent = reset ? 'Enter the reset code' : 'Enter the setup code';
-  $('#codeSub').textContent = 'Type the code printed on the server.';
-  $('#codeLabel').textContent = reset ? 'Reset code' : 'Setup code';
+  $('#codeTitle').textContent = tr(reset ? 'Enter the reset code' : 'Enter the setup code');
+  $('#codeSub').textContent = tr('Type the code printed on the server.');
+  $('#codeLabel').textContent = tr(reset ? 'Reset code' : 'Setup code');
   const c = input('#code');
   c.value = '';
   c.disabled = false;
@@ -771,7 +784,7 @@ $('#codeForm').addEventListener('submit', (e) => {
     hideAlert();
     const btn = $<HTMLButtonElement>('#codeBtn');
     const txt = $('#codeBtnTxt');
-    busy(btn, true, 'Checking...', txt);
+    busy(btn, true, tr('Checking...'), txt);
     try {
       const r = await jsonPost('/api/auth/verify', { code });
       const d = (await r.json().catch(() => ({}))) as {
@@ -782,20 +795,24 @@ $('#codeForm').addEventListener('submit', (e) => {
         error?: string;
         burned?: boolean;
       };
-      busy(btn, false, 'Continue', txt);
+      busy(btn, false, tr('Continue'), txt);
       const lim = limitedOf(r.status, d, r.headers.get('retry-after'));
       if (lim) {
         handleLimited(lim);
         return;
       }
       if (!r.ok || !d.ok) {
-        const msg = errText(d, 'Code check failed (' + r.status + ').');
+        const msg = errText(d, tr('Code check failed ({status}).', { status: r.status }));
         if (d.burned) {
           await afterBurn(msg);
         } else {
           showAlert(
             r.status === 403
-              ? 'That ' + (isReset() ? 'reset' : 'setup') + ' code is not right. Check the code shown on the server and type it again.'
+              ? tr(
+                  isReset()
+                    ? 'That reset code is not right. Check the code shown on the server and type it again.'
+                    : 'That setup code is not right. Check the code shown on the server and type it again.',
+                )
               : msg,
           );
           shake($('#codeInp'));
@@ -814,8 +831,8 @@ $('#codeForm').addEventListener('submit', (e) => {
       prepareForm();
       void show('form');
     } catch (err) {
-      busy(btn, false, 'Continue', txt);
-      showAlert('Could not reach the server: ' + (err as Error).message);
+      busy(btn, false, tr('Continue'), txt);
+      showAlert(tr('Could not reach the server: {error}', { error: (err as Error).message }));
       focusEl(btn);
     }
   })();
@@ -823,11 +840,11 @@ $('#codeForm').addEventListener('submit', (e) => {
 
 function prepareForm(): void {
   const reset = isReset();
-  $('#formTitle').textContent = reset ? 'Reset password' : 'Create the owner account';
-  $('#formSub').textContent = reset
-    ? 'Choose a new password. You can also change the username here.'
-    : 'You will use these to sign in.';
-  $('#setBtnTxt').textContent = reset ? 'Save new password' : 'Create account';
+  $('#formTitle').textContent = tr(reset ? 'Reset password' : 'Create the owner account');
+  $('#formSub').textContent = tr(
+    reset ? 'Choose a new password. You can also change the username here.' : 'You will use these to sign in.',
+  );
+  $('#setBtnTxt').textContent = tr(reset ? 'Save new password' : 'Create account');
   input('#su').value = reset && ARM.user ? ARM.user : '';
   input('#sp').value = '';
   input('#sp2').value = '';
@@ -854,7 +871,7 @@ function checkForm(): void {
   const inp3 = $('#inp3');
   if (!pw) {
     fill.style.width = '0';
-    rules.textContent = 'At least ' + min + ' characters. A short phrase works well.';
+    rules.textContent = tr('At least {min} characters. A short phrase works well.', { min });
     rules.className = 'rules';
     inp3.classList.remove('ok', 'bad');
   } else {
@@ -862,10 +879,10 @@ function checkForm(): void {
     fill.style.width = (okLen ? 55 + 45 * Math.min(1, (n - min) / (strong - min)) : 8 + 40 * (n / min)) + '%';
     fill.style.background = okLen ? 'var(--ok)' : 'var(--danger)';
     rules.textContent = !okLen
-      ? 'At least ' + min + ' characters (' + n + ' so far)'
+      ? tr('At least {min} characters ({n} so far)', { min, n })
       : n >= strong
-        ? 'Strong: ' + n + ' characters'
-        : 'Long enough. A few more characters make it stronger.';
+        ? tr('Strong: {n} characters', { n })
+        : tr('Long enough. A few more characters make it stronger.');
     rules.className = 'rules ' + (okLen ? 'ok' : 'bad');
     inp3.classList.toggle('ok', okLen);
     inp3.classList.toggle('bad', !okLen);
@@ -877,7 +894,7 @@ function checkForm(): void {
     inp2.classList.remove('ok', 'bad');
   } else {
     const same = pw2 === pw;
-    const txt = same ? 'Passwords match' : 'Passwords do not match';
+    const txt = tr(same ? 'Passwords match' : 'Passwords do not match');
     const paint = (): void => {
       m.textContent = txt;
       m.className = 'rules ' + (same ? 'ok' : 'bad');
@@ -907,7 +924,7 @@ $('#setForm').addEventListener('submit', (e) => {
     hideAlert();
     const btn = $<HTMLButtonElement>('#setBtn');
     const txt = $('#setBtnTxt');
-    const label = isReset() ? 'Save new password' : 'Create account';
+    const label = tr(isReset() ? 'Save new password' : 'Create account');
     const username = input('#su').value.trim();
     const password = input('#sp').value;
     const fail = (msg: string, sel: string): void => {
@@ -915,10 +932,10 @@ $('#setForm').addEventListener('submit', (e) => {
       markBad(input(sel));
       focusEl(input(sel), true);
     };
-    if (!username) return fail('Username required.', '#su');
-    if (chars(password) < ARM.min) return fail('Password must be at least ' + ARM.min + ' characters.', '#sp');
-    if (password !== input('#sp2').value) return fail('Passwords do not match.', '#sp2');
-    busy(btn, true, 'Saving...', txt);
+    if (!username) return fail(tr('Username required.'), '#su');
+    if (chars(password) < ARM.min) return fail(tr('Password must be at least {min} characters.', { min: ARM.min }), '#sp');
+    if (password !== input('#sp2').value) return fail(tr('Passwords do not match.'), '#sp2');
+    busy(btn, true, tr('Saving...'), txt);
     try {
       const r = await jsonPost(isReset() ? '/api/auth/reset' : '/api/auth/bootstrap', {
         code: ARM.code,
@@ -935,7 +952,7 @@ $('#setForm').addEventListener('submit', (e) => {
       if (!r.ok) {
         busy(btn, false, label, txt);
         checkForm();
-        const msg = errText(d, 'Failed (' + r.status + ').');
+        const msg = errText(d, tr('Failed ({status}).', { status: r.status }));
         if ((d as { burned?: boolean }).burned) {
           await afterBurn(msg);
         } else {
@@ -950,15 +967,15 @@ $('#setForm').addEventListener('submit', (e) => {
         enter('signin', st.ok ? st.s : {});
         input('#u').value = username;
         input('#p').value = '';
-        showAlert('Password saved. Sign in with the new password.', 'ok');
+        showAlert(tr('Password saved. Sign in with the new password.'), 'ok');
         window.setTimeout(() => focusEl(input('#p')), 260);
         return;
       }
-      showAlert(isReset() ? 'Password saved. Opening your vault...' : 'Account created. Opening your vault...', 'ok');
+      showAlert(tr(isReset() ? 'Password saved. Opening your vault...' : 'Account created. Opening your vault...'), 'ok');
       go(d.redirect);
     } catch (err) {
       busy(btn, false, label, txt);
-      showAlert('Could not reach the server: ' + (err as Error).message);
+      showAlert(tr('Could not reach the server: {error}', { error: (err as Error).message }));
       focusEl(btn);
     }
   })();
@@ -994,10 +1011,10 @@ document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
           }
         }
       }
-      label.textContent = ok ? 'Copied' : 'Select';
+      label.textContent = tr(ok ? 'Copied' : 'Select');
       btn.classList.toggle('done', ok);
       window.setTimeout(() => {
-        label.textContent = 'Copy';
+        label.textContent = tr('Copy');
         btn.classList.remove('done');
       }, 1500);
     })();
@@ -1033,16 +1050,16 @@ async function fetchMe(): Promise<{ authenticated: boolean; redirect?: string }>
 }
 
 function accountLabel(s: AuthState): string {
-  if (s.armed) return isResetMode(s) ? 'reset window open' : 'setup window open';
-  if (s.locked) return 'on hold';
-  if (s.bootstrap) return 'not set up';
-  return 'ready';
+  if (s.armed) return tr(isResetMode(s) ? 'reset window open' : 'setup window open');
+  if (s.locked) return tr('on hold');
+  if (s.bootstrap) return tr('not set up');
+  return tr('ready');
 }
 
 async function boot(): Promise<void> {
   const t0 = now();
   $('#retryBtn').hidden = true;
-  $('#splashTitle').textContent = 'Checking this instance\u2026';
+  $('#splashTitle').textContent = tr('Checking this instance\u2026');
   check('#ckServer', 'run');
   check('#ckReady', '');
   check('#ckAccount', '');
@@ -1050,7 +1067,7 @@ async function boot(): Promise<void> {
   if (me.authenticated) {
     check('#ckServer', 'ok');
     check('#ckReady', 'ok');
-    check('#ckAccount', 'ok', 'signed in');
+    check('#ckAccount', 'ok', tr('signed in'));
     go(me.redirect);
     return;
   }
@@ -1063,13 +1080,13 @@ async function boot(): Promise<void> {
         enterCooldown(secs);
         return;
       }
-      check('#ckServer', 'run', 'busy, retrying');
+      check('#ckServer', 'run', tr('busy, retrying'));
       await sleep(Math.min(secs, 10) * 1000);
       return boot();
     }
     await until(t0 + 250);
-    check('#ckServer', 'bad', 'no answer');
-    $('#splashTitle').textContent = 'Cannot reach the server';
+    check('#ckServer', 'bad', tr('no answer'));
+    $('#splashTitle').textContent = tr('Cannot reach the server');
     setOnline(false);
     $('#retryBtn').hidden = false;
     return;
@@ -1082,14 +1099,20 @@ async function boot(): Promise<void> {
   check('#ckReady', 'run');
   await until(t0 + 280);
   // Vault and state count as ready only once setup is done and a vault is chosen.
-  const bad = [s.checks?.vault === false ? 'vault' : '', s.checks?.state === false ? 'state' : ''].filter(Boolean);
-  const readyNote = bad.length
-    ? bad.join(' + ') + ' not writable'
-    : s.bootstrap
-      ? 'not set up'
-      : s.vault_configured === false
-        ? 'vault not chosen'
-        : '';
+  const vaultBad = s.checks?.vault === false;
+  const stateBad = s.checks?.state === false;
+  const readyNote =
+    vaultBad && stateBad
+      ? tr('vault + state not writable')
+      : vaultBad
+        ? tr('vault not writable')
+        : stateBad
+          ? tr('state not writable')
+          : s.bootstrap
+            ? tr('not set up')
+            : s.vault_configured === false
+              ? tr('vault not chosen')
+              : '';
   check('#ckReady', readyNote ? 'bad' : 'ok', readyNote);
   check('#ckAccount', 'run');
   await until(t0 + 400);
@@ -1100,8 +1123,8 @@ async function boot(): Promise<void> {
 
 $('#retryBtn').addEventListener('click', () => void boot());
 if (OAUTH_Q !== null) {
-  $('#vSignin .eyebrow').textContent = 'Connect an AI app';
-  $('#vSignin .sub').textContent = 'Sign in to let an AI app connect to this vault. You approve it on the next step.';
+  $('#vSignin .eyebrow').textContent = tr('Connect an AI app');
+  $('#vSignin .sub').textContent = tr('Sign in to let an AI app connect to this vault. You approve it on the next step.');
 }
 
 void boot();

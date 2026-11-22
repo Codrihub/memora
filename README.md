@@ -58,16 +58,22 @@ Screenshots use a demo vault.
   shows every step, and has no web, shell or delete-for-good access. It can
   answer with a chart or diagram: a file card that opens a sandboxed preview
   beside the chat. It can hand tasks to sub-agents that work at the same time,
-  use separate models to read and make images, read aloud and listen, and keeps
-  short notes on how you like answers, which you can see and edit.
+  show its plan as a live checklist on the message box, use separate models
+  to read and make images, read aloud and listen, and keeps short notes on how
+  you like answers, which you can see and edit (or let it learn them from your
+  notes). Choose which tools Mnemo and its sub-agents may use, and keep any note,
+  folder or picture private from it.
+- **Your language.** The interface comes in many languages, picked per device
+  (Auto follows the browser, and the server can set a default for new devices), and
+  Mnemo's suggestions come in that language too.
 - **Images beside notes.** Paste or drop PNG, JPEG, WebP or GIF into a note; the
   file lives in the note's folder and moves, goes to the Trash and comes back
   with it. Folder galleries show which note and section uses each image.
 - **API keys or OAuth.** Give each agent its own key, or let MCP clients such as
   Claude or ChatGPT connect with OAuth after you approve them in the browser.
 - **Per-agent control.** Scopes (`mcp`, `read`, `write`, `admin`), per-key tool
-  lists, server-wide tool switches, and privacy rules that hide notes or
-  folders from chosen agents.
+  lists, server-wide tool switches, and privacy rules that hide notes, folders
+  or pictures from chosen agents, Mnemo included.
 - **Web UI.** Brain and graph views, a canvas, the vault editor with nine reading
   colours, fonts and sizes, tags, live agent activity, keys, tools, access
   rules and settings. Installable as a PWA.
@@ -240,7 +246,7 @@ The MCP endpoint is `/mcp` on the same port. Authenticate with an API key in
 Claude Code:
 
 ```bash
-claude mcp add --transport http memora https://memory.example.com/mcp \
+claude mcp add --transport http memora https://memora.example.com/mcp \
   --header "Authorization: Bearer memora_live_REPLACE_WITH_YOUR_KEY"
 ```
 

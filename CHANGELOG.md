@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-23
+
+Memora speaks your language, Mnemo shows its plan as it works, and you decide
+what it may use and see.
+
+### Added
+
+- Languages: the whole interface in many languages, right to left included.
+  Pick one from a grid in Settings, Appearance, Language, per device; Auto
+  follows the browser. The welcome tour and the terminal setup ask for it
+  first, and the server keeps a default language for new devices (English
+  until you pick one). Dates follow the language, and each language loads on
+  its own, so the app stays light.
+- Mnemo's plan: for a longer task Mnemo lists its steps (`update_plan`) as a
+  checklist on the message box, each one not started, in progress or done,
+  live. Without a plan, the checklist follows the reply's sub-agents. A
+  finished plan folds away by itself.
+- Tell Mnemo about you: a new chat offers, once, a few words about you
+  (optional), or "Describe me from my notes", where Mnemo reads your vault and
+  keeps what it learns; or skip it.
+- Tools per agent: switch any tool off for Mnemo itself or for its
+  sub-agents (Settings, Mnemo, What Mnemo can use), Mnemo's own tools included
+  (pictures, chats, plans, sub-agents).
+- Private from Mnemo: Mnemo is listed with the agents in a note's, folder's or
+  picture's privacy panel, so anything can be kept out of its sight and its
+  sub-agents', its history included. A private picture stays unseen to
+  `view_image` too.
+- `/mnemo#fleeting-chat` opens a new fleeting chat straight away.
+- A Mnemo page in the docs: what it does, its tools, sub-agents, permissions,
+  privacy and settings.
+- Share Memora: once after this update, a small card (a corner card on
+  desktop, a sheet on phones, with a short timer and a close button) invites
+  you to share Memora or star it on GitHub. Open it again any time from the
+  account menu.
+
+### Changed
+
+- The welcome tour is rebuilt: layered scenes for each step, a segmented
+  progress bar, Mnemo introduced as the one that keeps your notes tidy while
+  your other agents read and write them, and the language and server name
+  asked at the start. The terminal setup asks the same two first.
+- One chat layout on every screen. The model sits above the chat as a plain
+  name with a chevron; its list marks the default model with a pin and a
+  Default badge, and any model's pin makes it the default. Agents, Think and
+  the context meter sit under the message box on the right; Agents is always
+  there.
+- The live status, the plan and the queue share one tray on top of the
+  message box. Each part opens and folds smoothly and the chat above shrinks
+  with it, so nothing covers the conversation.
+- A fleeting chat is a dark, rounded room inside the normal page, in Mnemo's
+  teal, with a calmer welcome and a way back to a normal chat before the first
+  message.
+- The note under the message box is smaller, wraps instead of being cut, shows
+  on every screen and goes once the chat starts.
+- What Mnemo knows about you is one plain list: no kinds to pick, and several
+  lines add several notes at once. "Describe me from my notes" is there too.
+- New chat suggestions are written in the language you picked for the screen,
+  not the language of your notes.
+- Settings, Mnemo: Add model opens a dialog from the Models header, and
+  fallback models have their own card with Add in its header.
+- All images in Settings: every picture is the same square card, its name on
+  a soft fade at the bottom, with where it is used and Delete on hover.
+- The sub-agent line in a reply spans the reply, with a clear View button.
+- Agents panel: the newest sub-agent on top in every section; its activity
+  shows the latest step first in a short window that fades out, with Show all
+  to open it fully and fold it back.
+- The scroll button reads "Scroll to" with an arrow down.
+
+### Fixed
+
+- A plan stayed on screen after starting a new chat.
+- The Think button showed only after the first message.
+- Stop did not show for a reply started elsewhere (another device or the
+  queue); any running reply now shows it.
+- Coming back to the window puts the cursor in the message box again.
+- A click in the padding of the message box closed and reopened it.
+- The folded Settings menu cut its icons off.
+- A fleeting chat showed "Connect a model first" once the models had loaded,
+  even with models set up.
+- Fleeting chats offer the same suggestions, skills and Fresh ideas as any new
+  chat, and Mnemo knows every tool and sub-agents work there too; only its
+  notes about you stay out.
+- The live status line shows the arrow only when a click opens something (the
+  sub-agents, or the reply's steps); otherwise it is plain text.
+- A tool switched off in What Mnemo can use stays off on every path, sub-agents
+  and questions to you included.
+
 ## [2.2.1] - 2026-11-22
 
 ### Changed
@@ -27,7 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mnemo saw only the first 40 models for sub-agents, so a model such as the
   default one could be missing from its list. It now gets every model, with
   the default and fallback models named, and a model asked for by its short
-  name (`hai-gpt` for `9r/hai-gpt`) or label is found; a name that is not a
+  name (the model id without its provider) or label is found; a name that is not a
   model here is refused instead of running on another model.
 - Saying yes to sub-agents and then writing again ("where are they?") made
   Mnemo ask again. The yes now holds until the sub-agents ran on it.

@@ -1037,7 +1037,21 @@ fn read_asset(st: &AppState, name: &str) -> Option<Vec<u8>> {
     if !asset_allowed(name) {
         return None;
     }
-    std::fs::read(std::path::Path::new(&st.assets).join(name)).ok()
+    let body = std::fs::read(std::path::Path::new(&st.assets).join(name)).ok()?;
+    if !name.ends_with(".html") {
+        return Some(body);
+    }
+    // Pages carry the server's default interface language for devices that picked none.
+    let lang = api::server_language(st);
+    Some(
+        String::from_utf8_lossy(&body)
+            .replacen(
+                r#"<meta name="memora-lang" content="">"#,
+                &format!(r#"<meta name="memora-lang" content="{lang}">"#),
+                1,
+            )
+            .into_bytes(),
+    )
 }
 
 /// `POST /logout`: revoke the session and return to the login page. POST plus the
@@ -1630,6 +1644,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/node/", get(h_app_route))
         .route("/node/{*vault_path}", get(h_app_route))
         .route("/assets/{name}", get(h_asset))
+        .route("/i18n/{name}", get(h_i18n))
         .route("/app.css", get(h_asset_root))
         .route("/app.js", get(h_asset_root))
         .route("/login.css", get(h_asset_root))
@@ -1695,6 +1710,32 @@ pub fn build_router(st: AppState) -> Router {
             mw_security_headers,
         ))
         .with_state(st)
+}
+
+/// Whether `name` is an interface language file the web build writes (`id.js`, `zh-TW.js`).
+fn i18n_name_ok(name: &str) -> bool {
+    name.strip_suffix(".js").is_some_and(|code| {
+        (2..=8).contains(&code.len())
+            && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && !code.starts_with('-')
+    })
+}
+
+/// `/i18n/{code}.js`: one interface language (loaded by index.html before app.js).
+async fn h_i18n(
+    State(st): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !i18n_name_ok(&name) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    assets::serve(
+        &std::path::Path::new(&st.assets).join("i18n").join(&name),
+        "application/javascript; charset=utf-8",
+        "no-cache",
+        &headers,
+    )
 }
 
 /// Serve root-level assets (`/app.css`, `/app.js`, `/login.css`, ...).
@@ -1986,16 +2027,16 @@ mod front_door_tests {
     #[test]
     fn cookie_csrf_needs_a_same_origin_header() {
         let c = ("cookie", "memora_sess=abc");
-        let host = ("host", "memory.example.com");
+        let host = ("host", "memora.example.com");
         assert!(origin_ok(&hdrs(&[
             c,
             host,
-            ("origin", "https://memory.example.com")
+            ("origin", "https://memora.example.com")
         ])));
         assert!(origin_ok(&hdrs(&[
             c,
             host,
-            ("referer", "https://memory.example.com/x?y")
+            ("referer", "https://memora.example.com/x?y")
         ])));
         // Missing, null, foreign, look-alike, userinfo and non-http origins fail.
         assert!(!origin_ok(&hdrs(&[c, host])));
@@ -2008,28 +2049,28 @@ mod front_door_tests {
         assert!(!origin_ok(&hdrs(&[
             c,
             host,
-            ("origin", "https://memory.example.com.evil.example")
+            ("origin", "https://memora.example.com.evil.example")
         ])));
         assert!(!origin_ok(&hdrs(&[
             c,
             host,
-            ("origin", "https://memory.example.com@evil.example")
+            ("origin", "https://memora.example.com@evil.example")
         ])));
         assert!(!origin_ok(&hdrs(&[
             c,
             host,
-            ("origin", "file://memory.example.com")
+            ("origin", "file://memora.example.com")
         ])));
         assert!(!origin_ok(&hdrs(&[
             c,
             host,
-            ("referer", "memory.example.com")
+            ("referer", "memora.example.com")
         ])));
         // A matching Origin cannot save a cross-site fetch.
         assert!(!origin_ok(&hdrs(&[
             c,
             host,
-            ("origin", "https://memory.example.com"),
+            ("origin", "https://memora.example.com"),
             ("sec-fetch-site", "cross-site"),
         ])));
         // A bad Origin is not rescued by a good Referer.
@@ -2037,7 +2078,7 @@ mod front_door_tests {
             c,
             host,
             ("origin", "https://evil.example"),
-            ("referer", "https://memory.example.com/"),
+            ("referer", "https://memora.example.com/"),
         ])));
         // No cookie: API-key and CLI callers are not browser-forgeable.
         assert!(origin_ok(&hdrs(&[host])));
@@ -2045,15 +2086,15 @@ mod front_door_tests {
 
     #[test]
     fn public_auth_forms_refuse_foreign_origins() {
-        let host = ("host", "memory.example.com:8471");
+        let host = ("host", "memora.example.com:8471");
         assert!(origin_ok_public(&hdrs(&[host])));
         assert!(origin_ok_public(&hdrs(&[
             host,
-            ("origin", "http://memory.example.com:8471")
+            ("origin", "http://memora.example.com:8471")
         ])));
         assert!(!origin_ok_public(&hdrs(&[
             host,
-            ("origin", "http://memory.example.com")
+            ("origin", "http://memora.example.com")
         ])));
         assert!(!origin_ok_public(&hdrs(&[
             host,
@@ -2137,14 +2178,23 @@ mod front_door_tests {
             Some("::1")
         );
         assert_eq!(
-            memora_gateway::url_host("Memory.Example.com:443").as_deref(),
-            Some("memory.example.com")
+            memora_gateway::url_host("Memora.Example.com:443").as_deref(),
+            Some("memora.example.com")
         );
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_language_files_are_served_from_i18n() {
+        assert!(super::i18n_name_ok("id.js"));
+        assert!(super::i18n_name_ok("zh-TW.js"));
+        assert!(!super::i18n_name_ok("../app.js"));
+        assert!(!super::i18n_name_ok("id.json"));
+        assert!(!super::i18n_name_ok("-x.js"));
+        assert!(!super::i18n_name_ok("a.js"));
+    }
 
     #[test]
     fn is_https_reads_every_proxy_header() {

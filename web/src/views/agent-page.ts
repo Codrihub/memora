@@ -58,9 +58,10 @@ import {
   wireAgentLinks,
   type KeyRowFull,
 } from './agents-data';
+import { t } from '../i18n';
 
 type Tab = (typeof AGENT_TABS)[number];
-const TAB_LABEL: Record<Tab, string> = { overview: 'Overview', setup: 'Setup', activity: 'Activity', access: 'Access', settings: 'Settings' };
+const TAB_LABEL: Record<Tab, string> = { overview: t('Overview'), setup: t('Setup'), activity: t('Activity'), access: t('Access'), settings: t('Settings') };
 const TAB_ICON: Record<Tab, string> = { overview: 'overview', setup: 'tools', activity: 'activity', access: 'shield', settings: 'settings' };
 
 /** The wizard's steps as a vertical rail (Setup tab, new-agent page), for wide containers. */
@@ -453,16 +454,16 @@ function skeletonHTML(): string {
 function mount(focus: boolean): void {
   if (!P) return;
   const k = key();
-  const crumb = `<nav class="ap-crumb" aria-label="Breadcrumb"><a class="ap-back" href="/agents" data-nav="">${ICO_BACK}All agents</a></nav>`;
+  const crumb = `<nav class="ap-crumb" aria-label="${t('Breadcrumb')}"><a class="ap-back" href="/agents" data-nav="">${ICO_BACK}${t('All agents')}</a></nav>`;
   if (!k) {
     const gone = state.keysDeleted.find((x) => x.id === P!.id);
-    P.root.innerHTML = `${crumb}<div class="ap-card ap-nf"><h1 tabindex="-1">${gone ? `${esc(nameOf(gone))} was deleted` : 'No agent at this address'}</h1>
+    P.root.innerHTML = `${crumb}<div class="ap-card ap-nf"><h1 tabindex="-1">${gone ? t('{name} was deleted', { name: esc(nameOf(gone)) }) : t('No agent at this address')}</h1>
       <p>${
         gone
-          ? 'Its key stopped working. You can restore it until you reload the app.'
-          : `There is no agent with the key id <code>${esc(P.id)}</code>. It may have been deleted; its past calls stay in Activity.`
-      }</p><div class="acts">${gone ? `<button type="button" class="btn primary" data-restore>${ICO_RESTORE}Restore</button>` : ''}
-      <a class="btn" href="/activity/${attr(encodeURIComponent(P.id))}" data-act-page>What it did</a><a class="btn" href="/agents" data-nav="">All agents</a></div></div>`;
+          ? t('Its key stopped working. You can restore it until you reload the app.')
+          : t('There is no agent with the key id {id}. It may have been deleted; its past calls stay in Activity.', { id: `<code>${esc(P.id)}</code>` })
+      }</p><div class="acts">${gone ? `<button type="button" class="btn primary" data-restore>${ICO_RESTORE}${t('Restore')}</button>` : ''}
+      <a class="btn" href="/activity/${attr(encodeURIComponent(P.id))}" data-act-page>${t('What it did')}</a><a class="btn" href="/agents" data-nav="">${t('All agents')}</a></div></div>`;
     wireAgentLinks(P.root);
     const rb = P.root.querySelector<HTMLElement>('[data-restore]');
     if (rb) rb.onclick = () => void restoreKey(P!.id);
@@ -481,7 +482,7 @@ function mount(focus: boolean): void {
         } else setRouteAgent(P!.id);
         hooks.go('logs');
       };
-    document.title = 'Agent not found · Memora';
+    document.title = `${t('Agent not found')} · Memora`;
     if (focus) P.root.querySelector<HTMLElement>('h1')?.focus({ preventScroll: true });
     return;
   }
@@ -516,16 +517,16 @@ function refresh(): void {
 
 function statusLine(k: KeyRowFull): string {
   const s = statusOf(k);
-  if (s.st === 'off') return `<span class="ap-st off"><span class="sd off" aria-hidden="true"></span><b>Turned off</b></span>`;
-  if (s.st === 'never') return `<span class="ap-st"><span class="sd never" aria-hidden="true"></span><b>Never used</b> · no calls yet</span>`;
-  return `<span class="ap-st"><span class="sd ${s.st}" aria-hidden="true"></span><b>${s.label}</b> · last call ${esc(s.seen.toLowerCase())}</span>`;
+  if (s.st === 'off') return `<span class="ap-st off"><span class="sd off" aria-hidden="true"></span><b>${t('Turned off')}</b></span>`;
+  if (s.st === 'never') return `<span class="ap-st"><span class="sd never" aria-hidden="true"></span><b>${t('Never used')}</b> · ${t('no calls yet')}</span>`;
+  return `<span class="ap-st"><span class="sd ${s.st}" aria-hidden="true"></span><b>${s.label}</b> · ${t('last call {when}', { when: esc(s.seen.toLowerCase()) })}</span>`;
 }
 
 function appChip(k: KeyRowFull): string {
   const app = appFor(k);
-  if (!app.id) return `<span class="ap-app none" title="Pick its app in Setup">App not set</span>`;
+  if (!app.id) return `<span class="ap-app none" title="${t('Pick its app in Setup')}">${t('App not set')}</span>`;
   const locked = !app.guessed;
-  return `<span class="ap-app" title="${attr(locked ? `${app.label}: each agent belongs to one app` : `${app.label}, guessed from its name`)}">${appIconHTML(
+  return `<span class="ap-app" title="${attr(locked ? t('{app}: each agent belongs to one app', { app: app.label }) : t('{app}, guessed from its name', { app: app.label }))}">${appIconHTML(
     app.label,
     20,
   )}<span>${esc(app.label)}</span>${locked ? ICO_LOCK : ''}</span>`;
@@ -543,9 +544,9 @@ function paintHead(): void {
   head.innerHTML = `${avatarHTML(name, 64, s.st === 'active' ? 'live' : '', k.id)}
     <div class="ap-id"><h1 tabindex="-1">${esc(name)}</h1><div class="ap-meta">${appChip(k)}${statusLine(k)}</div></div>
     <div class="ap-acts">${
-      needsSetup && P!.tab !== 'setup' ? `<button type="button" class="btn primary" data-h="setup" aria-label="Set up">${ICO.plug}<span class="l">Set up</span></button>` : ''
-    }<button type="button" class="btn" data-h="toggle" aria-label="${off ? 'Turn on' : 'Turn off'}">${off ? ICO.check : ICO_POWER}<span class="l">${off ? 'Turn on' : 'Turn off'}</span></button>
-      <button type="button" class="cc-ibtn" data-h="more" aria-haspopup="menu" aria-label="More actions for ${attr(name)}" title="More">${ICO.more}</button></div>`;
+      needsSetup && P!.tab !== 'setup' ? `<button type="button" class="btn primary" data-h="setup" aria-label="${t('Set up')}">${ICO.plug}<span class="l">${t('Set up')}</span></button>` : ''
+    }<button type="button" class="btn" data-h="toggle" aria-label="${off ? t('Turn on') : t('Turn off')}">${off ? ICO.check : ICO_POWER}<span class="l">${off ? t('Turn on') : t('Turn off')}</span></button>
+      <button type="button" class="cc-ibtn" data-h="more" aria-haspopup="menu" aria-label="${t('More actions for {name}', { name: attr(name) })}" title="${t('More')}">${ICO.more}</button></div>`;
   if (focusedH1) head.querySelector<HTMLElement>('h1')?.focus({ preventScroll: true });
   head.querySelectorAll<HTMLElement>('[data-h]').forEach((b) => {
     b.onclick = () => {
@@ -555,7 +556,7 @@ function paintHead(): void {
       if (a === 'more') moreMenu(b, k);
     };
   });
-  document.title = `${name} · Agents · Memora`;
+  document.title = `${name} · ${t('Agents')} · Memora`;
 }
 
 function moreMenu(anchor: HTMLElement, k: KeyRowFull): void {
@@ -563,12 +564,12 @@ function moreMenu(anchor: HTMLElement, k: KeyRowFull): void {
   openMenu(
     anchor,
     [
-      { label: 'Rename & colour', desc: 'Change how it shows up everywhere.', icon: ICO_EDIT, run: () => go('settings') },
-      ...(k.revealable ? [{ label: 'Show key', desc: 'See its key again; asks for your password.', icon: ICO_EYE, run: () => openReveal(k) }] : []),
-      { label: 'Make a new key', desc: 'The current key stops working at once.', icon: ICO.key, run: () => rollKey(k, () => go('setup')) },
-      { label: 'Activity', desc: 'Its numbers, timeline and export.', icon: ICO_ACTIVITY, run: () => go('activity') },
+      { label: t('Rename & colour'), desc: t('Change how it shows up everywhere.'), icon: ICO_EDIT, run: () => go('settings') },
+      ...(k.revealable ? [{ label: t('Show key'), desc: t('See its key again; asks for your password.'), icon: ICO_EYE, run: () => openReveal(k) }] : []),
+      { label: t('Make a new key'), desc: t('The current key stops working at once.'), icon: ICO.key, run: () => rollKey(k, () => go('setup')) },
+      { label: t('Activity'), desc: t('Its numbers, timeline and export.'), icon: ICO_ACTIVITY, run: () => go('activity') },
       { sep: true, label: '' },
-      { label: 'Delete', desc: 'Remove the agent; its key stops working at once.', icon: ICO_TRASH, danger: true, run: () => delKey(k, () => navAgents('')) },
+      { label: t('Delete'), desc: t('Remove the agent; its key stops working at once.'), icon: ICO_TRASH, danger: true, run: () => delKey(k, () => navAgents('')) },
     ],
     { title: name, lead: avatarHTML(name, 30, '', k.id) },
   );
@@ -688,9 +689,9 @@ function evRowHTML(it: ActivityItem, withClock = false): string {
   const pred = predicate(it);
   const found = cat === 'search' ? it.paths.slice(0, 2) : [];
   const st = it.running
-    ? '<span class="ap-ev-st run"><i></i>Working…</span>'
+    ? `<span class="ap-ev-st run"><i></i>${t('Working…')}</span>`
     : problem
-      ? `<span class="ap-ev-st fail"><i></i>${problem === 'refused' ? 'Refused' : 'Did not work'}</span>`
+      ? `<span class="ap-ev-st fail"><i></i>${problem === 'refused' ? t('Refused') : t('Did not work')}</span>`
       : '<span class="ap-ev-st"></span>';
   const rel = ago(it.ts);
   return `<li class="ap-ev${problem ? ' fail' : ''}${P?.fresh.has(it.id) ? ' new' : ''}" role="button" tabindex="0" data-act="${attr(it.id)}"
@@ -699,7 +700,7 @@ function evRowHTML(it: ActivityItem, withClock = false): string {
     <span class="ap-ev-m"><span class="ap-ev-s act-p cap">${pred}</span>${found
       .map((p) => `<button type="button" class="ap-ev-p" data-note="${attr(p)}" title="${attr(p)}">${ICO.note}<span>${esc(noteName(p))}</span></button>`)
       .join('')}${it.paths.length > found.length && found.length ? `<span class="ap-ev-more">+${it.paths.length - found.length}</span>` : ''}</span>${st}
-    <span class="ap-ev-t" title="${attr(fmtTs(it.ts))}">${withClock ? `<span class="clk">${clock(it.ts)}</span>` : ''}${rel === 'now' ? 'now' : rel + ' ago'}</span></li>`;
+    <span class="ap-ev-t" title="${attr(fmtTs(it.ts))}">${withClock ? `<span class="clk">${clock(it.ts)}</span>` : ''}${rel === t('now') ? t('now') : t('{time} ago', { time: rel })}</span></li>`;
 }
 
 function evSkeleton(n: number): string {
@@ -724,48 +725,48 @@ function paintOverview(panel: HTMLElement, k: KeyRowFull): void {
     .join('');
   const banner =
     s.st === 'off'
-      ? `<div class="ap-ban off"><span class="ic">${ICO_POWER}</span><span class="tx"><b>${esc(name)} is turned off</b><small>Its key is refused until you turn it back on. Nothing is deleted.</small></span>
-        <button type="button" class="btn" data-o="toggle">${ICO.check}Turn on</button></div>`
+      ? `<div class="ap-ban off"><span class="ic">${ICO_POWER}</span><span class="tx"><b>${t('{name} is turned off', { name: esc(name) })}</b><small>${t('Its key is refused until you turn it back on. Nothing is deleted.')}</small></span>
+        <button type="button" class="btn" data-o="toggle">${ICO.check}${t('Turn on')}</button></div>`
       : s.st === 'never'
-        ? `<div class="ap-ban"><span class="ic">${ICO.plug}</span><span class="tx"><b>No calls yet</b><small>${
-            c ? `Follow the ${esc(c.label)} setup guide to connect it.` : 'Pick its app, then follow the setup guide to connect it.'
-          }</small></span><button type="button" class="btn primary" data-o="setup">${ICO.plug}Open the setup guide</button></div>`
+        ? `<div class="ap-ban"><span class="ic">${ICO.plug}</span><span class="tx"><b>${t('No calls yet')}</b><small>${
+            c ? t('Follow the {app} setup guide to connect it.', { app: esc(c.label) }) : t('Pick its app, then follow the setup guide to connect it.')
+          }</small></span><button type="button" class="btn primary" data-o="setup">${ICO.plug}${t('Open the setup guide')}</button></div>`
         : '';
   panel.innerHTML = `${banner}
     <div class="ap-stats">
-      <div class="ap-stat"><span class="k">Calls in 24h</span><span class="v">${u ? u.day : 0}${
+      <div class="ap-stat"><span class="k">${t('Calls in 24h')}</span><span class="v">${u ? u.day : 0}${
         u && u.day ? `<span class="sp">${sparkSVG(u.spark, 120, 24)}</span>` : ''
-      }</span><span class="h">${u && u.day ? 'Per hour, last 24 hours' : 'None in the last 24 hours'}</span></div>
-      <div class="ap-stat"><span class="k">All time</span><span class="v">${(k.uses || 0).toLocaleString('en-US')}</span><span class="h">Calls with this key</span></div>
-      <div class="ap-stat"><span class="k">Last call</span><span class="v sm">${last ? esc(s.seen) : k.uses ? 'Over a week ago' : 'Never'}</span><span class="h">${
-        last ? esc(fmtTs(last)) : 'No call in the last 7 days'
+      }</span><span class="h">${u && u.day ? t('Per hour, last 24 hours') : t('None in the last 24 hours')}</span></div>
+      <div class="ap-stat"><span class="k">${t('All time')}</span><span class="v">${(k.uses || 0).toLocaleString('en-US')}</span><span class="h">${t('Calls with this key')}</span></div>
+      <div class="ap-stat"><span class="k">${t('Last call')}</span><span class="v sm">${last ? esc(s.seen) : k.uses ? t('Over a week ago') : t('Never')}</span><span class="h">${
+        last ? esc(fmtTs(last)) : t('No call in the last 7 days')
       }</span></div>
     </div>
     <div class="ap-cols">
-      <section class="ap-card"><div class="ap-card-h"><h2>Recent activity</h2><a class="ap-link" href="${attr(agentsHref(k.id + '/activity'))}" data-nav="${attr(
+      <section class="ap-card"><div class="ap-card-h"><h2>${t('Recent activity')}</h2><a class="ap-link" href="${attr(agentsHref(k.id + '/activity'))}" data-nav="${attr(
         k.id + '/activity',
-      )}">See all activity ${ICO.arrow}</a></div><div id="apRecent">${evSkeleton(4)}</div></section>
+      )}">${t('See all activity')} ${ICO.arrow}</a></div><div id="apRecent">${evSkeleton(4)}</div></section>
       <div class="ap-side">
-        <section class="ap-card"><div class="ap-card-h"><h2>App</h2>${
-          c ? `<a class="ap-link" href="${attr(agentsHref(k.id + '/setup'))}" data-nav="${attr(k.id + '/setup')}">Setup guide ${ICO.arrow}</a>` : ''
+        <section class="ap-card"><div class="ap-card-h"><h2>${t('App')}</h2>${
+          c ? `<a class="ap-link" href="${attr(agentsHref(k.id + '/setup'))}" data-nav="${attr(k.id + '/setup')}">${t('Setup guide')} ${ICO.arrow}</a>` : ''
         }</div>
           <div class="ap-card-b">${
             c
               ? `<div class="ap-appc">${appIconHTML(c.label, 38)}<span class="tx"><b>${esc(c.label)}</b><small>${esc(c.kind)}</small></span></div><p class="ap-hint">${
                   app.guessed
-                    ? 'Guessed from its name. Wrong app? Pick another in Setup.'
-                    : 'Each agent belongs to one app. For another app or device, make a new agent.'
+                    ? t('Guessed from its name. Wrong app? Pick another in Setup.')
+                    : t('Each agent belongs to one app. For another app or device, make a new agent.')
                 }</p>`
-              : `<div class="ap-appc">${appIconHTML('', 38)}<span class="tx"><b>Not set</b><small>Pick it once in Setup</small></span></div>
-                <p class="ap-hint"><a class="ap-link" href="${attr(agentsHref(k.id + '/setup'))}" data-nav="${attr(k.id + '/setup')}">Pick its app ${ICO.arrow}</a></p>`
+              : `<div class="ap-appc">${appIconHTML('', 38)}<span class="tx"><b>${t('Not set')}</b><small>${t('Pick it once in Setup')}</small></span></div>
+                <p class="ap-hint"><a class="ap-link" href="${attr(agentsHref(k.id + '/setup'))}" data-nav="${attr(k.id + '/setup')}">${t('Pick its app')} ${ICO.arrow}</a></p>`
           }</div></section>
-        <section class="ap-card"><div class="ap-card-h"><h2>Access</h2><a class="ap-link" href="${attr(agentsHref(k.id + '/access'))}" data-nav="${attr(
+        <section class="ap-card"><div class="ap-card-h"><h2>${t('Access')}</h2><a class="ap-link" href="${attr(agentsHref(k.id + '/access'))}" data-nav="${attr(
           k.id + '/access',
-        )}">Edit ${ICO.arrow}</a></div>
+        )}">${t('Edit')} ${ICO.arrow}</a></div>
           <div class="ap-card-b ap-acc${p.tone ? ' ' + p.tone : ''}"><b>${esc(p.tools ? p.level + ' · ' + p.tools : p.level)}</b>${
-            chips || signed ? `<div class="ap-chips">${chips}${signed ? '<span class="ap-chip">Signed in</span>' : ''}</div>` : ''
+            chips || signed ? `<div class="ap-chips">${chips}${signed ? `<span class="ap-chip">${t('Signed in')}</span>` : ''}</div>` : ''
           }</div></section>
-        <details class="ap-card ap-tech"><summary>${ICO_CHEV}Technical details<small>Key ID, last IP</small></summary><div class="ap-card-b"><dl class="ap-kv">
+        <details class="ap-card ap-tech"><summary>${ICO_CHEV}${t('Technical details')}<small>${t('Key ID, last IP')}</small></summary><div class="ap-card-b"><dl class="ap-kv">
           ${techRows(k)}
         </dl></div></details>
       </div>
@@ -783,12 +784,12 @@ function paintOverview(panel: HTMLElement, k: KeyRowFull): void {
 /** Key ID, how the key is kept, when it was made and where its last call came from. */
 function techRows(k: KeyRowFull): string {
   const signed = data.oauth.has(k.id);
-  return `<dt>Key ID</dt><dd><code title="${attr(k.id)}">${esc(k.id)}</code><button type="button" class="cc-ibtn" data-copy="${attr(
+  return `<dt>${t('Key ID')}</dt><dd><code title="${attr(k.id)}">${esc(k.id)}</code><button type="button" class="cc-ibtn" data-copy="${attr(
     k.id,
-  )}" aria-label="Copy the key ID" title="Copy">${ICO.copy}</button></dd>
-    <dt>Key</dt><dd>${k.revealable ? 'Can be shown again with your password' : signed ? 'Held by the app (it signed in)' : 'Was shown once, when it was made'}</dd>
-    ${k.created ? `<dt>Created</dt><dd>${esc(fmtTs(k.created))}</dd>` : ''}
-    <dt>Last IP</dt><dd><code title="${attr(k.last_ip || '')}">${esc(k.last_ip || 'None yet')}</code></dd>`;
+  )}" aria-label="${t('Copy the key ID')}" title="${t('Copy')}">${ICO.copy}</button></dd>
+    <dt>${t('Key')}</dt><dd>${k.revealable ? t('Can be shown again with your password') : signed ? t('Held by the app (it signed in)') : t('Was shown once, when it was made')}</dd>
+    ${k.created ? `<dt>${t('Created')}</dt><dd>${esc(fmtTs(k.created))}</dd>` : ''}
+    <dt>${t('Last IP')}</dt><dd><code title="${attr(k.last_ip || '')}">${esc(k.last_ip || t('None yet'))}</code></dd>`;
 }
 
 function paintRecent(): void {
@@ -797,12 +798,12 @@ function paintRecent(): void {
   const rows = P!.events.filter((x) => x.source === 'agent').slice(0, 8);
   const k = key()!;
   if (!rows.length) {
-    box.innerHTML = `<div class="ap-empty"><b>No calls in the last ${P!.range === '7d' ? '7 days' : 'while'}</b>${
-      statusOf(k).st === 'never' ? 'Once its app is set up, every call shows up here as it happens.' : 'New calls show up here as they happen.'
+    box.innerHTML = `<div class="ap-empty"><b>${P!.range === '7d' ? t('No calls in the last 7 days') : t('No calls in the last while')}</b>${
+      statusOf(k).st === 'never' ? t('Once its app is set up, every call shows up here as it happens.') : t('New calls show up here as they happen.')
     }</div>`;
     return;
   }
-  box.innerHTML = `<ul class="ap-evs" aria-label="Recent calls">${rows.map((x) => evRowHTML(x)).join('')}</ul>`;
+  box.innerHTML = `<ul class="ap-evs" aria-label="${t('Recent calls')}">${rows.map((x) => evRowHTML(x)).join('')}</ul>`;
 }
 
 function paintSetup(panel: HTMLElement, k: KeyRowFull): void {
@@ -813,15 +814,17 @@ function paintSetup(panel: HTMLElement, k: KeyRowFull): void {
   const c = appById(app.id)!;
   // A guessed app can still be changed until the first call keeps it.
   const top = app.guessed
-    ? `<p class="ap-guessed">${appIconHTML(c.label, 20)}<span>Showing the setup for <b>${esc(c.label)}</b>, guessed from ${
-        data.oauth.has(k.id) ? 'how it signed in' : 'its name'
-      }.</span><button type="button" class="ap-link" data-other>Wrong app? Pick another</button></p>`
+    ? `<p class="ap-guessed">${appIconHTML(c.label, 20)}<span>${
+        data.oauth.has(k.id)
+          ? t('Showing the setup for {app}, guessed from how it signed in.', { app: `<b>${esc(c.label)}</b>` })
+          : t('Showing the setup for {app}, guessed from its name.', { app: `<b>${esc(c.label)}</b>` })
+      }</span><button type="button" class="ap-link" data-other>${t('Wrong app? Pick another')}</button></p>`
     : `<div class="ap-card ap-lock">${appIconHTML(c.label, 40)}<span class="tx"><b>${esc(c.label)}${ICO_LOCK}</b>
-      <small>Each agent belongs to one app. To use Memora in another app, create a separate agent for it.</small></span>
-      <a class="btn" href="/agents/new" data-nav="new">${ICO.plus}New agent</a></div>`;
+      <small>${t('Each agent belongs to one app. To use Memora in another app, create a separate agent for it.')}</small></span>
+      <a class="btn" href="/agents/new" data-nav="new">${ICO.plus}${t('New agent')}</a></div>`;
   panel.innerHTML = `${top}
-    <div class="ap-card ap-wz"><div id="apWz"></div><div class="ap-wz-f"><button type="button" class="btn ghost" id="apWzBack">Back</button><span class="grow"></span>
-      <button type="button" class="btn primary" id="apWzNext">Continue</button></div></div>`;
+    <div class="ap-card ap-wz"><div id="apWz"></div><div class="ap-wz-f"><button type="button" class="btn ghost" id="apWzBack">${t('Back')}</button><span class="grow"></span>
+      <button type="button" class="btn primary" id="apWzNext">${t('Continue')}</button></div></div>`;
   const back = panel.querySelector<HTMLButtonElement>('#apWzBack')!;
   const next = panel.querySelector<HTMLButtonElement>('#apWzNext')!;
   const secret = freshSecrets.get(k.id);
@@ -842,8 +845,8 @@ function paintSetup(panel: HTMLElement, k: KeyRowFull): void {
     setNav: (n) => {
       back.style.visibility = n.back ? '' : 'hidden';
       // The last step needs no button: everything is on the page already.
-      next.hidden = n.next === 'Done';
-      next.textContent = n.next === 'Continue' ? 'Next: first prompt' : n.next;
+      next.hidden = n.next === 'Done' || n.next === t('Done');
+      next.textContent = n.next === 'Continue' || n.next === t('Continue') ? t('Next: first prompt') : n.next;
     },
   });
   P!.wizard = wz;
@@ -863,7 +866,7 @@ async function lockApp(k: KeyRowFull, clientId: string): Promise<void> {
   await setAgentApp(k.id, clientId);
   if (!P) return;
   P.picking = false;
-  toast(`${nameOf(k)} belongs to ${appById(clientId)?.label || 'that app'}`, 'ok', 2200);
+  toast(t('{name} belongs to {app}', { name: nameOf(k), app: appById(clientId)?.label || t('that app') }), 'ok', 2200);
   paintHead();
   const panel = P.root.querySelector<HTMLElement>('#apPanel');
   if (panel && P.tab === 'setup') {
@@ -880,12 +883,12 @@ function paintPicker(panel: HTMLElement, k: KeyRowFull): void {
       s.label,
       32,
     )}<span class="tx"><b>${esc(s.label)}</b><small>${esc(s.kind)}</small></span></button>`;
-  panel.innerHTML = `<div class="ap-card ap-ask"><h2 tabindex="-1">Which app is ${esc(name)} used with?</h2>
-    <p>Pick it and the setup steps for that app follow, with ${esc(name)}'s key filled in. For another app or device, make a new agent.</p>
-    <label class="ap-pq">${ICO.search}<span class="sr-only">Search apps</span><input class="ui-input" type="search" id="apPq" placeholder="Search apps" autocomplete="off"></label>
-    <div class="ap-pgrid" role="group" aria-label="Apps">${snippets().map(tile).join('')}</div>
-    <p class="ap-pnone" id="apPnone" hidden>No app matches. <b>Any client</b> works with every MCP client.</p>
-    ${appFor(k).id ? `<p style="margin:14px 0 0"><button type="button" class="ap-link" data-cancel>Back to the ${esc(appFor(k).label)} setup</button></p>` : ''}</div>`;
+  panel.innerHTML = `<div class="ap-card ap-ask"><h2 tabindex="-1">${t('Which app is {name} used with?', { name: esc(name) })}</h2>
+    <p>${t("Pick it and the setup steps for that app follow, with {name}'s key filled in. For another app or device, make a new agent.", { name: esc(name) })}</p>
+    <label class="ap-pq">${ICO.search}<span class="sr-only">${t('Search apps')}</span><input class="ui-input" type="search" id="apPq" placeholder="${t('Search apps')}" autocomplete="off"></label>
+    <div class="ap-pgrid" role="group" aria-label="${t('Apps')}">${snippets().map(tile).join('')}</div>
+    <p class="ap-pnone" id="apPnone" hidden>${t('No app matches. {any} works with every MCP client.', { any: `<b>${t('Any client')}</b>` })}</p>
+    ${appFor(k).id ? `<p style="margin:14px 0 0"><button type="button" class="ap-link" data-cancel>${t('Back to the {app} setup', { app: esc(appFor(k).label) })}</button></p>` : ''}</div>`;
   panel.querySelectorAll<HTMLElement>('[data-pick]').forEach((b) => (b.onclick = () => void lockApp(k, b.dataset.pick!)));
   const cancel = panel.querySelector<HTMLElement>('[data-cancel]');
   if (cancel)
@@ -935,9 +938,9 @@ async function paintAccess(panel: HTMLElement, k: KeyRowFull): Promise<void> {
   if (P !== page || page.tab !== 'access') return;
   const start = permsOf(k);
   panel.innerHTML = `<div class="ap-card ap-acc-ed" id="apPerms">${permsHTML(start, tools, { levels: true })}</div>
-    <div class="ap-save" id="apSave"><div class="ap-save-in"><span class="msg" aria-live="polite">No changes</span>
-      <button type="button" class="btn ghost" data-cancel disabled>Cancel</button>
-      <button type="button" class="btn primary" data-save disabled>Save access</button></div></div>`;
+    <div class="ap-save" id="apSave"><div class="ap-save-in"><span class="msg" aria-live="polite">${t('No changes')}</span>
+      <button type="button" class="btn ghost" data-cancel disabled>${t('Cancel')}</button>
+      <button type="button" class="btn primary" data-save disabled>${t('Save access')}</button></div></div>`;
   const box = panel.querySelector<HTMLElement>('#apPerms')!;
   const ed = wirePerms(box, start, tools);
   page.perms = ed;
@@ -948,7 +951,7 @@ async function paintAccess(panel: HTMLElement, k: KeyRowFull): Promise<void> {
   const sync = (): void => {
     const dirty = !same();
     bar.classList.toggle('dirty', dirty);
-    bar.querySelector('.msg')!.textContent = dirty ? 'Unsaved changes' : 'No changes';
+    bar.querySelector('.msg')!.textContent = dirty ? t('Unsaved changes') : t('No changes');
     save.disabled = !dirty;
     cancel.disabled = !dirty;
   };
@@ -966,40 +969,40 @@ async function paintAccess(panel: HTMLElement, k: KeyRowFull): Promise<void> {
     save.disabled = true;
     try {
       await updateKeyPermissions({ id: k.id, scopes: p.scopes, tools: p.tools });
-      toast('Access saved for ' + nameOf(k), 'ok');
+      toast(t('Access saved for {name}', { name: nameOf(k) }), 'ok');
       await loadAgents(true);
       if (P === page && page.tab === 'access') void paintAccess(panel, key() || k);
     } catch (e) {
       save.disabled = false;
-      toast('Could not save access: ' + (e as Error).message, 'err', 5200);
+      toast(t('Could not save access: {error}', { error: (e as Error).message }), 'err', 5200);
     }
   };
 }
 
 function previewHTML(name: string, color: string, sub: string): string {
-  return `${avatarHTML(name || '?', 44).replace(/--ag:[^;]+;/, `--ag:${color};`)}<span><b>${esc(name || 'Agent')}</b><small>${esc(sub)}</small></span>`;
+  return `${avatarHTML(name || '?', 44).replace(/--ag:[^;]+;/, `--ag:${color};`)}<span><b>${esc(name || t('Agent'))}</b><small>${esc(sub)}</small></span>`;
 }
 
 function paintSettings(panel: HTMLElement, k: KeyRowFull): void {
   panel.innerHTML = `<div class="ap-set">
-    <section class="ap-card"><div class="ap-card-h"><h2>Name &amp; colour</h2></div>
+    <section class="ap-card"><div class="ap-card-h"><h2>${t('Name & colour')}</h2></div>
       <form class="ap-namef" id="apName"><div class="ap-prev" id="apPrev"></div>
-        <div class="ui-fld"><label for="apN">Name</label><input id="apN" class="ui-input" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(
+        <div class="ui-fld"><label for="apN">${t('Name')}</label><input id="apN" class="ui-input" type="text" autocomplete="off" spellcheck="false" maxlength="64" value="${attr(
           k.name || '',
-        )}"><span class="ui-help">Past activity keeps the old name; new activity uses this one.</span></div>
-        <div class="ui-fld"><span class="ui-lbl">Colour</span>${colorPickHTML('apColor', k.color || '', { auto: true })}
-          <span class="ui-help">On its avatar, its sparks in the brain and every activity row.</span></div>
-        <div class="acts"><button type="submit" class="btn primary">Save</button></div></form></section>
+        )}"><span class="ui-help">${t('Past activity keeps the old name; new activity uses this one.')}</span></div>
+        <div class="ui-fld"><span class="ui-lbl">${t('Colour')}</span>${colorPickHTML('apColor', k.color || '', { auto: true })}
+          <span class="ui-help">${t('On its avatar, its sparks in the brain and every activity row.')}</span></div>
+        <div class="acts"><button type="submit" class="btn primary">${t('Save')}</button></div></form></section>
     <div id="apLive" style="display:flex;flex-direction:column;gap:16px;min-width:0"></div>
-    <section class="ap-card ap-danger full"><div class="ap-card-h"><h2>Danger zone</h2></div>
-      <div class="ap-row"><span class="tx"><b>Delete this agent</b><small>Its key stops working at once. Past activity stays; you can restore it until you reload the app.</small></span>
-        <button type="button" class="btn danger" data-s="delete">${ICO_TRASH}Delete agent</button></div></section></div>`;
+    <section class="ap-card ap-danger full"><div class="ap-card-h"><h2>${t('Danger zone')}</h2></div>
+      <div class="ap-row"><span class="tx"><b>${t('Delete this agent')}</b><small>${t('Its key stops working at once. Past activity stays; you can restore it until you reload the app.')}</small></span>
+        <button type="button" class="btn danger" data-s="delete">${ICO_TRASH}${t('Delete agent')}</button></div></section></div>`;
   const form = panel.querySelector<HTMLFormElement>('#apName')!;
   const input = form.querySelector<HTMLInputElement>('#apN')!;
   const prev = (): void => {
     const n = input.value.trim() || nameOf(k);
     const picked = form.querySelector<HTMLElement>('#apColor')!.dataset.value;
-    form.querySelector<HTMLElement>('#apPrev')!.innerHTML = previewHTML(n, picked || agentColor(n, null), picked ? 'Chosen colour' : 'Automatic colour from the name');
+    form.querySelector<HTMLElement>('#apPrev')!.innerHTML = previewHTML(n, picked || agentColor(n, null), picked ? t('Chosen colour') : t('Automatic colour from the name'));
   };
   wireColorPick(form, 'apColor', prev);
   input.oninput = prev;
@@ -1010,22 +1013,22 @@ function paintSettings(panel: HTMLElement, k: KeyRowFull): void {
     const name = input.value.trim();
     const color = form.querySelector<HTMLElement>('#apColor')!.dataset.value || '';
     if (!name) {
-      toast('The name cannot be empty', 'warn');
+      toast(t('The name cannot be empty'), 'warn');
       input.focus();
       return;
     }
     if (name === (cur.name || '') && color === (cur.color || '')) {
-      toast('Nothing to save', 'info', 1600);
+      toast(t('Nothing to save'), 'info', 1600);
       return;
     }
     try {
       if (name !== (cur.name || '')) await apiPost(KEY_PATHS.update, { id: cur.id, name });
       if (color !== (cur.color || '')) await apiPost(KEY_PATHS.update, { id: cur.id, color });
-      toast('Saved', 'ok');
+      toast(t('Saved'), 'ok');
       await loadKeys();
       await loadAgents(true);
     } catch (err) {
-      toast('Could not save: ' + (err as Error).message, 'err');
+      toast(t('Could not save: {error}', { error: (err as Error).message }), 'err');
     }
   };
   panel.querySelector<HTMLElement>('[data-s=delete]')!.onclick = () => delKey(key() || k, () => navAgents(''));
@@ -1039,18 +1042,18 @@ function paintSettingsLive(): void {
   if (!box || !k) return;
   const off = k.enabled === false;
   const signed = data.oauth.has(k.id);
-  box.innerHTML = `<section class="ap-card"><div class="ap-card-h"><h2>Key</h2></div>
-      <div class="ap-row"><span class="tx"><b>${k.revealable ? 'Can be shown again' : signed ? 'Held by the app' : 'Shown once'}</b><small>${
-        k.revealable ? 'Your password shows it again.' : signed ? 'The app signed in and holds its own token.' : 'It was shown when it was made. Make a new key to see one again.'
-      }</small></span>${k.revealable ? `<button type="button" class="btn" data-s="reveal">${ICO_EYE}Show key</button>` : ''}</div>
-      <div class="ap-row"><span class="tx"><b>Make a new key</b><small>The current key stops working at once; the setup guide gets the new one.</small></span>
-        <button type="button" class="btn" data-s="roll">${ICO.key}Make a new key</button></div>
-      <details class="ap-tech" style="border-top:1px solid var(--line)"><summary>${ICO_CHEV}Technical details<small>Key ID, last IP</small></summary>
+  box.innerHTML = `<section class="ap-card"><div class="ap-card-h"><h2>${t('Key')}</h2></div>
+      <div class="ap-row"><span class="tx"><b>${k.revealable ? t('Can be shown again') : signed ? t('Held by the app') : t('Shown once')}</b><small>${
+        k.revealable ? t('Your password shows it again.') : signed ? t('The app signed in and holds its own token.') : t('It was shown when it was made. Make a new key to see one again.')
+      }</small></span>${k.revealable ? `<button type="button" class="btn" data-s="reveal">${ICO_EYE}${t('Show key')}</button>` : ''}</div>
+      <div class="ap-row"><span class="tx"><b>${t('Make a new key')}</b><small>${t('The current key stops working at once; the setup guide gets the new one.')}</small></span>
+        <button type="button" class="btn" data-s="roll">${ICO.key}${t('Make a new key')}</button></div>
+      <details class="ap-tech" style="border-top:1px solid var(--line)"><summary>${ICO_CHEV}${t('Technical details')}<small>${t('Key ID, last IP')}</small></summary>
         <div class="ap-card-b"><dl class="ap-kv">${techRows(k)}</dl></div></details></section>
-    <section class="ap-card"><div class="ap-card-h"><h2>Status</h2></div>
-      <div class="ap-row"><span class="tx"><b>${off ? 'Turned off' : 'Turned on'}</b><small>${
-        off ? 'Its key is refused. Turn it on to let it connect again with the same key.' : 'Turn it off to block it without deleting anything.'
-      }</small></span><button type="button" class="btn" data-s="toggle">${off ? ICO.check + 'Turn on' : ICO_POWER + 'Turn off'}</button></div></section>`;
+    <section class="ap-card"><div class="ap-card-h"><h2>${t('Status')}</h2></div>
+      <div class="ap-row"><span class="tx"><b>${off ? t('Turned off') : t('Turned on')}</b><small>${
+        off ? t('Its key is refused. Turn it on to let it connect again with the same key.') : t('Turn it off to block it without deleting anything.')
+      }</small></span><button type="button" class="btn" data-s="toggle">${off ? ICO.check + t('Turn on') : ICO_POWER + t('Turn off')}</button></div></section>`;
   wireCopy(box);
   box.querySelectorAll<HTMLElement>('[data-s]').forEach((b) => {
     b.onclick = () => {

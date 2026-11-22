@@ -1,6 +1,7 @@
 // Account chip, account panel, quick guide and the profile menu.
 
 import { openWhatsNew } from './ui/whats-new';
+import { openPromo } from './assistant/promo';
 import { apiGet, apiPost } from './api';
 import { $, $$, esc } from './dom';
 import { hooks } from './hooks';
@@ -15,6 +16,7 @@ import { THEME_ICON, THEME_LABEL, setThemePref, themePref, type ThemePref } from
 import { segmented } from './ui/components';
 import { toast } from './toast';
 import { repaintUnread } from './assistant/unread';
+import { t, tn } from './i18n';
 
 interface SessionInfo {
   authenticated?: boolean;
@@ -37,10 +39,10 @@ function initialOf(name: string): string {
 /** Fill the top bar chip. Falls back to "account" when the name is unknown. */
 export function paintAccountChip(me: SessionInfo | null): void {
   const name = currentUser(me);
-  document.querySelectorAll<HTMLElement>('[data-username]').forEach((n) => (n.textContent = name || 'account'));
+  document.querySelectorAll<HTMLElement>('[data-username]').forEach((n) => (n.textContent = name || t('account')));
   document.querySelectorAll<HTMLElement>('[data-avatar]').forEach((n) => (n.textContent = initialOf(name)));
   $('#profileBtn').dataset.user = name;
-  $('#profileBtn').setAttribute('aria-label', (name ? name + ': ' : '') + 'account and settings');
+  $('#profileBtn').setAttribute('aria-label', (name ? name + ': ' : '') + t('account and settings'));
   myName = name;
 }
 
@@ -76,7 +78,7 @@ export async function openAccount(): Promise<void> {
   const name = currentUser(me);
 
   if (!name) {
-    toast('Your session has ended. Signing you out.', 'warn');
+    toast(t('Your session has ended. Signing you out.'), 'warn');
     window.setTimeout(() => window.location.replace('/login'), 700);
     return;
   }
@@ -88,19 +90,19 @@ export async function openAccount(): Promise<void> {
         <span class="acct-avatar">${esc(initialOf(name))}</span>
         <div>
           <div class="acct-name">${esc(name)}</div>
-          <div class="acct-sub">${me?.enabled === false ? 'disabled' : 'signed in'}</div>
+          <div class="acct-sub">${me?.enabled === false ? t('disabled') : t('signed in')}</div>
         </div>
       </div>
       <div class="kv">
-        <span class="kv-k">Session expires</span>
-        <span class="kv-v">${mins ? mins + ' minutes' : 'on activity'}</span>
+        <span class="kv-k">${t('Session expires')}</span>
+        <span class="kv-v">${mins ? tn(mins, '{n} minute', '{n} minutes') : t('on activity')}</span>
       </div>
-      <div class="acct-theme"><span>Appearance</span><span id="acctTheme"></span></div>
-      <p class="panel-sub">The session renews while you keep using the app. Agents connect with an API key from Agents &amp; keys.</p>
+      <div class="acct-theme"><span>${t('Appearance')}</span><span id="acctTheme"></span></div>
+      <p class="panel-sub">${t('The session renews while you keep using the app. Agents connect with an API key from Agents &amp; keys.')}</p>
     </div>`;
 
   Modal.open({
-    title: 'Account',
+    title: t('Account'),
     sub: name,
     body,
     onOpen: (root) => {
@@ -108,9 +110,9 @@ export async function openAccount(): Promise<void> {
       if (slot) slot.replaceWith(themeControl());
     },
     actions: [
-      { label: 'Close', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Close'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Sign out',
+        label: t('Sign out'),
         cls: 'danger',
         run: () => {
           Modal.close();
@@ -128,7 +130,7 @@ function themeControl(): HTMLElement {
     prefs.map((p) => ({ value: p, label: THEME_LABEL[p], icon: THEME_ICON[p] })),
     themePref(),
     (v) => setThemePref(v),
-    'Theme',
+    t('Theme'),
   );
 }
 
@@ -136,33 +138,33 @@ function themeControl(): HTMLElement {
 export function openGuide(): void {
   const mod = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
   Modal.open({
-    title: 'Help & shortcuts',
+    title: t('Help & shortcuts'),
     sub: 'Memora',
     body: `
       <div class="guide">
-        <section class="guide-about" aria-label="What is Memora">
+        <section class="guide-about" aria-label="${t('What is Memora')}">
           ${markSvg('guide-mark')}
-          <div><b>What is Memora</b><span class="guide-motto">${BRAND_MOTTO}</span></div>
-          <p>${BRAND_DESC}</p>
-          <p>${BRAND_ONCE}</p>
-          <p class="guide-name">${BRAND_NAME}</p>
-          <span class="guide-btns"><button type="button" class="btn sm guide-wl" id="guideWelcome">Read the full welcome</button>
-          <button type="button" class="btn sm guide-wl" id="guideDocs">${icon('book')}Open documentation</button></span>
+          <div><b>${t('What is Memora')}</b><span class="guide-motto">${t(BRAND_MOTTO)}</span></div>
+          <p>${t(BRAND_DESC)}</p>
+          <p>${t(BRAND_ONCE)}</p>
+          <p class="guide-name">${t(BRAND_NAME)}</p>
+          <span class="guide-btns"><button type="button" class="btn sm guide-wl" id="guideWelcome">${t('Read the full welcome')}</button>
+          <button type="button" class="btn sm guide-wl" id="guideDocs">${icon('book')}${t('Open documentation')}</button></span>
         </section>
-        <p><b>Brain</b> shows every note as a point of light; agent activity pulses through it live.</p>
+        <p>${t('{brain} shows every note as a point of light; agent activity pulses through it live.', { brain: `<b>${t('Brain')}</b>` })}</p>
         <div class="guide-keys">
-          <span><kbd>${mod}</kbd><kbd>K</kbd></span><span>Search notes, jump to pages, run actions</span>
-          <span><kbd>/</kbd></span><span>Open search from anywhere</span>
-          <span><kbd>&gt;</kbd></span><span>In search: actions only (new note, theme ...)</span>
-          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>Overview, Brain, Notes, Graph, Canvas, Tags, Activity, Agents, Tools</span>
-          <span><kbd>[</kbd></span><span>Collapse or expand the sidebar</span>
-          <span><kbd>?</kbd></span><span>Open this help</span>
+          <span><kbd>${mod}</kbd><kbd>K</kbd></span><span>${t('Search notes, jump to pages, run actions')}</span>
+          <span><kbd>/</kbd></span><span>${t('Open search from anywhere')}</span>
+          <span><kbd>&gt;</kbd></span><span>${t('In search: actions only (new note, theme ...)')}</span>
+          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>${t('Overview, Brain, Notes, Graph, Canvas, Tags, Activity, Agents, Tools')}</span>
+          <span><kbd>[</kbd></span><span>${t('Collapse or expand the sidebar')}</span>
+          <span><kbd>?</kbd></span><span>${t('Open this help')}</span>
         </div>
-        <p>The <b>Connected</b> dot in the top bar shows Memora is reachable, and how many agents are working right now. Click it for details.</p>
-        <p>The sidebar lists your pages; settings, tools, access rules and help are in the menu under your name.</p>
-        <p>Search understands <code>tag:name</code> to narrow by tag.</p>
+        <p>${t('The {connected} dot in the top bar shows Memora is reachable, and how many agents are working right now. Click it for details.', { connected: `<b>${t('Connected')}</b>` })}</p>
+        <p>${t('The sidebar lists your pages; settings, tools, access rules and help are in the menu under your name.')}</p>
+        <p>${t('Search understands {code} to narrow by tag.', { code: '<code>tag:name</code>' })}</p>
       </div>`,
-    actions: [{ label: 'Got it', cls: 'primary', run: () => Modal.close() }],
+    actions: [{ label: t('Got it'), cls: 'primary', run: () => Modal.close() }],
   });
   document.getElementById('guideWelcome')?.addEventListener('click', () => {
     Modal.close();
@@ -257,7 +259,7 @@ export function openProfileMenu(anchor: HTMLElement): void {
   const keys = (n: number): string => `<span class="pm-keys alt" aria-hidden="true"><kbd>${alt}</kbd><kbd>${n}</kbd></span>`;
   const fabShown = hooks.mnemoButton();
   const mnemoToggle = `<button class="pm-item" role="menuitem" type="button" data-act="mnemofab">${icon(fabShown ? 'eye-off' : 'eye')}<span class="pm-label">${
-      fabShown ? 'Hide the Mnemo button' : 'Show the Mnemo button'
+      fabShown ? t('Hide the Mnemo button') : t('Show the Mnemo button')
     }</span></button>`;
   const mnemo = item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + mnemoToggle;
   const group = (id: string, label: string, body: string): string =>
@@ -266,44 +268,45 @@ export function openProfileMenu(anchor: HTMLElement): void {
   // On wider screens the everyday pages are in the sidebar; the menu keeps the workspace ones.
   const sheet = window.matchMedia(SHEET_QUERY).matches;
   const pages = sheet
-    ? group('pages', 'Pages', item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + item('tags', 'Tags', 'tags') + item('trash', 'Trash', 'trash'))
+    ? group('pages', t('Pages'), item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + item('tags', t('Tags'), 'tags') + item('trash', t('Trash'), 'trash'))
     : '';
   menu.innerHTML = `
     <div class="pm-top">
     <div class="pm-grab" aria-hidden="true"></div>
     <div class="pm-head">
       <span class="user-avatar lg">${esc(initialOf(myName))}</span>
-      <div class="pm-who"><b>${esc(myName || 'account')}</b><span><i class="pm-dot"></i>Signed in${ver ? ` <em>·</em> <span title="Memora version">${esc(ver)}</span>` : ''}</span></div>
-      <button class="pm-close icon-btn" type="button" aria-label="Close menu">${icon('close')}</button>
+      <div class="pm-who"><b>${esc(myName || t('account'))}</b><span><i class="pm-dot"></i>${t('Signed in')}${ver ? ` <em>·</em> <span title="${t('Memora version')}">${esc(ver)}</span>` : ''}</span></div>
+      <button class="pm-close icon-btn" type="button" aria-label="${t('Close menu')}">${icon('close')}</button>
     </div>
-    <div class="pm-theme" role="group" aria-labelledby="pmg-theme"><div class="pm-glabel" id="pmg-theme">Appearance</div><span id="pmTheme"></span></div>
+    <div class="pm-theme" role="group" aria-labelledby="pmg-theme"><div class="pm-glabel" id="pmg-theme">${t('Appearance')}</div><span id="pmTheme"></span></div>
     </div>
     ${pages}
     ${
       sheet
         ? group(
             'agents',
-            'Agents',
+            t('Agents'),
             mnemoToggle +
-              item('logs', 'Activity', 'activity', live ? `<span class="pm-live"><i></i>${live} live</span>` : keys(7)) +
-              item('keys', 'Agents & API keys', 'key', keys(8)) +
-              item('tools', 'Tools', 'tools', keys(9)),
-          ) + group('system', 'System', item('access', 'Access rules', 'shield') + item('settings', 'Settings', 'settings'))
-        : group('system', 'Workspace', mnemo + item('tools', 'Tools', 'tools') + item('access', 'Access rules', 'shield'))
+              item('logs', t('Activity'), 'activity', live ? `<span class="pm-live"><i></i>${t('{n} live', { n: live })}</span>` : keys(7)) +
+              item('keys', t('Agents & API keys'), 'key', keys(8)) +
+              item('tools', t('Tools'), 'tools', keys(9)),
+          ) + group('system', t('System'), item('access', t('Access rules'), 'shield') + item('settings', t('Settings'), 'settings'))
+        : group('system', t('Workspace'), mnemo + item('tools', t('Tools'), 'tools') + item('access', t('Access rules'), 'shield'))
     }
     ${group(
       'help',
-      'Help',
-      item('docs', 'Documentation', 'book') +
-        `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">Help & shortcuts</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
-      <button class="pm-item" role="menuitem" type="button" data-act="whatsnew">${icon('bolt')}<span class="pm-label">What's new</span></button>
-      <button class="pm-item" role="menuitem" type="button" data-act="welcome">${icon('sparkle')}<span class="pm-label">Welcome to Memora</span></button>` +
+      t('Help'),
+      item('docs', t('Documentation'), 'book') +
+        `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">${t('Help & shortcuts')}</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
+      <button class="pm-item" role="menuitem" type="button" data-act="whatsnew">${icon('bolt')}<span class="pm-label">${t("What's new")}</span></button>
+      <button class="pm-item" role="menuitem" type="button" data-act="welcome">${icon('sparkle')}<span class="pm-label">${t('Welcome to Memora')}</span></button>
+      <button class="pm-item" role="menuitem" type="button" data-act="share">${icon('star')}<span class="pm-label">${t('Share Memora')}</span></button>` +
         (canInstall()
-          ? `<button class="pm-item" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">Install app</span></button>`
+          ? `<button class="pm-item" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">${t('Install app')}</span></button>`
           : ''),
     )}
     <div class="pm-sep" role="separator"></div>
-    <button class="pm-item danger" role="menuitem" type="button" data-act="signout">${icon('logout')}<span class="pm-label">Sign out</span></button>`;
+    <button class="pm-item danger" role="menuitem" type="button" data-act="signout">${icon('logout')}<span class="pm-label">${t('Sign out')}</span></button>`;
   repaintUnread();
 
   // Appearance: a menuitemradio group, kept in sync with the segmented control.
@@ -332,12 +335,13 @@ export function openProfileMenu(anchor: HTMLElement): void {
       else if (act === 'guide') openGuide();
       else if (act === 'welcome') openWelcome();
       else if (act === 'whatsnew') openWhatsNew();
+      else if (act === 'share') openPromo();
       else if (act === 'install') void PWA.install();
       else if (act === 'signout') void signOut();
       else if (act === 'mnemofab') {
         const show = !hooks.mnemoButton();
         hooks.mnemoButton(show);
-        toast(show ? 'The Mnemo button is back' : 'Mnemo button hidden. Show it again from More, Show the Mnemo button.', 'ok');
+        toast(show ? t('The Mnemo button is back') : t('Mnemo button hidden. Show it again from More, Show the Mnemo button.'), 'ok');
       }
     };
   });

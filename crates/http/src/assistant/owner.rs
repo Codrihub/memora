@@ -78,12 +78,13 @@ fn clean_text(t: &str) -> Result<String, String> {
     Ok(t)
 }
 
+/// Notes have no kinds any more (3.0.0): one plain list. An old note keeps the kind it had;
+/// a kind sent by an older client is checked and stored, a missing one stays empty.
 fn clean_kind(k: Option<&str>) -> Result<String, String> {
-    let k = k.unwrap_or("about");
-    if KINDS.contains(&k) {
-        Ok(k.to_string())
-    } else {
-        Err("kind is style, about or prefers".into())
+    match k.unwrap_or("") {
+        "" => Ok(String::new()),
+        k if KINDS.contains(&k) => Ok(k.to_string()),
+        _ => Err("kind is style, about or prefers".into()),
     }
 }
 
@@ -149,36 +150,24 @@ pub(crate) fn remove(store: &Store, id: &str) -> Result<(), String> {
     save(store, &items, seq)
 }
 
-/// The notes as the model reads them, grouped, each with its id; empty when there are none.
+/// The notes as the model reads them, one list, each with its id; empty when there are none.
 pub(crate) fn prompt_text(store: &Store) -> String {
-    let items = items(store);
-    let mut out = String::new();
-    for (kind, title) in [
-        ("style", "How to answer them"),
-        ("about", "About them"),
-        ("prefers", "What they like"),
-    ] {
-        let lines: Vec<String> = items
-            .iter()
-            .filter(|i| i["kind"] == kind)
-            .map(|i| {
-                format!(
-                    "- [{}] {}{}",
-                    i["id"].as_str().unwrap_or(""),
-                    i["text"].as_str().unwrap_or(""),
-                    if i["by"] == "owner" {
-                        " (set by the owner)"
-                    } else {
-                        ""
-                    }
-                )
-            })
-            .collect();
-        if !lines.is_empty() {
-            out.push_str(&format!("{title}:\n{}\n", lines.join("\n")));
-        }
-    }
-    out.trim_end().to_string()
+    items(store)
+        .iter()
+        .map(|i| {
+            format!(
+                "- [{}] {}{}",
+                i["id"].as_str().unwrap_or(""),
+                i["text"].as_str().unwrap_or(""),
+                if i["by"] == "owner" {
+                    " (set by the owner)"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// How the snapshot reads at the top of the owner's message.
@@ -201,7 +190,6 @@ and may be out of date.{keep}\n{notes})"
 }
 
 pub(crate) fn defs() -> Vec<ToolDef> {
-    let kind = json!({"type": "string", "enum": KINDS, "description": "style: how they want answers (length, tone, steps, language); about: who they are, their work, people and places; prefers: tastes and habits"});
     vec![
         ToolDef {
             name: REMEMBER.into(),
@@ -212,8 +200,8 @@ telling them, unless they asked you to remember."
                 .into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"text": {"type": "string", "description": "One short sentence, e.g. 'Wants one step at a time, not the whole list'"}, "kind": kind},
-                "required": ["text", "kind"],
+                "properties": {"text": {"type": "string", "description": "One short sentence, e.g. 'Wants one step at a time, not the whole list'"}},
+                "required": ["text"],
                 "additionalProperties": false
             }),
         },
@@ -222,7 +210,7 @@ telling them, unless they asked you to remember."
             description: "Change one of your notes about the owner (by its id, e.g. m3) when it changed or was only half right.".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"id": {"type": "string"}, "text": {"type": "string"}, "kind": kind},
+                "properties": {"id": {"type": "string"}, "text": {"type": "string"}},
                 "required": ["id"],
                 "additionalProperties": false
             }),
@@ -361,10 +349,13 @@ mod tests {
             add(&s, "x", Some("mood"), "owner").is_err(),
             "known kinds only"
         );
-        let b = add(&s, "Runs a farm business", None, "owner").unwrap();
+        let b = add(&s, "Works as a designer", None, "owner").unwrap();
         let text = prompt_text(&s);
-        assert!(text.contains("How to answer them:\n- [m1] Wants one step at a time"));
-        assert!(text.contains("About them:\n- [m2] Runs a farm business (set by the owner)"));
+        assert_eq!(
+            text, "- [m1] Wants one step at a time\n- [m2] Works as a designer (set by the owner)",
+            "one plain list"
+        );
+        assert_eq!(b["kind"], "", "no kind needed");
         let e = edit(&s, "m1", Some("Wants short answers"), None, "owner").unwrap();
         assert_eq!(
             (e["text"].as_str(), e["by"].as_str()),

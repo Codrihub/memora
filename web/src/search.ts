@@ -10,6 +10,7 @@ import { icon } from './ui/icons';
 import { fadeScroll } from './ui/scroll-fade';
 import { score, similar, type Near } from './ui/match';
 import type { NoteRef, SearchHit, SearchResult } from './types';
+import { t } from './i18n';
 
 interface Command {
   id: string;
@@ -178,7 +179,7 @@ function build(raw: string): void {
   }
   if (near.length) {
     const none = !out.length && fullTextQ === raw.trim();
-    suggestNote = none ? `Nothing matches “${raw.trim()}”. Maybe you meant one of these:` : 'Maybe you meant:';
+    suggestNote = none ? t('Nothing matches “{q}”. Maybe you meant one of these:', { q: raw.trim() }) : t('Maybe you meant:');
     const shown = new Set(out.map((o) => o.sub));
     for (const x of near) {
       const o = noteOption(x.n, '', 'suggest');
@@ -204,7 +205,7 @@ function render(): void {
       html +=
         section === 'suggest'
           ? `<div class="pal-note" role="presentation">${esc(suggestNote)}</div>`
-          : `<div class="pal-sec" role="presentation">${esc(section)}${
+          : `<div class="pal-sec" role="presentation">${esc(t(section))}${
               section === 'In note text' && loading ? '<span class="pal-spin"></span>' : ''
             }</div>`;
     }
@@ -218,12 +219,12 @@ function render(): void {
   const q = input.value.trim();
   if (!options.length) {
     html = loading
-      ? '<div class="pal-sec">Searching note text <span class="pal-spin"></span></div>'
+      ? `<div class="pal-sec">${t('Searching note text')} <span class="pal-spin"></span></div>`
       : q
-        ? `<div class="pal-empty"><span class="pe-ico">${icon('search')}</span><b>No results for “${esc(q)}”</b><span>Nothing in note names, folders or text, and nothing spelled close to it. Try fewer letters, another spelling, or a word from inside a note.</span></div>`
-        : '<div class="pal-empty">Type to search.</div>';
+        ? `<div class="pal-empty"><span class="pe-ico">${icon('search')}</span><b>${t('No results for “{q}”', { q: esc(q) })}</b><span>${t('Nothing in note names, folders or text, and nothing spelled close to it. Try fewer letters, another spelling, or a word from inside a note.')}</span></div>`
+        : `<div class="pal-empty">${t('Type to search.')}</div>`;
   } else if (q && loading && !options.some((o) => o.section === 'In note text')) {
-    html += '<div class="pal-sec">In note text <span class="pal-spin"></span></div>';
+    html += `<div class="pal-sec">${t('In note text')} <span class="pal-spin"></span></div>`;
   }
   list.innerHTML = html;
   input.setAttribute('aria-activedescendant', options.length ? 'pal-o' + sel : '');
@@ -301,17 +302,17 @@ export function openPalette(initial = ''): void {
     return;
   }
   lastFocus = document.activeElement as HTMLElement | null;
-  host.innerHTML = `<div class="pal" role="dialog" aria-modal="true" aria-label="Search and commands">
+  host.innerHTML = `<div class="pal" role="dialog" aria-modal="true" aria-label="${t('Search and commands')}">
     <div class="pal-in">${icon('search')}
       <input id="palInput" type="search" placeholder="${
-        window.matchMedia?.('(max-width: 760px)').matches ? 'Search notes, pages, > actions' : 'Search notes, jump to a page, or type > for actions'
+        window.matchMedia?.('(max-width: 760px)').matches ? t('Search notes, pages, > actions') : t('Search notes, jump to a page, or type > for actions')
       }" autocomplete="off" spellcheck="false"
-        role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list" aria-label="Search notes, pages and actions">
-      <button class="icon-btn" type="button" id="palClose" aria-label="Close search" title="Close (Esc)">${icon('close')}</button>
+        role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list" aria-label="${t('Search notes, pages and actions')}">
+      <button class="icon-btn" type="button" id="palClose" aria-label="${t('Close search')}" title="${t('Close (Esc)')}">${icon('close')}</button>
     </div>
-    <div class="pal-list" id="palList" role="listbox" aria-label="Results"></div>
-    <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>&gt;</kbd> actions</span><span style="margin-left:auto"><kbd>esc</kbd> close</span></div>
-    <div class="pal-closebar"><button class="pal-closebtn" type="button" id="palCloseBottom"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>Close search</button></div>
+    <div class="pal-list" id="palList" role="listbox" aria-label="${t('Results')}"></div>
+    <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> ${t('move')}</span><span><kbd>↵</kbd> ${t('open')}</span><span><kbd>&gt;</kbd> ${t('actions')}</span><span style="margin-left:auto"><kbd>esc</kbd> ${t('close')}</span></div>
+    <div class="pal-closebar"><button class="pal-closebtn" type="button" id="palCloseBottom"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>${t('Close search')}</button></div>
   </div>`;
   host.classList.remove('hidden');
   fadeScroll(document.getElementById('palList'));
@@ -406,14 +407,14 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
-const SEARCH_HINTS = ['Search notes, pages, actions…', 'Try: open brain', 'Try: new note', 'Try: > theme', 'Try: a note title'];
+const SEARCH_HINTS = [t('Search notes, pages, actions…'), t('Try: open brain'), t('Try: new note'), t('Try: > theme'), t('Try: a note title')];
 
 /** On hover the header search rotates example queries; the first few visits play that once on their own. */
 function advertiseSearch(): void {
   const btn = $('#searchBtn');
   const label = btn.querySelector<HTMLElement>('.tb-search-label');
   if (!label) return;
-  label.textContent = 'Search';
+  label.textContent = t('Search');
   const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   let timer = 0;
   let i = 0;
@@ -441,7 +442,7 @@ function advertiseSearch(): void {
   };
   const stop = (): void => {
     window.clearInterval(timer);
-    show('Search');
+    show(t('Search'));
   };
   btn.addEventListener('mouseenter', start);
   btn.addEventListener('focus', start);

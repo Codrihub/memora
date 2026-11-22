@@ -48,7 +48,8 @@ function stamp(html) {
 
 /** Write through a temporary file and a rename, so a half-written file is never served. */
 function write(name, contents) {
-  const tmp = join(assets, `.${name}.tmp`);
+  const slash = name.lastIndexOf('/');
+  const tmp = join(assets, slash < 0 ? `.${name}.tmp` : `${name.slice(0, slash)}/.${name.slice(slash + 1)}.tmp`);
   writeFileSync(tmp, contents);
   renameSync(tmp, join(assets, name));
   console.log(`  ${name} (${contents.length} bytes)`);
@@ -70,9 +71,28 @@ const sha = (b) => createHash('sha256').update(b).digest('hex').slice(0, 12);
 // Version the script URL by its content, so a deploy is picked up even behind a caching proxy.
 const appJs = readFileSync(join(assets, 'app.js'));
 const appUrl = `/app.js?v=${sha(appJs)}`;
-let indexHtml = indexPage(appCss, splashJs).replace('<script src="/app.js">', `<script src="${appUrl}">`);
-const loginHtml = loginPage(loginCss, loginJs);
-const offlineHtml = offlinePage();
+// Each interface language is its own file, loaded before app.js only when it is picked
+// (i18n/lang/<code>.ts -> /i18n/<code>.js setting window.__MEMORA_I18N__).
+const langsMod = await loadModule('src/i18n/langs.ts');
+mkdirSync(join(assets, 'i18n'), { recursive: true });
+const langUrls = {};
+for (const l of langsMod.LANGS) {
+  const src = join('src', 'i18n', 'lang', `${l.code}.ts`);
+  if (l.code === 'en' || !existsSync(join(web, src))) continue;
+  const table = (await loadModule(src)).default;
+  const body = `window.__MEMORA_I18N__=${JSON.stringify({ lang: l.code, t: table })};`;
+  write(`i18n/${l.code}.js`, body);
+  langUrls[l.code] = `/i18n/${l.code}.js?v=${sha(body)}`;
+}
+const langBoot = `(function(){var LANGS=${JSON.stringify(langsMod.LANGS.map((l) => ({ code: l.code })))};var U=${JSON.stringify(
+  langUrls,
+)};var pickLang=${langsMod.pickLang.toString()};var p=null;try{p=localStorage.getItem(${JSON.stringify(langsMod.LANG_KEY)})}catch(e){}var dm=document.querySelector('meta[name=memora-lang]');var d=dm&&dm.getAttribute('content');if((!p||p==='auto')&&d&&d!=='auto')p=d;var c=pickLang(p,navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language]);if(${JSON.stringify(langsMod.LANGS.filter((l) => l.rtl).map((l) => l.code))}.indexOf(c)>=0)document.documentElement.dir='rtl';if(U[c])document.write('<script src="'+U[c]+'"><\\/script>')})();`;
+let indexHtml = indexPage(appCss, splashJs).replace('<script src="/app.js">', `<script>${langBoot}</script>\n<script src="${appUrl}">`);
+// Sign-in and offline pages have no app.js: the language file plus a small translator.
+const staticI18n = await compileScript('src/i18n/static-boot.ts');
+const withLang = (html) => html.replace('</head>', `<script>${langBoot}</script>\n<script>${staticI18n}</script>\n</head>`);
+const loginHtml = withLang(loginPage(loginCss, loginJs));
+const offlineHtml = withLang(offlinePage());
 let sw = swJs.replace('__MEMORA_APP_JS__', appUrl);
 
 // A leftover placeholder would ship a broken tag; fail instead.

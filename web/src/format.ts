@@ -1,8 +1,15 @@
 import { SWATCH_COLORS as FOLDER_FALLBACK } from './icons.ts';
+import { lang, t, tn } from './i18n';
+
+/** Date locale that matches the interface language. */
+function loc(): string {
+  const l = lang();
+  return l === 'id' ? 'id-ID' : l === 'zh' ? 'zh-CN' : 'en-US';
+}
 
 export function fmtTs(ts?: number | null): string {
   if (!ts) return '-';
-  return new Date(Number(ts) * 1000).toLocaleString('en-US', {
+  return new Date(Number(ts) * 1000).toLocaleString(loc(), {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -14,16 +21,15 @@ export function fmtTs(ts?: number | null): string {
 export function relTs(ts?: number | null): string {
   if (!ts) return '-';
   const s = Date.now() / 1000 - Number(ts);
-  const n = (v: number, unit: string): string => `${v} ${unit}${v === 1 ? '' : 's'} ago`;
-  if (s < 60) return 'just now';
-  if (s < 3600) return n(Math.floor(s / 60), 'minute');
-  if (s < 86400) return n(Math.floor(s / 3600), 'hour');
-  if (s < 2592000) return n(Math.floor(s / 86400), 'day');
-  return new Date(Number(ts) * 1000).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (s < 60) return t('just now');
+  if (s < 3600) return tn(Math.floor(s / 60), '{n} minute ago', '{n} minutes ago');
+  if (s < 86400) return tn(Math.floor(s / 3600), '{n} hour ago', '{n} hours ago');
+  if (s < 2592000) return tn(Math.floor(s / 86400), '{n} day ago', '{n} days ago');
+  return new Date(Number(ts) * 1000).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function dayLabel(ts?: number | null): string {
-  return new Date(Number(ts) * 1000).toLocaleDateString('en-US', {
+  return new Date(Number(ts) * 1000).toLocaleDateString(loc(), {
     weekday: 'short',
     day: 'numeric',
     month: 'short',

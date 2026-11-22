@@ -1,6 +1,7 @@
 // Reading settings ("Aa"), stored per browser and applied only to the reading area.
 
-import { el } from '../dom';
+import { attr, el } from '../dom';
+import { t } from '../i18n';
 import { openPanel } from './panel';
 
 type ReadFont = 'sans' | 'system' | 'serif' | 'book' | 'humanist' | 'legible' | 'rounded' | 'dyslexic' | 'mono';
@@ -29,27 +30,27 @@ const DEFAULTS: ReadPrefs = { size: 16, font: 'sans', tone: 'default', leading: 
 const WIDTHS: Record<ReadWidth, string> = { narrow: '640px', wide: '760px', full: '100%' };
 
 const FONTS: { k: ReadFont; label: string }[] = [
-  { k: 'sans', label: 'Sans' },
-  { k: 'system', label: 'System' },
-  { k: 'serif', label: 'Serif' },
-  { k: 'book', label: 'Book' },
-  { k: 'humanist', label: 'Humanist' },
-  { k: 'legible', label: 'Legible' },
-  { k: 'rounded', label: 'Rounded' },
-  { k: 'dyslexic', label: 'Dyslexic' },
-  { k: 'mono', label: 'Mono' },
+  { k: 'sans', label: t('Sans') },
+  { k: 'system', label: t('System') },
+  { k: 'serif', label: t('Serif') },
+  { k: 'book', label: t('Book') },
+  { k: 'humanist', label: t('Humanist') },
+  { k: 'legible', label: t('Legible') },
+  { k: 'rounded', label: t('Rounded') },
+  { k: 'dyslexic', label: t('Dyslexic') },
+  { k: 'mono', label: t('Mono') },
 ];
 
 const TONES: { k: ReadTone; label: string }[] = [
-  { k: 'default', label: 'Default' },
-  { k: 'paper', label: 'Paper' },
-  { k: 'sepia', label: 'Sepia' },
-  { k: 'sage', label: 'Sage' },
-  { k: 'mist', label: 'Mist' },
-  { k: 'rose', label: 'Rose' },
-  { k: 'night', label: 'Night' },
-  { k: 'midnight', label: 'Midnight' },
-  { k: 'contrast', label: 'High contrast' },
+  { k: 'default', label: t('Default') },
+  { k: 'paper', label: t('Paper') },
+  { k: 'sepia', label: t('Sepia') },
+  { k: 'sage', label: t('Sage') },
+  { k: 'mist', label: t('Mist') },
+  { k: 'rose', label: t('Rose') },
+  { k: 'night', label: t('Night') },
+  { k: 'midnight', label: t('Midnight') },
+  { k: 'contrast', label: t('High contrast') },
 ];
 
 /** Colours from older versions, mapped to the nearest one kept. */
@@ -58,15 +59,15 @@ const OLD_TONES: Record<string, ReadTone> = { mint: 'sage' };
 const nearestSize = (px: number): number => SIZES.reduce((a, b) => (Math.abs(b - px) < Math.abs(a - px) ? b : a), DEFAULTS.size);
 
 const LEADINGS: { k: ReadLeading; label: string }[] = [
-  { k: 'compact', label: 'Compact' },
-  { k: 'normal', label: 'Normal' },
-  { k: 'relaxed', label: 'Relaxed' },
+  { k: 'compact', label: t('Compact') },
+  { k: 'normal', label: t('Normal') },
+  { k: 'relaxed', label: t('Relaxed') },
 ];
 
 const WIDTH_OPTS: { k: ReadWidth; label: string }[] = [
-  { k: 'narrow', label: 'Narrow' },
-  { k: 'wide', label: 'Wide' },
-  { k: 'full', label: 'Full' },
+  { k: 'narrow', label: t('Narrow') },
+  { k: 'wide', label: t('Wide') },
+  { k: 'full', label: t('Full') },
 ];
 
 function load(): ReadPrefs {
@@ -122,27 +123,27 @@ function isDefault(): boolean {
 export function openReadingPanel(anchor: HTMLElement, changed: () => void): void {
   const body = el('div', 'vx-aa');
   const paint = (): void => {
-    body.innerHTML = `<div class="vx-aa-row"><span class="vx-label">Text size</span>
-      <div class="vx-aa-size" role="group" aria-label="Text size">
-        <button data-size="-1" aria-label="Smaller text"${reading.size === SIZES[0] ? ' disabled' : ''}><span style="font-size:13px">A</span></button>
+    body.innerHTML = `<div class="vx-aa-row"><span class="vx-label">${t('Text size')}</span>
+      <div class="vx-aa-size" role="group" aria-label="${attr(t('Text size'))}">
+        <button data-size="-1" aria-label="${attr(t('Smaller text'))}"${reading.size === SIZES[0] ? ' disabled' : ''}><span style="font-size:13px">A</span></button>
         <span class="vx-aa-dots" aria-hidden="true">${SIZES.map((px) => `<i class="${px === reading.size ? 'on' : ''}"></i>`).join('')}</span>
         <span class="vx-aa-px">${reading.size}px</span>
-        <button data-size="1" aria-label="Larger text"${reading.size === SIZES[SIZES.length - 1] ? ' disabled' : ''}><span style="font-size:20px">A</span></button>
+        <button data-size="1" aria-label="${attr(t('Larger text'))}"${reading.size === SIZES[SIZES.length - 1] ? ' disabled' : ''}><span style="font-size:20px">A</span></button>
       </div></div>
-      <div class="vx-aa-row"><span class="vx-label">Font</span><div class="vx-seg3" role="group" aria-label="Font">${FONTS.map(
+      <div class="vx-aa-row"><span class="vx-label">${t('Font')}</span><div class="vx-seg3" role="group" aria-label="${attr(t('Font'))}">${FONTS.map(
         (f) =>
           `<button data-font="${f.k}" aria-pressed="${reading.font === f.k}" class="ff-${f.k}"><b>Ag</b><span>${f.label}</span></button>`,
       ).join('')}</div></div>
-      <div class="vx-aa-row"><span class="vx-label">Line spacing</span><div class="vx-seg3" role="group" aria-label="Line spacing">${LEADINGS.map(
+      <div class="vx-aa-row"><span class="vx-label">${t('Line spacing')}</span><div class="vx-seg3" role="group" aria-label="${attr(t('Line spacing'))}">${LEADINGS.map(
         (t) => `<button data-lead="${t.k}" aria-pressed="${reading.leading === t.k}"><i class="lh lh-${t.k}"><b></b><b></b><b></b></i><span>${t.label}</span></button>`,
       ).join('')}</div></div>
-      <div class="vx-aa-row"><span class="vx-label">Width</span><div class="vx-seg3" role="group" aria-label="Text width">${WIDTH_OPTS.map(
+      <div class="vx-aa-row"><span class="vx-label">${t('Width')}</span><div class="vx-seg3" role="group" aria-label="${attr(t('Text width'))}">${WIDTH_OPTS.map(
         (t) => `<button data-width="${t.k}" aria-pressed="${reading.width === t.k}"><i class="wd wd-${t.k}"><b></b></i><span>${t.label}</span></button>`,
       ).join('')}</div></div>
-      <div class="vx-aa-row"><span class="vx-label">Colour</span><div class="vx-seg3" role="group" aria-label="Reading colour">${TONES.map(
+      <div class="vx-aa-row"><span class="vx-label">${t('Colour')}</span><div class="vx-seg3" role="group" aria-label="${attr(t('Reading colour'))}">${TONES.map(
         (t) => `<button data-tone="${t.k}" aria-pressed="${reading.tone === t.k}"><i class="sw sw-${t.k}"></i><span>${t.label}</span></button>`,
       ).join('')}</div></div>
-      <button class="vx-aa-reset" data-reset${isDefault() ? ' disabled' : ''}>Reset to default</button>`;
+      <button class="vx-aa-reset" data-reset${isDefault() ? ' disabled' : ''}>${t('Reset to default')}</button>`;
   };
   paint();
   body.onclick = (e) => {
@@ -166,5 +167,5 @@ export function openReadingPanel(anchor: HTMLElement, changed: () => void): void
     ((key && body.querySelector<HTMLElement>(key + ':not(:disabled)')) || body.querySelector<HTMLElement>('button:not(:disabled)'))?.focus();
     changed();
   };
-  openPanel(anchor, 'Reading settings', body, 'vx-pop-aa');
+  openPanel(anchor, t('Reading settings'), body, 'vx-pop-aa');
 }

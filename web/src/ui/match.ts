@@ -1,5 +1,7 @@
 // Shared query matching: the query is matched whole ("a lam" finds "A lamp", never "A ... lam ... a").
 
+import { t, tn } from '../i18n';
+
 export function score(text: string, q: string): number {
   const t = text.toLowerCase();
   if (!q) return 1;
@@ -50,8 +52,8 @@ export function similar(text: string, q: string): Near | null {
     if (best && best.s >= s) continue;
     const why =
       whole <= start
-        ? `${d} letter${d === 1 ? '' : 's'} off from “${w}”`
-        : `“${w}” starts almost like “${q}”`;
+        ? tn(d, '{n} letter off from “{w}”', '{n} letters off from “{w}”', { w })
+        : t('“{w}” starts almost like “{q}”', { w, q });
     best = { s, word: w, why };
   }
   return best;
@@ -100,5 +102,5 @@ function similarWords(text: string, q: string): Near | null {
     at = found + 1;
   }
   if (!total) return null; // it would have matched as it is
-  return { s: 10 - total * 2, word: first, why: `${total} letter${total === 1 ? '' : 's'} off from “${text}”` };
+  return { s: 10 - total * 2, word: first, why: tn(total, '{n} letter off from “{w}”', '{n} letters off from “{w}”', { w: text }) };
 }

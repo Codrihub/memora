@@ -1,6 +1,7 @@
 // Folder picker: a sidebar-style folder tree with a search box that finds folders at any depth.
 
 import { attr, el, esc, useStyles } from '../dom';
+import { t, tn } from '../i18n';
 import { Modal } from '../modal';
 import { INDENT_CAP } from './drag';
 import { I, folderGlyph } from './icons';
@@ -91,8 +92,8 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   let active = 0;
 
   const box = el('div', 'fp');
-  box.innerHTML = `<div class="fp-search">${I.search}<input class="fp-q" type="search" placeholder="Search folders by name or path" aria-label="Search folders" autocomplete="off" spellcheck="false" aria-controls="${id}-tree"></div>
-<div class="fp-tree" id="${id}-tree" role="tree" tabindex="0" aria-label="${attr(opts.label || 'Folders')}"></div>
+  box.innerHTML = `<div class="fp-search">${I.search}<input class="fp-q" type="search" placeholder="${attr(t('Search folders by name or path'))}" aria-label="${attr(t('Search folders'))}" autocomplete="off" spellcheck="false" aria-controls="${id}-tree"></div>
+<div class="fp-tree" id="${id}-tree" role="tree" tabindex="0" aria-label="${attr(opts.label || t('Folders'))}"></div>
 <div class="fp-foot"><span class="fp-status" aria-live="polite"></span><span class="fp-chosen"></span></div>`;
   const q = box.querySelector<HTMLInputElement>('.fp-q')!;
   const list = box.querySelector<HTMLElement>('.fp-tree')!;
@@ -122,10 +123,10 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
     }
     const count = root ? 0 : counts.get(n.path) || 0;
     const tags = [
-      opts.current != null && n.path === opts.current ? '<em class="fp-tag">current</em>' : '',
-      root ? '<em class="fp-tag soft">top level</em>' : '',
+      opts.current != null && n.path === opts.current ? `<em class="fp-tag">${t('current')}</em>` : '',
+      root ? `<em class="fp-tag soft">${t('top level')}</em>` : '',
     ].join('');
-    const tip = (root ? rootLabel + ' (the top level)' : n.path) + (off ? ' · ' + off : '');
+    const tip = (root ? t('{name} (the top level)', { name: rootLabel }) : n.path) + (off ? ' · ' + off : '');
     return `<div class="fp-row${root ? ' root' : ''}${sel ? ' sel' : ''}${i === active ? ' kb' : ''}${off ? ' off' : ''}${
       matches && !r.match && !root ? ' anc' : ''
     }${sub ? ' two' : ''}" role="treeitem" id="${id}-r${i}" data-i="${i}" aria-level="${n.depth + 1}"${
@@ -142,12 +143,12 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   const paintChosen = (): void => {
     const ok = choosable(value);
     chosen.innerHTML = ok
-      ? `<span class="fp-chosen-l">Selected</span>${
+      ? `<span class="fp-chosen-l">${t('Selected')}</span>${
           value.includes('/')
             ? `<span class="fp-chosen-p">${breadcrumb(value.slice(0, value.lastIndexOf('/')))}<span class="fp-sep">›</span></span>`
             : ''
         }<b>${esc(value ? value.slice(value.lastIndexOf('/') + 1) : rootLabel)}</b>`
-      : '<span class="fp-chosen-l">Choose a folder</span>';
+      : `<span class="fp-chosen-l">${t('Choose a folder')}</span>`;
     chosen.title = ok ? value || rootLabel : '';
   };
 
@@ -157,15 +158,15 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
     rows = matches && !matches.length ? [] : visibleRows(tree, expanded, matches, collapsed);
     active = Math.max(0, Math.min(active, rows.length - 1));
     if (matches && !matches.length) {
-      list.innerHTML = `<p class="fp-empty">No folder matches "${esc(query)}".</p>`;
+      list.innerHTML = `<p class="fp-empty">${t('No folder matches "{query}".', { query: esc(query) })}</p>`;
       list.removeAttribute('aria-activedescendant');
     } else {
       list.innerHTML = rows.map(rowHTML).join('');
       list.setAttribute('aria-activedescendant', `${id}-r${active}`);
     }
     status.textContent = matches
-      ? `${matches.length} folder${matches.length === 1 ? '' : 's'} match`
-      : `${total} folder${total === 1 ? '' : 's'}`;
+      ? tn(matches.length, '{n} folder match', '{n} folders match')
+      : tn(total, '{n} folder', '{n} folders');
     if (keepScroll) list.scrollTop = top;
     paintChosen();
   };
@@ -367,7 +368,7 @@ interface PickFolderDialog {
 /** A dialog with the folder picker and a "Move here" style button. */
 export function pickFolderDialog(o: PickFolderDialog): void {
   let go: HTMLButtonElement | null = null;
-  const verb = o.verb || 'Move here';
+  const verb = o.verb || t('Move here');
   const label = (p: string | null): void => {
     if (!go) return;
     go.disabled = p == null;
@@ -391,7 +392,7 @@ export function pickFolderDialog(o: PickFolderDialog): void {
     title: o.title,
     body: picker.el,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
         label: verb,
         cls: 'primary',

@@ -2,6 +2,7 @@
 
 import { attr, el, esc } from '../dom';
 import { fmtTs, hashColor, relTs, stemTitle } from '../format';
+import { t, tn } from '../i18n';
 import { Modal } from '../modal';
 import { noteTitle, state } from '../state';
 import type { NoteRef } from '../types';
@@ -47,15 +48,15 @@ let listHost: HTMLElement | null = null;
 let observer: IntersectionObserver | null = null;
 
 const FILTERS: { k: ListFilter; label: string }[] = [
-  { k: 'all', label: 'All' },
-  { k: 'recent', label: 'Last 24 hours' },
-  { k: 'pinned', label: 'Pinned' },
+  { k: 'all', label: t('All') },
+  { k: 'recent', label: t('Last 24 hours') },
+  { k: 'pinned', label: t('Pinned') },
 ];
 
 const SORTS: { k: SortKey; label: string }[] = [
-  { k: 'mtime', label: 'Last updated' },
-  { k: 'name', label: 'Name' },
-  { k: 'folder', label: 'Folder' },
+  { k: 'mtime', label: t('Last updated') },
+  { k: 'name', label: t('Name') },
+  { k: 'folder', label: t('Folder') },
 ];
 
 /** The list searches sub folders too ("All", a quick filter, a list filter). */
@@ -94,8 +95,6 @@ function latest(notes: NoteRef[]): number {
   return notes.reduce((m, n) => Math.max(m, n.mtime || 0), 0);
 }
 
-const plural = (n: number, one: string, many = one + 's'): string => `${n} ${n === 1 ? one : many}`;
-
 /** "Did you mean" for a filter nothing matches, as the global search offers it. */
 function didYouMean(folder: string): string {
   const q = normQuery(query);
@@ -105,7 +104,7 @@ function didYouMean(folder: string): string {
     .sort((a, b) => b.near!.s - a.near!.s)
     .slice(0, 4);
   if (!near.length) return '';
-  return `<div class="vx-near"><span>Did you mean</span>${near
+  return `<div class="vx-near"><span>${t('Did you mean')}</span>${near
     .map(({ n, near: m }) => `<button type="button" class="vx-near-b" data-open="${attr(n.path)}" title="${attr(m!.why)}">${esc(noteTitle(n.path))}</button>`)
     .join('')}</div>`;
 }
@@ -132,18 +131,18 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
 
   const crumbs = folder ? folder.split('/').map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
   const head = el('header', 'vx-phead');
-  const meta: string[] = [plural(all.length, 'note')];
-  if (subs.length) meta.push(plural(subs.length, 'folder'));
-  if (!folder && state.stats.links) meta.push(plural(state.stats.links, 'link'));
+  const meta: string[] = [tn(all.length, '{n} note', '{n} notes')];
+  if (subs.length) meta.push(tn(subs.length, '{n} folder', '{n} folders'));
+  if (!folder && state.stats.links) meta.push(tn(state.stats.links, '{n} link', '{n} links'));
   const upd = latest(all);
-  if (upd) meta.push(`<span title="${attr(fmtTs(upd))}">updated ${esc(relTs(upd))}</span>`);
+  if (upd) meta.push(`<span title="${attr(fmtTs(upd))}">${t('updated {when}', { when: esc(relTs(upd)) })}</span>`);
   const sep = '<span class="vx-crumb-sep" aria-hidden="true">/</span>';
   head.innerHTML = `${
     folder
-      ? `<nav class="vx-crumbs" aria-label="Folder path">
-      <button class="vx-icon-btn vx-up" data-f="${attr(dirOf(folder))}" aria-label="Up to ${attr(
-        dirOf(folder) ? baseName(dirOf(folder)) : ROOT_LABEL,
-      )}" title="Up one folder">${I.back}</button>
+      ? `<nav class="vx-crumbs" aria-label="${attr(t('Folder path'))}">
+      <button class="vx-icon-btn vx-up" data-f="${attr(dirOf(folder))}" aria-label="${attr(
+        t('Up to {name}', { name: dirOf(folder) ? baseName(dirOf(folder)) : ROOT_LABEL }),
+      )}" title="${attr(t('Up one folder'))}">${I.back}</button>
       <button class="vx-crumb" data-f="">${ROOT_LABEL}</button>${crumbs
         .slice(0, -1)
         .map((c) => `${sep}<button class="vx-crumb" data-f="${attr(c)}"><span>${esc(baseName(c))}</span></button>`)
@@ -157,17 +156,21 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
       <div class="vx-btext"><h1>${esc(folder ? baseName(folder) : ROOT_LABEL)}</h1>
       <p class="vx-bmeta">${meta.join('<span class="vx-dot-sep" aria-hidden="true">·</span>')}</p></div>
       <div class="vx-bacts">
-        <button class="btn ghost" data-new-folder aria-label="New folder" title="New folder${folder ? ' in ' + attr(baseName(folder)) : ''}">${I.newFolder}<span>New folder</span></button>
-        <button class="btn primary" data-new aria-label="New note" title="New note${folder ? ' in ' + attr(baseName(folder)) : ''} (N)">${I.plus}<span>New note</span></button>
-        <button class="vx-icon-btn vx-round" data-more aria-label="${folder ? 'Folder actions' : 'More'}" title="${folder ? 'Folder actions' : 'More'}">${I.more}</button>
+        <button class="btn ghost" data-new-folder aria-label="${attr(t('New folder'))}" title="${attr(
+          folder ? t('New folder in {parent}', { parent: baseName(folder) }) : t('New folder'),
+        )}">${I.newFolder}<span>${t('New folder')}</span></button>
+        <button class="btn primary" data-new aria-label="${attr(t('New note'))}" title="${attr(
+          folder ? t('New note in {folder} (N)', { folder: baseName(folder) }) : t('New note (N)'),
+        )}">${I.plus}<span>${t('New note')}</span></button>
+        <button class="vx-icon-btn vx-round" data-more aria-label="${attr(folder ? t('Folder actions') : t('More'))}" title="${attr(folder ? t('Folder actions') : t('More'))}">${I.more}</button>
       </div>
     </div>`;
   page.appendChild(head);
 
   const tbar = el('div', 'vx-tbar');
-  tbar.innerHTML = `<label class="vx-search${query ? ' has' : ''}">${I.search}<input class="vx-list-q" type="search" placeholder="Search notes" aria-label="Search notes${
-    folder ? ' in ' + attr(baseName(folder)) : ''
-  }" value="${attr(query)}" spellcheck="false" autocomplete="off"><button type="button" class="vx-search-x" aria-label="Clear the search" title="Clear">${I.close}</button></label>`;
+  tbar.innerHTML = `<label class="vx-search${query ? ' has' : ''}">${I.search}<input class="vx-list-q" type="search" placeholder="${attr(t('Search notes'))}" aria-label="${attr(
+    folder ? t('Search notes in {folder}', { folder: baseName(folder) }) : t('Search notes'),
+  )}" value="${attr(query)}" spellcheck="false" autocomplete="off"><button type="button" class="vx-search-x" aria-label="${attr(t('Clear the search'))}" title="${attr(t('Clear'))}">${I.close}</button></label>`;
 
   // A folder with sub folders: two tabs, so each list gets the whole page.
   const tabbed = subs.length > 0;
@@ -175,10 +178,10 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   if (tabbed) {
     const tabs = el('div', 'vx-tabs');
     tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', 'Show');
+    tabs.setAttribute('aria-label', t('Show'));
     tabs.style.setProperty('--i', showTab === 'folders' ? '0' : '1');
-    tabs.innerHTML = `<span class="vx-tabs-pill" aria-hidden="true"></span><button type="button" role="tab" data-tab="folders" aria-selected="${showTab === 'folders'}"><span>Folders</span><b>${subs.length}</b></button>
-      <button type="button" role="tab" data-tab="nodes" aria-selected="${showTab === 'nodes'}"><span>Notes</span><b>${notes.length}</b></button>`;
+    tabs.innerHTML = `<span class="vx-tabs-pill" aria-hidden="true"></span><button type="button" role="tab" data-tab="folders" aria-selected="${showTab === 'folders'}"><span>${t('Folders')}</span><b>${subs.length}</b></button>
+      <button type="button" role="tab" data-tab="nodes" aria-selected="${showTab === 'nodes'}"><span>${t('Notes')}</span><b>${notes.length}</b></button>`;
     tabs.querySelectorAll<HTMLElement>('[data-tab]').forEach(
       (b) =>
         (b.onclick = () => {
@@ -200,14 +203,14 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   if (showTab === 'nodes') {
     tbar.insertAdjacentHTML(
       'beforeend',
-      `<span class="vx-grow"></span><div class="vx-pills" role="group" aria-label="Filter">${FILTERS.map(
+      `<span class="vx-grow"></span><div class="vx-pills" role="group" aria-label="${attr(t('Filter'))}">${FILTERS.map(
         (x) =>
           `<button type="button" class="vx-pill" data-filter="${x.k}" aria-pressed="${prefs.filter === x.k}">${esc(x.label)}</button>`,
       ).join('')}</div>
-    <div class="vx-seg" role="group" aria-label="Layout">
-      <button type="button" data-view="list" aria-pressed="${!cards}" aria-label="List" title="List">${LIST_ICON}</button>
-      <button type="button" data-view="cards" aria-pressed="${cards}" aria-label="Grid" title="Grid">${CARDS_ICON}</button>
-      <button type="button" data-view="gallery" aria-pressed="${gallery}" aria-label="Images in this folder" title="Images in this folder">${I.image}</button>
+    <div class="vx-seg" role="group" aria-label="${attr(t('Layout'))}">
+      <button type="button" data-view="list" aria-pressed="${!cards}" aria-label="${attr(t('List'))}" title="${attr(t('List'))}">${LIST_ICON}</button>
+      <button type="button" data-view="cards" aria-pressed="${cards}" aria-label="${attr(t('Grid'))}" title="${attr(t('Grid'))}">${CARDS_ICON}</button>
+      <button type="button" data-view="gallery" aria-pressed="${gallery}" aria-label="${attr(t('Images in this folder'))}" title="${attr(t('Images in this folder'))}">${I.image}</button>
     </div>`,
     );
   }
@@ -216,27 +219,27 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   const chips: string[] = [];
   if (folder)
     chips.push(
-      `<span class="vx-chip" style="--fc:${attr(folderColor(folder))}" title="${attr(folder)}"><i></i><span>${esc(folder)}</span><button type="button" data-x="folder" aria-label="Show all notes, not only ${attr(baseName(folder))}" title="Back to All notes">${I.close}</button></span>`,
+      `<span class="vx-chip" style="--fc:${attr(folderColor(folder))}" title="${attr(folder)}"><i></i><span>${esc(folder)}</span><button type="button" data-x="folder" aria-label="${attr(t('Show all notes, not only {folder}', { folder: baseName(folder) }))}" title="${attr(t('Back to All notes'))}">${I.close}</button></span>`,
     );
   if (prefs.filter !== 'all')
     chips.push(
-      `<span class="vx-chip"><span>${esc(FILTERS.find((x) => x.k === prefs.filter)?.label || '')}</span><button type="button" data-x="filter" aria-label="Remove the filter" title="Remove the filter">${I.close}</button></span>`,
+      `<span class="vx-chip"><span>${esc(FILTERS.find((x) => x.k === prefs.filter)?.label || '')}</span><button type="button" data-x="filter" aria-label="${attr(t('Remove the filter'))}" title="${attr(t('Remove the filter'))}">${I.close}</button></span>`,
     );
   if (query.trim())
     chips.push(
-      `<span class="vx-chip"><span>“${esc(query.trim())}”</span><button type="button" data-x="query" aria-label="Clear the search" title="Clear the search">${I.close}</button></span>`,
+      `<span class="vx-chip"><span>“${esc(query.trim())}”</span><button type="button" data-x="query" aria-label="${attr(t('Clear the search'))}" title="${attr(t('Clear the search'))}">${I.close}</button></span>`,
     );
   if (chips.length) {
     const act = el('div', 'vx-active');
-    act.setAttribute('aria-label', 'Showing');
-    act.innerHTML = `<span class="vx-active-k">Showing</span>${chips.join('')}<button type="button" class="vx-active-all" data-x="all">${I.vault}<span>All notes</span></button>`;
+    act.setAttribute('aria-label', t('Showing'));
+    act.innerHTML = `<span class="vx-active-k">${t('Showing')}</span>${chips.join('')}<button type="button" class="vx-active-all" data-x="all">${I.vault}<span>${t('All notes')}</span></button>`;
     page.appendChild(act);
   }
 
   if (subs.length && showTab === 'folders') {
     const sec = el('section', 'vx-bsec vx-tabbody');
     if (tabAnim) sec.classList.add('in-' + tabAnim);
-    sec.setAttribute('aria-label', 'Folders');
+    sec.setAttribute('aria-label', t('Folders'));
     const tiles = el('div', 'vx-tiles');
     for (const c of subs) tiles.appendChild(folderTile(c));
     sec.appendChild(tiles);
@@ -250,22 +253,22 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   const card = el('div', 'vx-lcard' + (cards ? ' is-cards' : ''));
   const tools = el('div', 'vx-ltools');
   tools.innerHTML = `<h2 class="vx-label">${
-    prefs.filter === 'all' ? 'Notes' : esc(FILTERS.find((x) => x.k === prefs.filter)?.label || 'Notes')
-  }<span>${notes.length}</span>${folder && isDeep ? '<em>including sub folders</em>' : ''}</h2>
+    prefs.filter === 'all' ? t('Notes') : esc(FILTERS.find((x) => x.k === prefs.filter)?.label || t('Notes'))
+  }<span>${notes.length}</span>${folder && isDeep ? `<em>${t('including sub folders')}</em>` : ''}</h2>
     <span class="vx-grow"></span>
     <span data-vx-sel="sort"></span>
-    <button class="vx-icon-btn vx-dir${prefs.dir < 0 ? ' desc' : ''}" aria-label="Sort direction: ${
-      prefs.dir < 0 ? 'descending' : 'ascending'
-    }" title="${prefs.dir < 0 ? 'Descending' : 'Ascending'}, click to reverse">${ARROW}</button>`;
+    <button class="vx-icon-btn vx-dir${prefs.dir < 0 ? ' desc' : ''}" aria-label="${attr(
+      prefs.dir < 0 ? t('Sort direction: descending') : t('Sort direction: ascending'),
+    )}" title="${attr(prefs.dir < 0 ? t('Descending, click to reverse') : t('Ascending, click to reverse'))}">${ARROW}</button>`;
   card.appendChild(tools);
 
   if (selection.size > 1) {
     const bulk = el('div', 'vx-bulk');
-    bulk.innerHTML = `<span><b>${selection.size}</b> selected</span><span class="vx-grow"></span>
-      <button class="btn sm" data-bulk="move">${I.move}Move</button>
-      <button class="btn sm" data-bulk="pin">${I.pin}Pin</button>
-      <button class="btn sm danger" data-bulk="del">${I.trash}Move to Trash</button>
-      <button class="btn sm ghost" data-bulk="clear">Clear</button>`;
+    bulk.innerHTML = `<span>${t('{n} selected', { n: `<b>${selection.size}</b>` })}</span><span class="vx-grow"></span>
+      <button class="btn sm" data-bulk="move">${I.move}${t('Move')}</button>
+      <button class="btn sm" data-bulk="pin">${I.pin}${t('Pin')}</button>
+      <button class="btn sm danger" data-bulk="del">${I.trash}${t('Move to Trash')}</button>
+      <button class="btn sm ghost" data-bulk="clear">${t('Clear')}</button>`;
     bulk.querySelectorAll<HTMLElement>('[data-bulk]').forEach((b) => {
       b.onclick = () => {
         const paths = Array.from(selection);
@@ -287,31 +290,41 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     const ranked = !!normQuery(query);
     const col = (k: SortKey, label: string): string => {
       const on = !ranked && prefs.sort === k;
-      return `<button type="button" data-sort="${k}" class="${on ? 'on' : ''}" aria-pressed="${on}" title="Sort by ${label.toLowerCase()}">${label}${
+      return `<button type="button" data-sort="${k}" class="${on ? 'on' : ''}" aria-pressed="${on}" title="${attr(t('Sort by {name}', { name: label.toLowerCase() }))}">${label}${
         on ? `<span class="vx-th-dir${prefs.dir < 0 ? ' desc' : ''}" aria-hidden="true">${ARROW}</span>` : ''
       }</button>`;
     };
     card.insertAdjacentHTML(
       'beforeend',
-      `<div class="vx-thead" role="group" aria-label="Sort by column">${col('name', 'Title')}${col('folder', 'Folder')}${col('mtime', 'Updated')}<span></span></div>`,
+      `<div class="vx-thead" role="group" aria-label="${attr(t('Sort by column'))}">${col('name', t('Title'))}${col('folder', t('Folder'))}${col('mtime', t('Updated'))}<span></span></div>`,
     );
   }
 
   const rows = el('div', 'vx-rows' + (cards ? ' cards' : ''));
   rows.setAttribute('role', 'listbox');
-  rows.setAttribute('aria-label', 'Notes');
+  rows.setAttribute('aria-label', t('Notes'));
   rows.setAttribute('aria-multiselectable', 'true');
   if (!notes.length) {
     rows.classList.add('empty');
     rows.innerHTML = query
-      ? emptyState(I.search, 'No matches', `No note matches “${esc(query)}”.`, didYouMean(folder))
+      ? emptyState(I.search, t('No matches'), t('No note matches “{query}”.', { query: esc(query) }), didYouMean(folder))
       : prefs.filter !== 'all'
-        ? emptyState(I.note, 'Nothing here', 'No note here matches this filter.', '<button class="btn sm" data-filter-all>Show all notes</button>')
+        ? emptyState(I.note, t('Nothing here'), t('No note here matches this filter.'), `<button class="btn sm" data-filter-all>${t('Show all notes')}</button>`)
         : subs.length
-          ? emptyState(I.folder, 'No notes in this folder', 'Its notes are in its folders. You can also start one here.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`)
+          ? emptyState(
+              I.folder,
+              t('No notes in this folder'),
+              t('Its notes are in its folders. You can also start one here.'),
+              `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`,
+            )
           : folder
-            ? emptyState(I.note, 'This folder is empty', 'Start the first note in it.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`)
-            : emptyState(I.note, 'No notes yet', 'A note is a page of text you and your AI agents can read and add to.', `<button class="btn sm primary" data-new>${I.plus}New note</button>`);
+            ? emptyState(I.note, t('This folder is empty'), t('Start the first note in it.'), `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`)
+            : emptyState(
+                I.note,
+                t('No notes yet'),
+                t('A note is a page of text you and your AI agents can read and add to.'),
+                `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`,
+              );
   }
   const groups = isDeep && prefs.sort === 'folder' && !cards;
   const frag = document.createDocumentFragment();
@@ -328,7 +341,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   }
   const add =
     notes.length && !query && prefs.filter === 'all'
-      ? `<button type="button" class="vx-addrow" data-new>${I.plus}<span>New note${folder ? ' in ' + esc(baseName(folder)) : ''}</span></button>`
+      ? `<button type="button" class="vx-addrow" data-new>${I.plus}<span>${folder ? t('New note in {folder}', { folder: esc(baseName(folder)) }) : t('New note')}</span></button>`
       : '';
   rows.appendChild(frag);
   if (add && cards) rows.insertAdjacentHTML('beforeend', add);
@@ -351,13 +364,13 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   });
   head.querySelector<HTMLElement>('[data-more]')!.onclick = (e) => {
     const at = e.currentTarget as HTMLElement;
-    const keys = mobile ? [] : [{ sep: true, label: '' }, { label: 'Keyboard shortcuts', icon: KBD_ICON, run: showKeys }];
+    const keys = mobile ? [] : [{ sep: true, label: '' }, { label: t('Keyboard shortcuts'), icon: KBD_ICON, run: showKeys }];
     if (folder) folderMenu(folder, at, undefined, keys);
     else
       openMenu(
         [
-          { label: 'New folder', icon: I.newFolder, run: () => nav.newFolder('') },
-          { label: 'Trash', icon: I.trash, run: () => nav.openTrash() },
+          { label: t('New folder'), icon: I.newFolder, run: () => nav.newFolder('') },
+          { label: t('Trash'), icon: I.trash, run: () => nav.openTrash() },
           ...keys,
         ],
         at,
@@ -444,7 +457,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   }
   const label = (o: SelectOption | undefined): string => `<span>${esc(o?.label || '')}</span>`;
   mountSelect(tools.querySelector('[data-vx-sel=sort]'), {
-    label: 'Sort by',
+    label: t('Sort by'),
     className: 'vx-select',
     align: 'end',
     minWidth: 160,
@@ -457,7 +470,7 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
       savePrefs();
       renderList(host, mobile);
     },
-  }).el.title = 'Sort by';
+  }).el.title = t('Sort by');
   tools.querySelector<HTMLElement>('.vx-dir')!.onclick = () => {
     prefs.dir = prefs.dir < 0 ? 1 : -1;
     savePrefs();
@@ -487,20 +500,20 @@ const GO = `<span class="vx-go" aria-hidden="true"><svg class="vx-i" viewBox="0 
 /** The images of the open folder only (never its sub folders or parents). */
 function gallerySection(folder: string): HTMLElement {
   const sec = el('section', 'vx-bsec vx-galsec');
-  sec.setAttribute('aria-label', 'Images');
-  sec.innerHTML = `<div class="vx-galhead"><h2 class="vx-label">Images<span data-n></span></h2><em>${esc(
-    folder ? `In ${baseName(folder)} only, not its sub folders` : 'At the top level only, not inside folders',
-  )}</em></div><div class="vx-galbody"><p class="vx-muted">Loading the images…</p></div>`;
+  sec.setAttribute('aria-label', t('Images'));
+  sec.innerHTML = `<div class="vx-galhead"><h2 class="vx-label">${t('Images')}<span data-n></span></h2><em>${esc(
+    folder ? t('In {folder} only, not its sub folders', { folder: baseName(folder) }) : t('At the top level only, not inside folders'),
+  )}</em></div><div class="vx-galbody"><p class="vx-muted">${t('Loading the images…')}</p></div>`;
   const body = sec.querySelector<HTMLElement>('.vx-galbody')!;
   const load = (): void => {
     folderImages(folder).then(
       (r) => {
         sec.querySelector('[data-n]')!.textContent = String(r.images.length);
         body.replaceChildren(
-          galleryGrid(r.images, 'No images here yet. Add one while editing a note: the Image button, paste or drop.', load),
+          galleryGrid(r.images, t('No images here yet. Add one while editing a note: the Image button, paste or drop.'), load),
         );
       },
-      (e: Error) => (body.innerHTML = `<p class="vx-muted">Could not load the images: ${esc(e.message)}</p>`),
+      (e: Error) => (body.innerHTML = `<p class="vx-muted">${t('Could not load the images: {error}', { error: esc(e.message) })}</p>`),
     );
   };
   load();
@@ -541,15 +554,15 @@ function showKeys(): void {
   const k = (keys: string[], what: string): string =>
     `<dt>${keys.map((x) => `<kbd>${esc(x)}</kbd>`).join('')}</dt><dd>${esc(what)}</dd>`;
   Modal.open({
-    title: 'Keyboard shortcuts',
+    title: t('Keyboard shortcuts'),
     body: `<dl class="vx-keys">
-      ${k(['↑', '↓'], 'Move in the tree or list')}${k(['←', '→'], 'Collapse or expand a folder')}
-      ${k(['Enter'], 'Open')}${k(['N'], 'New note here')}${k(['F2'], 'Rename')}${k(['P'], 'Pin or unpin')}
-      ${k(['M'], 'Move selected notes')}${k(['Del'], 'Move to Trash')}${k(['Ctrl', 'A'], 'Select all notes')}
-      ${k(['Shift', 'F10'], 'Context menu')}${k(['E'], 'Edit the open note')}${k(['Ctrl', 'E'], 'Switch read and edit')}
-      ${k(['Esc'], 'Stop editing (asks before dropping changes)')}${k(['Ctrl', 'S'], 'Save')}${k(['F6'], 'Next pane')}</dl>
-      <p class="vx-muted">Drag notes or folders onto a folder to move them, onto Pinned to pin them.</p>`,
-    actions: [{ label: 'Close', cls: 'primary', run: () => Modal.close() }],
+      ${k(['↑', '↓'], t('Move in the tree or list'))}${k(['←', '→'], t('Collapse or expand a folder'))}
+      ${k(['Enter'], t('Open'))}${k(['N'], t('New note here'))}${k(['F2'], t('Rename'))}${k(['P'], t('Pin or unpin'))}
+      ${k(['M'], t('Move selected notes'))}${k(['Del'], t('Move to Trash'))}${k(['Ctrl', 'A'], t('Select all notes'))}
+      ${k(['Shift', 'F10'], t('Context menu'))}${k(['E'], t('Edit the open note'))}${k(['Ctrl', 'E'], t('Switch read and edit'))}
+      ${k(['Esc'], t('Stop editing (asks before dropping changes)'))}${k(['Ctrl', 'S'], t('Save'))}${k(['F6'], t('Next pane'))}</dl>
+      <p class="vx-muted">${t('Drag notes or folders onto a folder to move them, onto Pinned to pin them.')}</p>`,
+    actions: [{ label: t('Close'), cls: 'primary', run: () => Modal.close() }],
   });
 }
 
@@ -557,8 +570,8 @@ function folderTile(c: FolderNode): HTMLElement {
   const b = el('button', 'vx-tile');
   b.dataset.folder = c.path;
   b.style.setProperty('--fc', folderColor(c.path));
-  const bits = [plural(c.total, 'note')];
-  if (c.children.length) bits.push(plural(c.children.length, 'folder'));
+  const bits = [tn(c.total, '{n} note', '{n} notes')];
+  if (c.children.length) bits.push(tn(c.children.length, '{n} folder', '{n} folders'));
   b.innerHTML = `<span class="vx-tile-ico">${folderGlyph(folderIcon(c.path), false)}</span>
     <span class="vx-tile-txt"><b>${esc(c.name)}${lockMark('folder', c.path)}</b><small>${bits.join(' · ')}</small></span>${GO}`;
   b.title = c.path;
@@ -604,17 +617,17 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
   row.setAttribute('aria-selected', String(sel || active));
   const sub = dirOf(n.path);
   const rel = folder ? sub.slice(folder.length).replace(/^\//, '') : sub;
-  const t = touched.get(n.path);
+  const tc = touched.get(n.path);
   row.style.setProperty('--fc', folderColor(sub));
   const lock = lockMark('node', n.path);
-  const pin = isPinned('note', n.path) ? `<span class="vx-note-pin" title="Pinned">${I.pin}</span>` : '';
+  const pin = isPinned('note', n.path) ? `<span class="vx-note-pin" title="${attr(t('Pinned'))}">${I.pin}</span>` : '';
   const when = `<time title="${attr(fmtTs(n.mtime))}">${esc(relTs(n.mtime))}</time>`;
-  const by = t
-    ? `<span class="vx-agent sm" style="--ac:${hashColor(t.actor)}" title="${attr(
-        `${t.actor} · ${t.action.replace(/_/g, ' ')} · ${relTs(t.at / 1000)}`,
-      )}">${esc(initials(t.actor))}</span>`
+  const by = tc
+    ? `<span class="vx-agent sm" style="--ac:${hashColor(tc.actor)}" title="${attr(
+        `${tc.actor} · ${tc.action.replace(/_/g, ' ')} · ${relTs(tc.at / 1000)}`,
+      )}">${esc(initials(tc.actor))}</span>`
     : '';
-  const more = `<button class="vx-row-more" tabindex="-1" aria-label="Note actions" title="Actions">${I.more}</button>`;
+  const more = `<button class="vx-row-more" tabindex="-1" aria-label="${attr(t('Note actions'))}" title="${attr(t('Actions'))}">${I.more}</button>`;
   const lead = `<span class="vx-note-lead" aria-hidden="true">${I.note}<span class="vx-note-thumb"></span></span>`;
   const place = folderPath(sub, rel);
   if (prefs.view === 'cards') {
@@ -622,10 +635,10 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
     row.innerHTML = `<span class="vx-card-top">${lead}<span class="vx-note-name">${esc(noteTitle(n.path))}</span>${lock}${pin}${more}</span>
       <span class="vx-note-ex"></span>
       <dl class="vx-props">
-        <dt>Folder</dt><dd>${folderPath(sub, sub)}</dd>
-        <dt>Tags</dt><dd class="vx-note-tags"><span class="vx-none">None</span></dd>
-        <dt>Updated</dt><dd>${when}</dd>
-        ${t ? `<dt>By</dt><dd>${by}<span>${esc(t.actor)}</span></dd>` : ''}
+        <dt>${t('Folder')}</dt><dd>${folderPath(sub, sub)}</dd>
+        <dt>${t('Tags')}</dt><dd class="vx-note-tags"><span class="vx-none">${t('None')}</span></dd>
+        <dt>${t('Updated')}</dt><dd>${when}</dd>
+        ${tc ? `<dt>${t('By')}</dt><dd>${by}<span>${esc(tc.actor)}</span></dd>` : ''}
       </dl>`;
   } else {
     // A table row on wide screens, stacked on phones.
@@ -692,7 +705,7 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
   };
   row.ondragstart = (e) => {
     const paths = sel && selection.size > 1 ? Array.from(selection) : [n.path];
-    startDrag(e, { kind: 'notes', paths }, paths.length > 1 ? `${paths.length} notes` : noteTitle(n.path));
+    startDrag(e, { kind: 'notes', paths }, paths.length > 1 ? tn(paths.length, '{n} note', '{n} notes') : noteTitle(n.path));
     row.classList.add('vx-dragsrc');
   };
   row.ondragend = () => {
@@ -714,7 +727,7 @@ function paintExcerpt(row: HTMLElement): void {
     return;
   }
   ex.classList.toggle('none', !e.text);
-  ex.textContent = e.text || 'Empty note';
+  ex.textContent = e.text || t('Empty note');
   // Only grid cards have an excerpt and tags, so a row that gets here is a card.
   const shown = e.tags.slice(0, 3);
   if (shown.length) tg.innerHTML = shown.map((x) => `<span class="vx-chip-tag" style="--tc:${hashColor(x)}"><i></i>${esc(x)}</span>`).join('');

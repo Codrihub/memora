@@ -3,6 +3,7 @@
 import { apiGet, apiPost } from '../api';
 import { $, attr, el, esc, useStyles } from '../dom';
 import { fmtTs, relTs } from '../format';
+import { t, tn } from '../i18n';
 import { Modal } from '../modal';
 import { state } from '../state';
 import { typedConfirm } from '../ui/components';
@@ -199,7 +200,7 @@ function again(): void {
 
 const INFO = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>`;
 
-const notes = (n: number): string => `${n} note${n === 1 ? '' : 's'}`;
+const notes = (n: number): string => tn(n, '{n} note', '{n} notes');
 const placeName = (p: string): string => (p ? p.split('/').join(' / ') : ROOT_LABEL);
 
 function paint(h: HTMLElement, error: Error | null): void {
@@ -211,23 +212,23 @@ function paint(h: HTMLElement, error: Error | null): void {
   const page = el('div', 'tr');
   page.innerHTML = `<header class="tr-head">
       <span class="tr-tile" aria-hidden="true">${I.trash}</span>
-      <div class="tr-title"><h1>Trash</h1><p>${
-        items ? (n ? `${notes(n)} waiting` : 'Nothing deleted') : error ? 'Not loaded' : 'Loading…'
+      <div class="tr-title"><h1>${t('Trash')}</h1><p>${
+        items ? (n ? tn(n, '{n} note waiting', '{n} notes waiting') : t('Nothing deleted')) : error ? t('Not loaded') : t('Loading…')
       }</p></div>
-      ${n ? `<button class="btn ghost tr-empty-all" data-empty aria-label="Empty trash" title="Delete every note in the Trash forever">${I.trash}<span>Empty trash</span></button>` : ''}
+      ${n ? `<button class="btn ghost tr-empty-all" data-empty aria-label="${attr(t('Empty trash'))}" title="${attr(t('Delete every note in the Trash forever'))}">${I.trash}<span>${t('Empty trash')}</span></button>` : ''}
     </header>
-    <p class="tr-explain">${INFO}<span>Deleted notes wait here until you restore them or delete them forever. When you restore, you choose where the note goes: its old folder, another folder or the top level.</span></p>`;
+    <p class="tr-explain">${INFO}<span>${t('Deleted notes wait here until you restore them or delete them forever. When you restore, you choose where the note goes: its old folder, another folder or the top level.')}</span></p>`;
   if (n) {
     const tbar = el('div', 'tr-tbar');
     const sel = all.filter((it) => picked.has(it.name));
-    tbar.innerHTML = `<label class="tr-search">${I.search}<input class="tr-q" type="search" placeholder="Search the Trash" aria-label="Search the Trash" value="${attr(
+    tbar.innerHTML = `<label class="tr-search">${I.search}<input class="tr-q" type="search" placeholder="${attr(t('Search the Trash'))}" aria-label="${attr(t('Search the Trash'))}" value="${attr(
       query,
     )}" spellcheck="false" autocomplete="off"></label>${
       sel.length
-        ? `<div class="tr-sel" role="group" aria-label="Selected notes"><span><b>${sel.length}</b> selected</span>
-        <button class="btn ghost" data-bulk="restore">${I.undo}Restore</button>
-        <button class="btn ghost tr-forever" data-bulk="forever">Delete forever</button>
-        <button class="btn ghost tr-clear" data-bulk="clear" aria-label="Clear the selection" title="Clear the selection">${I.close}</button></div>`
+        ? `<div class="tr-sel" role="group" aria-label="${attr(t('Selected notes'))}"><span>${t('{n} selected', { n: `<b>${sel.length}</b>` })}</span>
+        <button class="btn ghost" data-bulk="restore">${I.undo}${t('Restore')}</button>
+        <button class="btn ghost tr-forever" data-bulk="forever">${t('Delete forever')}</button>
+        <button class="btn ghost tr-clear" data-bulk="clear" aria-label="${attr(t('Clear the selection'))}" title="${attr(t('Clear the selection'))}">${I.close}</button></div>`
         : ''
     }`;
     page.appendChild(tbar);
@@ -264,13 +265,13 @@ function paint(h: HTMLElement, error: Error | null): void {
     q?.setSelectionRange(query.length, query.length);
   }
   if (error) {
-    card.innerHTML = `<div class="tr-err" role="alert"><p><b>Could not load the Trash</b></p><small>${esc(
-      error.message,
-    )}. Check your connection, then try again.</small><button class="btn sm" data-retry>Try again</button></div>`;
+    card.innerHTML = `<div class="tr-err" role="alert"><p><b>${t('Could not load the Trash')}</b></p><small>${t('{error}. Check your connection, then try again.', {
+      error: esc(error.message),
+    })}</small><button class="btn sm" data-retry>${t('Try again')}</button></div>`;
     card.querySelector<HTMLElement>('[data-retry]')!.onclick = () => void renderTrash();
   } else if (!items) {
     // The same rhythm as the rows that will land here.
-    card.innerHTML = `<div aria-busy="true" aria-label="Loading the Trash">${[46, 34, 40, 28]
+    card.innerHTML = `<div aria-busy="true" aria-label="${attr(t('Loading the Trash'))}">${[46, 34, 40, 28]
       .map(
         (w) =>
           `<div class="tr-skel"><span class="vx-skel" style="width:16px;height:16px;border-radius:4px"></span><span style="display:flex;align-items:center;gap:12px"><span class="vx-skel" style="width:32px;height:32px;border-radius:9px;flex:none"></span><span class="vx-skel" style="width:${w}%"></span></span></div>`,
@@ -279,21 +280,28 @@ function paint(h: HTMLElement, error: Error | null): void {
   } else if (!n) {
     card.innerHTML = emptyState(
       I.trash,
-      'The Trash is empty',
-      'Notes you delete wait here, so you can bring them back.',
-      `<button class="btn sm" data-home>Back to ${esc(ROOT_LABEL)}</button>`,
+      t('The Trash is empty'),
+      t('Notes you delete wait here, so you can bring them back.'),
+      `<button class="btn sm" data-home>${t('Back to {place}', { place: esc(ROOT_LABEL) })}</button>`,
     ).replace('vx-empty', 'vx-empty brand');
   } else if (!shown.length) {
-    card.innerHTML = emptyState(I.search, 'No matches', `No deleted note matches “${esc(query.trim())}”.`, '<button class="btn sm" data-clear>Clear the search</button>');
+    card.innerHTML = emptyState(
+      I.search,
+      t('No matches'),
+      t('No deleted note matches “{query}”.', { query: esc(query.trim()) }),
+      `<button class="btn sm" data-clear>${t('Clear the search')}</button>`,
+    );
   } else {
     const allOn = shown.every((it) => picked.has(it.name));
     card.insertAdjacentHTML(
       'beforeend',
-      `<div class="tr-thead"><label class="tr-check" title="Select all"><input type="checkbox" data-all aria-label="Select all"${allOn ? ' checked' : ''}></label><span>Note</span><span>Came from</span><span>Deleted</span><span></span></div>`,
+      `<div class="tr-thead"><label class="tr-check" title="${attr(t('Select all'))}"><input type="checkbox" data-all aria-label="${attr(t('Select all'))}"${
+        allOn ? ' checked' : ''
+      }></label><span>${t('Note')}</span><span>${t('Came from')}</span><span>${t('Deleted')}</span><span></span></div>`,
     );
     const list = el('div', 'tr-list');
     list.setAttribute('role', 'list');
-    list.setAttribute('aria-label', 'Deleted notes');
+    list.setAttribute('aria-label', t('Deleted notes'));
     for (const it of shown) list.appendChild(row(it, h));
     card.appendChild(list);
     const head = card.querySelector<HTMLInputElement>('[data-all]')!;
@@ -320,24 +328,32 @@ function row(it: TrashItem, h: HTMLElement): HTMLElement {
   const title = itemTitle(it);
   const place = placeOf(it);
   const ts = deletedTs(it);
-  const who = whoLabel(it);
+  const w = whoLabel(it);
+  const who = w === 'you' ? t('you') : w === 'an agent' ? t('an agent') : w;
   const known = it.original != null;
   const from = known
     ? `<span class="tr-from" style="--fc:${attr(folderColor(place))}" title="${attr(place || ROOT_LABEL)}"><i></i><span>${esc(placeName(place))}</span></span>`
-    : '<span class="tr-none">Unknown</span>';
-  const when = ts ? `<span title="${attr(fmtTs(ts))}">${esc(relTs(ts))}</span>` : '<span class="tr-none">Unknown</span>';
+    : `<span class="tr-none">${t('Unknown')}</span>`;
+  const when = ts ? `<span title="${attr(fmtTs(ts))}">${esc(relTs(ts))}</span>` : `<span class="tr-none">${t('Unknown')}</span>`;
   // Narrow screens: one meta line under the title says the same.
   const bits: string[] = [];
-  if (ts || who) bits.push(`Deleted${ts ? ' ' + esc(relTs(ts)) : ''}${who ? ' by ' + esc(who) : ''}`);
+  if (ts || who)
+    bits.push(
+      ts && who
+        ? t('Deleted {when} by {who}', { when: esc(relTs(ts)), who: esc(who) })
+        : ts
+          ? t('Deleted {when}', { when: esc(relTs(ts)) })
+          : t('Deleted by {who}', { who: esc(who) }),
+    );
   const meta = `<span class="tr-meta">${known ? `<span class="tr-from" style="--fc:${attr(folderColor(place))}"><i></i><span>${esc(placeName(place))}</span></span>` : ''}${
     bits.length ? `${known ? '<span aria-hidden="true">·</span>' : ''}<span>${bits.join('')}</span>` : ''
   }</span>`;
-  r.innerHTML = `<label class="tr-check"><input type="checkbox" aria-label="Select ${attr(title)}"${picked.has(it.name) ? ' checked' : ''}></label>
+  r.innerHTML = `<label class="tr-check"><input type="checkbox" aria-label="${attr(t('Select {name}', { name: title }))}"${picked.has(it.name) ? ' checked' : ''}></label>
     <div class="tr-main"><span class="tr-ico" aria-hidden="true">${I.note}</span><span class="tr-name"><b title="${attr(title)}">${esc(title)}</b>${meta}</span></div>
     ${from}
-    <span class="tr-when">${when}${who ? `<small>by ${esc(who)}</small>` : ''}</span>
-    <div class="tr-acts"><button class="btn ghost" data-restore aria-label="Restore ${attr(title)}">${I.undo}<span>Restore</span></button>
-    <button class="btn ghost tr-forever" data-forever aria-label="Delete ${attr(title)} forever">Delete forever</button></div>`;
+    <span class="tr-when">${when}${who ? `<small>${t('by {who}', { who: esc(who) })}</small>` : ''}</span>
+    <div class="tr-acts"><button class="btn ghost" data-restore aria-label="${attr(t('Restore {name}', { name: title }))}">${I.undo}<span>${t('Restore')}</span></button>
+    <button class="btn ghost tr-forever" data-forever aria-label="${attr(t('Delete {name} forever', { name: title }))}">${t('Delete forever')}</button></div>`;
   const box = r.querySelector<HTMLInputElement>('.tr-check input')!;
   box.dataset.name = it.name;
   box.onchange = () => {
@@ -363,23 +379,25 @@ function askRestore(list: TrashItem[]): void {
   const gone = (p: string): boolean => !!p && !folders.includes(p);
   const placeTag = (p: string): string =>
     `<span style="--fc:${attr(folderColor(p))}"><i></i><em title="${attr(p || ROOT_LABEL)}">${esc(placeName(p))}</em>${
-      gone(p) ? '<span class="tr-again">made again</span>' : ''
+      gone(p) ? `<span class="tr-again">${t('made again')}</span>` : ''
     }</span>`;
-  const shownPlaces = places.slice(0, 3).map(placeTag).join('') + (places.length > 3 ? `<span>and ${places.length - 3} more</span>` : '');
+  const shownPlaces = places.slice(0, 3).map(placeTag).join('') + (places.length > 3 ? `<span>${t('and {n} more', { n: places.length - 3 })}</span>` : '');
   const originText = one
     ? list[0].original != null
       ? shownPlaces
-      : `<span>Its old folder is not known, so it goes to the top level</span>`
-    : `${shownPlaces}${unknown ? '<span>unknown ones go to the top level</span>' : ''}`;
+      : `<span>${t('Its old folder is not known, so it goes to the top level')}</span>`
+    : `${shownPlaces}${unknown ? `<span>${t('unknown ones go to the top level')}</span>` : ''}`;
   let picker: FolderPicker | null = null;
   let newName = '';
   const body = el('div', 'tr-dlg');
-  body.innerHTML = `<p>${one ? `Where should “${esc(itemTitle(list[0]))}” go?` : `Where should these ${list.length} notes go?`}</p>
-    <div class="tr-opts" role="radiogroup" aria-label="Restore to">
-    <label class="tr-opt"><input type="radio" name="trTo" value="origin" checked><b>Back to ${one ? 'its folder' : 'their folders'}</b><small>${originText}</small></label>
-    <label class="tr-opt"><input type="radio" name="trTo" value="folder"><b>Move to another folder…</b><small>Pick a folder${one ? '' : ' for all of them'}, or make a new one</small></label>
+  body.innerHTML = `<p>${one ? t('Where should “{name}” go?', { name: esc(itemTitle(list[0])) }) : t('Where should these {n} notes go?', { n: list.length })}</p>
+    <div class="tr-opts" role="radiogroup" aria-label="${attr(t('Restore to'))}">
+    <label class="tr-opt"><input type="radio" name="trTo" value="origin" checked><b>${one ? t('Back to its folder') : t('Back to their folders')}</b><small>${originText}</small></label>
+    <label class="tr-opt"><input type="radio" name="trTo" value="folder"><b>${t('Move to another folder…')}</b><small>${
+      one ? t('Pick a folder, or make a new one') : t('Pick a folder for all of them, or make a new one')
+    }</small></label>
     <div class="tr-pick" hidden></div>
-    <label class="tr-opt"><input type="radio" name="trTo" value="top"><b>Top level</b><small>${esc(ROOT_LABEL)}, outside any folder</small></label>
+    <label class="tr-opt"><input type="radio" name="trTo" value="top"><b>${t('Top level')}</b><small>${t('{place}, outside any folder', { place: esc(ROOT_LABEL) })}</small></label>
     </div>`;
   const pickBox = body.querySelector<HTMLElement>('.tr-pick')!;
   const mode = (): string => body.querySelector<HTMLInputElement>('input[name=trTo]:checked')?.value || 'origin';
@@ -410,7 +428,7 @@ function askRestore(list: TrashItem[]): void {
     picker = createFolderPicker({
       folders,
       value: places.length === 1 && !gone(places[0]) ? places[0] : '',
-      label: 'Restore into',
+      label: t('Restore into'),
       onChange: () => {
         paintNew();
         sync();
@@ -420,11 +438,11 @@ function askRestore(list: TrashItem[]): void {
     pickBox.appendChild(picker.el);
     // A new folder inside the selected one: the server makes it on restore.
     const nf = el('div', 'tr-new');
-    nf.innerHTML = `<button type="button" class="btn ghost sm tr-new-btn">${I.newFolder}<span>New folder</span></button>
+    nf.innerHTML = `<button type="button" class="btn ghost sm tr-new-btn">${I.newFolder}<span>${t('New folder')}</span></button>
       <div class="tr-new-row" hidden><label class="tr-new-l" for="trNewIn"></label>
-      <div class="tr-new-f"><input id="trNewIn" class="tr-new-in" type="text" placeholder="Folder name" autocomplete="off" spellcheck="false" maxlength="80">
-      <button type="button" class="vx-icon-btn tr-new-x" aria-label="No new folder" title="No new folder">${I.close}</button></div>
-      <small class="tr-new-err" hidden>A folder name cannot contain / or \\.</small></div>`;
+      <div class="tr-new-f"><input id="trNewIn" class="tr-new-in" type="text" placeholder="${attr(t('Folder name'))}" autocomplete="off" spellcheck="false" maxlength="80">
+      <button type="button" class="vx-icon-btn tr-new-x" aria-label="${attr(t('No new folder'))}" title="${attr(t('No new folder'))}">${I.close}</button></div>
+      <small class="tr-new-err" hidden>${esc(t('A folder name cannot contain / or \\.'))}</small></div>`;
     pickBox.appendChild(nf);
     const btn = nf.querySelector<HTMLElement>('.tr-new-btn')!;
     const row = nf.querySelector<HTMLElement>('.tr-new-row')!;
@@ -460,7 +478,7 @@ function askRestore(list: TrashItem[]): void {
   const paintNew = (): void => {
     const l = pickBox.querySelector<HTMLElement>('.tr-new-l');
     const f = picker?.value;
-    if (l) l.textContent = `New folder inside ${f ? placeName(f) : ROOT_LABEL}`;
+    if (l) l.textContent = t('New folder inside {place}', { place: f ? placeName(f) : ROOT_LABEL });
   };
   body.querySelectorAll<HTMLInputElement>('input[name=trTo]').forEach((r) => {
     r.onchange = () => {
@@ -474,11 +492,11 @@ function askRestore(list: TrashItem[]): void {
   });
   body.querySelector('.tr-opt')?.classList.add('on');
   Modal.open({
-    title: one ? 'Restore note' : `Restore ${list.length} notes`,
+    title: one ? t('Restore note') : t('Restore {n} notes', { n: list.length }),
     body,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      { label: 'Restore', cls: 'primary', run: submit },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      { label: t('Restore'), cls: 'primary', run: submit },
     ],
     onOpen: (b) => {
       go = b.parentElement?.querySelector<HTMLButtonElement>('.modal-foot .btn.primary') || null;
@@ -497,17 +515,17 @@ async function restore(list: TrashItem[], c: RestoreChoice): Promise<void> {
       picked.delete(it.name);
     } catch (e) {
       failed++;
-      undoToast(`Could not restore “${itemTitle(it)}”: ${(e as Error).message}`, null, 'err');
+      undoToast(t('Could not restore “{name}”: {error}', { name: itemTitle(it), error: (e as Error).message }), null, 'err');
     }
   }
   await reload();
   if (back.length) {
     // Where the server put them (it may tidy a new folder's name).
     const where =
-      c.to === 'top' ? 'the top level' : c.to === 'folder' || back.length === 1 ? placeName(dirOf(back[0])) : 'their folders';
+      c.to === 'top' ? t('the top level') : c.to === 'folder' || back.length === 1 ? placeName(dirOf(back[0])) : t('their folders');
     const what = back.length === 1 && list.length === 1 ? `“${itemTitle(list[0])}”` : notes(back.length);
     // Undo puts them back in the Trash.
-    undoToast(`Restored ${what} to ${where}${failed ? ` (${failed} failed)` : ''}`, async () => {
+    undoToast(failed ? t('Restored {what} to {where} ({n} failed)', { what, where, n: failed }) : t('Restored {what} to {where}', { what, where }), async () => {
       await trashNotes(back.filter(Boolean));
       again();
     }, 'ok');
@@ -519,15 +537,17 @@ function deleteForever(list: TrashItem[]): void {
   if (!list.length) return;
   const one = list.length === 1;
   typedConfirm({
-    title: one ? 'Delete this note forever?' : `Delete ${list.length} notes forever?`,
+    title: one ? t('Delete this note forever?') : t('Delete {n} notes forever?', { n: list.length }),
     body: `<p>${
-      one ? 'This note is' : `These ${list.length} notes are`
-    } removed from the vault for good, with ${one ? 'its' : 'their'} text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read ${
-      one ? 'it' : 'them'
-    } again.</p>`,
+      one
+        ? t('This note is removed from the vault for good, with its text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read it again.')
+        : t('These {n} notes are removed from the vault for good, with their text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read them again.', {
+            n: list.length,
+          })
+    }</p>`,
     items: list.map(itemTitle),
     word: 'DELETE',
-    confirmLabel: one ? 'Delete forever' : `Delete ${list.length} forever`,
+    confirmLabel: one ? t('Delete forever') : t('Delete {n} forever', { n: list.length }),
     run: async () => {
       Modal.close();
       let done = 0;
@@ -537,10 +557,10 @@ function deleteForever(list: TrashItem[]): void {
           picked.delete(it.name);
           done++;
         } catch (e) {
-          undoToast(`Could not delete “${itemTitle(it)}”: ${(e as Error).message}`, null, 'err');
+          undoToast(t('Could not delete “{name}”: {error}', { name: itemTitle(it), error: (e as Error).message }), null, 'err');
         }
       }
-      if (done) undoToast(one ? `“${itemTitle(list[0])}” was deleted forever` : `${notes(done)} deleted forever`, null, 'info');
+      if (done) undoToast(one ? t('“{name}” was deleted forever', { name: itemTitle(list[0]) }) : t('{notes} deleted forever', { notes: notes(done) }), null, 'info');
       again();
     },
   });
@@ -548,24 +568,26 @@ function deleteForever(list: TrashItem[]): void {
 
 function emptyAll(n: number): void {
   typedConfirm({
-    title: 'Empty the Trash?',
+    title: t('Empty the Trash?'),
     body: `<p>${
-      n === 1 ? 'The note in the Trash is' : `All ${n} notes in the Trash are`
-    } removed from the vault for good, with ${n === 1 ? 'its' : 'their'} text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read ${
-      n === 1 ? 'it' : 'them'
-    } again.</p>`,
+      n === 1
+        ? t('The note in the Trash is removed from the vault for good, with its text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read it again.')
+        : t('All {n} notes in the Trash are removed from the vault for good, with their text, tags and links. Every earlier version is erased from the version history too, so no one, agents included, can read them again.', {
+            n,
+          })
+    }</p>`,
     items: (items || []).map(itemTitle),
     word: 'DELETE ALL',
-    confirmLabel: n === 1 ? 'Empty trash' : `Delete all ${n}`,
+    confirmLabel: n === 1 ? t('Empty trash') : t('Delete all {n}', { n }),
     run: async () => {
       Modal.close();
       try {
         const r = await apiPost<{ count?: number }>('/api/trash/empty', {});
         const c = r.count ?? n;
         picked.clear();
-        undoToast(`Trash emptied: ${notes(c)} deleted forever`, null, 'info');
+        undoToast(t('Trash emptied: {notes} deleted forever', { notes: notes(c) }), null, 'info');
       } catch (e) {
-        undoToast('Could not empty the Trash: ' + (e as Error).message, null, 'err');
+        undoToast(t('Could not empty the Trash: {error}', { error: (e as Error).message }), null, 'err');
       }
       again();
     },

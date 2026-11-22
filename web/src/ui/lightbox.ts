@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useStyles } from '../dom';
 
 const CSS = `
@@ -110,7 +111,7 @@ export function openLightbox(src: string, caption: string, set: LightboxImage[] 
   root.className = 'lbx';
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', caption || 'Image');
+  root.setAttribute('aria-label', caption || t('Image'));
 
   const bar = document.createElement('div');
   bar.className = 'lbx-bar';
@@ -121,10 +122,10 @@ export function openLightbox(src: string, caption: string, set: LightboxImage[] 
   setOriginal(orig, src);
   orig.target = '_blank';
   orig.rel = 'noopener noreferrer';
-  orig.textContent = 'Open original';
+  orig.textContent = t('Open original');
   const x = document.createElement('button');
   x.type = 'button';
-  x.setAttribute('aria-label', 'Close');
+  x.setAttribute('aria-label', t('Close'));
   x.textContent = '×';
   x.onclick = (e) => {
     e.stopPropagation();
@@ -155,8 +156,8 @@ export function openLightbox(src: string, caption: string, set: LightboxImage[] 
     root.append(b);
     return b;
   };
-  const prev = nav('prev', 'Previous image', '‹');
-  const next = nav('next', 'Next image', '›');
+  const prev = nav('prev', t('Previous image'), '‹');
+  const next = nav('next', t('Next image'), '›');
   if (many) bar.insertBefore(count, orig);
   const show = (i: number): void => {
     idx = (i + set.length) % set.length;

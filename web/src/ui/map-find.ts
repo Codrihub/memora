@@ -1,5 +1,6 @@
 // Query syntax: plain text, `#tag` (tag prefix) and `in:folder` (path substring); tokens combine.
 
+import { t, tn } from '../i18n';
 import { attr, esc, useStyles } from '../dom';
 import { matchAt, score, similar } from './match';
 import { noteTitle } from '../state';
@@ -80,35 +81,35 @@ function parseQuery(raw: string): Query {
 
 const WORD_START = /[\s\-_./()[\]]/;
 
-const folderLabel = (f: string): string => (!f || f === 'Root' ? 'the vault root' : f);
+const folderLabel = (f: string): string => (!f || f === 'Root' ? t('the vault root') : f);
 
 function matchText(it: FindItem, q: Query): Why | null {
-  const t = q.text;
-  if (!t) return { score: 1, badge: '', text: '', field: 'none', ranges: [] };
+  const qt = q.text;
+  if (!qt) return { score: 1, badge: '', text: '', field: 'none', ranges: [] };
   // The file name counts too when the title differs (Index.md titled Root Brain).
   const file = (it.id.split('/').pop() || '').replace(/\.md$/i, '');
-  if (file && file.toLowerCase() !== it.name.toLowerCase() && !matchAt(it.name, t) && matchAt(file, t)) {
-    const exact = file.toLowerCase() === t || file.toLowerCase().replace(/[_-]+/g, ' ') === t;
-    return { score: exact ? 95 : 72 + score(file, t) / 100, badge: 'File name', text: `The file is named “${file}.md”`, field: 'none', ranges: [] };
+  if (file && file.toLowerCase() !== it.name.toLowerCase() && !matchAt(it.name, qt) && matchAt(file, qt)) {
+    const exact = file.toLowerCase() === qt || file.toLowerCase().replace(/[_-]+/g, ' ') === qt;
+    return { score: exact ? 95 : 72 + score(file, qt) / 100, badge: t('File name'), text: t('The file is named “{file}”', { file: `${file}.md` }), field: 'none', ranges: [] };
   }
   const n = it.name.toLowerCase();
-  const at = matchAt(it.name, t);
+  const at = matchAt(it.name, qt);
   if (at) {
-    const sc = score(it.name, t);
-    if (n === t) return { score: 100, badge: 'Exact', text: `The name is exactly “${q.text}”`, field: 'name', ranges: [at] };
-    if (at[0] === 0) return { score: 90 + sc / 100, badge: 'Starts with', text: `The name starts with “${q.text}”`, field: 'name', ranges: [at] };
-    if (WORD_START.test(n[at[0] - 1])) return { score: 80 + sc / 100, badge: 'Word', text: `A word in the name starts with “${q.text}”`, field: 'name', ranges: [at] };
-    return { score: 70 + sc / 100, badge: 'Contains', text: `The name contains “${q.text}”`, field: 'name', ranges: [at] };
+    const sc = score(it.name, qt);
+    if (n === qt) return { score: 100, badge: t('Exact'), text: t('The name is exactly “{q}”', { q: q.text }), field: 'name', ranges: [at] };
+    if (at[0] === 0) return { score: 90 + sc / 100, badge: t('Starts with'), text: t('The name starts with “{q}”', { q: q.text }), field: 'name', ranges: [at] };
+    if (WORD_START.test(n[at[0] - 1])) return { score: 80 + sc / 100, badge: t('Word'), text: t('A word in the name starts with “{q}”', { q: q.text }), field: 'name', ranges: [at] };
+    return { score: 70 + sc / 100, badge: t('Contains'), text: t('The name contains “{q}”', { q: q.text }), field: 'name', ranges: [at] };
   }
   let best: Why | null = null;
   for (const tag of it.tags) {
-    const r = matchAt(tag, t);
+    const r = matchAt(tag, qt);
     if (!r) continue;
-    const exact = tag.toLowerCase() === t;
+    const exact = tag.toLowerCase() === qt;
     const w: Why = {
       score: exact ? 66 : r[0] === 0 ? 62 : 56,
-      badge: 'Tag',
-      text: exact ? `Tagged #${tag}` : `Has the tag #${tag}`,
+      badge: t('Tag'),
+      text: exact ? t('Tagged #{tag}', { tag }) : t('Has the tag #{tag}', { tag }),
       field: 'tag',
       ranges: [r],
       tag,
@@ -116,8 +117,8 @@ function matchText(it: FindItem, q: Query): Why | null {
     if (!best || w.score > best.score) best = w;
   }
   if (best) return best;
-  const fr = matchAt(it.folder, t);
-  if (fr) return { score: fr[0] === 0 || WORD_START.test(it.folder[fr[0] - 1]) ? 48 : 44, badge: 'Folder', text: `In the folder ${it.folder}`, field: 'folder', ranges: [fr] };
+  const fr = matchAt(it.folder, qt);
+  if (fr) return { score: fr[0] === 0 || WORD_START.test(it.folder[fr[0] - 1]) ? 48 : 44, badge: t('Folder'), text: t('In the folder {folder}', { folder: it.folder }), field: 'folder', ranges: [fr] };
   return null;
 }
 
@@ -150,7 +151,7 @@ function nearNames(items: FindItem[], text: string): Hit[] {
     const near = similar(it.name, text);
     if (!near) continue;
     const i = it.name.indexOf(near.word);
-    out.push({ item: it, why: { score: near.s, badge: 'Near', text: near.why, field: 'name', ranges: i >= 0 ? [[i, i + near.word.length]] : [] } });
+    out.push({ item: it, why: { score: near.s, badge: t('Near'), text: near.why, field: 'name', ranges: i >= 0 ? [[i, i + near.word.length]] : [] } });
   }
   return out.sort((a, b) => b.why.score - a.why.score || b.item.degree - a.item.degree).slice(0, 4);
 }
@@ -188,6 +189,8 @@ function mark(text: string, ranges: Range[]): string {
 }
 
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+/** "3 notes" in the interface language when the noun is the default one. */
+const nounCount = (n: number, w: string): string => (w === 'note' ? tn(n, '{n} note', '{n} notes') : plural(n, w));
 
 const CSS = `
 .mf{position:absolute;z-index:9;display:flex;flex-direction:column;max-height:min(520px,calc(100% - 80px));overflow:hidden;
@@ -257,8 +260,8 @@ export class MapFind {
     this.box = document.createElement('div');
     this.box.className = 'mf';
     this.box.hidden = true;
-    this.box.innerHTML = `<div class="mf-head"></div><div class="mf-list" role="listbox" aria-label="Search results"></div>
-      <div class="mf-foot"><span><kbd>↑</kbd><kbd>↓</kbd>move</span><span><kbd>Enter</kbd>open</span><span><kbd>Tab</kbd>use tag or folder</span><span><kbd>Esc</kbd>close</span></div>`;
+    this.box.innerHTML = `<div class="mf-head"></div><div class="mf-list" role="listbox" aria-label="${t('Search results')}"></div>
+      <div class="mf-foot"><span><kbd>↑</kbd><kbd>↓</kbd>${t('move')}</span><span><kbd>Enter</kbd>${t('open')}</span><span><kbd>Tab</kbd>${t('use tag or folder')}</span><span><kbd>Esc</kbd>${t('close')}</span></div>`;
     host.root.appendChild(this.box);
     this.head = this.box.querySelector('.mf-head')!;
     this.list = this.box.querySelector('.mf-list')!;
@@ -428,6 +431,7 @@ export class MapFind {
       return title && title !== it.name ? { ...it, name: title } : it;
     });
     const noun = this.src.noun || 'note';
+    const things = noun === 'note' ? t('notes') : `${noun}s`;
     this.acts = [];
     this.active = 0;
     const rows: string[] = [];
@@ -445,7 +449,7 @@ export class MapFind {
         .slice(0, 3)
         .map((t) => `<span class="t">#${why?.tag === t ? mark(t, why.ranges) : esc(t)}</span>`)
         .join('');
-      const badge = why?.badge ? `<span class="mf-why${why.score >= 84 ? ' top' : ''}" title="${attr(why.text)}">${esc(why.badge)}</span>` : `<span class="mf-n">${plural(it.degree, 'link')}</span>`;
+      const badge = why?.badge ? `<span class="mf-why${why.score >= 84 ? ' top' : ''}" title="${attr(why.text)}">${esc(why.badge)}</span>` : `<span class="mf-n">${tn(it.degree, '{n} link', '{n} links')}</span>`;
       return `<div class="mf-row" role="option" data-k style="--c:${attr(it.color)}"><i></i>
         <div class="mf-main"><span class="mf-name">${name}</span><div class="mf-sub"><span>${folder}</span>${tagHtml}</div></div>${badge}</div>`;
     };
@@ -468,7 +472,7 @@ export class MapFind {
         .map((id) => byId.get(id))
         .filter((x): x is FindItem => !!x && !this.src.hidden?.(x.region));
       if (rec.length) {
-        rows.push('<div class="mf-sec">Recent</div>');
+        rows.push(`<div class="mf-sec">${t('Recent')}</div>`);
         for (const it of rec.slice(0, 4)) push({ kind: 'node', item: it }, nodeRow(null, it));
       }
       const top = items
@@ -476,7 +480,7 @@ export class MapFind {
         .sort((a, b) => b.degree - a.degree)
         .slice(0, rec.length ? 4 : 5);
       if (top.length) {
-        rows.push('<div class="mf-sec">Most connected</div>');
+        rows.push(`<div class="mf-sec">${t('Most connected')}</div>`);
         for (const it of top) push({ kind: 'node', item: it }, nodeRow(null, it));
       }
       const topTag = [...tagCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -485,31 +489,38 @@ export class MapFind {
       const tip = (label: string, q: string, title: string): string =>
         `<button type="button" class="mf-try" data-try="${attr(q)}" title="${attr(title)}">${esc(label)}</button>`;
       this.head.innerHTML =
-        `<span>Try</span>` +
-        tip('#' + (topTag || 'tag'), topTag ? `#${topTag} ` : '#', 'Notes with a tag; the start of the tag is enough') +
-        tip('in:' + (leaf || 'folder'), leaf ? `in:${leaf} ` : 'in:', 'Notes inside a folder') +
-        tip('name words', '', 'Plain words match names first, then tags and folders') +
-        `<span class="grow"></span><span>Matches light up on the map</span>`;
+        `<span>${t('Try')}</span>` +
+        tip('#' + (topTag || t('tag')), topTag ? `#${topTag} ` : '#', t('Notes with a tag; the start of the tag is enough')) +
+        tip('in:' + (leaf || t('folder')), leaf ? `in:${leaf} ` : 'in:', t('Notes inside a folder')) +
+        tip(t('name words'), '', t('Plain words match names first, then tags and folders')) +
+        `<span class="grow"></span><span>${t('Matches light up on the map')}</span>`;
       this.paint(rows);
       return;
     }
 
     const { hits, held } = runQuery(items, q, this.src.hidden?.bind(this.src));
     this.src.highlight(new Set(hits.map((h) => h.item.id)));
-    this.host.setCount(hits.length ? String(hits.length) : 'none');
+    this.host.setCount(hits.length ? String(hits.length) : t('none'));
 
     const chips = [
       ...q.tags.map((t) => ['#' + t, `#${t}`]),
       ...q.folders.map((f) => ['in:' + f, `in: ${f}`]),
     ]
-      .map(([tok, label]) => `<span class="mf-chip">${esc(label)}<button type="button" data-drop="${attr(tok)}" aria-label="Remove ${attr(label)}">×</button></span>`)
+      .map(([tok, label]) => `<span class="mf-chip">${esc(label)}<button type="button" data-drop="${attr(tok)}" aria-label="${attr(t('Remove {name}', { name: label }))}">×</button></span>`)
       .join('');
-    const what = q.text ? ` for “<b>${esc(q.text)}</b>”` : '';
+    const qb = `<b>${esc(q.text)}</b>`;
+    const count = `<b>${nounCount(hits.length, noun)}</b>`;
     this.head.innerHTML =
       chips +
-      `<span>${hits.length ? `<b>${plural(hits.length, noun)}</b>${what} lit on the map` : `No ${noun}s${what}`}${
-        held ? ` · ${held} more in hidden folders` : ''
-      }</span>`;
+      `<span>${
+        hits.length
+          ? q.text
+            ? t('{count} for “{q}” lit on the map', { count, q: qb })
+            : t('{count} lit on the map', { count })
+          : q.text
+            ? t('No {things} for “{q}”', { things, q: qb })
+            : t('No {things}', { things })
+      }${held ? ` · ${t('{n} more in hidden folders', { n: held })}` : ''}</span>`;
 
     const p = q.partial;
     if (p?.kind === 'tag' || (!p && q.text && !q.tags.length)) {
@@ -519,10 +530,10 @@ export class MapFind {
         .sort((a, b) => Number(b[0].toLowerCase().startsWith(v)) - Number(a[0].toLowerCase().startsWith(v)) || b[1] - a[1])
         .slice(0, p ? 6 : 3);
       if (tags.length) {
-        rows.push(`<div class="mf-sec">Tags <span>${p ? 'Tab or click to filter by it' : ''}</span></div>`);
+        rows.push(`<div class="mf-sec">${t('Tags')} <span>${p ? t('Tab or click to filter by it') : ''}</span></div>`);
         for (const [t, n] of tags) {
           const i = t.toLowerCase().indexOf(v);
-          push({ kind: 'tag', tag: t }, `<div class="mf-row" role="option" data-k><i class="tg">#</i><div class="mf-main"><span class="mf-name">${mark(t, v && i >= 0 ? [[i, i + v.length]] : [])}</span></div><span class="mf-n">${plural(n, noun)}</span></div>`);
+          push({ kind: 'tag', tag: t }, `<div class="mf-row" role="option" data-k><i class="tg">#</i><div class="mf-main"><span class="mf-name">${mark(t, v && i >= 0 ? [[i, i + v.length]] : [])}</span></div><span class="mf-n">${nounCount(n, noun)}</span></div>`);
         }
       }
     }
@@ -533,34 +544,41 @@ export class MapFind {
         .sort((a, b) => b[1].n - a[1].n)
         .slice(0, p ? 6 : 3);
       if (fs.length) {
-        rows.push(`<div class="mf-sec">Folders <span>${p ? 'Tab to filter · click to go there' : ''}</span></div>`);
+        rows.push(`<div class="mf-sec">${t('Folders')} <span>${p ? t('Tab to filter · click to go there') : ''}</span></div>`);
         for (const [f, e] of fs) {
           const i = f.toLowerCase().indexOf(v);
           push(
             { kind: 'folder', folder: f.split('/').pop() || f, region: e.region },
-            `<div class="mf-row" role="option" data-k style="--c:${attr(e.color)}"><i class="sq"></i><div class="mf-main"><span class="mf-name">${mark(f, v && i >= 0 ? [[i, i + v.length]] : [])}</span></div><span class="mf-n">${plural(e.n, noun)}</span></div>`,
+            `<div class="mf-row" role="option" data-k style="--c:${attr(e.color)}"><i class="sq"></i><div class="mf-main"><span class="mf-name">${mark(f, v && i >= 0 ? [[i, i + v.length]] : [])}</span></div><span class="mf-n">${nounCount(e.n, noun)}</span></div>`,
           );
         }
       }
     }
 
     if (hits.length) {
-      rows.push(`<div class="mf-sec">${noun[0].toUpperCase() + noun.slice(1)}s <span>${hits.length > MAX_NODES ? `top ${MAX_NODES} of ${hits.length}` : ''}</span></div>`);
+      rows.push(`<div class="mf-sec">${noun === 'note' ? t('Notes') : `${noun[0].toUpperCase() + noun.slice(1)}s`} <span>${hits.length > MAX_NODES ? t('top {n} of {total}', { n: MAX_NODES, total: hits.length }) : ''}</span></div>`);
       for (const h of hits.slice(0, MAX_NODES)) push({ kind: 'node', item: h.item }, nodeRow(h, h.item));
-      if (hits.length > MAX_NODES) rows.push(`<div class="mf-more">${hits.length - MAX_NODES} more are lit on the map. Add a word, a #tag or in:folder to narrow.</div>`);
+      if (hits.length > MAX_NODES) rows.push(`<div class="mf-more">${t('{n} more are lit on the map. Add a word, a #tag or in:folder to narrow.', { n: hits.length - MAX_NODES })}</div>`);
     } else if (!rows.length || !this.acts.length) {
       const near = nearNames(items, q.text);
       rows.push(
-        `<div class="mf-empty">Nothing matches${q.text ? ` “<b>${esc(q.text)}</b>”` : ''}${q.tags.length || q.folders.length ? ' with these filters' : ''}.` +
-          `${held ? ` ${held} ${noun}s match in hidden folders: show them in Folders.` : ''}</div>`,
+        `<div class="mf-empty">${
+          q.tags.length || q.folders.length
+            ? q.text
+              ? t('Nothing matches “{q}” with these filters.', { q: qb })
+              : t('Nothing matches with these filters.')
+            : q.text
+              ? t('Nothing matches “{q}”.', { q: qb })
+              : t('Nothing matches.')
+        }` + `${held ? ` ${t('{n} {things} match in hidden folders: show them in Folders.', { n: held, things })}` : ''}</div>`,
       );
       if (near.length) {
-        rows.push('<div class="mf-sec">Did you mean</div>');
+        rows.push(`<div class="mf-sec">${t('Did you mean')}</div>`);
         for (const h of near) push({ kind: 'node', item: h.item }, nodeRow(h, h.item));
       }
       if (q.tags.length || q.folders.length) {
-        rows.push('<div class="mf-sec">Try</div>');
-        push({ kind: 'query', q: q.text }, `<div class="mf-tip" role="option" data-k><code>no filters</code><span>search “${esc(q.text || '…')}” without #tag and in:</span></div>`);
+        rows.push(`<div class="mf-sec">${t('Try')}</div>`);
+        push({ kind: 'query', q: q.text }, `<div class="mf-tip" role="option" data-k><code>${t('no filters')}</code><span>${t('search “{q}” without #tag and in:', { q: esc(q.text || '…') })}</span></div>`);
       }
     }
     const firstNode = this.acts.findIndex((a) => a.kind === 'node');

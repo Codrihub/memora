@@ -1,5 +1,6 @@
 // Activity rows and the detail drawer, shared by Overview and Activity.
 
+import { t } from '../i18n';
 import { apiGet, apiPost } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { fmtTs, noteName } from '../format';
@@ -22,6 +23,7 @@ import {
   titleOf,
   undoPlan,
   whoOf,
+  whoText,
   type Burst,
 } from './sentence';
 import { ago, clock, copyText, ICO, openDrawer, closeDrawer } from './ui';
@@ -122,10 +124,10 @@ export function useActivityStyles(): void {
 
 /** Only what a person needs on the row: working, refused or did not work. */
 function statusHTML(it: ActivityItem): string {
-  if (settleRunning(it)) return '<span class="act-st"><span class="cc-dot run"></span>Working…</span>';
+  if (settleRunning(it)) return `<span class="act-st"><span class="cc-dot run"></span>${t('Working…')}</span>`;
   const p = problemOf(it);
-  if (p === 'refused') return '<span class="act-st bad"><span class="cc-dot err"></span>Refused</span>';
-  if (p === 'failed') return '<span class="act-st bad"><span class="cc-dot err"></span>Did not work</span>';
+  if (p === 'refused') return `<span class="act-st bad"><span class="cc-dot err"></span>${t('Refused')}</span>`;
+  if (p === 'failed') return `<span class="act-st bad"><span class="cc-dot err"></span>${t('Did not work')}</span>`;
   return '';
 }
 
@@ -136,8 +138,8 @@ function fmtMs(ms: number): string {
 /** Where a system line comes from, shown only on those rows. */
 function sysTag(it: ActivityItem): string {
   if (!isSystem(it)) return '';
-  const t = it.source === 'auth' ? 'Sign-in & keys' : it.echo ? 'Note change' : 'Server';
-  return `<span class="act-src">${t}</span>`;
+  const tag = it.source === 'auth' ? t('Sign-in & keys') : it.echo ? t('Note change') : t('Server');
+  return `<span class="act-src">${tag}</span>`;
 }
 
 /** The signed-in person's name, so their own rows read "You". */
@@ -184,7 +186,7 @@ function named(it: ActivityItem): number {
 /** Who an agent acted for (Mnemo: "owner · chat", "owner · @mnemo in Inbox"). */
 function forHTML(it: ActivityItem): string {
   const f = it.raw.for;
-  return typeof f === 'string' && f ? ` <span class="act-for" title="${attr('For ' + f)}">for ${esc(f)}</span>` : '';
+  return typeof f === 'string' && f ? ` <span class="act-for" title="${attr(t('For {name}', { name: f }))}">${t('for {name}', { name: esc(f) })}</span>` : '';
 }
 
 /** One activity row: the AI's colour and avatar, then what it did as a sentence. */
@@ -194,23 +196,24 @@ export function actRowHTML(it: ActivityItem, opts: RowOpts = {}): string {
   settleRunning(it);
   const b = opts.burst && opts.burst.items.length > 1 ? opts.burst : null;
   const who = whoOf(it, myName());
+  const shown = whoText(it, myName());
   const pred = b ? burstPredicate(b) : predicate(it);
-  const text = `${who} ${plainText(pred)}`;
+  const text = `${shown} ${plainText(pred)}`;
   const whoHTML =
     kid && who !== 'You' && (keyExists(kid) !== false || kid === 'mnemo')
-      ? `<button type="button" class="act-who go" data-agent-page="${attr(kid)}" title="${attr(`Open ${it.actor}'s page`)}">${esc(who)}</button>`
-      : `<span class="act-who">${esc(who)}</span>`;
+      ? `<button type="button" class="act-who go" data-agent-page="${attr(kid)}" title="${attr(t("Open {name}'s page", { name: it.actor }))}">${esc(shown)}</button>`
+      : `<span class="act-who">${esc(shown)}</span>`;
   const more = opts.compact
     ? ''
     : b
     ? `<span class="act-l2"><button type="button" class="act-x" data-burst="${attr(it.id)}" aria-expanded="${!!opts.open}" aria-label="${attr(
-        `${opts.open ? 'Hide' : 'Show'} the ${b.items.length} actions: ${text}`,
-      )}">${opts.open ? 'Hide' : 'Show'} all ${b.items.length}<span class="act-span">· ${spanText(b.span)}</span>${CHEV}</button></span>`
+        opts.open ? t('Hide the {n} actions: {text}', { n: b.items.length, text }) : t('Show the {n} actions: {text}', { n: b.items.length, text }),
+      )}">${opts.open ? t('Hide all {n}', { n: b.items.length }) : t('Show all {n}', { n: b.items.length })}<span class="act-span">· ${spanText(b.span)}</span>${CHEV}</button></span>`
     : chipsHTML(it, named(it));
   const undo = undone.has(it.id)
-    ? '<span class="act-st ok">Undone</span>'
+    ? `<span class="act-st ok">${t('Undone')}</span>`
     : opts.undo && !b
-      ? `<button type="button" class="act-undo" data-undo="${attr(it.id)}" aria-label="${attr('Undo: ' + text)}">Undo</button>`
+      ? `<button type="button" class="act-undo" data-undo="${attr(it.id)}" aria-label="${attr(t('Undo: {text}', { text }))}">${t('Undo')}</button>`
       : '';
   const row = `<div class="act${problemOf(it) ? ' fail' : ''}${opts.fresh ? ' new' : ''}${isSystem(it) ? ' sys' : ''}" role="button" tabindex="0" data-act="${attr(
     it.id,
@@ -226,7 +229,7 @@ export function actRowHTML(it: ActivityItem, opts: RowOpts = {}): string {
 /** One call inside an expanded burst: the sentence without the name. */
 function kidRowHTML(it: ActivityItem): string {
   const pred = predicate(it);
-  const text = `${whoOf(it, myName())} ${plainText(pred)}`;
+  const text = `${whoText(it, myName())} ${plainText(pred)}`;
   return `<div class="act kid" role="button" tabindex="0" data-act="${attr(it.id)}" aria-label="${attr(text)}">
     <span class="av"></span><span style="min-width:0"><span class="act-l1"><span class="act-p cap">${pred}</span></span>${chipsHTML(it, named(it))}</span>
     <span class="act-meta"><span title="${attr(fmtTs(it.ts))}">${clock(it.ts)}</span></span></div>`;
@@ -240,7 +243,7 @@ const noteExists = (p: string): boolean => allNotes().some((n) => n.path === p);
 export async function runUndo(it: ActivityItem): Promise<boolean> {
   const plan = undoPlan(it, noteExists);
   if (!plan) {
-    toast('This can no longer be undone: the note has changed since.', 'warn');
+    toast(t('This can no longer be undone: the note has changed since.'), 'warn');
     return false;
   }
   try {
@@ -249,23 +252,28 @@ export async function runUndo(it: ActivityItem): Promise<boolean> {
       let at = plan.to;
       if (folderOf(at) !== back) at = (await apiPost<{ path?: string }>('/api/move', { path: at, folder: back || 'Root' })).path || at;
       if (noteName(at) !== noteName(plan.from)) at = (await apiPost<{ path?: string }>('/api/rename', { path: at, name: noteName(plan.from) })).path || at;
-      const where = back ? folderName(back) : 'the top level';
-      toast(at === plan.from ? `“${titleOf(plan.from)}” is back in ${where}.` : `“${titleOf(at)}” is back in ${where}, saved as ${noteName(at)}.`, 'ok');
+      const where = back ? folderName(back) : t('the top level');
+      toast(
+        at === plan.from
+          ? t('“{title}” is back in {where}.', { title: titleOf(plan.from), where })
+          : t('“{title}” is back in {where}, saved as {name}.', { title: titleOf(at), where, name: noteName(at) }),
+        'ok',
+      );
     } else {
       const pins = (await apiGet<{ pins?: { kind: string; path: string }[] }>('/api/pins')).pins || [];
       const pinned = pins.some((x) => x.kind === plan.kind && x.path === plan.path);
       if (pinned === (plan.type === 'pin')) {
-        toast(`Nothing to undo: “${titleOf(plan.path)}” is ${pinned ? 'pinned' : 'not pinned'} already.`, 'info');
+        toast(pinned ? t('Nothing to undo: “{title}” is pinned already.', { title: titleOf(plan.path) }) : t('Nothing to undo: “{title}” is not pinned already.', { title: titleOf(plan.path) }), 'info');
         undone.add(it.id);
         return true;
       }
       await apiPost(`/api/pins/${plan.type}`, { kind: plan.kind, path: plan.path });
-      toast(plan.type === 'unpin' ? `“${titleOf(plan.path)}” is no longer pinned.` : `“${titleOf(plan.path)}” is pinned again.`, 'ok');
+      toast(plan.type === 'unpin' ? t('“{title}” is no longer pinned.', { title: titleOf(plan.path) }) : t('“{title}” is pinned again.', { title: titleOf(plan.path) }), 'ok');
     }
     undone.add(it.id);
     return true;
   } catch (e) {
-    toast(`Could not undo this: ${(e as Error).message || 'try again in a moment'}.`, 'err');
+    toast(t('Could not undo this: {error}.', { error: (e as Error).message || t('try again in a moment') }), 'err');
     return false;
   }
 }
@@ -340,32 +348,34 @@ function openActivity(it: ActivityItem, onFilterActor?: (actor: string) => void,
   useActivityStyles();
   settleRunning(it);
   const problem = problemOf(it);
-  const status = it.running ? 'Working' : problem === 'refused' ? 'Refused' : problem ? 'Did not work' : it.ok === true || it.ms != null ? 'Done' : 'Recorded';
+  const status = it.running ? t('Working') : problem === 'refused' ? t('Refused') : problem ? t('Did not work') : it.ok === true || it.ms != null ? t('Done') : t('Recorded');
   const stCls = it.running ? 'acc' : problem ? 'err' : it.ok === true || it.ms != null ? 'ok' : '';
   const raw = { ...it.raw };
   const kid = typeof raw.actor_id === 'string' ? raw.actor_id : null;
-  const who = whoOf(it, myName());
+  const who = whoText(it, myName());
   const pred = predicate(it);
   const error = typeof raw.error === 'string' ? raw.error : '';
   const why =
     problem === 'refused'
-      ? `${esc(who)} asked for something its access does not allow. If it should be able to, change its access.`
+      ? t('{who} asked for something its access does not allow. If it should be able to, change its access.', { who: esc(who) })
       : problem
-        ? `It reached Memora but did not finish${error ? `: <span class="cc-mono">${esc(error)}</span>` : '.'} It often works on the next try.`
+        ? error
+          ? t('It reached Memora but did not finish: {error} It often works on the next try.', { error: `<span class="cc-mono">${esc(error)}</span>` })
+          : t('It reached Memora but did not finish. It often works on the next try.')
         : '';
-  const src = it.source === 'agent' ? 'An AI app (MCP tool call)' : it.source === 'auth' ? 'Sign-in and keys (gateway audit)' : 'Your notes (vault log)';
+  const src = it.source === 'agent' ? t('An AI app (MCP tool call)') : it.source === 'auth' ? t('Sign-in and keys (gateway audit)') : t('Your notes (vault log)');
   const dot = it.running ? 'run' : problem ? 'err' : stCls === 'ok' ? 'ok' : 'idle';
   const body = `<div class="adr-hero" style="--ag:${agentColor(it.actor, kid)}">${avatarHTML(it.actor, 40, it.running ? 'live' : '', kid)}
       <div style="min-width:0"><div class="v"><b style="color:var(--ag)">${esc(who)}</b> ${pred}</div></div></div>
     <dl class="cc-kv">
-      <dt>Result</dt><dd><span class="ad-res ${stCls}"><span class="cc-dot ${dot}"></span>${esc(status)}</span></dd>
-      ${why ? `<dt>Why</dt><dd>${why}</dd>` : ''}
-      ${typeof it.raw.for === 'string' && it.raw.for ? `<dt>For</dt><dd>${esc(it.raw.for)}</dd>` : ''}
-      <dt>When</dt><dd>${esc(new Date(it.ts * 1000).toLocaleString('en-US'))}</dd>
+      <dt>${t('Result')}</dt><dd><span class="ad-res ${stCls}"><span class="cc-dot ${dot}"></span>${esc(status)}</span></dd>
+      ${why ? `<dt>${t('Why')}</dt><dd>${why}</dd>` : ''}
+      ${typeof it.raw.for === 'string' && it.raw.for ? `<dt>${t('For')}</dt><dd>${esc(it.raw.for)}</dd>` : ''}
+      <dt>${t('When')}</dt><dd>${esc(new Date(it.ts * 1000).toLocaleString('en-US'))}</dd>
     </dl>
     ${
       it.paths.length
-        ? `<div class="ad-sec">${kindOf(it) === 'searched' ? 'Notes it found' : 'Notes'} <span class="n">${it.paths.length}</span></div><div class="ad-notes">${it.paths
+        ? `<div class="ad-sec">${kindOf(it) === 'searched' ? t('Notes it found') : t('Notes')} <span class="n">${it.paths.length}</span></div><div class="ad-notes">${it.paths
             .map(
               (p) =>
                 `<button type="button" data-note="${attr(p)}">${ICO.note}<span style="min-width:0"><span>${esc(noteName(p))}</span><small>${esc(
@@ -375,29 +385,29 @@ function openActivity(it: ActivityItem, onFilterActor?: (actor: string) => void,
             .join('')}</div>`
         : ''
     }
-    <details class="ad-tech" open><summary>Technical details</summary>
+    <details class="ad-tech" open><summary>${t('Technical details')}</summary>
       <dl class="cc-kv">
-        <dt>Action</dt><dd class="cc-mono">${esc(it.action)}</dd>
-        ${it.label ? `<dt>Summary</dt><dd>${esc(it.label)}</dd>` : ''}
-        ${it.ms != null ? `<dt>Duration</dt><dd>${esc(fmtMs(it.ms))}</dd>` : ''}
-        <dt>Source</dt><dd>${esc(src)}</dd>
+        <dt>${t('Action')}</dt><dd class="cc-mono">${esc(it.action)}</dd>
+        ${it.label ? `<dt>${t('Summary')}</dt><dd>${esc(it.label)}</dd>` : ''}
+        ${it.ms != null ? `<dt>${t('Duration')}</dt><dd>${esc(fmtMs(it.ms))}</dd>` : ''}
+        <dt>${t('Source')}</dt><dd>${esc(src)}</dd>
         ${it.ip ? `<dt>IP</dt><dd class="cc-mono">${esc(it.ip)}</dd>` : ''}
-        ${error && !problem ? `<dt>Error</dt><dd class="cc-mono">${esc(error)}</dd>` : ''}
+        ${error && !problem ? `<dt>${t('Error')}</dt><dd class="cc-mono">${esc(error)}</dd>` : ''}
       </dl>
-      <div class="ad-json"><div class="ad-json-h"><span>JSON</span><button type="button" class="btn sm ad-cp" data-cp>${ICO.copy}Copy JSON</button></div>
+      <div class="ad-json"><div class="ad-json-h"><span>JSON</span><button type="button" class="btn sm ad-cp" data-cp>${ICO.copy}${t('Copy JSON')}</button></div>
         <pre class="ad-raw">${esc(JSON.stringify(raw, null, 2))}</pre></div>
     </details>`;
   const agent = kid && keyExists(kid) !== false ? kid : null;
   const here = !!agent && agent === onAgentPage;
   const refused = problem === 'refused' && !!agent;
   const btns: string[] = [];
-  if (onFilterActor) btns.push(`<button type="button" class="btn ${agent ? 'ghost' : 'primary'}" data-fa title="${attr(`Show only ${it.actor} in the timeline`)}">${agent ? 'Only this agent' : `Only ${esc(it.actor)}`}</button>`);
-  if (agent && !here) btns.push(`<button type="button" class="btn${refused ? '' : ' primary'}" data-ap>Open agent activity${refused ? '' : ICO.arrow}</button>`);
-  if (refused) btns.push(`<button type="button" class="btn primary" data-acc title="Change what it may do">Change access</button>`);
-  else if (here) btns.push(`<button type="button" class="btn" data-acc title="What it may do">See its access</button>`);
-  if (!agent && !onFilterActor) btns.push(`<button type="button" class="btn primary" data-la>Show in Activity${ICO.arrow}</button>`);
+  if (onFilterActor) btns.push(`<button type="button" class="btn ${agent ? 'ghost' : 'primary'}" data-fa title="${attr(t('Show only {name} in the timeline', { name: it.actor }))}">${agent ? t('Only this agent') : t('Only {name}', { name: esc(it.actor) })}</button>`);
+  if (agent && !here) btns.push(`<button type="button" class="btn${refused ? '' : ' primary'}" data-ap>${t('Open agent activity')}${refused ? '' : ICO.arrow}</button>`);
+  if (refused) btns.push(`<button type="button" class="btn primary" data-acc title="${t('Change what it may do')}">${t('Change access')}</button>`);
+  else if (here) btns.push(`<button type="button" class="btn" data-acc title="${t('What it may do')}">${t('See its access')}</button>`);
+  if (!agent && !onFilterActor) btns.push(`<button type="button" class="btn primary" data-la>${t('Show in Activity')}${ICO.arrow}</button>`);
   openDrawer({
-    title: 'What happened',
+    title: t('What happened'),
     sub: fmtTs(it.ts),
     body,
     foot: btns.join(''),
@@ -438,7 +448,7 @@ function openActivity(it: ActivityItem, onFilterActor?: (actor: string) => void,
           hooks.go('logs');
         };
       const cp = d.querySelector<HTMLElement>('[data-cp]');
-      if (cp) cp.onclick = () => void copyText(JSON.stringify(raw, null, 2), 'JSON copied');
+      if (cp) cp.onclick = () => void copyText(JSON.stringify(raw, null, 2), t('JSON copied'));
     },
   });
 }

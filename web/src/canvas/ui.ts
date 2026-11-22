@@ -1,5 +1,6 @@
 import { el, esc } from '../dom';
 import { dismissGroup, notify } from '../toast';
+import { t } from '../i18n';
 
 const P = (d: string): string =>
   `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -44,43 +45,43 @@ export function buildChrome(root: HTMLElement): Chrome {
   const tools = el(
     'div',
     'cv-ui cv-tools',
-    btn('tool-select', ICON.pointer, 'Select (V)', 'on') +
-      btn('tool-hand', ICON.hand, 'Hand (H, or hold Space)', 'wide') +
+    btn('tool-select', ICON.pointer, t('Select (V)'), 'on') +
+      btn('tool-hand', ICON.hand, t('Hand (H, or hold Space)'), 'wide') +
       '<span class="cv-sep"></span>' +
-      '<span class="cv-zoom wide" title="Zoom level">100%</span>' +
-      `<button class="cv-btn wide" data-act="fit" title="Fit the whole board on screen (Shift+1)" aria-label="Fit the whole board on screen">${ICON.fit}Fit</button>` +
-      `<button class="cv-btn" data-act="zoom-100" title="Actual size, 100% (Shift+0)" aria-label="Actual size, 100%">100%</button>` +
+      `<span class="cv-zoom wide" title="${t('Zoom level')}">100%</span>` +
+      `<button class="cv-btn wide" data-act="fit" title="${t('Fit the whole board on screen (Shift+1)')}" aria-label="${t('Fit the whole board on screen')}">${ICON.fit}${t('Fit')}</button>` +
+      `<button class="cv-btn" data-act="zoom-100" title="${t('Actual size, 100% (Shift+0)')}" aria-label="${t('Actual size, 100%')}">100%</button>` +
       '<span class="cv-sep"></span>' +
-      btn('tidy', ICON.tidy, 'Tidy up (T: selection, Shift+T: whole board)') +
-      btn('links', ICON.link, 'Show links between notes (L)', 'on') +
-      btn('help', ICON.help, 'Keyboard shortcuts (?)'),
+      btn('tidy', ICON.tidy, t('Tidy up (T: selection, Shift+T: whole board)')) +
+      btn('links', ICON.link, t('Show links between notes (L)'), 'on') +
+      btn('help', ICON.help, t('Keyboard shortcuts (?)')),
   );
   const zoom = tools.querySelector<HTMLElement>('.cv-zoom')!;
   const selbar = el(
     'div',
     'cv-ui cv-selbar hidden',
     '<span class="cnt"></span><span class="cv-fchips"></span>' +
-      btn('sel-open', ICON.open, 'Preview and open (Enter)') +
-      btn('fit-sel', ICON.fit, 'Focus the selection (Shift+2)') +
+      btn('sel-open', ICON.open, t('Preview and open (Enter)')) +
+      btn('fit-sel', ICON.fit, t('Focus the selection (Shift+2)')) +
       '<span class="cv-sep"></span>' +
-      btn('al-l', ICON.alL, 'Align left (Alt+A)') +
-      btn('al-c', ICON.alC, 'Align horizontal centers (Alt+H)') +
-      btn('al-r', ICON.alR, 'Align right (Alt+D)') +
-      btn('al-t', ICON.alT, 'Align top (Alt+W)') +
-      btn('al-m', ICON.alM, 'Align vertical centers (Alt+V)') +
-      btn('al-b', ICON.alB, 'Align bottom (Alt+S)') +
+      btn('al-l', ICON.alL, t('Align left (Alt+A)')) +
+      btn('al-c', ICON.alC, t('Align horizontal centers (Alt+H)')) +
+      btn('al-r', ICON.alR, t('Align right (Alt+D)')) +
+      btn('al-t', ICON.alT, t('Align top (Alt+W)')) +
+      btn('al-m', ICON.alM, t('Align vertical centers (Alt+V)')) +
+      btn('al-b', ICON.alB, t('Align bottom (Alt+S)')) +
       '<span class="cv-sep"></span>' +
-      btn('dis-h', ICON.disH, 'Distribute horizontally (Alt+Shift+H)') +
-      btn('dis-v', ICON.disV, 'Distribute vertically (Alt+Shift+V)') +
+      btn('dis-h', ICON.disH, t('Distribute horizontally (Alt+Shift+H)')) +
+      btn('dis-v', ICON.disV, t('Distribute vertically (Alt+Shift+V)')) +
       '<span class="cv-sep"></span>' +
-      btn('tidy', ICON.tidy, 'Tidy into a grid (T)'),
+      btn('tidy', ICON.tidy, t('Tidy into a grid (T)')),
   );
   const toast = el('div', 'cv-ui cv-toast', '<span class="msg"></span>');
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-live', 'polite');
   const help = el('div', 'cv-ui cv-help hidden', helpHtml());
   help.setAttribute('role', 'dialog');
-  help.setAttribute('aria-label', 'Canvas keyboard shortcuts');
+  help.setAttribute('aria-label', t('Canvas keyboard shortcuts'));
   const scrim = el('div', 'cv-scrim hidden');
   root.append(tools, selbar, toast, scrim, help);
   return { tools, zoom, selbar, toast, help, scrim };
@@ -93,33 +94,33 @@ function helpHtml(): string {
       .map((x) => `<kbd>${esc(x)}</kbd>`)
       .join('');
   const rows: [string, string][] = [
-    ['Pan', 'Space+drag'],
-    ['Pan (mouse)', 'Middle-drag'],
-    ['Zoom at cursor', 'Ctrl+wheel'],
-    ['Zoom in / out', '+ -'],
-    ['Zoom to fit', 'Shift+1'],
-    ['Zoom to selection', 'Shift+2'],
-    ['Zoom to 100%', 'Shift+0'],
-    ['Select / Hand tool', 'V H'],
-    ['Add to selection', 'Shift+click'],
-    ['Select all', 'Ctrl+A'],
-    ['Preview note', 'Enter'],
-    ['Open note', 'O'],
-    ['Rename', 'F2'],
-    ['Nudge', 'Arrows'],
-    ['Align left / right', 'Alt+A Alt+D'],
-    ['Align top / bottom', 'Alt+W Alt+S'],
-    ['Align centers', 'Alt+H Alt+V'],
-    ['Distribute', 'Alt+Shift+H/V'],
-    ['Tidy selection', 'T'],
-    ['Tidy whole board', 'Shift+T'],
-    ['Wikilinks', 'L'],
-    ['Minimap', 'M'],
-    ['Undo last move', 'Ctrl+Z'],
-    ['Clear / close', 'Esc'],
+    [t('Pan'), 'Space+drag'],
+    [t('Pan (mouse)'), t('Middle-drag')],
+    [t('Zoom at cursor'), 'Ctrl+wheel'],
+    [t('Zoom in / out'), '+ -'],
+    [t('Zoom to fit'), 'Shift+1'],
+    [t('Zoom to selection'), 'Shift+2'],
+    [t('Zoom to 100%'), 'Shift+0'],
+    [t('Select / Hand tool'), 'V H'],
+    [t('Add to selection'), 'Shift+click'],
+    [t('Select all'), 'Ctrl+A'],
+    [t('Preview note'), 'Enter'],
+    [t('Open note'), 'O'],
+    [t('Rename'), 'F2'],
+    [t('Nudge'), t('Arrows')],
+    [t('Align left / right'), 'Alt+A Alt+D'],
+    [t('Align top / bottom'), 'Alt+W Alt+S'],
+    [t('Align centers'), 'Alt+H Alt+V'],
+    [t('Distribute'), 'Alt+Shift+H/V'],
+    [t('Tidy selection'), 'T'],
+    [t('Tidy whole board'), 'Shift+T'],
+    [t('Wikilinks'), 'L'],
+    [t('Minimap'), 'M'],
+    [t('Undo last move'), 'Ctrl+Z'],
+    [t('Clear / close'), 'Esc'],
   ];
-  return `<h3>Canvas shortcuts</h3>
-  <p>Drag a card into another folder frame to move the note on disk. Drag a frame by its name to rearrange the board; drop it onto another frame to move the whole folder there. Double-click a title to rename. On touch: drag to pan, pinch to zoom, long-press a card to move it, tap to preview.</p>
+  return `<h3>${t('Canvas shortcuts')}</h3>
+  <p>${t('Drag a card into another folder frame to move the note on disk. Drag a frame by its name to rearrange the board; drop it onto another frame to move the whole folder there. Double-click a title to rename. On touch: drag to pan, pinch to zoom, long-press a card to move it, tap to preview.')}</p>
   <div class="cols">${rows.map(([a, b]) => `<div class="row"><span>${esc(a)}</span><span>${k(b)}</span></div>`).join('')}</div>`;
 }
 
@@ -134,7 +135,7 @@ export class Toast {
       msg,
       opts.err ? 'err' : 'info',
       opts.ms ?? (undo ? 7000 : 3600),
-      undo ? { label: 'Undo', icon: ICON.undo, run: () => undo() } : undefined,
+      undo ? { label: t('Undo'), icon: ICON.undo, run: () => undo() } : undefined,
       { group: 'canvas' },
     );
   }

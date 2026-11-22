@@ -56,6 +56,7 @@ export function indexPage(css: string, splashJs: string): string {
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<meta name="memora-lang" content="">
 <meta name="memora-build" content="__MEMORA_BUILD__">
 <script>${THEME_BOOT}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">

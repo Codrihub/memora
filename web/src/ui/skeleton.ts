@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useStyles } from '../dom';
 
 const CSS = `
@@ -22,7 +23,7 @@ const lines = (widths: number[]): string => widths.map((w) => `<span class="sk s
 
 export function previewSkeleton(): string {
   useStyles('skeleton-css', CSS);
-  return `<div aria-busy="true" aria-label="Loading the preview">${b('45%', 16)}${lines([96, 90, 64])}<div class="sk-gap" style="height:10px"></div>${b('35%', 14)}${lines([92, 70])}</div>`;
+  return `<div aria-busy="true" aria-label="${t('Loading the preview')}">${b('45%', 16)}${lines([96, 90, 64])}<div class="sk-gap" style="height:10px"></div>${b('35%', 14)}${lines([92, 70])}</div>`;
 }
 
 export function rowsSkeleton(n = 6, round = true): string {

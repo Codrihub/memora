@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { attr, esc } from '../dom';
 import { Modal } from '../modal';
 import { icon } from './icons';
@@ -319,7 +320,7 @@ export function typedConfirm(o: TypedConfirmOptions): void {
     ? `<ul class="tc-list">${items
         .slice(0, 4)
         .map((n) => `<li title="${attr(n)}">${esc(n)}</li>`)
-        .join('')}${items.length > 4 ? `<li class="more">and ${items.length - 4} more</li>` : ''}</ul>`
+        .join('')}${items.length > 4 ? `<li class="more">${t('and {n} more', { n: items.length - 4 })}</li>` : ''}</ul>`
     : '';
   let input: HTMLInputElement | null = null;
   let btn: HTMLButtonElement | null = null;
@@ -329,12 +330,12 @@ export function typedConfirm(o: TypedConfirmOptions): void {
   };
   Modal.open({
     title: o.title,
-    body: `<div class="tc">${o.body}${list}<div class="field"><label for="${id}">Type <b>${esc(word)}</b> to confirm</label>
+    body: `<div class="tc">${o.body}${list}<div class="field"><label for="${id}">${t('Type {word} to confirm', { word: `<b>${esc(word)}</b>` })}</label>
       <input id="${id}" class="tc-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="${attr(
         word,
       )}"></div></div>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
         label: o.confirmLabel,
         cls: 'danger',

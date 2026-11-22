@@ -8,6 +8,7 @@ import { BRAND_MOTTO, BRAND_TAG, markSvg } from '../brand';
 import { BRAND_FONT } from '../brand-font';
 import { icon } from '../ui/icons';
 import { constellation } from './welcome';
+import { t } from '../i18n';
 
 const CSS = `
 .ob{position:fixed;inset:0;z-index:70;overflow:auto;background:var(--bg);display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
@@ -77,22 +78,22 @@ export function showVaultOnboarding(info: SettingsInfo, user: string): Promise<V
     const root = el('div', 'ob');
     root.id = 'vaultGate';
     root.setAttribute('role', 'main');
-    const who = user || 'owner';
+    const who = user || t('owner');
     root.innerHTML = `<aside class="ob-side" aria-hidden="true">${constellation(600, 900, 34, 7, 'ob-net')}
       <div class="ob-brand">${markSvg('ob-mk')}<b>Memora</b></div>
-      <div class="ob-copy"><h2>${BRAND_MOTTO}</h2><p>One folder of notes that you and every connected AI share.</p>
-        <ol class="ob-steps"><li><i>1</i>Signed in</li><li class="on"><i>2</i>Choose your vault folder</li></ol></div>
+      <div class="ob-copy"><h2>${t(BRAND_MOTTO)}</h2><p>${t('One folder of notes that you and every connected AI share.')}</p>
+        <ol class="ob-steps"><li><i>1</i>${t('Signed in')}</li><li class="on"><i>2</i>${t('Choose your vault folder')}</li></ol></div>
       <div class="ob-tag">${BRAND_TAG}</div></aside>
     <div class="ob-main">
-      <div class="ob-who"><span class="ob-mbrand">${markSvg('ob-mk')}<b>Memora</b></span><span>signed in as ${esc(who)}</span><span class="av" aria-hidden="true">${esc(who.slice(0, 1).toUpperCase())}</span></div>
+      <div class="ob-who"><span class="ob-mbrand">${markSvg('ob-mk')}<b>Memora</b></span><span>${t('signed in as {name}', { name: esc(who) })}</span><span class="av" aria-hidden="true">${esc(who.slice(0, 1).toUpperCase())}</span></div>
       <div class="ob-card">
-      <span class="ob-step">One last step</span>
-      <h1>Choose your vault folder</h1>
-      <p class="ob-lead">The vault is a <b>folder of markdown notes on the server's disk</b>: the brain every agent shares. This app and every agent connected over MCP (Claude Code, Cursor, Codex...) read and write the same notes there. Pick an existing folder of notes, or a new empty one.</p>
+      <span class="ob-step">${t('One last step')}</span>
+      <h1>${t('Choose your vault folder')}</h1>
+      <p class="ob-lead">${t('The vault is a {folder}: the brain every agent shares. This app and every agent connected over MCP (Claude Code, Cursor, Codex...) read and write the same notes there. Pick an existing folder of notes, or a new empty one.', { folder: `<b>${t("folder of markdown notes on the server's disk")}</b>` })}</p>
       <div id="obForm"></div>
-      <div class="ob-note"><span class="ti">${icon('info')}</span><span><b>Running in Docker?</b> The path is inside the container, so it must be a mounted volume, or the notes are lost when the container is recreated. For example, with <code>-v /srv/memora/vault:/data</code> enter <code>/data</code>.</span></div>
-      <div class="ob-foot"><span>You can change the folder later in Settings.</span><span class="grow"></span>
-        <button type="button" id="obSignOut">Sign out</button></div>
+      <div class="ob-note"><span class="ti">${icon('info')}</span><span><b>${t('Running in Docker?')}</b> ${t('The path is inside the container, so it must be a mounted volume, or the notes are lost when the container is recreated. For example, with {flag} enter {path}.', { flag: '<code>-v /srv/memora/vault:/data</code>', path: '<code>/data</code>' })}</span></div>
+      <div class="ob-foot"><span>${t('You can change the folder later in Settings.')}</span><span class="grow"></span>
+        <button type="button" id="obSignOut">${t('Sign out')}</button></div>
       </div>
     </div>`;
     document.body.appendChild(root);
@@ -101,10 +102,10 @@ export function showVaultOnboarding(info: SettingsInfo, user: string): Promise<V
       id: 'ob',
       suggested: info.vault_suggested,
       current: null,
-      submitLabel: 'Use this folder',
+      submitLabel: t('Use this folder'),
       onDone: (res) => {
         const go = root.querySelector<HTMLElement>('#obGo');
-        if (go) go.textContent = `Opening ${notesLabel(res.stats?.notes)}...`;
+        if (go) go.textContent = t('Opening {notes}...', { notes: notesLabel(res.stats?.notes) });
         root.style.transition = 'opacity .25s';
         root.style.opacity = '0';
         window.setTimeout(() => {

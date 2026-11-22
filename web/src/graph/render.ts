@@ -3,6 +3,7 @@
 import { agentInitials } from '../control/agents';
 import type { Camera } from './camera';
 import type { GLink, GNode, LayoutMode, Pulse } from './model';
+import { t } from '../i18n';
 
 export interface Theme {
   light: boolean;
@@ -521,7 +522,7 @@ export class Renderer {
       const font = '600 12.5px Geist, system-ui, -apple-system, Segoe UI, sans-serif';
       ctx.font = font;
       for (const g of this.hullCache) {
-        const text = /^root$/i.test(g.group) ? 'Top level' : g.group;
+        const text = /^root$/i.test(g.group) ? t('Top level') : g.group;
         const tw = this.measure(text, font);
         const s = cam.toScreen(g.top[0], g.top[1]);
         const x = s.x - tw / 2;

@@ -1097,8 +1097,8 @@ mod tests {
             m
         };
         assert_eq!(
-            base_url(&hm(&[("host", "memory.example.com")])),
-            "https://memory.example.com"
+            base_url(&hm(&[("host", "memora.example.com")])),
+            "https://memora.example.com"
         );
         assert_eq!(
             base_url(&hm(&[("host", "127.0.0.1:8400")])),

@@ -348,15 +348,20 @@ pub fn list(conn: &Connection) -> Result<Vec<Rule>> {
             r.get::<_, i64>(5)?,
         ))
     })?;
+    let mnemo = mnemo_rules(conn)?;
     let mut out = Vec::new();
     for row in rows {
         let (id, kind, path, mode, created_at, updated_at) = row?;
+        let mut ks = keys.remove(&id).unwrap_or_default();
+        if mnemo.contains(&id) {
+            ks.insert(MNEMO.to_string());
+        }
         out.push(Rule {
             id,
             kind: kind.parse()?,
             path,
             mode: mode.parse()?,
-            keys: keys.remove(&id).unwrap_or_default(),
+            keys: ks,
             created_at,
             updated_at,
             trail: trails.remove(&id).unwrap_or_default(),
@@ -410,6 +415,41 @@ fn map_constraint(e: rusqlite::Error) -> Error {
     }
 }
 
+/// Mnemo, the agent built into Memora, has no row in `api_key`, so the rules it is named in are
+/// kept as a list of rule ids in `meta` (no schema change); [`list`] adds it back to their keys.
+pub const MNEMO: &str = "mnemo";
+const MNEMO_META: &str = "privacy_mnemo";
+
+/// The rules that name Mnemo. A row that cannot be read fails (so views fail closed); only
+/// a missing row means none.
+fn mnemo_rules(conn: &Connection) -> Result<BTreeSet<i64>> {
+    let raw = match conn.query_row("SELECT value FROM meta WHERE key = ?1", [MNEMO_META], |r| {
+        r.get::<_, String>(0)
+    }) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(BTreeSet::new()),
+        Err(e) => return Err(e.into()),
+    };
+    serde_json::from_str::<Vec<i64>>(&raw)
+        .map(|ids| ids.into_iter().collect())
+        .map_err(|_| Error::invalid("privacy_mnemo", "unreadable list of rule ids"))
+}
+
+/// Name Mnemo in rule `id`, or not (every new rule says which, so a reused id starts clean).
+fn set_mnemo(conn: &Connection, id: i64, on: bool) -> Result<()> {
+    let mut ids = mnemo_rules(conn)?;
+    let changed = if on { ids.insert(id) } else { ids.remove(&id) };
+    if !changed {
+        return Ok(());
+    }
+    let v = serde_json::to_string(&ids.iter().collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![MNEMO_META, v],
+    )?;
+    Ok(())
+}
+
 /// Replace the rules on `(kind, path)` with one rule. A `deny` rule with no keys
 /// restricts nothing: the path's rules are removed and `None` returned.
 pub fn set(
@@ -443,10 +483,11 @@ pub fn set(
     {
         let mut st =
             tx.prepare_cached("INSERT INTO privacy_rule_key (rule_id, key_id) VALUES (?1, ?2)")?;
-        for k in keys {
+        for k in keys.iter().filter(|k| k.as_str() != MNEMO) {
             st.execute(params![id, k]).map_err(map_constraint)?;
         }
     }
+    set_mnemo(tx, id, keys.contains(MNEMO))?;
     for p in &trail {
         add_trail(tx, id, p)?;
     }
@@ -540,12 +581,13 @@ pub fn carry(tx: &Transaction<'_>, from: &str, to: &str, now: i64) -> Result<usi
             params![t, r.mode.as_str(), now],
         )?;
         let id = tx.last_insert_rowid();
-        for k in &r.keys {
+        for k in r.keys.iter().filter(|k| k.as_str() != MNEMO) {
             tx.execute(
                 "INSERT OR IGNORE INTO privacy_rule_key (rule_id, key_id) VALUES (?1, ?2)",
                 params![id, k],
             )?;
         }
+        set_mnemo(tx, id, r.keys.contains(MNEMO))?;
         add_trail(tx, id, &f)?;
         added += 1;
     }
@@ -671,6 +713,64 @@ mod tests {
         let v = db.read(|c| view_for(c, "k_c")).unwrap();
         assert!(!v.visible("a/../b"));
         assert!(v.visible(""));
+    }
+
+    #[test]
+    fn an_unreadable_mnemo_list_hides_everything_from_mnemo() {
+        let db = db_with_keys(&["k_a"]);
+        db.write(|tx| {
+            tx.execute(
+                "INSERT INTO meta (key, value) VALUES ('privacy_mnemo', 'not json')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!vis(&db, MNEMO, "Notes/any.md"), "fails closed");
+    }
+
+    #[test]
+    fn mnemo_can_be_named_in_rules_without_a_key_row() {
+        let db = db_with_keys(&["k_a"]);
+        db.write(|tx| {
+            set(tx, Kind::Folder, "Diary", Mode::Deny, &keys(&[MNEMO]), 1)?;
+            set(
+                tx,
+                Kind::Folder,
+                "Team",
+                Mode::AllowOnly,
+                &keys(&["k_a", MNEMO]),
+                1,
+            )?;
+            set(
+                tx,
+                Kind::Folder,
+                "Board",
+                Mode::AllowOnly,
+                &keys(&["k_a"]),
+                1,
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!vis(&db, MNEMO, "Diary/day.md"), "deny names Mnemo alone");
+        assert!(vis(&db, "k_a", "Diary/day.md"));
+        assert!(vis(&db, MNEMO, "Team/plan.md"), "on the allow list");
+        assert!(!vis(&db, MNEMO, "Board/x.md"), "not on the allow list");
+        let rules = db.read(list).unwrap();
+        assert!(rules
+            .iter()
+            .any(|r| r.path == "Diary" && r.keys.contains(MNEMO)));
+        db.write(|tx| {
+            set(tx, Kind::Folder, "Diary", Mode::Deny, &keys(&[]), 2)?;
+            // A note moved out of a folder keeps the folder's Mnemo rule.
+            set(tx, Kind::Folder, "Diary", Mode::Deny, &keys(&[MNEMO]), 3)?;
+            carry(tx, "Diary/day.md", "Trash/day.md", 4)?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!vis(&db, MNEMO, "Trash/day.md"));
+        assert!(vis(&db, "k_a", "Trash/day.md"));
     }
 
     #[test]

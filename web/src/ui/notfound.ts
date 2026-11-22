@@ -1,5 +1,6 @@
 // Never redirects by itself: at boot it sits under the splash, so a countdown would run out unseen.
 
+import { t } from '../i18n';
 import { esc, useStyles } from '../dom';
 import { icon } from './icons';
 import { markSvg } from '../brand';
@@ -74,21 +75,21 @@ export function showNotFound(miss: RouteMissing, home: () => void, back?: () => 
     <div class="nf-art" aria-hidden="true">${constellation(520, 200, 26, 11, 'nf-net')}
       <span class="nf-ic">${icon(node ? 'note' : 'search')}</span><span class="nf-num">404</span></div>
     <div class="nf-body">
-    <p class="nf-code">Error 404</p>
-    <h1 id="nf-title" tabindex="-1">${node ? 'Note not found' : 'Page not found'}</h1>
+    <p class="nf-code">${t('Error 404')}</p>
+    <h1 id="nf-title" tabindex="-1">${node ? t('Note not found') : t('Page not found')}</h1>
     <p class="nf-t">${
       node
-        ? 'It may have been renamed, moved or deleted. Deleted notes wait in the Trash.'
-        : 'There is no page at this address.'
+        ? t('It may have been renamed, moved or deleted. Deleted notes wait in the Trash.')
+        : t('There is no page at this address.')
     }</p>
-    <div class="nf-path"><span>${node ? 'Note' : 'Address'}</span><code title="${esc(miss.label)}">${esc(miss.label)}</code></div>
+    <div class="nf-path"><span>${node ? t('Note') : t('Address')}</span><code title="${esc(miss.label)}">${esc(miss.label)}</code></div>
     <div class="nf-acts">
-      <button type="button" class="btn primary" data-home>Go to Overview</button>
-      ${back ? '<button type="button" class="btn" data-back>Back</button>' : ''}
+      <button type="button" class="btn primary" data-home>${t('Go to Overview')}</button>
+      ${back ? `<button type="button" class="btn" data-back>${t('Back')}</button>` : ''}
     </div></div></div></div>`;
   document.body.appendChild(el);
   open = el;
-  document.title = (node ? 'Note not found' : 'Page not found') + ' · Memora';
+  document.title = (node ? t('Note not found') : t('Page not found')) + ' · Memora';
   el.querySelector<HTMLElement>('[data-home]')!.onclick = () => {
     closeNotFound();
     home();

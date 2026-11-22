@@ -35,6 +35,13 @@ fn too_long_password() -> Response {
     ))
 }
 
+/// The interface language new devices start in (`auto`: the browser's).
+pub(crate) fn server_language(st: &AppState) -> String {
+    st.db
+        .read(|c| Ok(memora_state::settings::ui_language(c)))
+        .unwrap_or_else(|_| "en".into())
+}
+
 fn realm(st: &AppState) -> String {
     rd(&st.cache.settings).realm.clone()
 }
@@ -478,11 +485,28 @@ async fn h_api_server_settings_set(
         session_max_age: b.get("session_max_age").and_then(|v| v.as_i64()),
         min_password_len: None,
     };
-    if patch.realm.is_none() && patch.session_ttl.is_none() && patch.session_max_age.is_none() {
-        return bad("send realm, session_ttl or session_max_age");
+    // The language new devices start in (a device's own pick wins).
+    let language = b
+        .get("language")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    if let Some(l) = &language {
+        if !memora_state::settings::language_ok(l) {
+            return bad("language must be a language code such as en, id or zh-TW, or auto");
+        }
+    }
+    if patch.realm.is_none()
+        && patch.session_ttl.is_none()
+        && patch.session_max_age.is_none()
+        && language.is_none()
+    {
+        return bad("send realm, session_ttl, session_max_age or language");
     }
     let user = actor_name(&st, &headers, &key);
     let res = st.db.write(|tx| {
+        if let Some(l) = &language {
+            memora_state::settings::set_ui_language(tx, l)?;
+        }
         let s = memora_state::settings::update(tx, &patch, memora_state::now())?;
         act_tx(
             tx,
@@ -499,7 +523,7 @@ async fn h_api_server_settings_set(
     match res {
         Ok(s) => {
             cache::reload(&st, Domain::Settings);
-            Json(json!({"realm": s.realm, "session_ttl": s.session_ttl, "session_max_age": s.session_max_age})).into_response()
+            Json(json!({"realm": s.realm, "session_ttl": s.session_ttl, "session_max_age": s.session_max_age, "language": server_language(&st)})).into_response()
         }
         Err(e) => db_err(e, "settings not found"),
     }
@@ -509,6 +533,7 @@ async fn h_api_server_settings_set(
 async fn h_api_config(State(st): State<AppState>) -> Response {
     Json(json!({
         "realm": realm(&st),
+        "language": server_language(&st),
         "min_password_len": min_password_len(&st),
         "session_ttl": session_ttl(&st),
         "vault": st.vault_path(),
@@ -534,6 +559,7 @@ async fn h_auth_state(State(st): State<AppState>, headers: HeaderMap) -> Respons
     let mut out = json!({
         "bootstrap": bootstrap,
         "realm": realm(&st),
+        "language": server_language(&st),
         "min_password_len": min_password_len(&st),
         "gateway": true,
         "armed": armed,

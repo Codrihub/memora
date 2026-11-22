@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { api } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { state } from '../state';
@@ -27,6 +28,29 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.0.0',
+    title: t('Your language, your rules'),
+    lead: t('Memora in your language, Mnemo showing its plan as it works, and you choosing what it may use and see.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'chat', title: t('Pick your language'), text: t('Choose from many languages in Settings, Appearance, per device. Auto follows your browser.') },
+          { icon: 'check', title: t('Mnemo\'s plan, live'), text: t('Longer tasks show as a checklist above the message box: not started, in progress, done.') },
+          { icon: 'shield', title: t('You decide what Mnemo uses'), text: t('Switch tools off for Mnemo or for its sub-agents, and keep notes, folders or pictures private from it.') },
+          { icon: 'user', title: t('Tell Mnemo about you'), text: t('A few words, or let it learn from your notes. What it knows is one plain list you can edit.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'sparkle', title: t('Suggestions in your words'), text: t('New chat ideas come in the language you write to Mnemo in.') },
+          { icon: 'agents', title: t('Tidier sub-agents'), text: t('The newest on top, the latest step first, and a full-width line with a clear View button.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '2.2.1',
     title: 'Sub-agents, simpler',
     lead: 'Nothing to set up for sub-agents, every model in reach, a yes that sticks, and the live status above the message box.',
@@ -35,7 +59,7 @@ const RELEASES: Release[] = [
         kind: 'better',
         items: [
           { icon: 'agents', title: 'No setup for sub-agents', text: 'Mnemo names and starts them itself. Settings keeps only whether it asks first; follow them and switch their model in Agents.' },
-          { icon: 'chat', title: 'Every model, by name', text: 'Ask for a sub-agent model by its short name, like hai-gpt. Mnemo sees all your models, with your default and fallbacks, and never swaps in another.' },
+          { icon: 'chat', title: 'Every model, by name', text: 'Ask for a sub-agent model by its short name. Mnemo sees all your models, with your default and fallbacks, and never swaps in another.' },
           { icon: 'chat', title: 'Status above the message box', text: 'What Mnemo is doing, and for how long, now sits in one line just above where you type, only while it works. Tap it to see the sub-agents.' },
           { icon: 'send-now', title: 'Your yes sticks', text: 'Said Run them and then wrote again? The sub-agents still run, without a second question.' },
         ],
@@ -384,7 +408,7 @@ const RELEASES: Release[] = [
   },
 ];
 
-const KIND_LABEL: Record<Kind, string> = { new: 'New', better: 'Better', admin: 'Good to know' };
+const KIND_LABEL: Record<Kind, string> = { new: t('New'), better: t('Better'), admin: t('Good to know') };
 const FLAG = '/api/ui/layout/whats-new';
 
 const CSS = `
@@ -480,11 +504,11 @@ function body(r: Release): string {
   return `<div class="wn" role="document">
     <header class="wn-hero">
       <div class="wn-top">${markSvg('wn-mark')}<span class="wn-word">Memora</span><span class="wn-grow"></span>${
-        RELEASES.length > 1 ? '<span class="wn-vlab" id="wnV">Version</span><i class="wn-slot"></i>' : ''
+        RELEASES.length > 1 ? `<span class="wn-vlab" id="wnV">${t('Version')}</span><i class="wn-slot"></i>` : ''
       }
-        <button type="button" class="wn-x" data-close aria-label="Close">${icon('close')}</button></div>
-      <div class="wn-ver"><b>What's new in ${esc(r.version)}</b>${r.date ? `<span>${esc(r.date)}</span>` : ''}${
-        ahead ? `<span class="pre">Coming next · you run ${esc(now)}</span>` : ''
+        <button type="button" class="wn-x" data-close aria-label="${t('Close')}">${icon('close')}</button></div>
+      <div class="wn-ver"><b>${t("What's new in {version}", { version: esc(r.version) })}</b>${r.date ? `<span>${esc(r.date)}</span>` : ''}${
+        ahead ? `<span class="pre">${t('Coming next · you run {version}', { version: esc(now) })}</span>` : ''
       }</div>
       <h2 id="wnT" title="${attr(r.title)}">${esc(r.title)}</h2><p title="${attr(r.lead)}">${esc(r.lead)}</p>
     </header>
@@ -497,10 +521,10 @@ function body(r: Release): string {
       .join('')}</div>
     <footer class="wn-foot">
       <div class="wn-links">
-        <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="Memora is free and open source. A star helps others find it.">${STAR}<span>Star</span><em data-stars></em></a>
-        <button type="button" class="wn-log" data-log>${icon('book')}<span>Full changelog</span></button>
+        <a class="wn-star" data-star href="https://github.com/Codrihub/memora" target="_blank" rel="noopener noreferrer" title="${t('Memora is free and open source. A star helps others find it.')}">${STAR}<span>${t('Star')}</span><em data-stars></em></a>
+        <button type="button" class="wn-log" data-log>${icon('book')}<span>${t('Full changelog')}</span></button>
       </div>
-      <button type="button" class="btn primary wn-ok" data-close>Got it</button>
+      <button type="button" class="btn primary wn-ok" data-close>${t('Got it')}</button>
     </footer>
   </div>`;
 }
@@ -541,14 +565,14 @@ export function openWhatsNew(version?: string): void {
     if (slot) {
       const pick = createSelect({
         className: 'wn-sel',
-        label: 'Version',
+        label: t('Version'),
         align: 'end',
         minWidth: 280,
         labelledBy: 'wnV',
-        options: RELEASES.map((x, i) => ({ value: x.version, label: x.version, hint: (i === 0 ? 'Latest · ' : '') + x.title })),
+        options: RELEASES.map((x, i) => ({ value: x.version, label: x.version, hint: (i === 0 ? t('Latest') + ' · ' : '') + x.title })),
         value: r.version,
         render: (o) =>
-          `<span class="ui-sel-v">${esc(o?.value || '')}${o?.value === RELEASES[0]?.version ? '<small>Latest</small>' : ''}</span><svg class="ui-sel-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`,
+          `<span class="ui-sel-v">${esc(o?.value || '')}${o?.value === RELEASES[0]?.version ? `<small>${t('Latest')}</small>` : ''}</span><svg class="ui-sel-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`,
         onChange: (v) => show(RELEASES.find((y) => y.version === v)),
       });
       slot.replaceWith(pick.el);
@@ -556,7 +580,7 @@ export function openWhatsNew(version?: string): void {
     }
     void paintStars(b);
   };
-  Modal.open({ title: "What's new", body: body(r), onOpen: (b: HTMLElement) => wire(b) });
+  Modal.open({ title: t("What's new"), body: body(r), onOpen: (b: HTMLElement) => wire(b) });
   markSeen(r.version);
 }
 

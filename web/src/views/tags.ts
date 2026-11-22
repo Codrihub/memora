@@ -32,6 +32,8 @@ import {
   type PatternToken,
   type TagEntry,
 } from './tags-model';
+import { t, tn } from '../i18n';
+import { ts } from '../i18n/server';
 
 const view = {
   q: '',
@@ -175,27 +177,27 @@ export async function renderTags(): Promise<void> {
   const typing = document.activeElement?.id === 'tgQ';
   host.innerHTML = `<div class="tg">
     <header class="tg-head">
-      <div class="tg-title"><h1>Tags</h1><p id="tgSub">Reading notes…</p></div>
-      <div class="tg-hacts"><button class="btn tg-patbtn" id="tgPat" title="Find notes by tags joined with and, or, not">${PATTERN_ICON}<span>Pattern…</span></button>
-      <button class="btn ghost tg-rebuild" id="tgRebuild" title="Read every note again">${REFRESH}<span>Rebuild</span></button></div>
+      <div class="tg-title"><h1>${t('Tags')}</h1><p id="tgSub">${t('Reading notes…')}</p></div>
+      <div class="tg-hacts"><button class="btn tg-patbtn" id="tgPat" title="${t('Find notes by tags joined with and, or, not')}">${PATTERN_ICON}<span>${t('Pattern…')}</span></button>
+      <button class="btn ghost tg-rebuild" id="tgRebuild" title="${t('Read every note again')}">${REFRESH}<span>${t('Rebuild')}</span></button></div>
     </header>
     <div class="tg-prog" id="tgProg"><i style="width:${state.tags.built ? 100 : 0}%"></i></div>
-    <div class="tg-bulk" id="tgBulk" role="toolbar" aria-label="Selected tags" hidden></div>
+    <div class="tg-bulk" id="tgBulk" role="toolbar" aria-label="${t('Selected tags')}" hidden></div>
     <div class="tg-body">
-      <section class="tg-side" aria-label="All tags">
+      <section class="tg-side" aria-label="${t('All tags')}">
         <div class="tg-tools">
-          <label class="tg-search">${SEARCH}<input id="tgQ" type="search" placeholder="Find a tag" aria-label="Find a tag" value="${attr(view.q)}" spellcheck="false" autocomplete="off">
-            <button type="button" class="tg-qx" id="tgQx" aria-label="Clear the search" title="Clear the search"${view.q ? '' : ' hidden'}>${X_ICON}</button></label>
-          <div class="tg-seg" role="group" aria-label="Sort tags">
-            <button data-s="count" aria-pressed="${view.sort === 'count'}" class="${view.sort === 'count' ? 'on' : ''}">Popular</button>
+          <label class="tg-search">${SEARCH}<input id="tgQ" type="search" placeholder="${t('Find a tag')}" aria-label="${t('Find a tag')}" value="${attr(view.q)}" spellcheck="false" autocomplete="off">
+            <button type="button" class="tg-qx" id="tgQx" aria-label="${t('Clear the search')}" title="${t('Clear the search')}"${view.q ? '' : ' hidden'}>${X_ICON}</button></label>
+          <div class="tg-seg" role="group" aria-label="${t('Sort tags')}">
+            <button data-s="count" aria-pressed="${view.sort === 'count'}" class="${view.sort === 'count' ? 'on' : ''}">${t('Popular')}</button>
             <button data-s="name" aria-pressed="${view.sort === 'name'}" class="${view.sort === 'name' ? 'on' : ''}">A–Z</button>
           </div>
         </div>
-        <div class="tg-lh" id="tgLh" hidden><label class="tg-all"><span class="tg-check"><input type="checkbox" id="tgAll"></span><span>Select all</span></label><span id="tgLn"></span></div>
-        <div id="tgCloud" class="tg-cloud" role="list" aria-label="Tags"><div class="empty">Building the tag index…</div></div>
+        <div class="tg-lh" id="tgLh" hidden><label class="tg-all"><span class="tg-check"><input type="checkbox" id="tgAll"></span><span>${t('Select all')}</span></label><span id="tgLn"></span></div>
+        <div id="tgCloud" class="tg-cloud" role="list" aria-label="${t('Tags')}"><div class="empty">${t('Building the tag index…')}</div></div>
       </section>
-      <section class="tg-results" aria-label="Notes">
-        <div class="tg-fx" id="tgFx" role="group" aria-label="Filters in use" hidden></div>
+      <section class="tg-results" aria-label="${t('Notes')}">
+        <div class="tg-fx" id="tgFx" role="group" aria-label="${t('Filters in use')}" hidden></div>
         <div id="tgRes" aria-live="polite"></div>
       </section>
     </div></div>`;
@@ -247,7 +249,7 @@ export async function renderTags(): Promise<void> {
   const sub = host.querySelector<HTMLElement>('#tgSub')!;
   const built = await buildTagIndex(false, (done, total) => {
     bar.style.width = Math.round((done / Math.max(1, total)) * 100) + '%';
-    sub.textContent = `Reading notes… ${done}/${total}`;
+    sub.textContent = t('Reading notes… {done}/{total}', { done, total });
   });
   if (!host.contains(bar)) return;
   map = built;
@@ -255,7 +257,7 @@ export async function renderTags(): Promise<void> {
   setTimeout(() => host.querySelector('#tgProg')?.classList.add('done'), 300);
   const tagged = new Set<string>();
   built.forEach((l) => l.forEach((e) => tagged.add(e.path)));
-  sub.textContent = `${built.size} tags across ${tagged.size} notes`;
+  sub.textContent = t('{tags} tags across {notes} notes', { tags: built.size, notes: tagged.size });
 
   // Drop filters and ticks for tags that no longer exist.
   view.sel = view.sel.filter((t) => built.has(t));
@@ -291,22 +293,22 @@ function drawCloud(): void {
   order = rows;
   lh.hidden = !rows.length;
   if (!map.size) {
-    cloud.innerHTML = '<div class="empty">This vault has no tags yet. Add <code>#tags</code> or a <code>tags:</code> line to a note.</div>';
+    cloud.innerHTML = `<div class="empty">${t('This vault has no tags yet. Add {inline} or a {line} line to a note.', { inline: '<code>#tags</code>', line: '<code>tags:</code>' })}</div>`;
     return;
   }
   if (!rows.length) {
-    cloud.innerHTML = `<div class="empty">No tag matches "${esc(view.q)}".</div>`;
+    cloud.innerHTML = `<div class="empty">${t('No tag matches "{q}".', { q: esc(view.q) })}</div>`;
     return;
   }
   const max = Math.max(...rows.map((t) => map!.get(t)!.length));
   cloud.innerHTML = rows
-    .map((t) => {
-      const n = map!.get(t)!.length;
-      const on = view.sel.includes(t);
-      const picked = view.picked.has(t);
-      return `<div class="tg-tag${on ? ' on' : ''}${picked ? ' picked' : ''}" role="listitem" style="--tc:${hashColor(t)};--w:${(n / Math.max(1, max)).toFixed(3)}">
-        <label class="tg-check" title="Select #${attr(t)} (Shift+click selects a range)"><input type="checkbox" data-pick="${attr(t)}" aria-label="Select #${attr(t)}"${picked ? ' checked' : ''}></label>
-        <button type="button" class="tg-tag-b" data-tag="${attr(t)}" aria-pressed="${on}"><i></i><span>${esc(t)}</span><s aria-hidden="true"></s><em>${n}</em></button></div>`;
+    .map((tag) => {
+      const n = map!.get(tag)!.length;
+      const on = view.sel.includes(tag);
+      const picked = view.picked.has(tag);
+      return `<div class="tg-tag${on ? ' on' : ''}${picked ? ' picked' : ''}" role="listitem" style="--tc:${hashColor(tag)};--w:${(n / Math.max(1, max)).toFixed(3)}">
+        <label class="tg-check" title="${t('Select #{tag} (Shift+click selects a range)', { tag: attr(tag) })}"><input type="checkbox" data-pick="${attr(tag)}" aria-label="${t('Select #{tag}', { tag: attr(tag) })}"${picked ? ' checked' : ''}></label>
+        <button type="button" class="tg-tag-b" data-tag="${attr(tag)}" aria-pressed="${on}"><i></i><span>${esc(tag)}</span><s aria-hidden="true"></s><em>${n}</em></button></div>`;
     })
     .join('');
   cloud.querySelectorAll<HTMLElement>('.tg-tag-b').forEach((b) => {
@@ -336,7 +338,7 @@ function drawCloud(): void {
   const st = allState(rows, view.picked);
   all.checked = st === 'all';
   all.indeterminate = st === 'some';
-  all.setAttribute('aria-label', view.q ? 'Select every tag found' : 'Select every tag');
+  all.setAttribute('aria-label', view.q ? t('Select every tag found') : t('Select every tag'));
   all.onchange = () => {
     const next = new Set(view.picked);
     for (const t of rows) {
@@ -348,7 +350,7 @@ function drawCloud(): void {
     redraw();
     ($('#tgAll') as HTMLInputElement).focus();
   };
-  $('#tgLn').textContent = view.q ? `${rows.length} of ${map.size}` : `${rows.length} tag${rows.length === 1 ? '' : 's'}`;
+  $('#tgLn').textContent = view.q ? t('{n} of {total}', { n: rows.length, total: map.size }) : tn(rows.length, '{n} tag', '{n} tags');
 }
 
 /** The bar over both panes while tags are ticked: count, what to do with them, clear. */
@@ -362,12 +364,12 @@ function drawBulk(): void {
     return;
   }
   const notes = untagPlan(map || new Map(), picked).length;
-  bar.innerHTML = `<span class="tg-bn"><b>${n}</b> selected<small> · ${notes} note${notes === 1 ? '' : 's'}</small></span>
+  bar.innerHTML = `<span class="tg-bn">${t('{n} selected', { n: `<b>${n}</b>` })}<small> · ${tn(notes, '{n} note', '{n} notes')}</small></span>
     <div class="tg-bacts">
-      <button type="button" class="btn ghost tg-bjump" data-b="jump">${matchCount()} note${matchCount() === 1 ? '' : 's'} ↓</button>
-      <button type="button" class="btn ghost" data-b="merge">${MERGE_ICON}${n === 1 ? 'Rename…' : 'Merge…'}</button>
-      <button type="button" class="btn ghost tg-danger" data-b="remove">${X_ICON}Remove from notes</button></div>
-    <button type="button" class="btn ghost tg-bx" data-b="clear" aria-label="Clear the selection (Esc)" title="Clear the selection (Esc)">${X_ICON}</button>`;
+      <button type="button" class="btn ghost tg-bjump" data-b="jump">${tn(matchCount(), '{n} note', '{n} notes')} ↓</button>
+      <button type="button" class="btn ghost" data-b="merge">${MERGE_ICON}${n === 1 ? t('Rename…') : t('Merge…')}</button>
+      <button type="button" class="btn ghost tg-danger" data-b="remove">${X_ICON}${t('Remove from notes')}</button></div>
+    <button type="button" class="btn ghost tg-bx" data-b="clear" aria-label="${t('Clear the selection (Esc)')}" title="${t('Clear the selection (Esc)')}">${X_ICON}</button>`;
   bar.querySelectorAll<HTMLElement>('[data-b]').forEach((b) => {
     b.onclick = () => {
       const k = b.dataset.b;
@@ -403,24 +405,29 @@ function openPattern(): void {
   const seed = view.pattern?.src ?? (view.sel.length ? view.sel.join(view.mode === 'all' ? ' and ' : ' or ') : '');
   let toks: PatternToken[] = patternTokens(seed).map((t) => (t.k === 'tag' ? { k: 'tag', t: byLower.get(t.t.toLowerCase()) || t.t } : t));
   Modal.open({
-    title: 'Find notes by a pattern',
+    title: t('Find notes by a pattern'),
     body: `<div class="tg-pat">
-      <p class="tg-pat-l">Pick tags; between them choose <b>and</b> (both) or <b>or</b> (either). <b>not</b> leaves a tag out, <b class="tg-nw">( )</b> groups.</p>
-      <div class="tg-pf" id="tgPf"><span class="tg-pf-toks" id="tgPfT"></span><input id="tgPatIn" class="tg-pf-in" type="text" autocomplete="off" spellcheck="false" aria-label="Add a tag"></div>
-      <div class="tg-pat-ops" role="group" aria-label="Add">${[
-        ['and', 'Both'],
-        ['or', 'Either'],
-        ['not', 'Without'],
-        ['(', 'Group'],
-        [')', 'End group'],
+      <p class="tg-pat-l">${t('Pick tags; between them choose {and} (both) or {or} (either). {not} leaves a tag out, {group} groups.', {
+        and: '<b>and</b>',
+        or: '<b>or</b>',
+        not: '<b>not</b>',
+        group: '<b class="tg-nw">( )</b>',
+      })}</p>
+      <div class="tg-pf" id="tgPf"><span class="tg-pf-toks" id="tgPfT"></span><input id="tgPatIn" class="tg-pf-in" type="text" autocomplete="off" spellcheck="false" aria-label="${t('Add a tag')}"></div>
+      <div class="tg-pat-ops" role="group" aria-label="${t('Add')}">${[
+        ['and', t('Both')],
+        ['or', t('Either')],
+        ['not', t('Without')],
+        ['(', t('Group')],
+        [')', t('End group')],
       ]
         .map(([o, h]) => `<button type="button" class="tg-pat-op" data-op="${o}" title="${h}">${o}</button>`)
-        .join('')}<button type="button" class="tg-pat-op clr" data-op="clear" title="Start over">Clear</button></div>
-      <div class="tg-pat-sug" id="tgPatSug" aria-label="Tags"></div>
+        .join('')}<button type="button" class="tg-pat-op clr" data-op="clear" title="${t('Start over')}">${t('Clear')}</button></div>
+      <div class="tg-pat-sug" id="tgPatSug" aria-label="${t('Tags')}"></div>
       <div class="tg-pat-out" id="tgPatOut" aria-live="polite"></div></div>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      { label: 'Show notes', cls: 'primary', run: () => apply() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      { label: t('Show notes'), cls: 'primary', run: () => apply() },
     ],
     onOpen: (b) => {
       const input = b.querySelector<HTMLInputElement>('#tgPatIn')!;
@@ -451,15 +458,15 @@ function openPattern(): void {
       };
       const paint = (): void => {
         tokEl.innerHTML = toks
-          .map((t, i) =>
-            t.k === 'tag'
-              ? `<span class="tg-pt tag" style="--tc:${hashColor(t.t)}"><i></i>${esc(t.t)}<button type="button" data-del="${i}" aria-label="Remove #${attr(t.t)}">${X_ICON}</button></span>`
-              : t.k === 'and' || t.k === 'or'
-                ? `<button type="button" class="tg-pt op" data-flip="${i}" title="Click to switch to ${t.k === 'and' ? 'or' : 'and'}">${t.k}</button>`
-                : `<button type="button" class="tg-pt op ${t.k === 'not' ? 'not' : 'par'}" data-del="${i}" title="Remove">${t.k}</button>`,
+          .map((tk, i) =>
+            tk.k === 'tag'
+              ? `<span class="tg-pt tag" style="--tc:${hashColor(tk.t)}"><i></i>${esc(tk.t)}<button type="button" data-del="${i}" aria-label="${t('Remove #{tag}', { tag: attr(tk.t) })}">${X_ICON}</button></span>`
+              : tk.k === 'and' || tk.k === 'or'
+                ? `<button type="button" class="tg-pt op" data-flip="${i}" title="${t('Click to switch to {op}', { op: tk.k === 'and' ? 'or' : 'and' })}">${tk.k}</button>`
+                : `<button type="button" class="tg-pt op ${tk.k === 'not' ? 'not' : 'par'}" data-del="${i}" title="${t('Remove')}">${tk.k}</button>`,
           )
           .join('');
-        input.placeholder = toks.length ? (afterTerm() ? 'Add another tag…' : 'Pick or type a tag…') : 'Pick or type a tag…';
+        input.placeholder = toks.length ? (afterTerm() ? t('Add another tag…') : t('Pick or type a tag…')) : t('Pick or type a tag…');
         tokEl.querySelectorAll<HTMLElement>('[data-del]').forEach((x) => {
           x.onclick = (e) => {
             e.stopPropagation();
@@ -483,11 +490,11 @@ function openPattern(): void {
         const inUse = new Set(toks.filter((t) => t.k === 'tag').map((t) => (t as { t: string }).t.toLowerCase()));
         const hits = (q ? tags.filter((t) => t.toLowerCase().includes(q)) : popular.filter((t) => !inUse.has(t.toLowerCase()))).slice(0, q ? 10 : 12);
         sug.innerHTML = hits.length
-          ? `<span class="tg-pat-sh">${q ? 'Matching tags' : 'Most used'}</span>${hits
+          ? `<span class="tg-pat-sh">${q ? t('Matching tags') : t('Most used')}</span>${hits
               .map((t) => `<button type="button" class="tg-mini" data-sug="${attr(t)}" style="--tc:${hashColor(t)}"><i></i>${esc(t)} <em>${map!.get(t)!.length}</em></button>`)
               .join('')}`
           : q
-            ? `<span class="tg-pat-sh">No tag contains “${esc(q)}”</span>`
+            ? `<span class="tg-pat-sh">${t('No tag contains “{q}”', { q: esc(q) })}</span>`
             : '';
         sug.querySelectorAll<HTMLElement>('[data-sug]').forEach((x) => {
           x.onclick = () => {
@@ -500,12 +507,12 @@ function openPattern(): void {
         const l = last();
         if (!toks.length) {
           out.className = 'tg-pat-out';
-          out.textContent = 'Pick a tag to start.';
+          out.textContent = t('Pick a tag to start.');
           return;
         }
         if (l && l.k !== 'tag' && l.k !== ')') {
           out.className = 'tg-pat-out';
-          out.textContent = l.k === '(' ? 'Add a tag inside the group.' : `Add a tag after “${l.k}”.`;
+          out.textContent = l.k === '(' ? t('Add a tag inside the group.') : t('Add a tag after “{op}”.', { op: l.k });
           return;
         }
         const r = parsePattern(tokensText(toks));
@@ -517,8 +524,8 @@ function openPattern(): void {
         const unknown = r.tags.filter((t) => !byLower.has(t));
         const n = notesForPattern(map!, r.p).length;
         out.className = 'tg-pat-out ok';
-        out.innerHTML = `<span class="tg-pat-n"><b>${n.toLocaleString('en-US')}</b> note${n === 1 ? '' : 's'}</span><span class="tg-pat-rd">${patternHTML(r.p)}</span>${
-          unknown.length ? `<small>No tag called ${unknown.map((t) => '#' + esc(t)).join(', ')}</small>` : ''
+        out.innerHTML = `<span class="tg-pat-n">${tn(n, '{n} note', '{n} notes', { n: `<b>${n.toLocaleString('en-US')}</b>` })}</span><span class="tg-pat-rd">${patternHTML(r.p)}</span>${
+          unknown.length ? `<small>${t('No tag called {tags}', { tags: unknown.map((u) => '#' + esc(u)).join(', ') })}</small>` : ''
         }`;
       };
       b.querySelectorAll<HTMLElement>('[data-op]').forEach((x) => {
@@ -601,19 +608,19 @@ function clearPicked(): void {
 function drawFx(): void {
   const fx = $('#tgFx');
   const chips = view.sel.map(
-    (t) =>
-      `<span class="tg-chip" style="--tc:${hashColor(t)}"><i></i><span class="t" title="#${attr(t)}">${esc(t)}</span><button type="button" class="x" data-rm="${attr(
-        t,
-      )}" aria-label="Stop filtering by #${attr(t)}" title="Remove">${X_ICON}</button></span>`,
+    (tag) =>
+      `<span class="tg-chip" style="--tc:${hashColor(tag)}"><i></i><span class="t" title="#${attr(tag)}">${esc(tag)}</span><button type="button" class="x" data-rm="${attr(
+        tag,
+      )}" aria-label="${t('Stop filtering by #{tag}', { tag: attr(tag) })}" title="${t('Remove')}">${X_ICON}</button></span>`,
   );
   // The joiner travels with the chip after it, so a wrapped line never ends on "and".
-  const joined = chips.map((c, i) => (i ? `<span class="tg-cj"><span class="tg-and">${view.mode === 'any' ? 'or' : 'and'}</span>${c}</span>` : c)).join('');
+  const joined = chips.map((c, i) => (i ? `<span class="tg-cj"><span class="tg-and">${view.mode === 'any' ? t('or') : t('and')}</span>${c}</span>` : c)).join('');
   const q = view.q.trim();
   const qChip = q
-    ? `<span class="tg-chip q">${SEARCH}<span class="t" title="Tags matching “${attr(q)}”">“${esc(q)}”</span><button type="button" class="x" data-rmq aria-label="Clear the tag search" title="Remove">${X_ICON}</button></span>`
+    ? `<span class="tg-chip q">${SEARCH}<span class="t" title="${t('Tags matching “{q}”', { q: attr(q) })}">“${esc(q)}”</span><button type="button" class="x" data-rmq aria-label="${t('Clear the tag search')}" title="${t('Remove')}">${X_ICON}</button></span>`
     : '';
   const pat = view.pattern
-    ? `<span class="tg-chip pat">${PATTERN_ICON}<button type="button" class="t tg-pat-edit" data-pedit title="Edit the pattern: ${attr(patternText(view.pattern.p))}">${patternHTML(view.pattern.p)}</button><button type="button" class="x" data-prm aria-label="Stop filtering by this pattern" title="Remove">${X_ICON}</button></span>`
+    ? `<span class="tg-chip pat">${PATTERN_ICON}<button type="button" class="t tg-pat-edit" data-pedit title="${t('Edit the pattern: {pattern}', { pattern: attr(patternText(view.pattern.p)) })}">${patternHTML(view.pattern.p)}</button><button type="button" class="x" data-prm aria-label="${t('Stop filtering by this pattern')}" title="${t('Remove')}">${X_ICON}</button></span>`
     : '';
   const n = chips.length + (q ? 1 : 0) + (pat ? 1 : 0);
   fx.hidden = !n;
@@ -622,7 +629,7 @@ function drawFx(): void {
     return;
   }
   fx.innerHTML = `<div class="tg-chips">${pat}${joined}${qChip}</div>
-    <div class="tg-fx-end">${n > 1 ? `<span class="tg-fn">${n} filters</span>` : ''}<button type="button" class="tg-clear" data-clear>Clear all</button></div>`;
+    <div class="tg-fx-end">${n > 1 ? `<span class="tg-fn">${tn(n, '{n} filter', '{n} filters')}</span>` : ''}<button type="button" class="tg-clear" data-clear>${t('Clear all')}</button></div>`;
   fx.querySelectorAll<HTMLElement>('[data-rm]').forEach((b) => {
     b.onclick = () => {
       view.sel = view.sel.filter((t) => t !== b.dataset.rm);
@@ -674,14 +681,17 @@ function drawResults(): void {
     const top = Array.from(map.entries())
       .sort((a, b) => b[1].length - a[1].length)
       .slice(0, 6);
-    res.innerHTML = `<div class="tg-hint"><div class="tg-hint-head"><span class="tg-hint-ico">${TAG_ICON}</span><div><h2>Pick a tag</h2>
-      <p>Click or tick tags to see their notes. Need more, like <i>session or (memora and plan) not docker</i>? Use <button type="button" class="tg-linkbtn" data-pat>Pattern…</button></p></div></div>${
+    res.innerHTML = `<div class="tg-hint"><div class="tg-hint-head"><span class="tg-hint-ico">${TAG_ICON}</span><div><h2>${t('Pick a tag')}</h2>
+      <p>${t('Click or tick tags to see their notes. Need more, like {example}? Use {button}', {
+        example: '<i>session or (memora and plan) not docker</i>',
+        button: `<button type="button" class="tg-linkbtn" data-pat>${t('Pattern…')}</button>`,
+      })}</p></div></div>${
         top.length
-          ? `<h3 class="tg-sub">Most used</h3><div class="tg-top">${top
+          ? `<h3 class="tg-sub">${t('Most used')}</h3><div class="tg-top">${top
               .map(
-                ([t, l]) =>
-                  `<button class="tg-card" data-tag="${attr(t)}" style="--tc:${hashColor(t)}"><b><i></i>${esc(t)}</b><dl>
-                  <dt>Notes</dt><dd>${l.length}</dd><dt>Updated</dt><dd>${esc(relTs(Math.max(...l.map((e) => e.mtime || 0))))}</dd></dl><small>${esc(
+                ([tag, l]) =>
+                  `<button class="tg-card" data-tag="${attr(tag)}" style="--tc:${hashColor(tag)}"><b><i></i>${esc(tag)}</b><dl>
+                  <dt>${t('Notes')}</dt><dd>${l.length}</dd><dt>${t('Updated')}</dt><dd>${esc(relTs(Math.max(...l.map((e) => e.mtime || 0))))}</dd></dl><small>${esc(
                     l
                       .slice(0, 3)
                       .map((e) => e.name)
@@ -714,33 +724,33 @@ function drawResults(): void {
     .slice(0, 12);
   const k = view.sel.length;
   const what = pat
-    ? `matching ${patternText(pat.p)}`
+    ? t('matching {pattern}', { pattern: patternText(pat.p) })
     : k === 1
-      ? `tagged #${view.sel[0]}`
+      ? t('tagged #{tag}', { tag: view.sel[0] })
       : view.mode === 'any'
-        ? `with any of ${k} tags`
-        : `with all ${k} tags`;
+        ? t('with any of {n} tags', { n: k })
+        : t('with all {n} tags', { n: k });
 
   res.innerHTML = `<div class="tg-card-main"><div class="tg-res-head">
-      <div class="tg-rt"><h2>${notes.length} note${notes.length === 1 ? '' : 's'}</h2>${
-        pat ? `<span class="tg-pat-rd sm" title="${attr(what)}">matching ${patternHTML(pat.p)}</span>` : `<span title="${attr(what)}">${esc(what)}</span>`
+      <div class="tg-rt"><h2>${tn(notes.length, '{n} note', '{n} notes')}</h2>${
+        pat ? `<span class="tg-pat-rd sm" title="${attr(what)}">${t('matching {pattern}', { pattern: patternHTML(pat.p) })}</span>` : `<span title="${attr(what)}">${esc(what)}</span>`
       }</div>
       ${
         k > 1
-          ? `<div class="tg-seg tg-mode" role="group" aria-label="Notes must carry">
-        <button data-m="all" aria-pressed="${view.mode === 'all'}" class="${view.mode === 'all' ? 'on' : ''}" title="Notes that carry every tag">All tags</button>
-        <button data-m="any" aria-pressed="${view.mode === 'any'}" class="${view.mode === 'any' ? 'on' : ''}" title="Notes that carry at least one tag">Any tag</button></div>`
+          ? `<div class="tg-seg tg-mode" role="group" aria-label="${t('Notes must carry')}">
+        <button data-m="all" aria-pressed="${view.mode === 'all'}" class="${view.mode === 'all' ? 'on' : ''}" title="${t('Notes that carry every tag')}">${t('All tags')}</button>
+        <button data-m="any" aria-pressed="${view.mode === 'any'}" class="${view.mode === 'any' ? 'on' : ''}" title="${t('Notes that carry at least one tag')}">${t('Any tag')}</button></div>`
           : ''
       }
     </div>
     ${
       rel.length && !pat
-        ? `<div class="tg-related"><span>Related</span>${rel
+        ? `<div class="tg-related"><span>${t('Related')}</span>${rel
             .map(
-              ([t, n]) =>
-                `<button class="tg-mini" data-add="${attr(t)}" style="--tc:${hashColor(t)}" title="${
-                  view.mode === 'any' ? `Add #${attr(t)} to the filter` : `Narrow to notes also tagged #${attr(t)}`
-                }"><i></i>${esc(t)} <em>${n}</em></button>`,
+              ([tag, n]) =>
+                `<button class="tg-mini" data-add="${attr(tag)}" style="--tc:${hashColor(tag)}" title="${
+                  view.mode === 'any' ? t('Add #{tag} to the filter', { tag: attr(tag) }) : t('Narrow to notes also tagged #{tag}', { tag: attr(tag) })
+                }"><i></i>${esc(tag)} <em>${n}</em></button>`,
             )
             .join('')}</div>`
         : ''
@@ -748,7 +758,7 @@ function drawResults(): void {
     <div class="tg-notes" role="list">${
       notes
         .map(
-          (n) => `<div class="tg-note${card?.isOpen && card.path === n.path ? ' on' : ''}" role="listitem" tabindex="0" data-path="${attr(n.path)}" title="Preview (double-click opens the note)">
+          (n) => `<div class="tg-note${card?.isOpen && card.path === n.path ? ' on' : ''}" role="listitem" tabindex="0" data-path="${attr(n.path)}" title="${t('Preview (double-click opens the note)')}">
         <span class="tg-note-ico" aria-hidden="true">${NOTE_ICON}</span>
         <div class="tg-note-main"><b>${esc(n.name)}</b><small>${esc(n.folder || folderOf(n.path))} · ${esc(relTs(n.mtime))}</small></div>
         <div class="tg-note-tags">${(tagsOf.get(n.path) || [])
@@ -756,11 +766,11 @@ function drawResults(): void {
           .slice(0, 6)
           .map((t) => `<span style="--tc:${hashColor(t)}"><i></i>${esc(t)}</span>`)
           .join('')}</div>
-        <button type="button" class="tg-open" data-open="${attr(n.path)}" aria-label="Open ${attr(n.name)}" title="Open the note">${OPEN_ICON}</button>
+        <button type="button" class="tg-open" data-open="${attr(n.path)}" aria-label="${t('Open {name}', { name: attr(n.name) })}" title="${t('Open the note')}">${OPEN_ICON}</button>
       </div>`,
         )
         .join('') ||
-      `<div class="empty">${pat ? 'No note matches this pattern.' : view.mode === 'any' ? 'No note carries these tags.' : 'No note carries all of these tags.'}</div>`
+      `<div class="empty">${pat ? t('No note matches this pattern.') : view.mode === 'any' ? t('No note carries these tags.') : t('No note carries all of these tags.')}</div>`
     }</div></div>`;
 
   res.querySelectorAll<HTMLElement>('[data-m]').forEach((b) => {
@@ -835,7 +845,7 @@ function ensureCard(): NodeCard {
       view.mode = 'any';
       redraw();
     },
-    tagLabel: (t) => `Show the notes tagged #${t}`,
+    tagLabel: (tg) => t('Show the notes tagged #{tag}', { tag: tg }),
     closed: () => cardClosed(),
   });
   window.matchMedia(SHEET_Q).addEventListener('change', dock);
@@ -920,9 +930,9 @@ async function callTool<T>(name: string, args: Record<string, unknown>): Promise
     method: 'tools/call',
     params: { name, arguments: args },
   });
-  if (r.error) throw new Error(r.error.message || 'the server refused');
+  if (r.error) throw new Error((r.error.message && ts(r.error.message)) || t('the server refused'));
   const text = r.result?.content?.[0]?.text || '';
-  if (r.result?.isError) throw new Error(text.replace(new RegExp('^' + name + ':\\s*'), '') || 'it failed');
+  if (r.result?.isError) throw new Error(ts(text.replace(new RegExp('^' + name + ':\\s*'), '')) || t('it failed'));
   try {
     return JSON.parse(text) as T;
   } catch {
@@ -947,10 +957,11 @@ async function bulk(run: () => Promise<void>): Promise<void> {
   }
 }
 
-const count = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+const notesN = (n: number): string => tn(n, '{n} note', '{n} notes');
+const tagsN = (n: number): string => tn(n, '{n} tag', '{n} tags');
 const tagList = (tags: string[]): string => {
-  const shown = tags.slice(0, 4).map((t) => `<b>#${esc(t)}</b>`);
-  return (tags.length > 4 ? [...shown, `${tags.length - 4} more`] : shown).join(', ').replace(/, ([^,]*)$/, tags.length > 1 ? ' and $1' : ', $1');
+  const shown = tags.slice(0, 4).map((x) => `<b>#${esc(x)}</b>`);
+  return (tags.length > 4 ? [...shown, t('{n} more', { n: tags.length - 4 })] : shown).join(', ').replace(/, ([^,]*)$/, tags.length > 1 ? ` ${t('and')} $1` : ', $1');
 };
 
 function askMerge(tags: string[]): void {
@@ -958,27 +969,26 @@ function askMerge(tags: string[]): void {
   const ranked = tags.slice().sort((a, b) => (map!.get(b)?.length || 0) - (map!.get(a)?.length || 0));
   const notes = untagPlan(map, tags).length;
   typedConfirm({
-    title: `Merge ${tags.length} tags`,
-    body: `<p>Every note tagged ${tagList(ranked)} gets one tag instead (${count(notes, 'note')}). Inline #tags in the text change too. There is no one-step undo; each note keeps its history.</p>
-      <div class="tg-into" role="radiogroup" aria-label="Merge into">${ranked
+    title: t('Merge {n} tags', { n: tags.length }),
+    body: `<p>${t('Every note tagged {tags} gets one tag instead ({notes}). Inline #tags in the text change too. There is no one-step undo; each note keeps its history.', { tags: tagList(ranked), notes: notesN(notes) })}</p>
+      <div class="tg-into" role="radiogroup" aria-label="${t('Merge into')}">${ranked
         .map(
-          (t, i) =>
-            `<label class="tg-into-o"><input type="radio" name="tgInto" value="${attr(t)}"${i ? '' : ' checked'}><i style="--tc:${hashColor(t)}"></i><span>Keep <b>#${esc(t)}</b></span><em>${count(
-              map!.get(t)?.length || 0,
-              'note',
+          (tag, i) =>
+            `<label class="tg-into-o"><input type="radio" name="tgInto" value="${attr(tag)}"${i ? '' : ' checked'}><i style="--tc:${hashColor(tag)}"></i><span>${t('Keep {tag}', { tag: `<b>#${esc(tag)}</b>` })}</span><em>${notesN(
+              map!.get(tag)?.length || 0,
             )}</em></label>`,
         )
         .join('')}
-        <label class="tg-into-o"><input type="radio" name="tgInto" value=""><i class="new"></i><span>A new name</span></label>
-        <div class="field tg-into-new"><input type="text" placeholder="new-tag" aria-label="New tag name" autocomplete="off" spellcheck="false" autocapitalize="off"></div></div>`,
+        <label class="tg-into-o"><input type="radio" name="tgInto" value=""><i class="new"></i><span>${t('A new name')}</span></label>
+        <div class="field tg-into-new"><input type="text" placeholder="new-tag" aria-label="${t('New tag name')}" autocomplete="off" spellcheck="false" autocapitalize="off"></div></div>`,
     word: 'MERGE',
-    confirmLabel: 'Merge',
+    confirmLabel: t('Merge'),
     run: async () => {
       const box = document.getElementById('modalHost');
       const v = box?.querySelector<HTMLInputElement>('input[name=tgInto]:checked')?.value ?? '';
       const into = (v || box?.querySelector<HTMLInputElement>('.tg-into-new input')?.value || '').trim().replace(/^#+/, '');
       if (!validTag(into)) {
-        notify('Give the tag a name: letters, digits and - _ / . only.', 'warn');
+        notify(t('Give the tag a name: letters, digits and - _ / . only.'), 'warn');
         box?.querySelector<HTMLInputElement>('.tg-into-new input')?.focus();
         return;
       }
@@ -1000,12 +1010,12 @@ async function doMerge(tags: string[], into: string): Promise<void> {
   let failed = '';
   await bulk(async () => {
     for (const [i, a] of sources.entries()) {
-      notify(`Merging tags… ${i + 1} of ${sources.length}`, 'info', 60000, undefined, { group: 'tg-bulk' });
+      notify(t('Merging tags… {n} of {total}', { n: i + 1, total: sources.length }), 'info', 60000, undefined, { group: 'tg-bulk' });
       try {
         const r = await callTool<{ notes?: string[] }>('merge_tag', { a, b: into });
         (r.notes || []).forEach((p) => changed.add(p));
       } catch (e) {
-        failed = `Could not merge #${a}: ${(e as Error).message}`;
+        failed = t('Could not merge #{tag}: {error}', { tag: a, error: (e as Error).message });
         break;
       }
     }
@@ -1014,7 +1024,7 @@ async function doMerge(tags: string[], into: string): Promise<void> {
     view.anchor = null;
   });
   if (failed) notify(failed, 'err', 0, undefined, { group: 'tg-bulk' });
-  else notify(`Merged ${count(sources.length, 'tag')} into #${into} · ${count(changed.size, 'note')} changed`, 'ok', 5000, undefined, { group: 'tg-bulk' });
+  else notify(t('Merged {tags} into #{into} · {notes} changed', { tags: tagsN(sources.length), into, notes: notesN(changed.size) }), 'ok', 5000, undefined, { group: 'tg-bulk' });
 }
 
 function askRename(tag: string): void {
@@ -1022,13 +1032,13 @@ function askRename(tag: string): void {
   const n = map.get(tag)?.length || 0;
   const id = 'tgRenameIn';
   Modal.open({
-    title: `Rename #${tag}`,
-    body: `<p class="tg-dlg-p">Every note tagged #${esc(tag)} (${count(n, 'note')}) gets the new name, inline #tags in the text too.</p>
-      ${Modal.field('New name', id, { value: tag, ph: 'new-tag' })}<p class="tg-dlg-hint" id="tgRenameHint" aria-live="polite"></p>`,
+    title: t('Rename #{tag}', { tag }),
+    body: `<p class="tg-dlg-p">${t('Every note tagged #{tag} ({notes}) gets the new name, inline #tags in the text too.', { tag: esc(tag), notes: notesN(n) })}</p>
+      ${Modal.field(t('New name'), id, { value: tag, ph: 'new-tag' })}<p class="tg-dlg-hint" id="tgRenameHint" aria-live="polite"></p>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Rename',
+        label: t('Rename'),
         cls: 'primary',
         run: async (b) => {
           const v = (b.querySelector<HTMLInputElement>('#' + id)?.value || '').trim().replace(/^#+/, '');
@@ -1051,9 +1061,9 @@ function askRename(tag: string): void {
         hint.textContent = !v
           ? ''
           : !validTag(v)
-            ? 'Only letters, digits and - _ / . can be used.'
+            ? t('Only letters, digits and - _ / . can be used.')
             : clash
-              ? `#${clash} exists already: the two tags become one, which cannot be split again.`
+              ? t('#{tag} exists already: the two tags become one, which cannot be split again.', { tag: clash })
               : '';
       };
       input.addEventListener('input', sync);
@@ -1075,12 +1085,12 @@ async function doRename(tag: string, to: string): Promise<void> {
     try {
       const r = await callTool<{ notes?: string[] }>('rename_tag', { old: tag, new: to });
       ok = true;
-      msg = `Renamed #${tag} to #${to} · ${count((r.notes || []).length, 'note')} changed`;
+      msg = t('Renamed #{tag} to #{to} · {notes} changed', { tag, to, notes: notesN((r.notes || []).length) });
       view.sel = view.sel.map((t) => (t === tag ? to : t));
       view.picked = new Set([to]);
       view.anchor = null;
     } catch (e) {
-      msg = `Could not rename #${tag}: ${(e as Error).message}`;
+      msg = t('Could not rename #{tag}: {error}', { tag, error: (e as Error).message });
     }
   });
   notify(msg, ok ? 'ok' : 'err', ok ? 5000 : 0);
@@ -1090,11 +1100,13 @@ function askRemove(tags: string[]): void {
   if (!map) return;
   const plan = untagPlan(map, tags);
   typedConfirm({
-    title: tags.length === 1 ? `Remove #${tags[0]} from its notes` : `Remove ${tags.length} tags from their notes`,
-    body: `<p>${tagList(tags)} ${tags.length === 1 ? 'comes' : 'come'} off ${count(plan.length, 'note')}. Tags written inline in a note's text (#like-this) stay; edit those notes to take them out. You can undo this right after.</p>`,
+    title: tags.length === 1 ? t('Remove #{tag} from its notes', { tag: tags[0] }) : t('Remove {n} tags from their notes', { n: tags.length }),
+    body: `<p>${(tags.length === 1
+      ? t("{tags} comes off {notes}. Tags written inline in a note's text (#like-this) stay; edit those notes to take them out. You can undo this right after.", { tags: tagList(tags), notes: notesN(plan.length) })
+      : t("{tags} come off {notes}. Tags written inline in a note's text (#like-this) stay; edit those notes to take them out. You can undo this right after.", { tags: tagList(tags), notes: notesN(plan.length) }))}</p>`,
     items: plan.map((p) => allNotes().find((n) => n.path === p.path)?.name || p.path),
     word: 'REMOVE',
-    confirmLabel: `Remove from ${count(plan.length, 'note')}`,
+    confirmLabel: t('Remove from {notes}', { notes: notesN(plan.length) }),
     run: async () => {
       Modal.close();
       await doRemove(tags, plan);
@@ -1108,14 +1120,14 @@ async function doRemove(tags: string[], plan: { path: string; tags: string[] }[]
   let failed = '';
   await bulk(async () => {
     for (const [i, p] of plan.entries()) {
-      if (i % 3 === 0) notify(`Removing tags… ${i + 1} of ${plan.length}`, 'info', 60000, undefined, { group: 'tg-bulk' });
+      if (i % 3 === 0) notify(t('Removing tags… {n} of {total}', { n: i + 1, total: plan.length }), 'info', 60000, undefined, { group: 'tg-bulk' });
       try {
         const r = await callTool<{ tags?: string[] }>('remove_tags', { path: p.path, tags: p.tags.join(',') });
         const gone = removedTags(p.tags, r.tags || []);
         if (gone.length) undo.push({ path: p.path, tags: gone });
         if (gone.length < p.tags.length) inline++;
       } catch (e) {
-        failed = `Stopped at ${p.path.split('/').pop()}: ${(e as Error).message}`;
+        failed = t('Stopped at {name}: {error}', { name: p.path.split('/').pop() || '', error: (e as Error).message });
         break;
       }
     }
@@ -1124,19 +1136,20 @@ async function doRemove(tags: string[], plan: { path: string; tags: string[] }[]
   });
   const again = undo.length
     ? {
-        label: 'Undo',
+        label: t('Undo'),
         run: async () => {
           await bulk(async () => {
             for (const u of undo) await callTool('add_tags', { path: u.path, tags: u.tags.join(',') }).catch(() => undefined);
           });
-          notify(`Put the tags back on ${count(undo.length, 'note')}`, 'ok', 4200, undefined, { group: 'tg-bulk' });
+          notify(t('Put the tags back on {notes}', { notes: notesN(undo.length) }), 'ok', 4200, undefined, { group: 'tg-bulk' });
         },
       }
     : undefined;
   if (failed) notify(failed, 'err', 0, again, { group: 'tg-bulk' });
   else
     notify(
-      `Removed ${tags.length === 1 ? '#' + tags[0] : count(tags.length, 'tag')} from ${count(undo.length, 'note')}${inline ? ` · ${count(inline, 'note')} still say it inline` : ''}`,
+      t('Removed {tags} from {notes}', { tags: tags.length === 1 ? '#' + tags[0] : tagsN(tags.length), notes: notesN(undo.length) }) +
+        (inline ? ` · ${t('{notes} still say it inline', { notes: notesN(inline) })}` : ''),
       'ok',
       8000,
       again,

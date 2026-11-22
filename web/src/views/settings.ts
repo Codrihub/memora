@@ -16,6 +16,9 @@ import { clearPins, pinnedItems } from '../vault/store';
 import { renderTree } from '../sidebar';
 import { onNavigate } from '../router';
 import { setThemePref, themePref, type ThemePref } from '../theme';
+import { LANGS, langPref, setLangPref, t, tn, type LangPref } from '../i18n';
+import { ts } from '../i18n/server';
+import { langButtonHTML, openLangPicker } from '../ui/lang-picker';
 import { toast } from '../toast';
 import { fadeScroll } from '../ui/scroll-fade';
 import { fetchSettings, mountVaultForm, notesLabel, reloadVaultData } from '../vault';
@@ -136,6 +139,8 @@ const CSS = `
 .st-me .who{min-width:0}
 .st-me .who b{display:block;font-size:17px;font-weight:600;color:var(--fg);overflow-wrap:anywhere;letter-spacing:-.01em}
 .st-me .who span{display:block;font-size:13px;line-height:1.45;color:var(--muted);margin-top:2px}
+.st-lang{display:flex;width:100%;max-width:320px}
+.st-lang .lp-btn{width:100%}
 .st-theme{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;max-width:560px}
 .st-theme button{position:relative;display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:6px 6px 10px;border-radius:12px;min-width:0;
   border:1px solid var(--line-strong);background:var(--surface-1);text-align:left;color:var(--fg);transition:border-color .16s,background .16s}
@@ -277,11 +282,12 @@ const CSS = `
   .st-nav-tg:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .st-nav-tg .i{width:18px;height:18px;flex:none}
   .st-page.nav-mini{max-width:1280px}
-  .st-page.nav-mini .st-layout{grid-template-columns:44px minmax(0,1fr);gap:28px}
-  .st-page.nav-mini .st-nav-tg{width:44px;padding:0;justify-content:center}
+  .st-page.nav-mini .st-layout{grid-template-columns:56px minmax(0,1fr);gap:24px}
+  .st-page.nav-mini .st-nav-tg{width:44px;padding:0;justify-content:center;margin-inline:auto}
+  .st-page.nav-mini .st-nav{padding:4px 6px 8px;overflow-x:hidden}
   .st-page.nav-mini :is(.st-nav-tg span,.st-nav .tx){display:none}
   .st-page.nav-mini .st-nav-g{height:1px;margin:10px 10px;padding:0;overflow:hidden;font-size:0;background:var(--line)}
-  .st-page.nav-mini .st-nav a{width:44px;padding:0;justify-content:center}
+  .st-page.nav-mini .st-nav a{width:44px;padding:0;justify-content:center;margin-inline:auto}
 }
 @container st (max-width:779.98px){
   .st-page[data-open="0"] .st-main{display:none}
@@ -355,7 +361,7 @@ function mark(host: ParentNode, sel: string, s: SaveState, text = ''): void {
   if (!n) return;
   n.dataset.s = s;
   const ico = s === 'saving' ? '<span class="sp" aria-hidden="true"></span>' : s === 'saved' ? icon('check') : s === 'error' ? icon('alert') : '';
-  const words = text || (s === 'saving' ? 'Saving…' : s === 'saved' ? 'Saved' : '');
+  const words = text || (s === 'saving' ? t('Saving…') : s === 'saved' ? t('Saved') : '');
   n.innerHTML = s ? `${ico}<span>${esc(words)}</span>` : '';
 }
 
@@ -363,16 +369,11 @@ function mb(bytes: number): string {
   return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
 }
 
-function plural(n: number | undefined, word: string): string {
-  const c = n || 0;
-  return `${c} ${word}${c === 1 ? '' : 's'}`;
-}
-
 /** "45 minutes", "12 hours", "7 days". */
 function span(secs: number): string {
-  if (secs < 3600) return plural(Math.max(1, Math.round(secs / 60)), 'minute');
-  if (secs < 86400 * 2) return plural(Math.round(secs / 3600), 'hour');
-  return plural(Math.round(secs / 86400), 'day');
+  if (secs < 3600) return tn(Math.max(1, Math.round(secs / 60)), '{n} minute', '{n} minutes');
+  if (secs < 86400 * 2) return tn(Math.round(secs / 3600), '{n} hour', '{n} hours');
+  return tn(Math.round(secs / 86400), '{n} day', '{n} days');
 }
 
 function dateTime(ts: number): string {
@@ -393,8 +394,8 @@ function deviceName(ua: string | null): string {
           : /Safari\//.test(ua)
             ? 'Safari'
             : /curl|wget|python|node/i.test(ua)
-              ? 'Script'
-              : 'Browser';
+              ? t('Script')
+              : t('Browser');
   const os = /iPhone/.test(ua)
     ? 'iPhone'
     : /iPad/.test(ua)
@@ -410,7 +411,7 @@ function deviceName(ua: string | null): string {
               : /Linux/.test(ua)
                 ? 'Linux'
                 : '';
-  return os ? `${browser} on ${os}` : browser;
+  return os ? t('{browser} on {os}', { browser, os }) : browser;
 }
 
 function isPhone(ua: string | null): boolean {
@@ -422,54 +423,54 @@ function deviceIcon(s: SessionRow): string {
 }
 
 function sessionTitle(s: SessionRow): string {
-  return s.alias || deviceName(s.user_agent) || 'Unknown device';
+  return s.alias || deviceName(s.user_agent) || t('Unknown device');
 }
 
 const EVENT_LABEL: Record<string, string> = {
-  login: 'Signed in',
-  signin: 'Signed in',
-  login_ok: 'Signed in',
-  login_failed: 'Failed sign-in',
-  signin_failed: 'Failed sign-in',
-  logout: 'Signed out',
-  password_changed: 'Password changed',
-  username_changed: 'Username changed',
-  vault_changed: 'Notes folder switched',
-  sessions_revoked: 'Signed out other devices',
-  key_created: 'Agent key created',
-  key_deleted: 'Agent key deleted',
-  key_rolled: 'Agent key rolled',
+  login: t('Signed in'),
+  signin: t('Signed in'),
+  login_ok: t('Signed in'),
+  login_failed: t('Failed sign-in'),
+  signin_failed: t('Failed sign-in'),
+  logout: t('Signed out'),
+  password_changed: t('Password changed'),
+  username_changed: t('Username changed'),
+  vault_changed: t('Notes folder switched'),
+  sessions_revoked: t('Signed out other devices'),
+  key_created: t('Agent key created'),
+  key_deleted: t('Agent key deleted'),
+  key_rolled: t('Agent key rolled'),
 };
 
 function eventLabel(ev: string): string {
   if (EVENT_LABEL[ev]) return EVENT_LABEL[ev];
-  const t = ev.replace(/_/g, ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  const s = ev.replace(/_/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** A copy button for a long value; wired once per page by `[data-copy]`. */
 function copyBtn(value: string, what: string): string {
-  return `<button type="button" class="st-copy" data-copy="${esc(value)}" data-what="${esc(what)}" aria-label="Copy ${esc(what.toLowerCase())}" title="Copy">${ICO.copy}</button>`;
+  return `<button type="button" class="st-copy" data-copy="${esc(value)}" data-what="${esc(what)}" aria-label="${t('Copy {what}', { what: esc(what.toLowerCase()) })}" title="${t('Copy')}">${ICO.copy}</button>`;
 }
 
 function vaultSummary(info: SettingsInfo): string {
   if (!info.vault) {
-    return `<div class="st-vault"><div class="st-vault-txt"><div class="st-vault-path"><span>No notes folder is set yet</span></div></div><span class="cc-pill warn">Not set</span></div>`;
+    return `<div class="st-vault"><div class="st-vault-txt"><div class="st-vault-path"><span>${t('No notes folder is set yet')}</span></div></div><span class="cc-pill warn">${t('Not set')}</span></div>`;
   }
   const s = info.stats;
   const n = (v: number): string => v.toLocaleString('en-US');
   const meta = s
-    ? `<div class="st-figs"><div><small>Notes</small><b>${n(s.notes)}</b><span>Markdown files</span></div><div><small>Folders</small><b>${n(s.folders)}</b></div><div><small>Links</small><b>${n(
+    ? `<div class="st-figs"><div><small>${t('Notes')}</small><b>${n(s.notes)}</b><span>${t('Markdown files')}</span></div><div><small>${t('Folders')}</small><b>${n(s.folders)}</b></div><div><small>${t('Links')}</small><b>${n(
         s.links,
-      )}</b><span>between notes</span></div></div>`
-    : '<span class="st-note">Counting notes…</span>';
+      )}</b><span>${t('between notes')}</span></div></div>`
+    : `<span class="st-note">${t('Counting notes…')}</span>`;
   const badge =
     info.vault_writable === false
-      ? '<span class="cc-pill err">Read only</span>'
+      ? `<span class="cc-pill err">${t('Read only')}</span>`
       : info.vault_writable === true
-        ? '<span class="cc-pill ok" title="Memora can save notes here">Writable</span>'
+        ? `<span class="cc-pill ok" title="${t('Memora can save notes here')}">${t('Writable')}</span>`
         : '';
-  return `<div class="st-vault"><div class="st-vault-txt"><div class="st-vault-path"><span>${esc(info.vault)}</span>${copyBtn(info.vault, 'Folder path')}</div>
+  return `<div class="st-vault"><div class="st-vault-txt"><div class="st-vault-path"><span>${esc(info.vault)}</span>${copyBtn(info.vault, t('Folder path'))}</div>
     </div>${badge}</div>${meta}`;
 }
 
@@ -489,26 +490,26 @@ interface Section {
 
 /** Personal sections first, then the ones that change the server for everyone, then shut down. */
 const SECTIONS: Section[] = [
-  { id: 'stAppearance', slug: 'appearance', label: 'Appearance', icon: 'sun', desc: 'Dark, light or follow this device', group: 'personal' },
-  { id: 'stAccount', slug: 'account', label: 'Account', icon: 'user', desc: 'Username, password and signed-in devices', group: 'personal' },
-  { id: 'stInterface', slug: 'interface', label: 'Interface', icon: 'sidebar', desc: 'Sidebar, pins and tag suggestions', group: 'personal' },
-  { id: 'stToasts', slug: 'notifications', label: 'Notifications', icon: 'bell', desc: 'Pop-ups when an agent works in your notes', group: 'personal' },
-  { id: 'stVault', slug: 'notes-folder', label: 'Notes folder', icon: 'folder', desc: 'Where every note is kept on the server', group: 'server' },
-  { id: 'stStorage', slug: 'storage', label: 'Storage', icon: 'vault', desc: 'How full notes, images and chats are, and their limits', group: 'server' },
-  { id: 'stImages', slug: 'images', label: 'Images', icon: 'image', desc: 'How large an image may be, and what images take', group: 'server' },
-  { id: 'stMnemo', slug: 'mnemo', label: 'Mnemo (AI agent)', icon: 'mnemo', desc: 'Models, API keys and what the notes agent may do', group: 'server' },
-  { id: 'stLogs', slug: 'activity-log', label: 'Activity log', icon: 'activity', desc: 'How much history the server keeps', group: 'server' },
-  { id: 'stServer', slug: 'server', label: 'Server details', icon: 'monitor', desc: 'Addresses, folders and sign-in limits', group: 'server' },
-  { id: 'stVersion', slug: 'version', label: 'Version', icon: 'refresh', desc: 'What is installed and how to update', group: 'server' },
-  { id: 'stStop', slug: 'shut-down', label: 'Shut down', icon: 'logout', desc: 'Stop Memora on the machine it runs on', group: 'danger' },
+  { id: 'stAppearance', slug: 'appearance', label: t('Appearance'), icon: 'sun', desc: t('Dark, light or follow this device'), group: 'personal' },
+  { id: 'stAccount', slug: 'account', label: t('Account'), icon: 'user', desc: t('Username, password and signed-in devices'), group: 'personal' },
+  { id: 'stInterface', slug: 'interface', label: t('Interface'), icon: 'sidebar', desc: t('Sidebar, pins and tag suggestions'), group: 'personal' },
+  { id: 'stToasts', slug: 'notifications', label: t('Notifications'), icon: 'bell', desc: t('Pop-ups when an agent works in your notes'), group: 'personal' },
+  { id: 'stVault', slug: 'notes-folder', label: t('Notes folder'), icon: 'folder', desc: t('Where every note is kept on the server'), group: 'server' },
+  { id: 'stStorage', slug: 'storage', label: t('Storage'), icon: 'vault', desc: t('How full notes, images and chats are, and their limits'), group: 'server' },
+  { id: 'stImages', slug: 'images', label: t('Images'), icon: 'image', desc: t('How large an image may be, and what images take'), group: 'server' },
+  { id: 'stMnemo', slug: 'mnemo', label: t('Mnemo (AI agent)'), icon: 'mnemo', desc: t('Models, API keys and what the notes agent may do'), group: 'server' },
+  { id: 'stLogs', slug: 'activity-log', label: t('Activity log'), icon: 'activity', desc: t('How much history the server keeps'), group: 'server' },
+  { id: 'stServer', slug: 'server', label: t('Server details'), icon: 'monitor', desc: t('Addresses, folders and sign-in limits'), group: 'server' },
+  { id: 'stVersion', slug: 'version', label: t('Version'), icon: 'refresh', desc: t('What is installed and how to update'), group: 'server' },
+  { id: 'stStop', slug: 'shut-down', label: t('Shut down'), icon: 'logout', desc: t('Stop Memora on the machine it runs on'), group: 'danger' },
 ];
 
-const GROUP_LABEL: Record<Group, string> = { personal: 'Personal', server: 'Server (admin)', danger: 'Danger zone' };
+const GROUP_LABEL: Record<Group, string> = { personal: t('Personal'), server: t('Server (admin)'), danger: t('Danger zone') };
 /** The small line above a section title. */
 const GROUP_EYE: Record<Group, string> = {
-  personal: 'Personal',
-  server: 'Server (admin) · applies to everyone',
-  danger: 'Danger zone',
+  personal: t('Personal'),
+  server: t('Server (admin) · applies to everyone'),
+  danger: t('Danger zone'),
 };
 
 /** Page width (px) from which the index sits beside the section; matches the CSS container query. */
@@ -597,28 +598,28 @@ async function askShutdown(): Promise<void> {
   const info = await apiGet<ShutdownInfo>('/api/server/shutdown').catch(() => ({}) as ShutdownInfo);
   const again =
     info.restarts === 'systemd'
-      ? `<li>This server is run by systemd, which starts it again a few seconds later. To keep it stopped, run <code>${esc(info.stop || 'systemctl stop memora')}</code> on the server instead.</li>`
+      ? `<li>${t('This server is run by systemd, which starts it again a few seconds later. To keep it stopped, run {cmd} on the server instead.', { cmd: `<code>${esc(info.stop || 'systemctl stop memora')}</code>` })}</li>`
       : info.restarts === 'docker'
-        ? `<li>This server runs in Docker, which may start it again. To keep it stopped, run <code>${esc(info.stop || 'docker stop memora')}</code> on the host instead.</li>`
-        : '<li>To start it again, someone must run <code>memora-cli start</code> (or start its service) on the machine it runs on. This page cannot start it.</li>';
+        ? `<li>${t('This server runs in Docker, which may start it again. To keep it stopped, run {cmd} on the host instead.', { cmd: `<code>${esc(info.stop || 'docker stop memora')}</code>` })}</li>`
+        : `<li>${t('To start it again, someone must run {cmd} (or start its service) on the machine it runs on. This page cannot start it.', { cmd: '<code>memora-cli start</code>' })}</li>`;
   Modal.open({
-    title: 'Shut down the server?',
-    body: `<div class="st-cf"><p>Memora stops on the machine it runs on. Your notes stay safe on disk.</p>
-      <ul><li>You are disconnected, and so is every other browser.</li>
-        <li>Every connected agent loses its memory until Memora runs again.</li>${again}</ul>
-      <div class="field"><label for="sStopWord">Type <b>${STOP_WORD}</b> to confirm</label>
+    title: t('Shut down the server?'),
+    body: `<div class="st-cf"><p>${t('Memora stops on the machine it runs on. Your notes stay safe on disk.')}</p>
+      <ul><li>${t('You are disconnected, and so is every other browser.')}</li>
+        <li>${t('Every connected agent loses its memory until Memora runs again.')}</li>${again}</ul>
+      <div class="field"><label for="sStopWord">${t('Type {word} to confirm', { word: `<b>${STOP_WORD}</b>` })}</label>
         <input id="sStopWord" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"></div></div>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Shut down',
+        label: t('Shut down'),
         cls: 'danger',
         run: (body) => {
           if (body.querySelector<HTMLInputElement>('#sStopWord')?.value.trim().toLowerCase() !== STOP_WORD) return;
           Modal.close();
           void apiPost<ShutdownInfo>('/api/server/shutdown', {})
             .then((r) => shutDownScreen(r.restarts ?? info.restarts ?? null))
-            .catch((e: Error) => toast('Could not shut down: ' + e.message, 'err'));
+            .catch((e: Error) => toast(t('Could not shut down: {error}', { error: e.message }), 'err'));
         },
       },
     ],
@@ -683,14 +684,14 @@ function shutDownScreen(restarts: ShutdownInfo['restarts']): void {
   box.setAttribute('aria-describedby', 'stOffD');
   box.innerHTML = `<div class="st-off-card">
     <span class="st-off-i" aria-hidden="true">${icon(back ? 'refresh' : 'logout')}</span>
-    <h1 id="stOffT">${back ? 'Memora is restarting' : 'Memora is shut down'}</h1>
+    <h1 id="stOffT">${back ? t('Memora is restarting') : t('Memora is shut down')}</h1>
     ${
       back
-        ? `<p id="stOffD">The server stopped and ${restarts === 'docker' ? 'Docker' : 'systemd'} is starting it again. This page reloads by itself when it is back.</p>
-      <div class="st-off-wait" role="status" aria-live="polite"><span class="st-off-spin" aria-hidden="true"></span><span id="stOffW">Waiting for the server...</span></div>`
-        : `<p id="stOffD">The server has stopped, and every browser and agent is disconnected. Start it again on the machine it runs on, for example with one of these, then reload this page:</p>
+        ? `<p id="stOffD">${t('The server stopped and {by} is starting it again. This page reloads by itself when it is back.', { by: restarts === 'docker' ? 'Docker' : 'systemd' })}</p>
+      <div class="st-off-wait" role="status" aria-live="polite"><span class="st-off-spin" aria-hidden="true"></span><span id="stOffW">${t('Waiting for the server...')}</span></div>`
+        : `<p id="stOffD">${t('The server has stopped, and every browser and agent is disconnected. Start it again on the machine it runs on, for example with one of these, then reload this page:')}</p>
       <ul><li><code>memora-cli start</code></li><li><code>sudo systemctl start memora</code></li><li><code>docker start memora</code></li></ul>
-      <div class="st-off-acts"><button class="btn primary" type="button" id="stOffR">${icon('refresh')}Reload</button>
+      <div class="st-off-acts"><button class="btn primary" type="button" id="stOffR">${icon('refresh')}${t('Reload')}</button>
         <span class="st-off-note" id="stOffW" role="status" aria-live="polite"></span></div>`
     }
   </div>`;
@@ -709,7 +710,7 @@ function shutDownScreen(restarts: ShutdownInfo['restarts']): void {
         if (ok) location.reload();
         else {
           btn.disabled = false;
-          box.querySelector('#stOffW')!.textContent = 'Still stopped. Start it on the server first.';
+          box.querySelector('#stOffW')!.textContent = t('Still stopped. Start it on the server first.');
         }
       });
     };
@@ -722,7 +723,7 @@ function shutDownScreen(restarts: ShutdownInfo['restarts']): void {
       void healthy().then((ok) => {
         if (ok) location.reload();
         else if (tries < 120) poll();
-        else box.querySelector('#stOffW')!.textContent = 'It is taking a while. Check the server, then reload this page.';
+        else box.querySelector('#stOffW')!.textContent = t('It is taking a while. Check the server, then reload this page.');
       });
     }, 2000);
   };
@@ -737,8 +738,8 @@ function samePath(a: string, b: string): boolean {
 
 /** Local checks, then a confirm dialog before a vault switch. Resolves true to switch, false when cancelled, or an error message. */
 function confirmVaultSwitch(now: { vault: string | null; notes?: number }, path: string, create: boolean): Promise<boolean | string> {
-  if (path.split(/[\\/]/).includes('..')) return Promise.resolve("The path must not contain '..'. Write the folder out in full.");
-  if (now.vault && samePath(now.vault, path)) return Promise.resolve('Memora already uses this folder.');
+  if (path.split(/[\\/]/).includes('..')) return Promise.resolve(t("The path must not contain '..'. Write the folder out in full."));
+  if (now.vault && samePath(now.vault, path)) return Promise.resolve(t('Memora already uses this folder.'));
   return new Promise((resolve) => {
     let answered = false;
     const answer = (v: boolean): void => {
@@ -747,18 +748,18 @@ function confirmVaultSwitch(now: { vault: string | null; notes?: number }, path:
       resolve(v);
     };
     Modal.open({
-      title: 'Switch to another notes folder?',
+      title: t('Switch to another notes folder?'),
       body: `<div class="st-cf"><dl class="st-cf-paths">
-          <dt>Now</dt><dd>${esc(now.vault || 'No folder set')}${now.vault ? `<small>${esc(notesLabel(now.notes))}</small>` : ''}</dd>
-          <dt>New</dt><dd>${esc(path)}${create ? '<small>Created if it does not exist yet</small>' : ''}</dd></dl>
-        <ul><li>Memora first checks that the new folder exists${create ? ' (or can be created)' : ''} and that it can save notes there. If the check fails, nothing changes.</li>
-          <li>Then this app, every signed-in browser and every connected agent switch to the new folder at once.</li>
-          <li>Notes in the current folder are not moved, copied or deleted. You can switch back here at any time.</li></ul>
-        <div class="st-cf-keep${now.notes ? ' warn' : ''}"><b>${now.notes ? 'Everything but your agents changes with the folder' : 'What changes with the folder'}</b>
-          <p>The Activity log, the Trash, version history and folder colours are kept inside each notes folder, so they switch too: the new folder shows its own (empty if it is new). Your account, connected agents and their access, pins and settings stay as they are. Switching back brings the old ones back.</p></div></div>`,
+          <dt>${t('Now')}</dt><dd>${esc(now.vault || t('No folder set'))}${now.vault ? `<small>${esc(notesLabel(now.notes))}</small>` : ''}</dd>
+          <dt>${t('New')}</dt><dd>${esc(path)}${create ? `<small>${t('Created if it does not exist yet')}</small>` : ''}</dd></dl>
+        <ul><li>${create ? t('Memora first checks that the new folder exists (or can be created) and that it can save notes there. If the check fails, nothing changes.') : t('Memora first checks that the new folder exists and that it can save notes there. If the check fails, nothing changes.')}</li>
+          <li>${t('Then this app, every signed-in browser and every connected agent switch to the new folder at once.')}</li>
+          <li>${t('Notes in the current folder are not moved, copied or deleted. You can switch back here at any time.')}</li></ul>
+        <div class="st-cf-keep${now.notes ? ' warn' : ''}"><b>${now.notes ? t('Everything but your agents changes with the folder') : t('What changes with the folder')}</b>
+          <p>${t('The Activity log, the Trash, version history and folder colours are kept inside each notes folder, so they switch too: the new folder shows its own (empty if it is new). Your account, connected agents and their access, pins and settings stay as they are. Switching back brings the old ones back.')}</p></div></div>`,
       actions: [
         {
-          label: 'Cancel',
+          label: t('Cancel'),
           cls: 'ghost',
           run: () => {
             answer(false);
@@ -766,7 +767,7 @@ function confirmVaultSwitch(now: { vault: string | null; notes?: number }, path:
           },
         },
         {
-          label: 'Check and switch',
+          label: t('Check and switch'),
           cls: 'primary',
           run: () => {
             answer(true);
@@ -828,11 +829,11 @@ export async function renderSettings(): Promise<void> {
       <span class="lb">${icon(THEME_ICON[p])}<span>${label}</span></span><span class="ck" aria-hidden="true"></span></button>`;
 
   const presets: [string, string][] = [
-    ['7', '1 week'],
-    ['30', '30 days'],
-    ['90', '90 days'],
-    ['365', '1 year'],
-    ['0', 'No age limit'],
+    ['7', t('1 week')],
+    ['30', t('30 days')],
+    ['90', t('90 days')],
+    ['365', t('1 year')],
+    ['0', t('No age limit')],
   ];
 
   const navItem = (s: Section): string =>
@@ -846,22 +847,28 @@ export async function renderSettings(): Promise<void> {
        .map(navItem)
        .join('')}</ul>`;
 
-  host.innerHTML = `<div class="cc st-page" data-open="0">${systemHeader('settings', 'Settings', 'Your own preferences first, then server settings that apply to everyone.')}
+  host.innerHTML = `<div class="cc st-page" data-open="0">${systemHeader('settings', t('Settings'), t('Your own preferences first, then server settings that apply to everyone.'))}
   <div class="st-layout">
-    <nav class="st-nav" aria-label="Settings sections"><button type="button" class="st-nav-tg" id="stNavTg" aria-pressed="false">${icon('sidebar')}<span>Hide labels</span></button>${navGroup(
+    <nav class="st-nav" aria-label="${t('Settings sections')}"><button type="button" class="st-nav-tg" id="stNavTg" aria-pressed="false">${icon('sidebar')}<span>${t('Hide labels')}</span></button>${navGroup(
       'personal',
     )}${navGroup('server')}${navGroup('danger')}</nav>
     <div class="st-main">
-    <button type="button" class="st-up" id="stUp">${icon('chev-left')}<span>Settings</span></button>
+    <button type="button" class="st-up" id="stUp">${icon('chev-left')}<span>${t('Settings')}</span></button>
 
     ${section(
       'stAppearance',
-      'How Memora looks for you. Saved in this browser only.',
+      t('How Memora looks for you. Saved in this browser only.'),
       card(
         row(
-          '<span id="stThemeL">Theme</span>',
-          'Dark, light, or follow the setting of this device.',
-          `<div class="st-theme" role="radiogroup" aria-labelledby="stThemeL">${themeBtn('dark', 'Dark')}${themeBtn('light', 'Light')}${themeBtn('system', 'System')}</div>`,
+          `<span id="stThemeL">${t('Theme')}</span>`,
+          t('Dark, light, or follow the setting of this device.'),
+          `<div class="st-theme" role="radiogroup" aria-labelledby="stThemeL">${themeBtn('dark', t('Dark'))}${themeBtn('light', t('Light'))}${themeBtn('system', t('System'))}</div>`,
+          { cls: 'full' },
+        ) +
+        row(
+          `<span id="stLangL">${t('Language')}</span>`,
+          t('The language Memora is shown in on this device. Auto follows your browser.'),
+          `<div class="st-lang"><button type="button" class="lp-btn" id="stLang" aria-haspopup="dialog">${langButtonHTML()}</button></div>`,
           { cls: 'full' },
         ),
       ),
@@ -869,52 +876,52 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stAccount',
-      'Your account and the devices signed in to it.',
+      t('Your account and the devices signed in to it.'),
       card(
         `<div class="st-me"><span class="st-av" id="sAv" aria-hidden="true">${esc((user || '?').slice(0, 1).toUpperCase())}</span>
-        <div class="who"><b id="sMeName">${esc(user || '-')}</b><span id="sMeSub">Signed in on this device</span></div></div>
+        <div class="who"><b id="sMeName">${esc(user || '-')}</b><span id="sMeSub">${t('Signed in on this device')}</span></div></div>
       ${row(
-        '<label for="sUser">Username</label>',
-        "Used to sign in. Letters, digits, '-', '_' or '.', at most 32. Stored in lower case.",
+        `<label for="sUser">${t('Username')}</label>`,
+        t("Used to sign in. Letters, digits, '-', '_' or '.', at most 32. Stored in lower case."),
         `<div class="field"><input id="sUser" type="text" value="${esc(user)}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="32"></div>
-         <div class="field" id="sUserPwF" hidden><label for="sUserPw">Current password</label>
+         <div class="field" id="sUserPwF" hidden><label for="sUserPw">${t('Current password')}</label>
            <input id="sUserPw" type="password" autocomplete="current-password"></div>
-         <div class="st-acts"><button class="btn primary" id="sUserSave" type="submit" disabled>Save username</button>
+         <div class="st-acts"><button class="btn primary" id="sUserSave" type="submit" disabled>${t('Save username')}</button>
            <span class="st-state" id="sUserSt" role="status" aria-live="polite"></span></div>`,
         { form: true, id: 'sUserForm' },
       )}
       ${row(
-        'Password',
-        `At least ${esc(minPw)} characters. This device stays signed in; every other device is signed out and told why.`,
-        `<div id="sPwClosed" class="st-acts"><button class="btn" id="sPwOpen" type="button">${icon('key')}Change password</button>
+        t('Password'),
+        t('At least {n} characters. This device stays signed in; every other device is signed out and told why.', { n: esc(minPw) }),
+        `<div id="sPwClosed" class="st-acts"><button class="btn" id="sPwOpen" type="button">${icon('key')}${t('Change password')}</button>
            <span class="st-state" id="sPwSt0" role="status" aria-live="polite"></span></div>
          <div id="sPwOpenBox" hidden>
            <input type="text" autocomplete="username" value="${esc(user)}" hidden id="sPwUserHint">
-           <div class="field"><label for="sPwCur">Current password</label><input id="sPwCur" type="password" autocomplete="current-password"></div>
-           <div class="field"><label for="sPw1">New password</label><input id="sPw1" type="password" autocomplete="new-password"></div>
-           <div class="field"><label for="sPw2">Repeat the new password</label><input id="sPw2" type="password" autocomplete="new-password"></div>
-           <div class="st-acts"><button class="btn primary" id="sPwSave" type="submit">Change password</button>
-             <button class="btn ghost" id="sPwCancel" type="button">Cancel</button>
+           <div class="field"><label for="sPwCur">${t('Current password')}</label><input id="sPwCur" type="password" autocomplete="current-password"></div>
+           <div class="field"><label for="sPw1">${t('New password')}</label><input id="sPw1" type="password" autocomplete="new-password"></div>
+           <div class="field"><label for="sPw2">${t('Repeat the new password')}</label><input id="sPw2" type="password" autocomplete="new-password"></div>
+           <div class="st-acts"><button class="btn primary" id="sPwSave" type="submit">${t('Change password')}</button>
+             <button class="btn ghost" id="sPwCancel" type="button">${t('Cancel')}</button>
              <span class="st-state" id="sPwSt" role="status" aria-live="polite"></span></div>
          </div>`,
         { form: true, id: 'sPwForm' },
       )}`,
       ) +
         card(
-          `<div class="st-sess" id="sSess"><div class="st-empty">Loading…</div></div>
+          `<div class="st-sess" id="sSess"><div class="st-empty">${t('Loading…')}</div></div>
       ${row(
-        'Sign out other devices',
-        'End every session except this one. Those browsers must sign in again.',
-        `<button class="btn danger" id="sOutOthers" type="button">${icon('logout')}Sign out others</button><span class="st-state" id="sOutSt" role="status" aria-live="polite"></span>`,
+        t('Sign out other devices'),
+        t('End every session except this one. Those browsers must sign in again.'),
+        `<button class="btn danger" id="sOutOthers" type="button">${icon('logout')}${t('Sign out others')}</button><span class="st-state" id="sOutSt" role="status" aria-live="polite"></span>`,
         { ctl: 'end', cls: 'inl' },
       )}
-      ${row('Sign out here', 'End the session in this browser.', `<button class="btn danger" id="sLogout" type="button">${icon('logout')}Sign out</button>`, {
+      ${row(t('Sign out here'), t('End the session in this browser.'), `<button class="btn danger" id="sLogout" type="button">${icon('logout')}${t('Sign out')}</button>`, {
         ctl: 'end',
         cls: 'inl',
       })}`,
           {
-            title: 'Signed-in devices',
-            sub: 'Browsers signed in to your account. Tap ⋯ to name a device, see its sign-ins or sign it out. Connected agents are not listed here and keep working.',
+            title: t('Signed-in devices'),
+            sub: t('Browsers signed in to your account. Tap ⋯ to name a device, see its sign-ins or sign it out. Connected agents are not listed here and keep working.'),
             id: 'sSessRow',
           },
         ),
@@ -922,24 +929,24 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stInterface',
-      'Preferences kept in this browser, unless a row says otherwise.',
+      t('Preferences kept in this browser, unless a row says otherwise.'),
       card(
         `${row(
-          '<span id="sCollapsedL">Collapsed sidebar</span>',
-          'Start with the sidebar panel collapsed.',
-          switchHTML('sCollapsed', !!ui.collapsed, 'Start with the sidebar collapsed', ' aria-labelledby="sCollapsedL"'),
+          `<span id="sCollapsedL">${t('Collapsed sidebar')}</span>`,
+          t('Start with the sidebar panel collapsed.'),
+          switchHTML('sCollapsed', !!ui.collapsed, t('Start with the sidebar collapsed'), ' aria-labelledby="sCollapsedL"'),
           { ctl: 'end', cls: 'inl sw' },
         )}
       ${row(
-        'Pinned notes',
-        'Pins are saved on the server and shared by every browser and device you sign in on. Removing them does not touch the notes.',
-        '<button class="btn" id="sClearPins" type="button">Remove all pins</button>',
+        t('Pinned notes'),
+        t('Pins are saved on the server and shared by every browser and device you sign in on. Removing them does not touch the notes.'),
+        `<button class="btn" id="sClearPins" type="button">${t('Remove all pins')}</button>`,
         { ctl: 'end', cls: 'inl' },
       )}
       ${row(
-        'Tag suggestions',
-        'Memora keeps a list of your tags to suggest them while you type. Refresh it if a tag is missing or out of date.',
-        '<button class="btn" id="sClearIdx" type="button">Refresh the tag list</button>',
+        t('Tag suggestions'),
+        t('Memora keeps a list of your tags to suggest them while you type. Refresh it if a tag is missing or out of date.'),
+        `<button class="btn" id="sClearIdx" type="button">${t('Refresh the tag list')}</button>`,
         { ctl: 'end', cls: 'inl' },
       )}`,
       ),
@@ -947,78 +954,78 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stToasts',
-      'Pop-up notifications when an agent works in your notes. Kept in this browser.',
+      t('Pop-up notifications when an agent works in your notes. Kept in this browser.'),
       card(
         row(
-          '<span id="sToastsL">Agent activity pop-ups</span>',
-          'The main switch. When it is off, no pop-up appears, even for agents turned on below.',
-          switchHTML('sToasts', !toastPrefs.off, 'Agent activity pop-ups', ' aria-labelledby="sToastsL"'),
+          `<span id="sToastsL">${t('Agent activity pop-ups')}</span>`,
+          t('The main switch. When it is off, no pop-up appears, even for agents turned on below.'),
+          switchHTML('sToasts', !toastPrefs.off, t('Agent activity pop-ups'), ' aria-labelledby="sToastsL"'),
           { ctl: 'end', cls: 'inl sw' },
         ),
       ) +
-        card('<div class="st-tkeys" id="sToastKeys" aria-live="polite"><span class="st-tk-empty">Loading agents…</span></div>', {
-          title: 'Each agent',
-          sub: 'Turn off the pop-ups of a single agent.',
+        card(`<div class="st-tkeys" id="sToastKeys" aria-live="polite"><span class="st-tk-empty">${t('Loading agents…')}</span></div>`, {
+          title: t('Each agent'),
+          sub: t('Turn off the pop-ups of a single agent.'),
           cls: 'st-keys-row',
         }),
     )}
 
     ${section(
       'stVault',
-      'The server folder that holds every note as a file. This app and every agent use it.',
+      t('The server folder that holds every note as a file. This app and every agent use it.'),
       card(
-        `${row('Current folder', 'Where your notes are right now.', `<div id="sVaultNow">${vaultSummary({ vault: state.health.vault || cfg.vault || null, stats: state.stats.notes ? state.stats : undefined } as SettingsInfo)}</div>`)}
+        `${row(t('Current folder'), t('Where your notes are right now.'), `<div id="sVaultNow">${vaultSummary({ vault: state.health.vault || cfg.vault || null, stats: state.stats.notes ? state.stats : undefined } as SettingsInfo)}</div>`)}
       ${row(
-        'Use another folder',
-        'Memora checks the folder and asks you to confirm before it switches. Nothing is moved or copied, and you can switch back here. Running in Docker? Use a folder mounted into the container.',
-        '<div id="sVaultForm"><span class="st-note">Loading…</span></div>',
+        t('Use another folder'),
+        t('Memora checks the folder and asks you to confirm before it switches. Nothing is moved or copied, and you can switch back here. Running in Docker? Use a folder mounted into the container.'),
+        `<div id="sVaultForm"><span class="st-note">${t('Loading…')}</span></div>`,
       )}`,
       ),
     )}
 
     ${section(
       'stImages',
-      'Images live beside the notes that show them. Choose how large one may be, and see what notes and images take.',
+      t('Images live beside the notes that show them. Choose how large one may be, and see what notes and images take.'),
       card(
-        `${row('Storage', 'Notes and images in the notes folder.', '<div id="sImgStore"><span class="st-note">Counting…</span></div>')}
+        `${row(t('Storage'), t('Notes and images in the notes folder.'), `<div id="sImgStore"><span class="st-note">${t('Counting…')}</span></div>`)}
       ${row(
-        'Largest image',
-        'Uploads above this size are refused, from this app and from agents alike. Between 0.1 and 50 MB.',
-        `<form id="sImgForm" class="lg-lim st-img-form"><label>Up to<span><input id="sImgMb" type="number" min="0.1" max="50" step="0.1" inputmode="decimal"> MB</span></label><button class="btn sm primary" type="submit" id="sImgSave">Save</button></form>`,
+        t('Largest image'),
+        t('Uploads above this size are refused, from this app and from agents alike. Between 0.1 and 50 MB.'),
+        `<form id="sImgForm" class="lg-lim st-img-form"><label>${t('Up to')}<span><input id="sImgMb" type="number" min="0.1" max="50" step="0.1" inputmode="decimal"> MB</span></label><button class="btn sm primary" type="submit" id="sImgSave">${t('Save')}</button></form>`,
       )}`,
       ) + galleryHTML(),
     )}
 
     ${section(
       'stStorage',
-      'How much room notes, images and Mnemo chats take, each against its own room. A banner warns when one is almost full.',
+      t('How much room notes, images and Mnemo chats take, each against its own room. A banner warns when one is almost full.'),
       storageSectionHTML(),
     )}
 
-    ${section('stMnemo', 'The notes agent built into Memora: connect a model with your own API key, choose models and set how it works.', mnemoSectionHTML())}
+    ${section('stMnemo', t('The notes agent built into Memora: connect a model with your own API key, choose models and set how it works.'), mnemoSectionHTML())}
 
     ${section(
       'stLogs',
-      'What agents and people did with your notes, kept on the server.',
+      t('What agents and people did with your notes, kept on the server.'),
       card(
         `${row(
-          'Usage',
-          'When a limit is reached, the oldest entries are removed first.',
-          `<div class="lg-use"><div class="lg-use-top"><span id="sLogPct">Loading…</span><span id="sLogCap"></span></div><div class="lg-use-bar"><i id="sLogBar"></i></div>
-            <div class="st-figs"><div><small>Used</small><b id="sLogUsed">–</b><span id="sLogOf"></span></div><div><small>Entries</small><b id="sLogN">–</b></div>
-            <div><small>Oldest entry</small><b id="sLogSince">–</b></div><div><small>Kept for</small><b id="sLogKeep">–</b></div></div></div>`,
+          t('Usage'),
+          t('When a limit is reached, the oldest entries are removed first.'),
+          `<div class="lg-use"><div class="lg-use-top"><span id="sLogPct">${t('Loading…')}</span><span id="sLogCap"></span></div><div class="lg-use-bar"><i id="sLogBar"></i></div>
+            <div class="st-figs"><div><small>${t('Used')}</small><b id="sLogUsed">–</b><span id="sLogOf"></span></div><div><small>${t('Entries')}</small><b id="sLogN">–</b></div>
+            <div><small>${t('Oldest entry')}</small><b id="sLogSince">–</b></div><div><small>${t('Kept for')}</small><b id="sLogKeep">–</b></div></div></div>`,
         )}
       ${row(
-        'Limits',
-        'A size limit in MB, and how many days to keep (0 keeps by size only). If the new limits are lower than what is stored, you are asked before older entries are removed.',
+        t('Limits'),
+        t('A size limit in MB, and how many days to keep (0 keeps by size only). If the new limits are lower than what is stored, you are asked before older entries are removed.'),
         `<div class="lg-lim">
-           <label>Max size<span><input id="sLogMb" type="number" min="1" max="512" step="1" inputmode="numeric"> MB</span></label>
-           <label>Keep for<span><input id="sLogDays" type="number" min="0" max="3650" step="1" inputmode="numeric"> days</span></label>
+           <label>${t('Max size')}<span><input id="sLogMb" type="number" min="1" max="512" step="1" inputmode="numeric"> MB</span></label>
+           <label>${t('Keep for')}<span><input id="sLogDays" type="number" min="0" max="3650" step="1" inputmode="numeric"> ${t('days')}</span></label>
          </div>
-         <div class="lg-presets" role="group" aria-label="Quick choices">${presets
+         <div class="lg-presets" role="group" aria-label="${t('Quick choices')}">${presets
            .map(([d, l]) => `<button type="button" class="chip" data-days="${d}" aria-pressed="false">${l}</button>`)
            .join('')}</div>
-         <div class="st-acts"><button class="btn primary" id="sLogSave" type="submit">Save limits</button>
+         <div class="st-acts"><button class="btn primary" id="sLogSave" type="submit">${t('Save limits')}</button>
            <span class="st-state" id="sLogSt" role="status" aria-live="polite"></span></div>`,
         { form: true, id: 'sLogForm' },
       )}`,
@@ -1027,24 +1034,31 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stServer',
-      'The server name and how long browsers stay signed in apply to everyone. The rest is shown for reference.',
+      t('The server name and how long browsers stay signed in apply to everyone. The rest is shown for reference.'),
       `${card(
         `${row(
-          '<label for="sRealm">Server name</label>',
-          'Shown on the sign-in page and in the browser tab. 1 to 64 characters.',
+          `<label for="sRealm">${t('Server name')}</label>`,
+          t('Shown on the sign-in page and in the browser tab. 1 to 64 characters.'),
           `<div class="field"><input id="sRealm" type="text" maxlength="64" spellcheck="false" autocomplete="off"></div>`,
           { form: true, id: 'sSrvForm' },
         )}
         ${row(
-          '<label for="sTtl">Sign out after inactivity</label>',
-          'A browser left unused this long must sign in again. Connected agents are not affected.',
+          `<label for="sLangDef">${t('Default language')}</label>`,
+          t('The language a new device starts in. Each device can still pick its own in Appearance.'),
+          `<div class="field"><select id="sLangDef">${[{ code: 'auto', label: t('Auto (each browser)') }, ...LANGS]
+            .map((l) => `<option value="${l.code}">${esc(l.label)}</option>`)
+            .join('')}</select></div>`,
+        )}
+        ${row(
+          `<label for="sTtl">${t('Sign out after inactivity')}</label>`,
+          t('A browser left unused this long must sign in again. Connected agents are not affected.'),
           '<div class="field"><select id="sTtl"></select></div>',
         )}
         ${row(
-          '<label for="sMaxAge">Longest sign-in</label>',
-          'Even in daily use, a browser signs in again after this long. It cannot be shorter than the inactivity time.',
+          `<label for="sMaxAge">${t('Longest sign-in')}</label>`,
+          t('Even in daily use, a browser signs in again after this long. It cannot be shorter than the inactivity time.'),
           `<div class="field"><select id="sMaxAge"></select></div>
-           <div class="st-acts"><button class="btn primary" id="sSrvSave" type="button" disabled>Save</button>
+           <div class="st-acts"><button class="btn primary" id="sSrvSave" type="button" disabled>${t('Save')}</button>
              <span class="st-state" id="sSrvSt" role="status" aria-live="polite"></span></div>`,
         )}`,
       )}${card('<dl class="st-kv" id="sServerKv"></dl>')}`,
@@ -1052,29 +1066,33 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stVersion',
-      'Memora by Codrihub Tech',
+      t('Memora by Codrihub Tech'),
       card(
-        `<dl class="st-kv"><dt>Installed</dt><dd><span class="st-ver" id="sVerCur">v${esc(version || '-')}</span></dd>
-        <dt>Latest release</dt><dd><span class="st-ver" id="sVerLatest">-</span></dd></dl>
+        `<dl class="st-kv"><dt>${t('Installed')}</dt><dd><span class="st-ver" id="sVerCur">v${esc(version || '-')}</span></dd>
+        <dt>${t('Latest release')}</dt><dd><span class="st-ver" id="sVerLatest">-</span></dd></dl>
       ${row(
-        'Updates',
-        '<span id="sVerHint">Checking for a newer release…</span>',
-        `<span class="st-upd" id="sVerState">-</span><a class="btn" id="sVerLink" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">Releases on GitHub</a>`,
+        t('Updates'),
+        `<span id="sVerHint">${t('Checking for a newer release…')}</span>`,
+        `<span class="st-upd" id="sVerState">-</span><a class="btn" id="sVerLink" href="${RELEASES_URL}" target="_blank" rel="noopener noreferrer">${t('Releases on GitHub')}</a>`,
         { ctl: 'end', cls: 'inl' },
       )}`,
       ) +
         card(
-          `${row("What's new", 'The notes of each release, from 2.0.0 on.', `<button class="btn" id="sWhatsNew" type="button">What's new</button>`, {
+          `${row(t("What's new"), t('The notes of each release, from 2.0.0 on.'), `<button class="btn" id="sWhatsNew" type="button">${t("What's new")}</button>`, {
             ctl: 'end',
             cls: 'inl',
           })}
-      ${row('Documentation', 'Installing, connecting agents, settings and reference.', `<a class="btn" id="sDocs" href="/docs">Open documentation</a>`, {
+      ${row(t('Documentation'), t('Installing, connecting agents, settings and reference.'), `<a class="btn" id="sDocs" href="/docs">${t('Open documentation')}</a>`, {
             ctl: 'end',
             cls: 'inl',
           })}
       ${row(
-        'How to update',
-        'Updates run on the server, not in this page. Installed directly: run <code class="st-code">sudo memora-cli</code> and type <code class="st-code">/update</code>. With Docker: <code class="st-code">docker compose pull</code> &amp;&amp; <code class="st-code">docker compose up -d</code>.',
+        t('How to update'),
+        t('Updates run on the server, not in this page. Installed directly: run {cli} and type {cmd}. With Docker: {docker}.', {
+          cli: '<code class="st-code">sudo memora-cli</code>',
+          cmd: '<code class="st-code">/update</code>',
+          docker: '<code class="st-code">docker compose pull</code> &amp;&amp; <code class="st-code">docker compose up -d</code>',
+        }),
         '',
         { cls: 'full' },
       )}`,
@@ -1083,12 +1101,12 @@ export async function renderSettings(): Promise<void> {
 
     ${section(
       'stStop',
-      'Stop Memora on the machine it runs on.',
+      t('Stop Memora on the machine it runs on.'),
       card(
         row(
-          'Shut down the server',
-          'Every browser and agent is disconnected until someone starts Memora again on that machine. This page cannot start it again.',
-          `<button class="btn danger" id="sShutdown" type="button">${icon('logout')}Shut down…</button>`,
+          t('Shut down the server'),
+          t('Every browser and agent is disconnected until someone starts Memora again on that machine. This page cannot start it again.'),
+          `<button class="btn danger" id="sShutdown" type="button">${icon('logout')}${t('Shut down…')}</button>`,
           { ctl: 'end', cls: 'inl' },
         ),
         { cls: 'st-dz' },
@@ -1103,16 +1121,16 @@ export async function renderSettings(): Promise<void> {
     const maxAge = info?.session_max_age || 0;
     // Plain labels; the technical value stays visible for whoever runs the server.
     const rows: [string, string, boolean][] = [
-      ['Version', version ? 'v' + version : '-', false],
-      ['Server name', cfg.realm || st.realm || '-', false],
-      ['Address for agents', location.origin + '/mcp', true],
-      ['Notes folder', info?.vault || state.health.vault || cfg.vault || 'Not set', true],
-      ['Memora data folder', info?.state_dir || '-', true],
-      ['Sign out after inactivity', ttl ? span(ttl) : '-', false],
-      ['Longest sign-in', maxAge ? span(maxAge) : 'No limit', false],
+      [t('Version'), version ? 'v' + version : '-', false],
+      [t('Server name'), cfg.realm || st.realm || '-', false],
+      [t('Address for agents'), location.origin + '/mcp', true],
+      [t('Notes folder'), info?.vault || state.health.vault || cfg.vault || t('Not set'), true],
+      [t('Memora data folder'), info?.state_dir || '-', true],
+      [t('Sign out after inactivity'), ttl ? span(ttl) : '-', false],
+      [t('Longest sign-in'), maxAge ? span(maxAge) : t('No limit'), false],
       [
-        'Sign-in protection',
-        st.locked ? 'Locked after too many attempts' : st.armed ? 'Setup or reset window open' : 'Normal',
+        t('Sign-in protection'),
+        st.locked ? t('Locked after too many attempts') : st.armed ? t('Setup or reset window open') : t('Normal'),
         false,
       ],
     ];
@@ -1121,7 +1139,7 @@ export async function renderSettings(): Promise<void> {
       kv.innerHTML = rows
         .map(
           ([k, v, mono]) =>
-            `<dt>${esc(k)}</dt><dd${mono ? ' class="mono"' : ''}><span>${esc(v)}</span>${mono && v !== '-' && v !== 'Not set' ? copyBtn(v, k) : ''}</dd>`,
+            `<dt>${esc(k)}</dt><dd${mono ? ' class="mono"' : ''}><span>${esc(v)}</span>${mono && v !== '-' && v !== t('Not set') ? copyBtn(v, k) : ''}</dd>`,
         )
         .join('');
   };
@@ -1129,32 +1147,34 @@ export async function renderSettings(): Promise<void> {
 
   // Server name and sign-in limits: the only server details an admin edits here.
   const TTLS: [number, string][] = [
-    [1800, '30 minutes'],
-    [3600, '1 hour'],
-    [10800, '3 hours'],
-    [28800, '8 hours'],
-    [86400, '1 day'],
-    [604800, '7 days'],
-    [2592000, '30 days'],
+    [1800, t('30 minutes')],
+    [3600, t('1 hour')],
+    [10800, t('3 hours')],
+    [28800, t('8 hours')],
+    [86400, t('1 day')],
+    [604800, t('7 days')],
+    [2592000, t('30 days')],
   ];
   const MAX_AGES: [number, string][] = [
-    [0, 'No limit'],
-    [86400, '1 day'],
-    [604800, '7 days'],
-    [2592000, '30 days'],
-    [7776000, '90 days'],
+    [0, t('No limit')],
+    [86400, t('1 day')],
+    [604800, t('7 days')],
+    [2592000, t('30 days')],
+    [7776000, t('90 days')],
   ];
   const realmIn = host.querySelector<HTMLInputElement>('#sRealm')!;
+  const langIn = host.querySelector<HTMLSelectElement>('#sLangDef')!;
   const ttlIn = host.querySelector<HTMLSelectElement>('#sTtl')!;
   const maxIn = host.querySelector<HTMLSelectElement>('#sMaxAge')!;
   const srvSave = host.querySelector<HTMLButtonElement>('#sSrvSave')!;
-  let srv = { realm: String(cfg.realm || st.realm || 'Memora'), ttl: Number(cfg.session_ttl) || 10800, max: 0 };
+  let srv = { realm: String(cfg.realm || st.realm || 'Memora'), ttl: Number(cfg.session_ttl) || 10800, max: 0, lang: String((cfg as { language?: string }).language || 'en') };
   const fillSel = (sel: HTMLSelectElement, opts: [number, string][], v: number): void => {
     const list = opts.some(([x]) => x === v) ? opts : [...opts, [v, span(v)] as [number, string]].sort((a, b) => (a[0] || Infinity) - (b[0] || Infinity));
     sel.innerHTML = list.map(([x, l]) => `<option value="${x}"${x === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   };
   const fillSrv = (): void => {
     realmIn.value = srv.realm;
+    langIn.value = srv.lang;
     fillSel(ttlIn, TTLS, srv.ttl);
     fillSel(maxIn, MAX_AGES, srv.max);
     srvSave.disabled = true;
@@ -1163,10 +1183,10 @@ export async function renderSettings(): Promise<void> {
     const ttl = Number(ttlIn.value);
     const max = Number(maxIn.value);
     const bad = !realmIn.value.trim() || (max !== 0 && max < ttl);
-    srvSave.disabled = bad || (realmIn.value.trim() === srv.realm && ttl === srv.ttl && max === srv.max);
-    mark(host, '#sSrvSt', bad && max !== 0 && max < ttl ? 'error' : '', bad && max !== 0 && max < ttl ? 'Longest sign-in must be at least the inactivity time' : '');
+    srvSave.disabled = bad || (realmIn.value.trim() === srv.realm && ttl === srv.ttl && max === srv.max && langIn.value === srv.lang);
+    mark(host, '#sSrvSt', bad && max !== 0 && max < ttl ? 'error' : '', bad && max !== 0 && max < ttl ? t('Longest sign-in must be at least the inactivity time') : '');
   };
-  [realmIn, ttlIn, maxIn].forEach((x) => x.addEventListener('input', srvDirty));
+  [realmIn, ttlIn, maxIn, langIn].forEach((x) => x.addEventListener('input', srvDirty));
   host.querySelector<HTMLFormElement>('#sSrvForm')?.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!srvSave.disabled) srvSave.click();
@@ -1174,19 +1194,20 @@ export async function renderSettings(): Promise<void> {
   srvSave.onclick = () =>
     void (async () => {
       srvSave.disabled = true;
-      mark(host, '#sSrvSt', 'saving', 'Saving…');
+      mark(host, '#sSrvSt', 'saving', t('Saving…'));
       try {
-        const r = await apiPost<{ realm: string; session_ttl: number; session_max_age: number }>('/api/settings/server', {
+        const r = await apiPost<{ realm: string; session_ttl: number; session_max_age: number; language?: string }>('/api/settings/server', {
           realm: realmIn.value.trim(),
           session_ttl: Number(ttlIn.value),
           session_max_age: Number(maxIn.value),
+          language: langIn.value,
         });
-        srv = { realm: r.realm, ttl: r.session_ttl, max: r.session_max_age };
+        srv = { realm: r.realm, ttl: r.session_ttl, max: r.session_max_age, lang: r.language || langIn.value };
         cfg.realm = r.realm;
         cfg.session_ttl = r.session_ttl;
         fillSrv();
-        mark(host, '#sSrvSt', 'saved', 'Saved');
-        toast('Server settings saved', 'ok');
+        mark(host, '#sSrvSt', 'saved', t('Saved'));
+        toast(t('Server settings saved'), 'ok');
         void fetchSettings()
           .then((f) => paintServer(f as SettingsFull))
           .catch(() => paintServer(null));
@@ -1218,27 +1239,27 @@ export async function renderSettings(): Promise<void> {
     const latestEl = host.querySelector<HTMLElement>('#sVerLatest');
     if (!stateEl || !hint || !link) return;
     link.href = u.url;
-    if (latestEl) latestEl.textContent = u.latest ? 'v' + u.latest : u.state === 'none' ? 'None yet' : '-';
+    if (latestEl) latestEl.textContent = u.latest ? 'v' + u.latest : u.state === 'none' ? t('None yet') : '-';
     stateEl.classList.remove('new', 'ok', 'warn');
     if (u.available && u.latest) {
-      stateEl.textContent = 'Update available v' + u.latest;
+      stateEl.textContent = t('Update available {version}', { version: 'v' + u.latest });
       stateEl.classList.add('new');
-      hint.textContent = 'A newer release is out. Read what changed, then update.';
-      link.textContent = 'View v' + u.latest + ' on GitHub';
+      hint.textContent = t('A newer release is out. Read what changed, then update.');
+      link.textContent = t('View {version} on GitHub', { version: 'v' + u.latest });
     } else if (u.state === 'ok' || u.state === 'none') {
-      stateEl.textContent = 'Up to date';
+      stateEl.textContent = t('Up to date');
       stateEl.classList.add('ok');
-      hint.textContent = u.state === 'ok' ? 'You run the newest release.' : 'No release has been published yet.';
+      hint.textContent = u.state === 'ok' ? t('You run the newest release.') : t('No release has been published yet.');
     } else if (u.state === 'off') {
-      stateEl.textContent = 'Checks off';
-      hint.textContent = 'Release checks are turned off on this server (MEMORA_UPDATE_CHECK).';
+      stateEl.textContent = t('Checks off');
+      hint.textContent = t('Release checks are turned off on this server (MEMORA_UPDATE_CHECK).');
     } else if (u.state === 'pending') {
-      stateEl.textContent = 'Checking…';
-      hint.textContent = 'The server checks GitHub shortly after it starts.';
+      stateEl.textContent = t('Checking…');
+      hint.textContent = t('The server checks GitHub shortly after it starts.');
     } else {
-      stateEl.textContent = 'Could not check';
+      stateEl.textContent = t('Could not check');
       stateEl.classList.add('warn');
-      hint.textContent = 'The server could not reach GitHub. It tries again later.';
+      hint.textContent = t('The server could not reach GitHub. It tries again later.');
     }
   });
 
@@ -1303,8 +1324,8 @@ export async function renderSettings(): Promise<void> {
   const setMini = (on: boolean): void => {
     host.querySelector('.st-page')?.classList.toggle('nav-mini', on);
     navTg.setAttribute('aria-pressed', String(on));
-    navTg.title = on ? 'Show section names' : 'Hide section names for a wider page';
-    navTg.querySelector('span')!.textContent = on ? 'Show labels' : 'Hide labels';
+    navTg.title = on ? t('Show section names') : t('Hide section names for a wider page');
+    navTg.querySelector('span')!.textContent = on ? t('Show labels') : t('Hide labels');
   };
   let mini = false;
   try {
@@ -1344,7 +1365,7 @@ export async function renderSettings(): Promise<void> {
   show(start, 'replace', !!pop?.pushed && start === pop.id);
   page.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-copy]');
-    if (b) void copyText(b.dataset.copy || '', `${b.dataset.what || 'Value'} copied`);
+    if (b) void copyText(b.dataset.copy || '', t('{what} copied', { what: b.dataset.what || t('Value') }));
   });
   live = {
     root: page,
@@ -1388,6 +1409,10 @@ export async function renderSettings(): Promise<void> {
     };
   });
 
+  // Language: kept on this device; the page is drawn again in it.
+  const langBtn = host.querySelector<HTMLButtonElement>('#stLang');
+  if (langBtn) langBtn.onclick = () => openLangPicker(langPref(), (code) => setLangPref(code as LangPref));
+
   // Account: username
   const uForm = host.querySelector<HTMLFormElement>('#sUserForm')!;
   const uInput = host.querySelector<HTMLInputElement>('#sUser')!;
@@ -1417,12 +1442,12 @@ export async function renderSettings(): Promise<void> {
   uForm.onsubmit = (e) => {
     e.preventDefault();
     const name = uInput.value.trim();
-    if (!name) return mark(host, '#sUserSt', 'error', 'Enter a username.');
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(name)) return mark(host, '#sUserSt', 'error', "Use letters, digits, '-', '_' or '.', at most 32.");
-    if (name.toLowerCase() === user.toLowerCase()) return mark(host, '#sUserSt', 'error', 'That is already your username.');
+    if (!name) return mark(host, '#sUserSt', 'error', t('Enter a username.'));
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(name)) return mark(host, '#sUserSt', 'error', t("Use letters, digits, '-', '_' or '.', at most 32."));
+    if (name.toLowerCase() === user.toLowerCase()) return mark(host, '#sUserSt', 'error', t('That is already your username.'));
     if (!uPw.value) {
       uPw.focus();
-      return mark(host, '#sUserSt', 'error', 'Enter your current password.');
+      return mark(host, '#sUserSt', 'error', t('Enter your current password.'));
     }
     uSave.disabled = true;
     mark(host, '#sUserSt', 'saving');
@@ -1435,8 +1460,8 @@ export async function renderSettings(): Promise<void> {
         const fresh = await fetchSettings().catch(() => null);
         if (fresh?.user) showUser(fresh.user);
         syncUserForm();
-        mark(host, '#sUserSt', 'saved', `Saved as ${user}`);
-        toast('Username changed', 'ok');
+        mark(host, '#sUserSt', 'saved', t('Saved as {name}', { name: user }));
+        toast(t('Username changed'), 'ok');
       } catch (err) {
         mark(host, '#sUserSt', 'error', (err as Error).message);
         uSave.disabled = false;
@@ -1472,9 +1497,9 @@ export async function renderSettings(): Promise<void> {
     const cur = pwVal('#sPwCur');
     const pw1 = pwVal('#sPw1');
     const pw2 = pwVal('#sPw2');
-    if (!cur) return mark(host, '#sPwSt', 'error', 'Enter your current password.');
-    if (pw1.length < minPw) return mark(host, '#sPwSt', 'error', `The new password needs at least ${minPw} characters.`);
-    if (pw1 !== pw2) return mark(host, '#sPwSt', 'error', 'The new passwords do not match.');
+    if (!cur) return mark(host, '#sPwSt', 'error', t('Enter your current password.'));
+    if (pw1.length < minPw) return mark(host, '#sPwSt', 'error', t('The new password needs at least {n} characters.', { n: minPw }));
+    if (pw1 !== pw2) return mark(host, '#sPwSt', 'error', t('The new passwords do not match.'));
     const btn = host.querySelector<HTMLButtonElement>('#sPwSave')!;
     btn.disabled = true;
     mark(host, '#sPwSt', 'saving');
@@ -1488,8 +1513,8 @@ export async function renderSettings(): Promise<void> {
         pwReset();
         pwShow(false);
         const n = r.revoked_sessions || 0;
-        mark(host, '#sPwSt0', 'saved', 'Password changed' + (n ? `. ${plural(n, 'other device')} signed out.` : '.'));
-        toast('Password changed', 'ok');
+        mark(host, '#sPwSt0', 'saved', n ? tn(n, 'Password changed. {n} other device signed out.', 'Password changed. {n} other devices signed out.') : t('Password changed.'));
+        toast(t('Password changed'), 'ok');
         void loadSessions();
       } catch (err) {
         mark(host, '#sPwSt', 'error', (err as Error).message);
@@ -1506,15 +1531,15 @@ export async function renderSettings(): Promise<void> {
 
   const sessionHTML = (s: SessionRow): string => {
     const meta = [
-      s.current ? 'Active now' : 'Active ' + ago(s.last_seen),
+      s.current ? t('Active now') : t('Active {when}', { when: ago(s.last_seen) }),
       s.ip ? 'IP ' + s.ip : '',
-      'Signed in ' + dateTime(s.created_at),
+      t('Signed in {date}', { date: dateTime(s.created_at) }),
     ].filter(Boolean);
     return `<div class="st-ses${s.current ? ' cur' : ''}" data-id="${esc(s.id)}">
       <span class="dv" aria-hidden="true">${deviceIcon(s)}</span>
-      <div class="mn"><div class="nm"><span>${esc(sessionTitle(s))}</span>${s.current ? '<span class="st-tag">This device</span>' : ''}</div>
+      <div class="mn"><div class="nm"><span>${esc(sessionTitle(s))}</span>${s.current ? `<span class="st-tag">${t('This device')}</span>` : ''}</div>
         <div class="mt">${meta.map(esc).join('<em>·</em>')}</div></div>
-      <button type="button" class="more" data-more="${esc(s.id)}" aria-haspopup="menu" aria-label="Actions for ${esc(sessionTitle(s))}">${icon('more')}</button>
+      <button type="button" class="more" data-more="${esc(s.id)}" aria-haspopup="menu" aria-label="${t('Actions for {name}', { name: esc(sessionTitle(s)) })}">${icon('more')}</button>
     </div>`;
   };
 
@@ -1523,20 +1548,20 @@ export async function renderSettings(): Promise<void> {
       const r = await apiGet<{ sessions: SessionRow[] }>('/api/settings/sessions');
       sessions = r.sessions || [];
     } catch (e) {
-      sessBox.innerHTML = `<div class="st-empty">Could not read the sessions: ${esc((e as Error).message)}</div>`;
+      sessBox.innerHTML = `<div class="st-empty">${t('Could not read the sessions: {error}', { error: esc((e as Error).message) })}</div>`;
       return;
     }
     if (!host.contains(sessBox)) return;
-    sessBox.innerHTML = sessions.length ? sessions.map(sessionHTML).join('') : '<div class="st-empty">No sessions.</div>';
+    sessBox.innerHTML = sessions.length ? sessions.map(sessionHTML).join('') : `<div class="st-empty">${t('No sessions.')}</div>`;
     const others = sessions.filter((s) => !s.current).length;
     outOthers.disabled = others === 0;
-    outOthers.title = others ? '' : 'No other device is signed in';
+    outOthers.title = others ? '' : t('No other device is signed in');
     const cur = sessions.find((s) => s.current);
     const sub = host.querySelector<HTMLElement>('#sMeSub');
     if (sub)
       sub.textContent =
-        `Signed in on this device${cur?.expires_in ? ` · session renews while you work (${span(cur.expires_in)} idle left)` : ''}` +
-        (others ? ` · ${plural(others, 'other device')}` : '');
+        `${t('Signed in on this device')}${cur?.expires_in ? ` · ${t('session renews while you work ({time} idle left)', { time: span(cur.expires_in) })}` : ''}` +
+        (others ? ` · ${tn(others, '{n} other device', '{n} other devices')}` : '');
     sessBox.querySelectorAll<HTMLButtonElement>('[data-more]').forEach((b) => {
       b.onclick = () => {
         const s = sessions.find((x) => x.id === b.dataset.more);
@@ -1548,26 +1573,26 @@ export async function renderSettings(): Promise<void> {
   const revoke = async (s: SessionRow): Promise<void> => {
     try {
       await apiPost('/api/settings/sessions/revoke', { id: s.id });
-      toast(`${sessionTitle(s)} signed out`, 'ok');
+      toast(t('{name} signed out', { name: sessionTitle(s) }), 'ok');
     } catch (e) {
-      toast('Could not sign it out: ' + (e as Error).message, 'err');
+      toast(t('Could not sign it out: {error}', { error: (e as Error).message }), 'err');
     }
     void loadSessions();
   };
 
   const rename = (s: SessionRow): void => {
     const sh = openSheet({
-      title: 'Name this device',
-      sub: deviceName(s.user_agent) || 'Unknown device',
+      title: t('Name this device'),
+      sub: deviceName(s.user_agent) || t('Unknown device'),
       width: 440,
-      body: `<div class="field"><label for="sAlias">Device name</label>
-        <input id="sAlias" type="text" maxlength="64" value="${esc(s.alias || '')}" placeholder="${esc(deviceName(s.user_agent) || 'Work laptop')}">
-        <span class="hint">Shown in this list only. Leave empty to show the browser name.</span></div>
+      body: `<div class="field"><label for="sAlias">${t('Device name')}</label>
+        <input id="sAlias" type="text" maxlength="64" value="${esc(s.alias || '')}" placeholder="${esc(deviceName(s.user_agent) || t('Work laptop'))}">
+        <span class="hint">${t('Shown in this list only. Leave empty to show the browser name.')}</span></div>
         <span class="st-state" id="sAliasSt" role="status" aria-live="polite"></span>`,
       actions: [
-        { label: 'Cancel', cls: 'ghost', run: (x) => x.close() },
+        { label: t('Cancel'), cls: 'ghost', run: (x) => x.close() },
         {
-          label: 'Save',
+          label: t('Save'),
           cls: 'primary',
           run: async (x) => {
             const alias = x.body.querySelector<HTMLInputElement>('#sAlias')!.value;
@@ -1575,7 +1600,7 @@ export async function renderSettings(): Promise<void> {
             try {
               await apiPost('/api/settings/sessions/rename', { id: s.id, alias });
               x.close();
-              toast('Device renamed', 'ok');
+              toast(t('Device renamed'), 'ok');
               void loadSessions();
             } catch (e) {
               mark(x.body, '#sAliasSt', 'error', (e as Error).message);
@@ -1591,13 +1616,14 @@ export async function renderSettings(): Promise<void> {
 
   const activity = (s: SessionRow): void => {
     const d = openDrawer({
-      title: 'Activity on this device',
-      sub: sessionTitle(s) + (s.current ? ' · this device' : ''),
-      body: `<p class="st-act-note">Sign-ins, account changes and failed attempts recorded from ${
-        s.ip ? `IP <b>${esc(s.ip)}</b>` : 'this device'
-      } since it signed in on ${esc(dateTime(s.created_at))}. Note changes and agent work are in Activity.</p>
-        <ul class="st-act" id="sActList"><li><span class="e"><span>Loading…</span></span></li></ul>`,
-      foot: `<button type="button" class="btn" id="sActLogs">${icon('activity')}Open Activity</button>`,
+      title: t('Activity on this device'),
+      sub: sessionTitle(s) + (s.current ? ' · ' + t('this device') : ''),
+      body: `<p class="st-act-note">${t('Sign-ins, account changes and failed attempts recorded from {from} since it signed in on {date}. Note changes and agent work are in Activity.', {
+        from: s.ip ? `IP <b>${esc(s.ip)}</b>` : t('this device'),
+        date: esc(dateTime(s.created_at)),
+      })}</p>
+        <ul class="st-act" id="sActList"><li><span class="e"><span>${t('Loading…')}</span></span></li></ul>`,
+      foot: `<button type="button" class="btn" id="sActLogs">${icon('activity')}${t('Open Activity')}</button>`,
     });
     d.querySelector<HTMLButtonElement>('#sActLogs')!.onclick = () => {
       d.querySelector<HTMLButtonElement>('[data-x]')?.click();
@@ -1613,15 +1639,15 @@ export async function renderSettings(): Promise<void> {
               .map(
                 (e) => `<li><span class="w" title="${esc(new Date(e.at * 1000).toLocaleString())}">${esc(ago(e.at))}</span>
                   <span class="e${/fail|denied|blocked/.test(e.event) ? ' bad' : ''}"><b>${esc(eventLabel(e.event))}</b>${
-                    e.detail || e.user ? `<span>${esc([e.user, e.detail].filter(Boolean).join(' · '))}</span>` : ''
+                    e.detail || e.user ? `<span>${esc([e.user, e.detail && ts(e.detail)].filter(Boolean).join(' · '))}</span>` : ''
                   }</span></li>`,
               )
               .join('')
-          : '<li><span class="e"><span>Nothing recorded from this device yet.</span></span></li>';
+          : `<li><span class="e"><span>${t('Nothing recorded from this device yet.')}</span></span></li>`;
       })
       .catch((e) => {
         const list = d.querySelector<HTMLElement>('#sActList');
-        if (list) list.innerHTML = `<li><span class="e bad"><b>Could not load</b><span>${esc((e as Error).message)}</span></span></li>`;
+        if (list) list.innerHTML = `<li><span class="e bad"><b>${t('Could not load')}</b><span>${esc((e as Error).message)}</span></span></li>`;
       });
   };
 
@@ -1630,31 +1656,31 @@ export async function renderSettings(): Promise<void> {
       anchor,
       [
         {
-          label: 'Activity on this device',
-          desc: 'Sign-ins and account changes from it',
+          label: t('Activity on this device'),
+          desc: t('Sign-ins and account changes from it'),
           icon: icon('activity'),
           run: () => activity(s),
         },
-        { label: 'Rename device', desc: 'Give it a name you recognise', icon: icon('note'), run: () => rename(s) },
+        { label: t('Rename device'), desc: t('Give it a name you recognise'), icon: icon('note'), run: () => rename(s) },
         { label: '', sep: true },
         s.current
           ? {
-              label: 'Sign out here',
-              desc: 'End the session in this browser',
+              label: t('Sign out here'),
+              desc: t('End the session in this browser'),
               icon: icon('logout'),
               danger: true,
               run: () => void signOutHere(),
             }
           : {
-              label: 'Sign out this device',
-              desc: 'It must sign in again and is told why',
+              label: t('Sign out this device'),
+              desc: t('It must sign in again and is told why'),
               icon: icon('logout'),
               danger: true,
               run: () =>
                 Modal.confirm(
-                  'Sign out this device?',
-                  `${sessionTitle(s)} will be signed out at once and must sign in again.`,
-                  'Sign out',
+                  t('Sign out this device?'),
+                  t('{name} will be signed out at once and must sign in again.', { name: sessionTitle(s) }),
+                  t('Sign out'),
                   async () => {
                     Modal.close();
                     await revoke(s);
@@ -1662,23 +1688,23 @@ export async function renderSettings(): Promise<void> {
                 ),
             },
       ],
-      { title: sessionTitle(s) + (s.current ? ' (this device)' : ''), lead: deviceIcon(s) },
+      { title: sessionTitle(s) + (s.current ? ` (${t('this device')})` : ''), lead: deviceIcon(s) },
     );
   };
 
   outOthers.onclick = () => {
     const n = sessions.filter((s) => !s.current).length;
     Modal.confirm(
-      'Sign out other devices?',
-      `${plural(n, 'other device')} will be signed out and must sign in again. This device stays signed in. Connected agents keep working.`,
-      'Sign out others',
+      t('Sign out other devices?'),
+      tn(n, '{n} other device will be signed out and must sign in again. This device stays signed in. Connected agents keep working.', '{n} other devices will be signed out and must sign in again. This device stays signed in. Connected agents keep working.'),
+      t('Sign out others'),
       async () => {
         Modal.close();
-        mark(host, '#sOutSt', 'saving', 'Signing out…');
+        mark(host, '#sOutSt', 'saving', t('Signing out…'));
         try {
           const r = await apiPost<{ revoked?: number }>('/api/settings/sessions/revoke', { others: true });
           const k = r.revoked || 0;
-          mark(host, '#sOutSt', 'saved', k ? `${plural(k, 'device')} signed out` : 'No other devices');
+          mark(host, '#sOutSt', 'saved', k ? tn(k, '{n} device signed out', '{n} devices signed out') : t('No other devices'));
         } catch (e) {
           mark(host, '#sOutSt', 'error', (e as Error).message);
         }
@@ -1692,7 +1718,7 @@ export async function renderSettings(): Promise<void> {
       await apiPost<OkResult>('/api/auth/logout');
       location.href = '/login';
     } catch (e) {
-      toast('Could not sign out: ' + (e as Error).message, 'err');
+      toast(t('Could not sign out: {error}', { error: (e as Error).message }), 'err');
     }
   };
   host.querySelector<HTMLButtonElement>('#sLogout')!.onclick = () => void signOutHere();
@@ -1713,7 +1739,7 @@ export async function renderSettings(): Promise<void> {
       id: 'sv',
       suggested: info.vault_suggested,
       current: info.vault,
-      submitLabel: 'Check and switch…',
+      submitLabel: t('Check and switch…'),
       confirm: (path, create) => confirmVaultSwitch(now, path, create),
       onDone: async (res) => {
         const prev = now.vault;
@@ -1723,8 +1749,12 @@ export async function renderSettings(): Promise<void> {
         $('#sVaultNow').innerHTML = vaultSummary({ vault: res.vault, stats: res.stats, vault_writable: true });
         const err = $('#svErr');
         err.className = 'vf-ok';
-        err.innerHTML = `${esc(`Checked and switched. Now using ${res.vault}${res.created ? ' (created)' : ''}: ${notesLabel(res.stats?.notes)}.`)}${
-          prev && prev !== res.vault ? `<div class="st-back"><button type="button" class="btn sm" id="svBack">Switch back to ${esc(prev)}</button></div>` : ''
+        err.innerHTML = `${esc(
+          res.created
+            ? t('Checked and switched. Now using {path} (created): {notes}.', { path: res.vault || '', notes: notesLabel(res.stats?.notes) })
+            : t('Checked and switched. Now using {path}: {notes}.', { path: res.vault || '', notes: notesLabel(res.stats?.notes) }),
+        )}${
+          prev && prev !== res.vault ? `<div class="st-back"><button type="button" class="btn sm" id="svBack">${t('Switch back to {path}', { path: esc(prev) })}</button></div>` : ''
         }`;
         err.querySelector<HTMLButtonElement>('#svBack')?.addEventListener('click', () => {
           const input = $('#svPath') as unknown as HTMLInputElement;
@@ -1735,7 +1765,7 @@ export async function renderSettings(): Promise<void> {
         void fetchSettings()
           .then((f) => paintServer(f as SettingsFull))
           .catch(() => undefined);
-        toast('Notes folder switched', 'ok');
+        toast(t('Notes folder switched'), 'ok');
       },
     });
   });
@@ -1747,7 +1777,7 @@ export async function renderSettings(): Promise<void> {
     sw.setAttribute('aria-checked', String(on));
     ui.collapsed = on;
     saveUI();
-    toast(on ? 'The sidebar starts collapsed' : 'The sidebar starts open', 'ok', 1800);
+    toast(on ? t('The sidebar starts collapsed') : t('The sidebar starts open'), 'ok', 1800);
   };
   // Notifications
   const tSw = host.querySelector<HTMLButtonElement>('#sToasts')!;
@@ -1764,7 +1794,7 @@ export async function renderSettings(): Promise<void> {
     tSw.setAttribute('aria-checked', String(!toastPrefs.off));
     saveToastPrefs();
     paintToastKeys();
-    toast(toastPrefs.off ? 'Agent pop-ups are off' : 'Agent pop-ups are on', 'ok', 1800);
+    toast(toastPrefs.off ? t('Agent pop-ups are off') : t('Agent pop-ups are on'), 'ok', 1800);
   };
   void apiGet<KeysResult | KeyRow[]>('/api/keys')
     .then((d) => {
@@ -1773,15 +1803,15 @@ export async function renderSettings(): Promise<void> {
       // The dots use the same colours as the avatars everywhere else.
       setAgentColors(rows);
       if (!rows.length) {
-        tBox.innerHTML = '<span class="st-tk-empty">No agents connected yet.</span>';
+        tBox.innerHTML = `<span class="st-tk-empty">${t('No agents connected yet.')}</span>`;
         return;
       }
       tBox.innerHTML = rows
         .map((k, i) => {
           const name = k.name || k.id;
           return `<div class="st-tk"><span class="dot" style="background:${esc(agentColor(name, k.id))}"></span><span class="nm" id="sTk${i}">${esc(name)}${
-            k.enabled === false ? ' <em>turned off</em>' : ''
-          }</span>${switchHTML('sTkSw' + i, true, 'Pop-ups for ' + name, ` aria-labelledby="sTk${i}" data-key="${esc(k.id)}"`)}</div>`;
+            k.enabled === false ? ` <em>${t('turned off')}</em>` : ''
+          }</span>${switchHTML('sTkSw' + i, true, t('Pop-ups for {name}', { name }), ` aria-labelledby="sTk${i}" data-key="${esc(k.id)}"`)}</div>`;
         })
         .join('');
       tBox.querySelectorAll<HTMLButtonElement>('.cc-sw').forEach((b) => {
@@ -1799,19 +1829,19 @@ export async function renderSettings(): Promise<void> {
       paintToastKeys();
     })
     .catch(() => {
-      if (seq === renderSeq) tBox.innerHTML = '<span class="st-tk-empty">The agent list could not be loaded. Reload the page to try again.</span>';
+      if (seq === renderSeq) tBox.innerHTML = `<span class="st-tk-empty">${t('The agent list could not be loaded. Reload the page to try again.')}</span>`;
     });
 
   host.querySelector<HTMLButtonElement>('#sClearPins')!.onclick = () => {
     Modal.confirm(
-      'Remove all pins?',
-      'The Pinned list empties on every browser and device. The notes and folders themselves stay where they are.',
-      'Remove all pins',
+      t('Remove all pins?'),
+      t('The Pinned list empties on every browser and device. The notes and folders themselves stay where they are.'),
+      t('Remove all pins'),
       () => {
         Modal.close();
         void clearPins().then(() => {
           renderTree();
-          if (!pinnedItems().length) toast('Pins removed', 'ok');
+          if (!pinnedItems().length) toast(t('Pins removed'), 'ok');
         });
       },
     );
@@ -1820,7 +1850,7 @@ export async function renderSettings(): Promise<void> {
     clearTagIndex();
     state.tags.built = false;
     state.tags.index = null;
-    toast('Tag list cleared. It is rebuilt the next time tags are used.', 'ok');
+    toast(t('Tag list cleared. It is rebuilt the next time tags are used.'), 'ok');
   };
 
   // Activity log
@@ -1850,24 +1880,24 @@ async function wireImages(host: HTMLElement): Promise<void> {
   try {
     const s = await apiGet<StorageInfo>('/api/vault/storage');
     if (!host.contains(box)) return;
-    box.innerHTML = `<div class="st-figs"><div><small>Notes</small><b>${size(s.note_bytes)}</b><span>${s.notes.toLocaleString('en-US')} files</span></div><div><small>Images</small><b>${size(
+    box.innerHTML = `<div class="st-figs"><div><small>${t('Notes')}</small><b>${size(s.note_bytes)}</b><span>${t('{n} files', { n: s.notes.toLocaleString('en-US') })}</span></div><div><small>${t('Images')}</small><b>${size(
       s.image_bytes,
-    )}</b><span>${s.images.toLocaleString('en-US')} files</span></div><div><small>Together</small><b>${size(s.total_bytes)}</b></div></div>`;
+    )}</b><span>${t('{n} files', { n: s.images.toLocaleString('en-US') })}</span></div><div><small>${t('Together')}</small><b>${size(s.total_bytes)}</b></div></div>`;
     mbIn.value = String(Math.round((s.max_image_bytes / 1048576) * 10) / 10);
   } catch (e) {
-    box.innerHTML = `<span class="st-note">Could not count the storage: ${esc((e as Error).message)}</span>`;
+    box.innerHTML = `<span class="st-note">${t('Could not count the storage: {error}', { error: esc((e as Error).message) })}</span>`;
   }
   form.onsubmit = async (e) => {
     e.preventDefault();
     const mb = Number(mbIn.value);
     if (!(mb >= 0.1 && mb <= 50)) {
-      toast('Choose between 0.1 and 50 MB', 'err');
+      toast(t('Choose between 0.1 and 50 MB'), 'err');
       return;
     }
     try {
       const r = await apiPost<{ max_image_mb: number }>('/api/settings/media', { max_image_mb: mb });
       mbIn.value = String(r.max_image_mb);
-      toast(`Images can now be up to ${r.max_image_mb} MB`, 'ok');
+      toast(t('Images can now be up to {n} MB', { n: r.max_image_mb }), 'ok');
     } catch (err) {
       toast((err as Error).message, 'err');
     }
@@ -1905,13 +1935,13 @@ async function wireLogLimits(host: HTMLElement): Promise<void> {
       const e = host.querySelector<HTMLElement>('#' + id);
       if (e) e.textContent = v;
     };
-    put('sLogPct', `${pct < 1 && st.bytes > 0 ? 'Under 1' : Math.round(pct)}% used`);
-    put('sLogCap', `Limit ${s.max_mb} MB`);
+    put('sLogPct', pct < 1 && st.bytes > 0 ? t('Under 1% used') : t('{n}% used', { n: Math.round(pct) }));
+    put('sLogCap', t('Limit {n} MB', { n: s.max_mb }));
     put('sLogUsed', mb(st.bytes));
-    put('sLogOf', `of ${s.max_mb} MB`);
+    put('sLogOf', t('of {n} MB', { n: s.max_mb }));
     put('sLogN', st.lines.toLocaleString());
-    put('sLogSince', since || 'None yet');
-    put('sLogKeep', s.max_days ? plural(s.max_days, 'day') : 'No age limit');
+    put('sLogSince', since || t('None yet'));
+    put('sLogKeep', s.max_days ? tn(s.max_days, '{n} day', '{n} days') : t('No age limit'));
   };
   let stats: LogSettings['stats'] | null = null;
   const fill = (s: LogSettings): void => {
@@ -1937,8 +1967,8 @@ async function wireLogLimits(host: HTMLElement): Promise<void> {
     e.preventDefault();
     const max_mb = Math.round(Number(mbIn.value));
     const max_days = Math.round(Number(daysIn.value));
-    if (!(max_mb >= 1 && max_mb <= 512)) return mark(host, '#sLogSt', 'error', 'Size: 1 to 512 MB');
-    if (!(max_days >= 0 && max_days <= 3650)) return mark(host, '#sLogSt', 'error', 'Days: 0 to 3650');
+    if (!(max_mb >= 1 && max_mb <= 512)) return mark(host, '#sLogSt', 'error', t('Size: 1 to 512 MB'));
+    if (!(max_days >= 0 && max_days <= 3650)) return mark(host, '#sLogSt', 'error', t('Days: 0 to 3650'));
     const btn = host.querySelector<HTMLButtonElement>('#sLogSave')!;
     const trims = trimsNow(stats, max_mb, max_days);
     const save = (): void => {
@@ -1947,7 +1977,7 @@ async function wireLogLimits(host: HTMLElement): Promise<void> {
       void apiPost<LogSettings>('/api/logs/settings', { max_mb, max_days })
         .then((s) => {
           fill(s);
-          mark(host, '#sLogSt', 'saved', trims ? 'Saved. Older entries were removed.' : 'Saved');
+          mark(host, '#sLogSt', 'saved', trims ? t('Saved. Older entries were removed.') : t('Saved'));
         })
         .catch((err) => mark(host, '#sLogSt', 'error', (err as Error).message))
         .finally(() => (btn.disabled = false));
@@ -1955,11 +1985,22 @@ async function wireLogLimits(host: HTMLElement): Promise<void> {
     if (!trims || !stats) return save();
     const since = logDate(stats.oldest);
     Modal.confirm(
-      'Remove older activity now?',
-      `The log holds ${stats.lines.toLocaleString()} entries (${mb(stats.bytes)}${since ? ', since ' + since : ''}). With a limit of ${max_mb} MB${
-        max_days ? ` and ${plural(max_days, 'day')}` : ''
-      }, the oldest entries are removed right away to fit. They cannot be brought back.`,
-      'Save and remove',
+      t('Remove older activity now?'),
+      max_days
+        ? t('The log holds {n} entries ({size}{since}). With a limit of {mb} MB and {days}, the oldest entries are removed right away to fit. They cannot be brought back.', {
+            n: stats.lines.toLocaleString(),
+            size: mb(stats.bytes),
+            since: since ? ', ' + t('since {date}', { date: since }) : '',
+            mb: max_mb,
+            days: tn(max_days, '{n} day', '{n} days'),
+          })
+        : t('The log holds {n} entries ({size}{since}). With a limit of {mb} MB, the oldest entries are removed right away to fit. They cannot be brought back.', {
+            n: stats.lines.toLocaleString(),
+            size: mb(stats.bytes),
+            since: since ? ', ' + t('since {date}', { date: since }) : '',
+            mb: max_mb,
+          }),
+      t('Save and remove'),
       () => {
         Modal.close();
         save();
@@ -1970,6 +2011,6 @@ async function wireLogLimits(host: HTMLElement): Promise<void> {
     fill(await apiGet<LogSettings>('/api/logs/settings'));
   } catch (e) {
     const pct = host.querySelector<HTMLElement>('#sLogPct');
-    if (pct) pct.textContent = 'Could not read the log settings: ' + (e as Error).message;
+    if (pct) pct.textContent = t('Could not read the log settings: {error}', { error: (e as Error).message });
   }
 }

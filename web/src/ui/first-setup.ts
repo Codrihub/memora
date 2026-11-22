@@ -1,3 +1,4 @@
+import { t, tn } from '../i18n';
 import { esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
 import { state, allNotes } from '../state';
@@ -64,46 +65,50 @@ const CSS = `
 export function firstSetupHTML(agents = 0): string {
   const known = agents > 0;
   const modes = STARTER_MODES.map(
-    (m, i) => `<button type="button" class="fs-mode" data-mode="${m.id}" aria-pressed="${i === 0}">${esc(m.label)}</button>`,
+    (m, i) => `<button type="button" class="fs-mode" data-mode="${m.id}" aria-pressed="${i === 0}">${esc(t(m.label))}</button>`,
   ).join('');
   return `<div class="fs">
     <div class="fs-hero">
       ${markSvg('fs-mark')}
-      <h2 id="ovWelcomeT">${known ? 'This notes folder is empty' : "Let's fill your memory"}</h2>
+      <h2 id="ovWelcomeT">${known ? t('This notes folder is empty') : t("Let's fill your memory")}</h2>
       <p>${
         known
-          ? `Your ${agents === 1 ? 'connected AI works' : `${agents} connected AIs work`} in this folder now. Ask one to save what it knows here, or write a note yourself. Switched folders by mistake? Switch back under Settings, Notes folder.`
-          : 'Memora is still empty. Connect an AI app, send it one prompt, and it saves what it knows about you here, as notes you can read, edit and see in the brain.'
+          ? tn(
+              agents,
+              'Your connected AI works in this folder now. Ask one to save what it knows here, or write a note yourself. Switched folders by mistake? Switch back under Settings, Notes folder.',
+              'Your {n} connected AIs work in this folder now. Ask one to save what it knows here, or write a note yourself. Switched folders by mistake? Switch back under Settings, Notes folder.',
+            )
+          : t('Memora is still empty. Connect an AI app, send it one prompt, and it saves what it knows about you here, as notes you can read, edit and see in the brain.')
       }</p>
-      <span class="fs-live"><i></i>Waiting for the first note</span>
+      <span class="fs-live"><i></i>${t('Waiting for the first note')}</span>
       ${
         known
-          ? '<button type="button" class="fs-tour" data-fs="folder">Open Settings, Notes folder</button>'
-          : '<button type="button" class="fs-tour" data-fs="tour">What is Memora? Read the welcome</button>'
+          ? `<button type="button" class="fs-tour" data-fs="folder">${t('Open Settings, Notes folder')}</button>`
+          : `<button type="button" class="fs-tour" data-fs="tour">${t('What is Memora? Read the welcome')}</button>`
       }
     </div>
     <ol class="fs-steps">
       <li class="fs-step"><span class="fs-n">${ICO.plug}</span>
         ${
           known
-            ? `<h3>Your AIs are already connected</h3>
-        <p>${agents === 1 ? 'Its key and access' : `Their ${agents} keys and access`} stay the same in every notes folder. Connect another one any time.</p>
-        <div class="fs-acts"><button type="button" class="btn" data-fs="agents">See your agents</button><button type="button" class="btn ghost" data-fs="connect">Connect another AI</button></div></li>`
-            : `<h3>Connect your AI app</h3>
-        <p>Claude, ChatGPT, Cursor, Codex and others each get their own access, so you can see what each one does.</p>
-        <div class="fs-acts"><button type="button" class="btn primary" data-fs="connect">Connect an AI ${ICO.arrow}</button></div></li>`
+            ? `<h3>${t('Your AIs are already connected')}</h3>
+        <p>${tn(agents, 'Its key and access stay the same in every notes folder. Connect another one any time.', 'Their {n} keys and access stay the same in every notes folder. Connect another one any time.')}</p>
+        <div class="fs-acts"><button type="button" class="btn" data-fs="agents">${t('See your agents')}</button><button type="button" class="btn ghost" data-fs="connect">${t('Connect another AI')}</button></div></li>`
+            : `<h3>${t('Connect your AI app')}</h3>
+        <p>${t('Claude, ChatGPT, Cursor, Codex and others each get their own access, so you can see what each one does.')}</p>
+        <div class="fs-acts"><button type="button" class="btn primary" data-fs="connect">${t('Connect an AI')} ${ICO.arrow}</button></div></li>`
         }
       <li class="fs-step"><span class="fs-n">${ICO.chat}</span>
-        <h3>Send it a first prompt <small>pick what it should save</small></h3>
-        <p>Once it is connected, paste this into a new chat in that app. It tells the AI to store what it knows into Memora.</p>
-        <div class="fs-modes" role="group" aria-label="What should it save?">${modes}</div>
+        <h3>${t('Send it a first prompt')} <small>${t('pick what it should save')}</small></h3>
+        <p>${t('Once it is connected, paste this into a new chat in that app. It tells the AI to store what it knows into Memora.')}</p>
+        <div class="fs-modes" role="group" aria-label="${t('What should it save?')}">${modes}</div>
         <div class="fs-prompt"><b data-fs="title"></b><q data-fs="text"></q>
-          <div class="fs-prompt-f"><span data-fs="hint"></span><button type="button" class="btn" data-fs="copy">${ICO.copy}Copy prompt</button></div></div></li>
+          <div class="fs-prompt-f"><span data-fs="hint"></span><button type="button" class="btn" data-fs="copy">${ICO.copy}${t('Copy prompt')}</button></div></div></li>
       <li class="fs-step"><span class="fs-n">${ICO.spark}</span>
-        <h3>Watch it fill up</h3>
-        <p>Notes appear as the AI saves them and light up the brain. This page turns into your dashboard when the first note arrives.</p>
-        <div class="fs-acts"><button type="button" class="btn" data-fs="brain">Open the brain</button>
-          <button type="button" class="btn ghost" data-fs="note">${ICO.pen}Or write a note yourself</button></div></li>
+        <h3>${t('Watch it fill up')}</h3>
+        <p>${t('Notes appear as the AI saves them and light up the brain. This page turns into your dashboard when the first note arrives.')}</p>
+        <div class="fs-acts"><button type="button" class="btn" data-fs="brain">${t('Open the brain')}</button>
+          <button type="button" class="btn ghost" data-fs="note">${ICO.pen}${t('Or write a note yourself')}</button></div></li>
     </ol>
   </div>`;
 }
@@ -114,9 +119,10 @@ export function wireFirstSetup(box: HTMLElement, connect: () => void, tour: () =
   let current = STARTER_MODES[0];
   const show = (): void => {
     const p = starterPrompt(current.id);
-    q('[data-fs=title]').textContent = p.title;
-    q('[data-fs=text]').textContent = p.text;
-    q('[data-fs=hint]').textContent = current.hint;
+    // The starter texts live in connect-model.ts (no imports there); their translations are in the ui dictionary.
+    q('[data-fs=title]').textContent = t(p.title);
+    q('[data-fs=text]').textContent = t(p.text);
+    q('[data-fs=hint]').textContent = t(current.hint);
     box.querySelectorAll<HTMLElement>('.fs-mode').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === current.id)));
   };
   box.querySelectorAll<HTMLElement>('.fs-mode').forEach((b) => {
@@ -125,7 +131,7 @@ export function wireFirstSetup(box: HTMLElement, connect: () => void, tour: () =
       show();
     };
   });
-  q('[data-fs=copy]').onclick = () => void copyText(starterPrompt(current.id).text, 'Prompt copied');
+  q('[data-fs=copy]').onclick = () => void copyText(t(starterPrompt(current.id).text), t('Prompt copied'));
   q('[data-fs=connect]').onclick = connect;
   q('[data-fs=brain]').onclick = () => hooks.go('brain');
   q('[data-fs=note]').onclick = () => hooks.openNewNote();

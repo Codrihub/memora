@@ -2,6 +2,7 @@
 // rules first; `pressDrag` runs one gesture. What a place means is up to tree.ts.
 
 import { esc } from '../dom';
+import { t, tn } from '../i18n';
 import { baseName, dirOf, isInside } from './store';
 import type { DragPayload } from './nav';
 
@@ -27,7 +28,7 @@ function isSelfOrBelow(path: string, folder: string): boolean {
 
 /** A folder's display name in hints ('' = the top level). */
 export function placeName(folder: string): string {
-  return folder === '' ? 'the top level' : baseName(folder);
+  return folder === '' ? t('the top level') : baseName(folder);
 }
 
 /** The move destination of a target ('' = top level), or null for pins. */
@@ -38,24 +39,24 @@ function destOf(t: DropTarget): string | null {
   return null;
 }
 
-/** What dropping `d` on `t` would do. */
-export function resolveDrop(d: DragPayload, t: DropTarget): DropVerdict {
-  if (t.kind === 'pins') {
-    return { ok: true, dest: '', hint: d.kind === 'pin' ? 'Move the pin here' : 'Pin here' };
+/** What dropping `d` on `target` would do. */
+export function resolveDrop(d: DragPayload, target: DropTarget): DropVerdict {
+  if (target.kind === 'pins') {
+    return { ok: true, dest: '', hint: d.kind === 'pin' ? t('Move the pin here') : t('Pin here') };
   }
-  const dest = destOf(t) ?? '';
+  const dest = destOf(target) ?? '';
   const where = placeName(dest);
-  const into = dest === '' ? 'Move to the top level' : `Move into ${where}`;
-  const already = `Already in ${where}`;
+  const into = dest === '' ? t('Move to the top level') : t('Move into {where}', { where });
+  const already = t('Already in {where}', { where });
   const notes = d.kind === 'notes' ? d.paths : d.kind === 'pin' && d.item.kind === 'note' ? [d.item.key] : null;
   if (notes) {
     if (!notes.some((p) => dirOf(p) !== dest)) return { ok: false, dest, hint: already };
     return { ok: true, dest, hint: into };
   }
   const src = d.kind === 'folder' ? d.path : d.kind === 'pin' ? d.item.key : '';
-  if (!src) return { ok: false, dest, hint: 'The vault itself cannot move' };
+  if (!src) return { ok: false, dest, hint: t('The vault itself cannot move') };
   if (isSelfOrBelow(dest, src)) {
-    return { ok: false, dest, hint: dest === src ? 'A folder cannot go into itself' : 'A folder cannot go into its own subfolder' };
+    return { ok: false, dest, hint: dest === src ? t('A folder cannot go into itself') : t('A folder cannot go into its own subfolder') };
   }
   if (dirOf(src) === dest) return { ok: false, dest, hint: already };
   return { ok: true, dest, hint: into };
@@ -64,7 +65,7 @@ export function resolveDrop(d: DragPayload, t: DropTarget): DropVerdict {
 /** What a drag carries, for the ghost and the confirm: one name or "N items". */
 export function payloadLabel(d: DragPayload): { name: string; count: number; folder: boolean } {
   if (d.kind === 'notes') {
-    return { name: d.paths.length === 1 ? noteTitle(d.paths[0]) : `${d.paths.length} items`, count: d.paths.length, folder: false };
+    return { name: d.paths.length === 1 ? noteTitle(d.paths[0]) : tn(d.paths.length, '{n} item', '{n} items'), count: d.paths.length, folder: false };
   }
   if (d.kind === 'folder') return { name: baseName(d.path), count: 1, folder: true };
   return { name: d.item.kind === 'note' ? noteTitle(d.item.key) : baseName(d.item.key), count: 1, folder: d.item.kind === 'folder' };
@@ -77,8 +78,8 @@ function noteTitle(path: string): string {
 /** The confirm question: `Move "X" to "Y"?` or `Move N items to "Y"?`. */
 export function confirmTitle(d: DragPayload, dest: string): string {
   const { name, count } = payloadLabel(d);
-  const what = count > 1 ? `${count} items` : `"${name}"`;
-  return `Move ${what} to "${dest === '' ? 'Top level' : baseName(dest)}"?`;
+  const what = count > 1 ? tn(count, '{n} item', '{n} items') : `"${name}"`;
+  return t('Move {what} to "{dest}"?', { what, dest: dest === '' ? t('Top level') : baseName(dest) });
 }
 
 /** Auto-scroll zone height at the top and bottom of the scroll box (px). */
@@ -238,7 +239,7 @@ export function pressDrag(e: PointerEvent, spec: () => DragSpec | null): void {
     ghost.classList.toggle('ok', ok);
     document.body.classList.toggle('vx-pdrag-no', !!verdict && !ok);
     const hint = ghost.querySelector<HTMLElement>('.vx-pghost-hint')!;
-    const text = verdict ? verdict.hint : 'Drop on a folder';
+    const text = verdict ? verdict.hint : t('Drop on a folder');
     if (hint.textContent !== text) hint.textContent = text;
     const want = cur ? s.canOpen(cur.target) : null;
     if (want !== openPath) {

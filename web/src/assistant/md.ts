@@ -4,6 +4,7 @@ import { attr, esc } from '../dom';
 import { renderMarkdown } from '../docs/markdown';
 import { allNotes, noteTitle } from '../state';
 import { icon } from '../ui/icons';
+import { t, tn } from '../i18n';
 
 const TOKEN = 'MNWLTOKEN';
 
@@ -40,7 +41,7 @@ function linkFor(target: string): string {
   const path = resolveNote(target);
   return path
     ? `<a href="#" class="mn-wl" data-note="${attr(path)}" title="${attr(path)}">${esc(shown)}</a>`
-    : `<span class="mn-wl missing" title="No note with this name">${esc(shown)}</span>`;
+    : `<span class="mn-wl missing" title="${t('No note with this name')}">${esc(shown)}</span>`;
 }
 
 /** Languages whose code blocks become a file card once the reply is done. */
@@ -51,15 +52,15 @@ const ART_LANGS = /^(html|htm|svg)$/i;
 function fileCard(lang: string, code: string): string {
   const kind = lang.toLowerCase() === 'svg' ? 'svg' : 'html';
   const KIND = kind.toUpperCase();
-  const t = /&lt;title&gt;([^&<]{1,80})&lt;\/title&gt;/i.exec(code)?.[1]?.trim();
-  const title = t || (kind === 'svg' ? 'Image' : 'Page');
+  const named = /&lt;title&gt;([^&<]{1,80})&lt;\/title&gt;/i.exec(code)?.[1]?.trim();
+  const title = named || (kind === 'svg' ? t('Image') : t('Page'));
   const lines = code.split('\n').length;
   return (
-    `<div class="mn-file" data-art="${kind}" data-title="${attr(title)}" role="button" tabindex="0" aria-label="Open ${attr(title)} (${KIND})">` +
+    `<div class="mn-file" data-art="${kind}" data-title="${attr(title)}" role="button" tabindex="0" aria-label="${t('Open {name} ({kind})', { name: attr(title), kind: KIND })}">` +
     `<span class="mn-file-ic">${icon('code')}</span>` +
-    `<span class="mn-file-t"><b>${esc(title)}</b><small>${kind === 'svg' ? 'SVG image' : 'HTML page'} · ${lines} line${lines === 1 ? '' : 's'}</small></span>` +
-    `<span class="mn-file-a"><span class="mn-file-open">${icon('eye')}<span>Open</span></span>` +
-    `<button type="button" class="mn-file-dl" data-file-dl title="Download the ${KIND} file" aria-label="Download the ${KIND} file">${icon('download')}</button></span>` +
+    `<span class="mn-file-t"><b>${esc(title)}</b><small>${kind === 'svg' ? t('SVG image') : t('HTML page')} · ${tn(lines, '{n} line', '{n} lines')}</small></span>` +
+    `<span class="mn-file-a"><span class="mn-file-open">${icon('eye')}<span>${t('Open')}</span></span>` +
+    `<button type="button" class="mn-file-dl" data-file-dl title="${t('Download the {kind} file', { kind: KIND })}" aria-label="${t('Download the {kind} file', { kind: KIND })}">${icon('download')}</button></span>` +
     `<pre class="mn-file-src" hidden><code>${code}</code></pre></div>`
   );
 }

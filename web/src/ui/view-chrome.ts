@@ -1,3 +1,4 @@
+import { t, tn } from '../i18n';
 import { MapFind, type FindSource } from './map-find';
 import { ago } from '../control/ui';
 import { avatarHTML } from '../control/agents';
@@ -120,23 +121,23 @@ function savePrefs(p: ChromePrefs): void {
 const CUBE =
   '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>';
 const PAGES: [ViewPage, string, string, string][] = [
-  ['brain', '3D', CUBE, '3D: your notes as points in a 3D brain'],
-  ['graph', 'Graph', icon('graph'), 'Graph: a map of the links between notes'],
-  ['canvas', 'Canvas', icon('canvas'), 'Canvas: your notes as cards on a board'],
+  ['brain', '3D', CUBE, t('3D: your notes as points in a 3D brain')],
+  ['graph', t('Graph'), icon('graph'), t('Graph: a map of the links between notes')],
+  ['canvas', t('Canvas'), icon('canvas'), t('Canvas: your notes as cards on a board')],
 ];
 
 const EMPTY: Record<ViewPage, { title: string; text: string }> = {
   brain: {
-    title: 'Your brain is empty',
-    text: 'Every note becomes a point of light here, grouped by folder. The guide shows how to have an AI save its knowledge here, or write a note yourself.',
+    title: t('Your brain is empty'),
+    text: t('Every note becomes a point of light here, grouped by folder. The guide shows how to have an AI save its knowledge here, or write a note yourself.'),
   },
   graph: {
-    title: 'No notes to map yet',
-    text: 'Notes and the links between them show up here as a map. The guide shows how to have an AI save its knowledge here, or write a note yourself.',
+    title: t('No notes to map yet'),
+    text: t('Notes and the links between them show up here as a map. The guide shows how to have an AI save its knowledge here, or write a note yourself.'),
   },
   canvas: {
-    title: 'Your board is empty',
-    text: 'Every note becomes a card here, inside a frame for its folder. The guide shows how to have an AI save its knowledge here, or write a note yourself.',
+    title: t('Your board is empty'),
+    text: t('Every note becomes a card here, inside a frame for its folder. The guide shows how to have an AI save its knowledge here, or write a note yourself.'),
   },
 };
 
@@ -649,62 +650,62 @@ export class ViewChrome {
     return `
 <div class="vc-tl vc-bar">
   <div class="vc-p vc-barin">
-  <nav class="vc-modes" aria-label="View">${modes}</nav>
+  <nav class="vc-modes" aria-label="${t('View')}">${modes}</nav>
   <span class="vc-sep" aria-hidden="true"></span>
-  <label class="vc-search">${I.search}<input type="search" placeholder="${attr(o.search.placeholder)}" aria-label="${attr(o.search.placeholder)}" autocomplete="off" spellcheck="false"><em></em><button type="button" class="vc-x" title="Clear the search" aria-label="Clear the search" hidden>${I.close}</button><kbd title="Press / to search">/</kbd><span class="vc-sq" aria-hidden="true">Search</span></label>
+  <label class="vc-search">${I.search}<input type="search" placeholder="${attr(o.search.placeholder)}" aria-label="${attr(o.search.placeholder)}" autocomplete="off" spellcheck="false"><em></em><button type="button" class="vc-x" title="${t('Clear the search')}" aria-label="${t('Clear the search')}" hidden>${I.close}</button><kbd title="${t('Press / to search')}">/</kbd><span class="vc-sq" aria-hidden="true">${t('Search')}</span></label>
   <span class="vc-sep" aria-hidden="true"></span>
   <div class="vc-tr">
-  <button type="button" class="vc-b vc-reset" data-reset title="Reset this view to its defaults" aria-label="Reset this view to its defaults">${I.reset}</button>
-  <button type="button" class="vc-b" data-vc="filter" aria-expanded="false" title="Filter and display" aria-label="Filter and display">${I.filter}<b class="vc-badge"></b></button>
+  <button type="button" class="vc-b vc-reset" data-reset title="${t('Reset this view to its defaults')}" aria-label="${t('Reset this view to its defaults')}">${I.reset}</button>
+  <button type="button" class="vc-b" data-vc="filter" aria-expanded="false" title="${t('Filter and display')}" aria-label="${t('Filter and display')}">${I.filter}<b class="vc-badge"></b></button>
 </div>
-    <aside class="vc-p vc-ovl vc-panel" hidden aria-label="Filter and display">
-  <div class="vc-ph"><h3>Filter and display</h3><button type="button" class="vc-b" data-close title="Close" aria-label="Close">${I.close}</button></div>
+    <aside class="vc-p vc-ovl vc-panel" hidden aria-label="${t('Filter and display')}">
+  <div class="vc-ph"><h3>${t('Filter and display')}</h3><button type="button" class="vc-b" data-close title="${t('Close')}" aria-label="${t('Close')}">${I.close}</button></div>
   <div class="vc-pb vc-fade"></div>
 </aside>
   </div>
 
 </div>
 
-<button type="button" class="vc-tab vc-tab-l" data-open="regions" aria-expanded="false" aria-label="Folders: show or hide them" title="Folders: show or hide them">${I.layers}<svg class="tic tx" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>Folders</span><em data-rn></em></button>
-<aside class="vc-drawer vc-ovl vc-drawer-l" data-d="regions" aria-label="Folders">
-  <div class="vc-dh"><h3>Folders <em data-rn></em></h3></div>
-  <div class="vc-bulk"><button type="button" data-all="show">Show all</button><button type="button" data-all="hide">Hide all</button></div>
+<button type="button" class="vc-tab vc-tab-l" data-open="regions" aria-expanded="false" aria-label="${t('Folders: show or hide them')}" title="${t('Folders: show or hide them')}">${I.layers}<svg class="tic tx" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>${t('Folders')}</span><em data-rn></em></button>
+<aside class="vc-drawer vc-ovl vc-drawer-l" data-d="regions" aria-label="${t('Folders')}">
+  <div class="vc-dh"><h3>${t('Folders')} <em data-rn></em></h3></div>
+  <div class="vc-bulk"><button type="button" data-all="show">${t('Show all')}</button><button type="button" data-all="hide">${t('Hide all')}</button></div>
   <div class="vc-db vc-fade vc-rl"></div>
 </aside>
 
-<button type="button" class="vc-tab vc-tab-r" data-open="activity" aria-expanded="false" aria-label="Agent activity" title="Agent activity"><i class="dot"></i>${I.pulse}<svg class="tic tx" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>Activity</span><em data-an></em></button>
-<aside class="vc-drawer vc-ovl vc-drawer-r" data-d="activity" aria-label="Agent activity">
-  <div class="vc-dh"><h3>Activity <em data-an></em></h3></div>
-  <div class="vc-bulk vc-sub">Agents and what they did last</div>
+<button type="button" class="vc-tab vc-tab-r" data-open="activity" aria-expanded="false" aria-label="${t('Agent activity')}" title="${t('Agent activity')}"><i class="dot"></i>${I.pulse}<svg class="tic tx" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>${t('Activity')}</span><em data-an></em></button>
+<aside class="vc-drawer vc-ovl vc-drawer-r" data-d="activity" aria-label="${t('Agent activity')}">
+  <div class="vc-dh"><h3>${t('Activity')} <em data-an></em></h3></div>
+  <div class="vc-bulk vc-sub">${t('Agents and what they did last')}</div>
   <div class="vc-db vc-fade vc-al"></div>
 </aside>
 
 <div class="vc-dock">
-  <div class="vc-nav-top"><div class="vc-mini" title="Minimap: click or drag to move the view"><canvas></canvas></div>
-  <div class="vc-globe" role="group" aria-label="Turn the view">
+  <div class="vc-nav-top"><div class="vc-mini" title="${t('Minimap: click or drag to move the view')}"><canvas></canvas></div>
+  <div class="vc-globe" role="group" aria-label="${t('Turn the view')}">
     <canvas></canvas>
-    <button type="button" data-g="u" title="Up" aria-label="Up">${I.up}</button>
-    <button type="button" data-g="l" title="Left" aria-label="Left">${I.up}</button>
-    <button type="button" data-g="r" title="Right" aria-label="Right">${I.up}</button>
-    <button type="button" data-g="d" title="Down" aria-label="Down">${I.up}</button>
-    <button type="button" data-g="h" title="Default view" aria-label="Default view">${I.home}</button>
+    <button type="button" data-g="u" title="${t('Up')}" aria-label="${t('Up')}">${I.up}</button>
+    <button type="button" data-g="l" title="${t('Left')}" aria-label="${t('Left')}">${I.up}</button>
+    <button type="button" data-g="r" title="${t('Right')}" aria-label="${t('Right')}">${I.up}</button>
+    <button type="button" data-g="d" title="${t('Down')}" aria-label="${t('Down')}">${I.up}</button>
+    <button type="button" data-g="h" title="${t('Default view')}" aria-label="${t('Default view')}">${I.home}</button>
   </div></div>
   <div class="vc-zoom">
-    <button type="button" class="vc-b vc-padbtn" data-open="sheet" title="Controller" aria-label="Controller">${I.pad}</button>
-    <button type="button" class="vc-b" data-z="in" title="Zoom in (+)" aria-label="Zoom in">${I.plus}</button>
-    <button type="button" class="vc-b" data-z="out" title="Zoom out (-)" aria-label="Zoom out">${I.minus}</button>
-    <button type="button" class="vc-b" data-z="fit" title="Fit to screen" aria-label="Fit to screen">${I.fit}</button>
-    <button type="button" class="vc-b" data-z="full" title="Full screen" aria-label="Full screen">${I.full}</button>
-    <button type="button" class="vc-b" data-z="clean" title="Clean view: hide the controls (C)" aria-label="Clean view">${I.eyeOff}</button>
+    <button type="button" class="vc-b vc-padbtn" data-open="sheet" title="${t('Controller')}" aria-label="${t('Controller')}">${I.pad}</button>
+    <button type="button" class="vc-b" data-z="in" title="${t('Zoom in (+)')}" aria-label="${t('Zoom in')}">${I.plus}</button>
+    <button type="button" class="vc-b" data-z="out" title="${t('Zoom out (-)')}" aria-label="${t('Zoom out')}">${I.minus}</button>
+    <button type="button" class="vc-b" data-z="fit" title="${t('Fit to screen')}" aria-label="${t('Fit to screen')}">${I.fit}</button>
+    <button type="button" class="vc-b" data-z="full" title="${t('Full screen')}" aria-label="${t('Full screen')}">${I.full}</button>
+    <button type="button" class="vc-b" data-z="clean" title="${t('Clean view: hide the controls (C)')}" aria-label="${t('Clean view')}">${I.eyeOff}</button>
   </div>
 </div>
-<button type="button" class="vc-unclean" title="Show the controls (C or Esc)">${I.eye}<span>Show controls</span></button>
+<button type="button" class="vc-unclean" title="${t('Show the controls (C or Esc)')}">${I.eye}<span>${t('Show controls')}</span></button>
 
 <div class="vc-ec" hidden></div>
 <div class="vc-scrim"></div>
-<section class="vc-sheet vc-ovl" aria-label="Controller">
+<section class="vc-sheet vc-ovl" aria-label="${t('Controller')}">
   <div class="vc-grab"></div>
-  <div class="vc-sh"><h3>Controller</h3><button type="button" class="vc-b" data-close title="Close" aria-label="Close">${I.close}</button></div>
+  <div class="vc-sh"><h3>${t('Controller')}</h3><button type="button" class="vc-b" data-close title="${t('Close')}" aria-label="${t('Close')}">${I.close}</button></div>
   <div class="vc-sgrid"><div data-slot="globe"></div><div data-slot="mini"></div></div>
   <div data-slot="labels"></div>
 </section>`;
@@ -734,7 +735,7 @@ export class ViewChrome {
     const c = EMPTY[this.o.page];
     const mark = PAGES.find((p) => p[0] === this.o.page)?.[2] || '';
     box.innerHTML = `<div class="vc-ec-card" role="status"><span class="vc-ec-ic" aria-hidden="true">${mark}</span><h3>${esc(c.title)}</h3><p>${esc(c.text)}</p>
-      <div class="vc-ec-acts"><button type="button" class="btn primary" data-ec="setup">Open the guide</button><button type="button" class="btn" data-ec="new">${I.plus}New note</button></div></div>`;
+      <div class="vc-ec-acts"><button type="button" class="btn primary" data-ec="setup">${t('Open the guide')}</button><button type="button" class="btn" data-ec="new">${I.plus}${t('New note')}</button></div></div>`;
     // The setup guide lives on the Overview while the vault is empty.
     box.querySelector<HTMLElement>('[data-ec=setup]')!.onclick = () => hooks.go('home');
     box.querySelector<HTMLElement>('[data-ec=new]')!.onclick = () => hooks.openNewNote();
@@ -907,9 +908,9 @@ export class ViewChrome {
       const dirty = JSON.stringify(this.prefs) !== JSON.stringify(defaultChromePrefs()) || !!o.changed?.();
       if (rb.classList.contains('dirty') === dirty) return;
       rb.classList.toggle('dirty', dirty);
-      const t = dirty ? 'Reset: this view differs from its defaults' : 'Reset this view to its defaults';
-      rb.title = t;
-      rb.setAttribute('aria-label', t);
+      const label = dirty ? t('Reset: this view differs from its defaults') : t('Reset this view to its defaults');
+      rb.title = label;
+      rb.setAttribute('aria-label', label);
     };
     this.dirtyTimer = window.setInterval(() => {
       if (!document.hidden && this.el.isConnected) paintDirty();
@@ -1036,16 +1037,19 @@ export class ViewChrome {
     if (this.open !== 'filter') return;
     const p = this.q('.vc-pb');
     const top = p.scrollTop;
-    const turn = this.o.page === 'brain' ? 'turn the brain' : 'move the map';
+    const globeHelp =
+      this.o.page === 'brain'
+        ? t('The globe at the bottom right: its arrows turn the brain, the middle button goes back to the default view.')
+        : t('The globe at the bottom right: its arrows move the map, the middle button goes back to the default view.');
     p.innerHTML =
       (this.phone
         ? ''
-        : `<h4>View</h4>` +
-          toggleHTML('vc-minimap', 'Minimap', this.prefs.minimap, 'The small overview at the bottom left. Click or drag it to move the view.') +
-          toggleHTML('vc-controls', 'Orbit globe', this.prefs.controls, `The globe at the bottom right: its arrows ${turn}, the middle button goes back to the default view.`)) +
-      `<h4>Labels</h4>` +
+        : `<h4>${t('View')}</h4>` +
+          toggleHTML('vc-minimap', t('Minimap'), this.prefs.minimap, t('The small overview at the bottom left. Click or drag it to move the view.')) +
+          toggleHTML('vc-controls', t('Orbit globe'), this.prefs.controls, globeHelp)) +
+      `<h4>${t('Labels')}</h4>` +
       this.labelsHTML() +
-      `<h4>Background</h4>` +
+      `<h4>${t('Background')}</h4>` +
       this.dotsHTML() +
       `<div data-own></div>`;
     p.querySelectorAll<HTMLElement>('[data-t^=vc-]').forEach((b) => (b.onclick = () => this.toggleShared(b.dataset.t || '')));
@@ -1055,14 +1059,14 @@ export class ViewChrome {
   }
 
   private dotsHTML(): string {
-    return toggleHTML('vc-dots', 'Dot grid', dotsOn(), 'The dots behind 3D, Graph and Canvas. Turn them off for a clean, plain background.');
+    return toggleHTML('vc-dots', t('Dot grid'), dotsOn(), t('The dots behind 3D, Graph and Canvas. Turn them off for a clean, plain background.'));
   }
 
   private labelsHTML(): string {
     const lab = this.o.labels.get();
     return (
-      toggleHTML('vc-lab-nodes', 'Note labels', lab.nodes, this.o.labels.help.nodes) +
-      toggleHTML('vc-lab-folders', 'Folder labels', lab.folders, this.o.labels.help.folders)
+      toggleHTML('vc-lab-nodes', t('Note labels'), lab.nodes, this.o.labels.help.nodes) +
+      toggleHTML('vc-lab-folders', t('Folder labels'), lab.folders, this.o.labels.help.folders)
     );
   }
 
@@ -1084,7 +1088,7 @@ export class ViewChrome {
   private renderSheetLabels(): void {
     if (this.open !== 'sheet') return;
     const host = this.q('[data-slot=labels]');
-    host.innerHTML = '<h4>Labels</h4>' + this.labelsHTML() + '<h4>Background</h4>' + this.dotsHTML();
+    host.innerHTML = `<h4>${t('Labels')}</h4>` + this.labelsHTML() + `<h4>${t('Background')}</h4>` + this.dotsHTML();
     host.querySelectorAll<HTMLElement>('[data-t]').forEach((b) => (b.onclick = () => this.toggleShared(b.dataset.t || '')));
     wireHelp(host);
   }
@@ -1129,14 +1133,14 @@ export class ViewChrome {
       ? list
           .map(
             (r) =>
-              `<div class="vc-rr${r.hidden ? ' off' : ''}" style="--c:${attr(r.color)}"><button type="button" class="tg" data-r="${attr(r.name)}" aria-pressed="${!r.hidden}" title="${
-                r.hidden ? 'Show' : 'Hide'
-              } ${attr(r.name)}" aria-label="${r.hidden ? 'Show' : 'Hide'} ${attr(r.name)}"><i></i></button><button type="button" class="t" data-f="${attr(r.name)}" title="${
-                focusBtn ? 'Go to' : r.hidden ? 'Show' : 'Hide'
-              } ${attr(r.name)}"><span>${esc(r.name)}</span><em>${r.count}</em>${focusBtn ? I.target : ''}</button></div>`,
+              `<div class="vc-rr${r.hidden ? ' off' : ''}" style="--c:${attr(r.color)}"><button type="button" class="tg" data-r="${attr(r.name)}" aria-pressed="${!r.hidden}" title="${attr(
+                r.hidden ? t('Show {name}', { name: r.name }) : t('Hide {name}', { name: r.name }),
+              )}" aria-label="${attr(r.hidden ? t('Show {name}', { name: r.name }) : t('Hide {name}', { name: r.name }))}"><i></i></button><button type="button" class="t" data-f="${attr(r.name)}" title="${attr(
+                focusBtn ? t('Go to {name}', { name: r.name }) : r.hidden ? t('Show {name}', { name: r.name }) : t('Hide {name}', { name: r.name }),
+              )}"><span>${esc(r.name)}</span><em>${r.count}</em>${focusBtn ? I.target : ''}</button></div>`,
           )
           .join('')
-      : '<div class="vc-empty">No folders yet.</div>';
+      : `<div class="vc-empty">${t('No folders yet.')}</div>`;
     host.querySelectorAll<HTMLElement>('[data-r]').forEach((b) => {
       b.onclick = () => {
         this.o.regions.toggle(b.dataset.r || '');
@@ -1169,7 +1173,7 @@ export class ViewChrome {
     const tab = this.q('.vc-tab-r');
     tab.classList.toggle('live', live.length > 0);
     this.el.querySelectorAll('[data-an]').forEach((e) => (e.textContent = String(live.length)));
-    tab.title = live.length ? `${live.length} agent${live.length === 1 ? '' : 's'} working now` : 'Agent activity';
+    tab.title = live.length ? tn(live.length, '{n} agent working now', '{n} agents working now') : t('Agent activity');
     if (this.open !== 'activity') return;
     const host = this.q('.vc-al');
     host.innerHTML = list.length
@@ -1177,13 +1181,13 @@ export class ViewChrome {
           .slice(0, 30)
           .map((a) => {
             const on = busy(a);
-            const what = a.lastLabel || a.lastAction || (a.kind === 'user' ? 'in the app' : 'connected');
+            const what = a.lastLabel || a.lastAction || (a.kind === 'user' ? t('in the app') : t('connected'));
             return `<div class="vc-ag${on ? ' on' : ''}" style="--ag:var(--accent)">${avatarHTML(a.actor, 24, on ? 'live' : '', a.id)}<div class="m"><b>${esc(a.actor)}</b><small>${esc(
               what,
-            )}</small></div><time>${on ? 'now' : esc(ago(Math.floor(a.lastAt / 1000)))}</time></div>`;
+            )}</small></div><time>${on ? t('now') : esc(ago(Math.floor(a.lastAt / 1000)))}</time></div>`;
           })
           .join('')
-      : '<div class="vc-empty">No agent activity yet. Agents show up here the moment they read or write your memory.</div>';
+      : `<div class="vc-empty">${t('No agent activity yet. Agents show up here the moment they read or write your memory.')}</div>`;
   }
 
   redrawMini(): void {
@@ -1298,7 +1302,7 @@ export class ViewChrome {
     const b = this.q('[data-z=full]');
     const on = document.fullscreenElement === this.o.root;
     b.innerHTML = on ? I.exitFull : I.full;
-    b.title = on ? 'Exit full screen' : 'Full screen';
+    b.title = on ? t('Exit full screen') : t('Full screen');
     b.setAttribute('aria-label', b.title);
     window.setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
   }

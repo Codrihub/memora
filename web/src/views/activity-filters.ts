@@ -4,7 +4,7 @@ import { attr, esc } from '../dom';
 import { agentColor, avatarHTML } from '../control/agents';
 import type { ActivityItem, Source } from '../control/feed';
 import { actionLabel, isSystem } from '../control/sentence';
-import { ago, ICO, openDrawer, plural } from '../control/ui';
+import { ago, ICO, openDrawer } from '../control/ui';
 import {
   CATS,
   CLASSES,
@@ -23,6 +23,7 @@ import {
   type TimeKey,
 } from './activity-model';
 import { CAT_COLOR } from './activity-views';
+import { t, tn } from '../i18n';
 
 interface SheetCtx {
   /** Events of the selected time range (before the other filters). */
@@ -83,56 +84,56 @@ function bodyHTML(ctx: SheetCtx): string {
           a.name.toLowerCase(),
         )}" aria-pressed="${on}" style="--ag:${agentColor(a.name, a.id)}">${avatarHTML(a.name, 30, a.cls === 'active' ? 'live' : '', a.id)}
           <span class="t"><b>${esc(a.name)}</b><small>${
-            a.lastTs ? `Last seen ${esc(ago(a.lastTs))}` : 'No activity yet'
-          }${a.disabled ? ' · turned off' : ''}</small></span><span class="n">${n}</span><span class="ax-box">${CSS_CHECK}</span></button>`;
+            a.lastTs ? t('Last seen {ago}', { ago: esc(ago(a.lastTs)) }) : t('No activity yet')
+          }${a.disabled ? ` · ${t('turned off')}` : ''}</small></span><span class="n">${n}</span><span class="ax-box">${CSS_CHECK}</span></button>`;
       })
       .join('')}`;
   }
   return `<div class="ax-fs">
-    <section class="ax-fg"><h3>Time</h3>
+    <section class="ax-fg"><h3>${t('Time')}</h3>
       <div class="ax-opts">${TIMES.map((t) => opt('time', t.id, t.label, F.time === t.id)).join('')}</div>
       <div class="ax-range${F.time === 'custom' ? ' on' : ''}">
-        <label><span>From</span><input type="date" data-date="from" value="${attr(F.from)}" max="${today}"></label>
-        <label><span>To</span><input type="date" data-date="to" value="${attr(F.to)}" max="${today}"></label>
+        <label><span>${t('From')}</span><input type="date" data-date="from" value="${attr(F.from)}" max="${today}"></label>
+        <label><span>${t('To')}</span><input type="date" data-date="to" value="${attr(F.to)}" max="${today}"></label>
       </div>
     </section>
-    <section class="ax-fg"><h3>Result</h3>
+    <section class="ax-fg"><h3>${t('Result')}</h3>
       <div class="ax-opts">${STATUSES.map((s) =>
         opt('status', s.id, s.label, F.status.has(s.id), st.get(s.id) || 0, `<span class="cc-dot ${s.id === 'fail' ? 'err' : s.id === 'running' ? 'run' : 'ok'}"></span>`),
       ).join('')}</div>
     </section>
-    <section class="ax-fg"><h3>What</h3>
+    <section class="ax-fg"><h3>${t('What')}</h3>
       <div class="ax-opts">${CATS.filter((c) => c.id !== 'other' || cats.get(c.id) || F.cats.has(c.id)).map((c) =>
         opt('cats', c.id, c.label, F.cats.has(c.id), cats.get(c.id) || 0, `<i class="sw" style="--c:${CAT_COLOR[c.id]}"></i>`, c.hint),
       ).join('')}</div>
       ${
         actList.length
-          ? `<details class="ax-acts"${actionsOpen || F.actions.size ? ' open' : ''}><summary>Specific actions<span class="n">${actList.length}</span></summary>
+          ? `<details class="ax-acts"${actionsOpen || F.actions.size ? ' open' : ''}><summary>${t('Specific actions')}<span class="n">${actList.length}</span></summary>
         <div class="ax-opts">${actList
           .map(([a, n]) => opt('actions', a, actionLabel(a, catRows.find((x) => x.action === a)?.source), F.actions.has(a), n, '', a))
           .join('')}</div></details>`
           : ''
       }
     </section>
-    <section class="ax-fg"><h3>Where it came from</h3>
+    <section class="ax-fg"><h3>${t('Where it came from')}</h3>
       <div class="ax-opts">${SRCS.map((s) => opt('srcs', s.id, s.label, F.srcs.has(s.id), srcs.get(s.id) || 0, '', s.hint)).join('')}</div>
       <div class="ax-opts ax-sysopt">${opt(
         'system',
         '1',
-        'Include system lines',
+        t('Include system lines'),
         F.system,
         sysN,
         '',
-        'Server and sign-in events, the console, and note saves that repeat an AI’s own action',
+        t('Server and sign-in events, the console, and note saves that repeat an AI’s own action'),
       )}</div>
     </section>
-    <section class="ax-fg"><h3>AIs and people${F.agents.size ? `<button type="button" class="ax-lnk" data-k="agents-clear">Everyone</button>` : ''}</h3>
+    <section class="ax-fg"><h3>${t('AIs and people')}${F.agents.size ? `<button type="button" class="ax-lnk" data-k="agents-clear">${t('Everyone')}</button>` : ''}</h3>
       ${
         agents.length > 6
-          ? `<label class="ax-agq">${ICO.search}<span class="sr-only">Find an AI</span><input type="search" placeholder="Find an AI" autocomplete="off"></label>`
+          ? `<label class="ax-agq">${ICO.search}<span class="sr-only">${t('Find an AI')}</span><input type="search" placeholder="${t('Find an AI')}" autocomplete="off"></label>`
           : ''
       }
-      <div class="ax-aglist">${agHTML || '<div class="cc-muted" style="font-size:13px">No AIs yet</div>'}</div>
+      <div class="ax-aglist">${agHTML || `<div class="cc-muted" style="font-size:13px">${t('No AIs yet')}</div>`}</div>
     </section>
   </div>`;
 }
@@ -165,9 +166,9 @@ function paint(): void {
   });
   const n = ctx.scoped().filter((x) => matches(x)).length;
   const done = d.querySelector<HTMLElement>('[data-done]');
-  if (done) done.textContent = `Show ${plural(n, 'action')}`;
+  if (done) done.textContent = tn(n, 'Show {n} action', 'Show {n} actions');
   const sub = d.querySelector<HTMLElement>('.cc-drawer-h .s');
-  if (sub) sub.textContent = `${n} of ${plural(ctx.scoped().length, 'action')} match`;
+  if (sub) sub.textContent = tn(ctx.scoped().length, '{m} of {n} action match', '{m} of {n} actions match', { m: n });
 }
 
 function filterAgents(d: HTMLElement, q: string): void {
@@ -188,10 +189,10 @@ export function refreshFilters(): void {
 
 export function openFilters(ctx: SheetCtx): void {
   const d = openDrawer({
-    title: 'Filters',
+    title: t('Filters'),
     sub: ' ',
     body: '',
-    foot: `<button type="button" class="btn ghost" data-reset>Reset</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>Show actions</button>`,
+    foot: `<button type="button" class="btn ghost" data-reset>${t('Reset')}</button><span style="flex:1"></span><button type="button" class="btn primary" data-done>${t('Show actions')}</button>`,
   });
   d.classList.add('ax-sheet');
   sheet = { d, ctx };

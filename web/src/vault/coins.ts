@@ -1,6 +1,7 @@
 // Agent "coins" on tree rows: which active agents are working on a note or inside a folder right now.
 
 import { attr, esc, useStyles } from '../dom';
+import { t, tn } from '../i18n';
 import { agentColor, agentInitials } from '../control/agents';
 import type { Presence } from './store';
 
@@ -35,8 +36,8 @@ export function coinsHTML(list: Presence[], small = false): string {
   const more = list.length - shown.length;
   const who = list.map((p) => p.actor).join(', ');
   return `<span class="vx-coins${small ? ' sm' : ''}${list.length > 1 ? ' many' : ''}" title="${attr(
-    `Working here now: ${who}`,
-  )}" aria-label="${attr(`${list.length} agent${list.length === 1 ? '' : 's'} working here`)}">${shown
+    t('Working here now: {who}', { who }),
+  )}" aria-label="${attr(tn(list.length, '{n} agent working here', '{n} agents working here'))}">${shown
     .map(
       (p, k) =>
         `<span class="vx-coin" style="--c:${attr(agentColor(p.actor, p.id))};--k:${k}">${esc(agentInitials(p.actor))}</span>`,

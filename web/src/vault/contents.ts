@@ -1,6 +1,7 @@
 // The reader's side panel: Contents (outline, links, mentions) or Details; a side column on wide screens, a sheet otherwise.
 
 import { attr, el, esc } from '../dom';
+import { t } from '../i18n';
 import { closePanel, openPanel } from './panel';
 import { noteTitle } from '../state';
 import { dirOf, folderColor, ROOT_LABEL } from './store';
@@ -65,10 +66,10 @@ const JUMP = `<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentC
 export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boolean): HTMLElement {
   const body = el('div', 'vx-ct');
   const tabs: { k: Tab; label: string; n: number }[] = [
-    { k: 'toc', label: 'Outline', n: d.heads.length },
-    { k: 'out', label: 'Links', n: d.outs.length },
-    { k: 'back', label: 'Mentions', n: d.backlinks.length },
-    { k: 'img', label: 'Images', n: d.images },
+    { k: 'toc', label: t('Outline'), n: d.heads.length },
+    { k: 'out', label: t('Links'), n: d.outs.length },
+    { k: 'back', label: t('Mentions'), n: d.backlinks.length },
+    { k: 'img', label: t('Images'), n: d.images },
   ];
   let scope: 'note' | 'folder' = 'note';
   let gal: NoteImages | null = null;
@@ -79,7 +80,7 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       box.replaceChildren(
         galleryGrid(
           scope === 'note' ? g.images : g.folder_images,
-          scope === 'note' ? 'This note shows no image of its folder yet.' : 'This folder has no images yet.',
+          scope === 'note' ? t('This note shows no image of its folder yet.') : t('This folder has no images yet.'),
           () => {
             gal = null;
             fillImages();
@@ -88,19 +89,19 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       );
     };
     if (gal) return draw(gal);
-    box.innerHTML = '<p class="vx-ct-none">Loading the images…</p>';
+    box.innerHTML = `<p class="vx-ct-none">${t('Loading the images…')}</p>`;
     noteImages(d.path).then(
       (g) => {
         gal = g;
         if (tab === 'img') draw(g);
       },
-      (e: Error) => (box.innerHTML = `<p class="vx-ct-none">Could not load the images: ${esc(e.message)}</p>`),
+      (e: Error) => (box.innerHTML = `<p class="vx-ct-none">${t('Could not load the images: {error}', { error: esc(e.message) })}</p>`),
     );
   };
   let main: Main = lastMain;
   const mainSeg = el('div', 'vx-ct-main');
   mainSeg.setAttribute('role', 'tablist');
-  mainSeg.setAttribute('aria-label', 'Panel');
+  mainSeg.setAttribute('aria-label', t('Panel'));
   const inner = el('div', 'vx-ct-inner');
   body.append(mainSeg, inner);
   // Open on the last tab used when it has something, else the first that does.
@@ -118,43 +119,43 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
 
   const list = (): string => {
     if (tab === 'img')
-      return `<div class="vx-ct-imgs"><div class="vx-ct-scope" role="group" aria-label="Which images">${(['note', 'folder'] as const)
-        .map((k) => `<button type="button" data-scope="${k}" aria-pressed="${scope === k}">${k === 'note' ? 'This note' : 'This folder'}</button>`)
+      return `<div class="vx-ct-imgs"><div class="vx-ct-scope" role="group" aria-label="${attr(t('Which images'))}">${(['note', 'folder'] as const)
+        .map((k) => `<button type="button" data-scope="${k}" aria-pressed="${scope === k}">${k === 'note' ? t('This note') : t('This folder')}</button>`)
         .join('')}</div><div class="vx-ct-gal"></div></div>`;
     if (tab === 'toc')
       return d.heads.length
-        ? `<nav class="vx-ct-toc" aria-label="Outline">${d.heads
+        ? `<nav class="vx-ct-toc" aria-label="${attr(t('Outline'))}">${d.heads
             .map((h, i) => {
               const lv = Math.max(0, Math.min(3, (Number(h.tagName[1]) || 2) - top));
               return `<button type="button" class="vx-ct-h${lv ? '' : ' l0'}" data-h="${i}" style="--lv:${lv}">${esc((h.textContent || '').trim())}</button>`;
             })
             .join('')}</nav>`
-        : '<p class="vx-ct-none">This note has no headings yet.</p>';
+        : `<p class="vx-ct-none">${t('This note has no headings yet.')}</p>`;
     if (tab === 'back')
       return d.backlinks.length
         ? d.backlinks
             .map((b) => `<button type="button" class="vx-ct-i" data-open="${attr(b.path)}">${note(b.path)}</button>`)
             .join('')
-        : '<p class="vx-ct-none">No other note links here yet.</p>';
+        : `<p class="vx-ct-none">${t('No other note links here yet.')}</p>`;
     return d.outs.length
       ? d.outs
           .map((o) => {
             const n = spots.get(o.name.trim().toLowerCase())?.length || 0;
             const jump = n
-              ? `<button type="button" class="vx-ct-jump" data-l="${attr(o.name)}" aria-label="Show “${attr(o.name)}” in the text" title="Show in the text${
-                  n > 1 ? ` (${n} places)` : ''
-                }">${JUMP}${n > 1 ? `<b>${n}</b>` : ''}</button>`
+              ? `<button type="button" class="vx-ct-jump" data-l="${attr(o.name)}" aria-label="${attr(t('Show “{name}” in the text', { name: o.name }))}" title="${attr(
+                  n > 1 ? t('Show in the text ({n} places)', { n }) : t('Show in the text'),
+                )}">${JUMP}${n > 1 ? `<b>${n}</b>` : ''}</button>`
               : '';
             return `<div class="vx-ct-row">${
               o.path
                 ? `<button type="button" class="vx-ct-i" data-open="${attr(o.path)}">${note(o.path)}</button>`
-                : `<button type="button" class="vx-ct-i missing" data-create="${attr(o.name)}" title="Create this note"><i></i><span><b>${esc(
+                : `<button type="button" class="vx-ct-i missing" data-create="${attr(o.name)}" title="${attr(t('Create this note'))}"><i></i><span><b>${esc(
                     o.name,
-                  )}</b><small>Not created yet · create it</small></span></button>`
+                  )}</b><small>${t('Not created yet · create it')}</small></span></button>`
             }${jump}</div>`;
           })
           .join('')
-      : '<p class="vx-ct-none">This note does not link to other notes yet.</p>';
+      : `<p class="vx-ct-none">${t('This note does not link to other notes yet.')}</p>`;
   };
 
   const paintMain = (): void => {
@@ -162,7 +163,7 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       .map(
         (m) =>
           `<button type="button" role="tab" data-main="${m}" aria-selected="${m === main}" tabindex="${m === main ? 0 : -1}">${
-            m === 'contents' ? 'Contents' : 'Details'
+            m === 'contents' ? t('Contents') : t('Details')
           }</button>`,
       )
       .join('');
@@ -173,10 +174,10 @@ export function contentsBody(d: ContentsData, act: ContentsActions, inSheet: boo
       fadeScroll(inner.querySelector<HTMLElement>('.vx-ct-list')!);
       return;
     }
-    inner.innerHTML = `<div class="vx-ct-seg" role="tablist" aria-label="Contents">${tabs
+    inner.innerHTML = `<div class="vx-ct-seg" role="tablist" aria-label="${attr(t('Contents'))}">${tabs
       .map(
         (t) =>
-          `<button type="button" role="tab" data-tab="${t.k}" aria-selected="${t.k === tab}" tabindex="${t.k === tab ? 0 : -1}" title="${t.label}"><span>${t.label}</span>${
+          `<button type="button" role="tab" data-tab="${t.k}" aria-selected="${t.k === tab}" tabindex="${t.k === tab ? 0 : -1}" title="${attr(t.label)}"><span>${esc(t.label)}</span>${
             t.n >= 0 ? `<b>${t.n}</b>` : ''
           }</button>`,
       )
@@ -284,5 +285,5 @@ export function markHead(root: HTMLElement, i: number, reveal: boolean): void {
 
 /** Phones and tablets: Contents as a bottom sheet, opened only by its button. */
 export function openContentsSheet(anchor: HTMLElement, d: ContentsData, act: ContentsActions): void {
-  openPanel(anchor, 'This note', contentsBody(d, act, true), 'vx-pop-ct', true);
+  openPanel(anchor, t('This note'), contentsBody(d, act, true), 'vx-pop-ct', true);
 }

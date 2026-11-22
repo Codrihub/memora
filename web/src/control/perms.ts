@@ -1,5 +1,6 @@
 // What an agent may do (scopes and callable tools); contract: docs/contracts/tools-permissions.md.
 
+import { t, tn } from '../i18n';
 import { fetchTools } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { categoryDesc, categoryLabel, groupTools, riskChip, TOOL_ROW_CSS, toolMatches, toolRisk, toolTitle } from '../views/tools';
@@ -19,30 +20,30 @@ const I = (d: string): string => `<svg class="cc-i" viewBox="0 0 24 24" aria-hid
 export const SCOPES: { id: KeyScope; label: string; short: string; hint: string; icon: string }[] = [
   {
     id: 'mcp',
-    label: 'Connect from AI apps',
-    short: 'AI apps',
-    hint: "Lets the app use Memora's tools (MCP), limited by the tool list below. Every AI app needs this.",
+    label: t('Connect from AI apps'),
+    short: t('AI apps'),
+    hint: t("Lets the app use Memora's tools (MCP), limited by the tool list below. Every AI app needs this."),
     icon: I('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>'),
   },
   {
     id: 'read',
-    label: 'Read notes from scripts',
-    short: 'Scripts',
-    hint: 'Plain HTTP API requests that read notes, outside the AI tools.',
+    label: t('Read notes from scripts'),
+    short: t('Scripts'),
+    hint: t('Plain HTTP API requests that read notes, outside the AI tools.'),
     icon: I('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>'),
   },
   {
     id: 'write',
-    label: 'Change notes',
-    short: 'Changes',
-    hint: 'Create, edit, move and delete notes, with the AI tools and the HTTP API. Without it every change is refused.',
+    label: t('Change notes'),
+    short: t('Changes'),
+    hint: t('Create, edit, move and delete notes, with the AI tools and the HTTP API. Without it every change is refused.'),
     icon: I('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
   },
   {
     id: 'admin',
-    label: 'Manage Memora',
-    short: 'Manage',
-    hint: "Switch tools on or off for everyone and change any agent's key and access, its own included.",
+    label: t('Manage Memora'),
+    short: t('Manage'),
+    hint: t("Switch tools on or off for everyone and change any agent's key and access, its own included."),
     icon: I('<path d="M12 3 4.5 6v6c0 4.5 3.2 7.6 7.5 9 4.3-1.4 7.5-4.5 7.5-9V6z"/><path d="M12 8v5M12 16h.01"/>'),
   },
 ];
@@ -51,26 +52,26 @@ export const SCOPES: { id: KeyScope; label: string; short: string; hint: string;
 export type Level = 'read' | 'write' | 'full' | 'none';
 
 const LEVELS: { id: Exclude<Level, 'none'>; label: string; desc: string; scopes: KeyScope[] }[] = [
-  { id: 'read', label: 'Can only read', desc: 'Searches and reads notes. Any change it tries is refused.', scopes: ['mcp', 'read'] },
+  { id: 'read', label: t('Can only read'), desc: t('Searches and reads notes. Any change it tries is refused.'), scopes: ['mcp', 'read'] },
   {
     id: 'write',
-    label: 'Can read and change',
-    desc: 'Searches, reads and saves notes. It cannot manage Memora or other agents.',
+    label: t('Can read and change'),
+    desc: t('Searches, reads and saves notes. It cannot manage Memora or other agents.'),
     scopes: ['mcp', 'read', 'write'],
   },
   {
     id: 'full',
-    label: 'Full control',
-    desc: 'Everything, plus switching tools off for everyone and managing other agents. Only for automation you fully trust.',
+    label: t('Full control'),
+    desc: t('Everything, plus switching tools off for everyone and managing other agents. Only for automation you fully trust.'),
     scopes: ['mcp', 'read', 'write', 'admin'],
   },
 ];
 
 const LEVEL_LABEL: Record<Level, string> = {
-  read: 'Can only read',
-  write: 'Can read and change',
-  full: 'Full control',
-  none: 'No access',
+  read: t('Can only read'),
+  write: t('Can read and change'),
+  full: t('Full control'),
+  none: t('No access'),
 };
 
 /** The level a set of scopes amounts to (the same rule as the server's `access` field). */
@@ -132,18 +133,18 @@ interface PermSummary {
 
 export function summarize(p: Permissions, _total?: number | null): PermSummary {
   const id = levelOf(p.scopes);
-  if (id === 'none') return { id, level: LEVEL_LABEL.none, tools: 'Everything is refused', tone: 'none' };
+  if (id === 'none') return { id, level: LEVEL_LABEL.none, tools: t('Everything is refused'), tone: 'none' };
   const mcp = p.scopes.includes('mcp');
   let tools = '';
   let tone: PermSummary['tone'] = id === 'full' ? 'warn' : '';
-  if (!mcp) tools = 'Not from AI apps';
+  if (!mcp) tools = t('Not from AI apps');
   else if (Array.isArray(p.tools)) {
     if (!p.tools.length) {
-      tools = 'No tools allowed';
+      tools = t('No tools allowed');
       tone = 'none';
     } else if (!(id === 'read' && p.tools.every((n) => toolRisk({ name: n }) === 'read'))) {
       // A read-only agent limited to reading tools is no narrower than its level says.
-      tools = `Only ${p.tools.length} chosen tool${p.tools.length === 1 ? '' : 's'}`;
+      tools = tn(p.tools.length, 'Only {n} chosen tool', 'Only {n} chosen tools');
     }
   }
   return { id, level: LEVEL_LABEL[id], tools, tone };
@@ -159,13 +160,13 @@ export function accessSentence(p: Permissions): string {
   const s = summarize(p);
   const base =
     s.id === 'full'
-      ? 'It has full control: it reads and changes notes, and can manage Memora and other agents'
+      ? t('It has full control: it reads and changes notes, and can manage Memora and other agents')
       : s.id === 'write'
-        ? 'It can search, read and save your notes'
+        ? t('It can search, read and save your notes')
         : s.id === 'read'
-          ? 'It can search and read your notes, but not change them'
-          : 'It cannot do anything yet';
-  return s.tools && s.id !== 'none' ? `${base} (${s.tools.toLowerCase()}).` : base + '.';
+          ? t('It can search and read your notes, but not change them')
+          : t('It cannot do anything yet');
+  return s.tools && s.id !== 'none' ? t('{base} ({tools}).', { base, tools: s.tools.toLowerCase() }) : t('{base}.', { base });
 }
 
 /** The level card these scopes match, or null for a custom mix (no AI apps, or manage without change). */
@@ -177,26 +178,26 @@ function cardLevel(scopes: ReadonlySet<KeyScope>): Exclude<Level, 'none'> | null
 
 /** A plain sentence for the editor's live summary. */
 function sentence(p: Permissions, total: number): string {
-  if (!p.scopes.length) return 'Nothing is allowed. Turn something on, or pause the agent instead.';
+  if (!p.scopes.length) return t('Nothing is allowed. Turn something on, or pause the agent instead.');
   const write = p.scopes.includes('write');
   const parts: string[] = [];
   if (p.scopes.includes('mcp')) {
-    const which = p.tools === '*' ? 'every tool' : p.tools.length ? `${p.tools.length} of ${total || p.tools.length} tools` : '';
+    const which = p.tools === '*' ? t('every tool') : p.tools.length ? t('{n} of {total} tools', { n: p.tools.length, total: total || p.tools.length }) : '';
     parts.push(
       !which
-        ? 'connect from an AI app but use no tools'
+        ? t('connect from an AI app but use no tools')
         : write
-          ? `use ${which} from an AI app, including ones that change notes`
-          : `use ${which} from an AI app to search and read; every change is refused`,
+          ? t('use {which} from an AI app, including ones that change notes', { which })
+          : t('use {which} from an AI app to search and read; every change is refused', { which }),
     );
   }
-  if (p.scopes.includes('read') && write) parts.push('read and change notes from scripts');
-  else if (p.scopes.includes('read')) parts.push('read notes from scripts');
-  else if (write && !p.scopes.includes('mcp')) parts.push('change notes from scripts');
-  if (p.scopes.includes('admin')) parts.push('manage Memora and other agents');
-  if (!parts.length) return 'It can change notes, but nothing lets it connect.';
+  if (p.scopes.includes('read') && write) parts.push(t('read and change notes from scripts'));
+  else if (p.scopes.includes('read')) parts.push(t('read notes from scripts'));
+  else if (write && !p.scopes.includes('mcp')) parts.push(t('change notes from scripts'));
+  if (p.scopes.includes('admin')) parts.push(t('manage Memora and other agents'));
+  if (!parts.length) return t('It can change notes, but nothing lets it connect.');
   const last = parts.pop()!;
-  return 'It can ' + (parts.length ? parts.join(', ') + ' and ' + last : last) + '.';
+  return t('It can {list}.', { list: parts.length ? t('{list} and {last}', { list: parts.join(', '), last }) : last });
 }
 
 const PERMS_CSS = `
@@ -321,57 +322,57 @@ export function permsHTML(initial: Permissions, tools: ToolInfo[] | null, o: { l
             categoryLabel(cat),
           )}</b><small>${esc(categoryDesc(cat))}</small></span></button>
           <span class="pm-n" data-cnt></span>
-          <button type="button" class="pm-mini" data-catset="1" aria-label="Allow all ${attr(categoryLabel(cat))} tools">All</button>
-          <button type="button" class="pm-mini" data-catset="0" aria-label="Allow no ${attr(categoryLabel(cat))} tools">None</button></div>
+          <button type="button" class="pm-mini" data-catset="1" aria-label="${attr(t('Allow all {category} tools', { category: categoryLabel(cat) }))}">${t('All')}</button>
+          <button type="button" class="pm-mini" data-catset="0" aria-label="${attr(t('Allow no {category} tools', { category: categoryLabel(cat) }))}">${t('None')}</button></div>
           <div class="pm-cat-b" id="${u}-c-${attr(cat)}" hidden>${items
             .map(
-              (t) => `<div class="pm-tool" data-tool="${attr(t.name)}">${checkboxHTML(
-                selected.has(t.name),
-                ` data-t="${attr(t.name)}" aria-labelledby="${u}-t-${attr(t.name)}"`,
-              )}<span class="tx"><span class="nm"><span id="${u}-t-${attr(t.name)}">${esc(toolTitle(t.name))}</span><code class="tl-code">${esc(
-                t.name,
-              )}</code></span>${t.description ? `<span class="ds">${esc(t.description)}</span>` : ''}${
-                t.enabled ? '' : '<span class="offall" title="Switched off for every agent on the server">Off for every agent</span>'
-              }</span><span class="rk">${riskChip(toolRisk(t))}</span></div>`,
+              (tl) => `<div class="pm-tool" data-tool="${attr(tl.name)}">${checkboxHTML(
+                selected.has(tl.name),
+                ` data-t="${attr(tl.name)}" aria-labelledby="${u}-t-${attr(tl.name)}"`,
+              )}<span class="tx"><span class="nm"><span id="${u}-t-${attr(tl.name)}">${esc(toolTitle(tl.name))}</span><code class="tl-code">${esc(
+                tl.name,
+              )}</code></span>${tl.description ? `<span class="ds">${esc(tl.description)}</span>` : ''}${
+                tl.enabled ? '' : `<span class="offall" title="${t('Switched off for every agent on the server')}">${t('Off for every agent')}</span>`
+              }</span><span class="rk">${riskChip(toolRisk(tl))}</span></div>`,
             )
             .join('')}</div></section>`,
         )
         .join('')
     : '';
-  const warn = `<div class="pm-warn" data-admin-warn role="alert" hidden><b>Careful:</b> with this on, the agent can turn tools back on, widen its own permissions and make or delete other agents. Only for automation you fully trust.</div>`;
+  const warn = `<div class="pm-warn" data-admin-warn role="alert" hidden><b>${t('Careful:')}</b> ${t('with this on, the agent can turn tools back on, widen its own permissions and make or delete other agents. Only for automation you fully trust.')}</div>`;
   const lv = cardLevel(new Set(initial.scopes));
   const levels = o.levels
-    ? `<section class="pm-sec"><h3>What it may do</h3><p>Pick one. You can change it any time.</p>
-      <div class="ui-rcs pm-lv" role="radiogroup" aria-label="Access level">${LEVELS.map((l) =>
-        radioCardHTML(l.id, l.id === lv, esc(l.label), esc(l.desc), l.id === 'write' ? 'Recommended' : ''),
+    ? `<section class="pm-sec"><h3>${t('What it may do')}</h3><p>${t('Pick one. You can change it any time.')}</p>
+      <div class="ui-rcs pm-lv" role="radiogroup" aria-label="${t('Access level')}">${LEVELS.map((l) =>
+        radioCardHTML(l.id, l.id === lv, esc(l.label), esc(l.desc), l.id === 'write' ? t('Recommended') : ''),
       ).join('')}</div>
-      <p class="pm-mix" data-mix hidden>Its permissions are a custom mix. Pick a level to replace them, or fine-tune them under Advanced.</p>${warn}</section>
-    <details class="pm-adv"><summary>${CHEV}<span>Advanced<small>Switches and the tool list</small></span></summary><div class="pm-adv-b">`
+      <p class="pm-mix" data-mix hidden>${t('Its permissions are a custom mix. Pick a level to replace them, or fine-tune them under Advanced.')}</p>${warn}</section>
+    <details class="pm-adv"><summary>${CHEV}<span>${t('Advanced')}<small>${t('Switches and the tool list')}</small></span></summary><div class="pm-adv-b">`
     : '';
   return `<div class="pm">
     <div class="pm-sum" data-sum role="status" aria-live="polite"><span class="ic">${SHIELD}</span><span class="tx"><b></b><small></small></span></div>${levels}
-    <section class="pm-sec"><h3>${o.levels ? 'Switches' : 'What it may do'}</h3><p>Turn on only what the app needs. You can change this any time.</p>
+    <section class="pm-sec"><h3>${o.levels ? t('Switches') : t('What it may do')}</h3><p>${t('Turn on only what the app needs. You can change this any time.')}</p>
       <div class="pm-caps">${caps}</div>${o.levels ? '' : warn}
     </section>
-    <section class="pm-sec" data-tools><h3>Which tools it may call</h3><p data-mcp-note></p>
-      <div class="ui-rcs pm-mode" role="radiogroup" aria-label="Tool access">
-        ${radioCardHTML('all', all, 'All tools', 'Every tool that is on for the server, including new ones.')}
+    <section class="pm-sec" data-tools><h3>${t('Which tools it may call')}</h3><p data-mcp-note></p>
+      <div class="ui-rcs pm-mode" role="radiogroup" aria-label="${t('Tool access')}">
+        ${radioCardHTML('all', all, t('All tools'), t('Every tool that is on for the server, including new ones.'))}
         ${radioCardHTML(
           'some',
           !all,
-          'Only the ones I pick',
-          tools ? 'Tools added later stay blocked for this agent.' : 'The tool list could not be loaded right now.',
+          t('Only the ones I pick'),
+          tools ? t('Tools added later stay blocked for this agent.') : t('The tool list could not be loaded right now.'),
           '',
           !tools,
         )}
       </div>
       <div class="pm-pick" data-pick${all ? ' hidden' : ''}>
-        <div class="pm-ph"><label class="pm-q">${SEARCH}<span class="sr-only">Search tools</span><input class="ui-input" type="search" data-q placeholder="Search tools" autocomplete="off"></label>
+        <div class="pm-ph"><label class="pm-q">${SEARCH}<span class="sr-only">${t('Search tools')}</span><input class="ui-input" type="search" data-q placeholder="${t('Search tools')}" autocomplete="off"></label>
           <div class="pm-bar"><span class="pm-cnt" data-count aria-live="polite"></span>
-            <button type="button" class="pm-chip" data-quick="read">Read-only tools</button>
-            <button type="button" class="pm-chip" data-quick="all">All</button>
-            <button type="button" class="pm-chip" data-quick="none">None</button></div></div>
-        <div role="group" aria-label="Tools">${cats}</div><p class="pm-empty" data-empty hidden>No tool matches.</p>
+            <button type="button" class="pm-chip" data-quick="read">${t('Read-only tools')}</button>
+            <button type="button" class="pm-chip" data-quick="all">${t('All')}</button>
+            <button type="button" class="pm-chip" data-quick="none">${t('None')}</button></div></div>
+        <div role="group" aria-label="${t('Tools')}">${cats}</div><p class="pm-empty" data-empty hidden>${t('No tool matches.')}</p>
       </div></section>${o.levels ? '</div></details>' : ''}</div>`;
 }
 
@@ -410,12 +411,12 @@ export function wirePerms(b: HTMLElement, initial: Permissions, tools: ToolInfo[
       r.tabIndex = r.dataset.v === mode ? 0 : -1;
     });
     q('[data-mcp-note]').textContent = mcp
-      ? 'A tool switched off for the whole server stays blocked, whatever you pick here.'
-      : 'MCP is off above, so this only matters once you turn it on.';
+      ? t('A tool switched off for the whole server stays blocked, whatever you pick here.')
+      : t('MCP is off above, so this only matters once you turn it on.');
     q('[data-tools]').classList.toggle('pm-dim', !mcp);
     q('[data-pick]').hidden = mode === 'all';
     const total = tools ? tools.length : 0;
-    q('[data-count]').innerHTML = `<b>${selected.size}</b> of ${total} picked`;
+    q('[data-count]').innerHTML = t('{n} of {total} picked', { n: `<b>${selected.size}</b>`, total });
     qa('[data-t]').forEach((cb) => cb.setAttribute('aria-checked', String(selected.has(cb.dataset.t!))));
     qa('.pm-cat').forEach((c) => {
       const names = namesOf(c.dataset.cat!);
@@ -523,8 +524,8 @@ export function wirePerms(b: HTMLElement, initial: Permissions, tools: ToolInfo[
     read,
     problem: () => {
       const p = read();
-      if (!p.scopes.length) return 'Turn on at least one thing it may do, or turn the agent off instead.';
-      if (Array.isArray(p.tools) && !p.tools.length && p.scopes.includes('mcp')) return 'Pick at least one tool, or choose All tools.';
+      if (!p.scopes.length) return t('Turn on at least one thing it may do, or turn the agent off instead.');
+      if (Array.isArray(p.tools) && !p.tools.length && p.scopes.includes('mcp')) return t('Pick at least one tool, or choose All tools.');
       return '';
     },
   };

@@ -29,7 +29,7 @@ until you clear it.
 |---|---|---|---|
 | `MEMORA_PORT` | `8400` | `server_config` or env | HTTP port (API, MCP, web UI, WebSocket). 1-65535. |
 | `MEMORA_BIND` | `127.0.0.1` | `server_config` or env | Bind address. `0.0.0.0` for every interface (the container image and the installer set it). |
-| `MEMORA_BASE_URL` | empty | `server_config` or env | Public URL, for example `https://memory.example.com`. Used for OAuth metadata and connection snippets; its host is also an allowed domain. |
+| `MEMORA_BASE_URL` | empty | `server_config` or env | Public URL, for example `https://memora.example.com`. Used for OAuth metadata and connection snippets; its host is also an allowed domain. |
 | `MEMORA_DOMAIN` | empty (any host) | `server_config` or env | Allowed hostnames, comma separated (`*.example.com` works). Requests for other hosts get 404. Loopback names are always allowed. |
 | `MEMORA_TRUSTED_PROXIES` | empty | `server_config` or env | IPs of remote reverse proxies whose forwarding headers are trusted. Loopback is always trusted. |
 | `MEMORA_ARM_TTL` | `300` | `server_config` or env | Accepted and validated (30-86400 seconds), but the server and `memora-cli` do not read it: the setup / reset window length comes from `memora-cli --minutes` (default 5 minutes). |

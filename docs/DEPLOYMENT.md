@@ -26,7 +26,7 @@ detail:
   "vault": "/var/lib/memora/vault",
   "armed": false,
   "locked": false,
-  "base_url": "https://memory.example.com",
+  "base_url": "https://memora.example.com",
   "base_url_configured": true
 }
 ```
@@ -62,7 +62,7 @@ hostnames.
 ```nginx
 server {
     listen 443 ssl;
-    server_name memory.example.com;
+    server_name memora.example.com;
 
     location / {
         proxy_pass http://127.0.0.1:8400;
@@ -89,7 +89,7 @@ server {
 ### Caddy
 
 ```
-memory.example.com {
+memora.example.com {
     reverse_proxy 127.0.0.1:8400
 }
 ```

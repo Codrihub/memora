@@ -1,5 +1,7 @@
 // Per-device theme choice; the inline script in index.page.ts applies it before first paint.
 
+import { t } from './i18n';
+
 export type ThemePref = 'dark' | 'light' | 'system';
 
 const KEY = 'memora.theme';
@@ -65,5 +67,5 @@ export function cycleTheme(): ThemePref {
   return next;
 }
 
-export const THEME_LABEL: Record<ThemePref, string> = { dark: 'Dark', light: 'Light', system: 'System' };
+export const THEME_LABEL: Record<ThemePref, string> = { dark: t('Dark'), light: t('Light'), system: t('System') };
 export const THEME_ICON: Record<ThemePref, string> = { dark: 'moon', light: 'sun', system: 'monitor' };

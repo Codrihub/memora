@@ -2,6 +2,7 @@
 
 import { $, el, esc } from './dom';
 import { icon } from './ui/icons';
+import { t, tn } from './i18n';
 
 type ToastKind = 'ok' | 'warn' | 'err' | 'info';
 
@@ -92,9 +93,9 @@ function layout(): void {
   if (more) {
     if (!extra) more.remove();
     else {
-      more.textContent = expanded ? 'Show fewer' : `+${extra} more`;
+      more.textContent = expanded ? t('Show fewer') : t('+{n} more', { n: extra });
       more.setAttribute('aria-expanded', String(expanded));
-      more.setAttribute('aria-label', expanded ? 'Show only the latest notifications' : `Show ${extra} more notification${extra === 1 ? '' : 's'}`);
+      more.setAttribute('aria-label', expanded ? t('Show only the latest notifications') : tn(extra, 'Show {n} more notification', 'Show {n} more notifications'));
     }
   }
   box.classList.toggle('expanded', expanded);
@@ -169,7 +170,7 @@ function fill(node: HTMLElement, msg: string, kind: ToastKind, action?: ToastAct
   node.className = 'toast ' + kind + (opts?.iconHtml ? ' has-av' : '');
   node.innerHTML = `<span class="t-ico">${opts?.iconHtml || icon(ICON[kind] || 'info')}</span><span class="t-msg">${esc(msg)}</span>${
     action ? `<button type="button" class="t-act">${action.icon || ''}${esc(action.label)}</button>` : ''
-  }<button type="button" class="t-x" aria-label="Dismiss" title="Dismiss">${icon('close')}</button>`;
+  }<button type="button" class="t-x" aria-label="${t('Dismiss')}" title="${t('Dismiss')}">${icon('close')}</button>`;
   // Errors interrupt; the rest is read out politely by the stack's live region.
   if (kind === 'err') node.setAttribute('role', 'alert');
   else node.removeAttribute('role');

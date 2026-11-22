@@ -3,6 +3,7 @@
 // many chats have news; the Mnemo page marks each one with how many new messages it has.
 
 import { useStyles } from '../dom';
+import { tn } from '../i18n';
 import * as A from './api';
 
 /** How often the list is checked (only while the tab is visible). */
@@ -77,7 +78,7 @@ export function onUnread(f: () => void): () => void {
 /** The count on the sidebar's Mnemo item and the menu's Mnemo entry. */
 function paint(): void {
   const n = unreadChats();
-  const label = n ? `${n} chat${n === 1 ? '' : 's'} with new messages` : '';
+  const label = n ? tn(n, '{n} chat with new messages', '{n} chats with new messages') : '';
   document.querySelectorAll<HTMLElement>('.side-mnemo, .pm-item[data-page="assistant"]').forEach((item) => {
     let b = item.querySelector<HTMLElement>('.mn-unread-n');
     if (!n) {

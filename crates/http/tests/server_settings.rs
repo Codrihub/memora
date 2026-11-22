@@ -111,11 +111,11 @@ async fn owner_changes_name_and_sign_in_limits() {
     let mut e = env("ok").await;
     let (s, v) = post(
         &mut e,
-        json!({"realm": "Kurnia memory", "session_ttl": 7200, "session_max_age": 604800}),
+        json!({"realm": "Team memory", "session_ttl": 7200, "session_max_age": 604800}),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["realm"], "Kurnia memory");
+    assert_eq!(v["realm"], "Team memory");
     assert_eq!(v["session_ttl"], 7200);
     assert_eq!(v["session_max_age"], 604800);
     // The cached settings follow at once.
@@ -130,7 +130,7 @@ async fn owner_changes_name_and_sign_in_limits() {
         .await
         .unwrap();
     let cfg: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(cfg["realm"], "Kurnia memory");
+    assert_eq!(cfg["realm"], "Team memory");
     assert_eq!(cfg["session_ttl"], 7200);
 }
 

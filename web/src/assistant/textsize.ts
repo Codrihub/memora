@@ -1,13 +1,15 @@
 // Mnemo's text size, chosen per device: Auto (small on phones, medium elsewhere), Small, Medium or Large.
 // Kept in this browser only; set as `data-mnfs` on <html>, which the chat's styles read as --mn-fs.
 
+import { t } from '../i18n';
+
 export type TextSize = 'auto' | 's' | 'm' | 'l';
 
 export const TEXT_SIZES: { id: TextSize; label: string; hint: string }[] = [
-  { id: 'auto', label: 'Auto', hint: 'Auto: small on phones, medium elsewhere' },
-  { id: 's', label: 'Small', hint: 'Small text: more fits on the screen' },
-  { id: 'm', label: 'Medium', hint: 'Medium text' },
-  { id: 'l', label: 'Large', hint: 'Large text: easier to read' },
+  { id: 'auto', label: t('Auto'), hint: t('Auto: small on phones, medium elsewhere') },
+  { id: 's', label: t('Small'), hint: t('Small text: more fits on the screen') },
+  { id: 'm', label: t('Medium'), hint: t('Medium text') },
+  { id: 'l', label: t('Large'), hint: t('Large text: easier to read') },
 ];
 
 const LS = 'memora.mnemo.fs.v1';
@@ -16,7 +18,7 @@ const listeners = new Set<() => void>();
 export function readTextSize(): TextSize {
   try {
     const v = localStorage.getItem(LS);
-    return TEXT_SIZES.some((t) => t.id === v) ? (v as TextSize) : 'auto';
+    return TEXT_SIZES.some((z) => z.id === v) ? (v as TextSize) : 'auto';
   } catch {
     return 'auto';
   }
@@ -49,10 +51,10 @@ export function onTextSize(f: () => void): () => void {
 /** A segmented control: Auto, then A in three sizes. */
 export function textSizeHTML(name: string): string {
   const cur = readTextSize();
-  return `<div class="mn-fs" role="radiogroup" aria-label="Text size">${TEXT_SIZES.map(
-    (t) =>
-      `<button type="button" role="radio" class="mn-fs-${t.id}${t.id === cur ? ' on' : ''}" data-fs="${t.id}" data-fs-group="${name}" aria-checked="${t.id === cur}" title="${t.hint}" aria-label="${t.hint}">${
-        t.id === 'auto' ? 'Auto' : 'A'
+  return `<div class="mn-fs" role="radiogroup" aria-label="${t('Text size')}">${TEXT_SIZES.map(
+    (z) =>
+      `<button type="button" role="radio" class="mn-fs-${z.id}${z.id === cur ? ' on' : ''}" data-fs="${z.id}" data-fs-group="${name}" aria-checked="${z.id === cur}" title="${z.hint}" aria-label="${z.hint}">${
+        z.id === 'auto' ? t('Auto') : 'A'
       }</button>`,
   ).join('')}</div>`;
 }

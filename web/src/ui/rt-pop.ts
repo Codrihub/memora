@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { attr, esc, useStyles } from '../dom';
 import { relTs } from '../format';
 import { hooks } from '../hooks';
@@ -157,18 +158,18 @@ let backTo = '';
 
 function when(ms: number, active: boolean, now = Date.now()): string {
   if (!ms) return '';
-  if (active) return 'now';
+  if (active) return t('now');
   // Coarse on purpose: the panel repaints only when its text changes.
-  return now - ms < 60_000 ? 'just now' : relTs(Math.floor(ms / 1000));
+  return now - ms < 60_000 ? t('just now') : relTs(Math.floor(ms / 1000));
 }
 
 function short(ms: number, running = false, now = Date.now()): string {
-  if (running) return 'now';
+  if (running) return t('now');
   const s = Math.max(0, (now - ms) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + ' min';
-  if (s < 86400) return Math.floor(s / 3600) + ' h';
-  return Math.floor(s / 86400) + ' d';
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{n} min', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('{n} h', { n: Math.floor(s / 3600) });
+  return t('{n} d', { n: Math.floor(s / 86400) });
 }
 
 export function resetRtPop(): void {
@@ -255,10 +256,10 @@ function line(it: ActivityItem, solo = false, n = 1, hot = false): string {
   const now = settleRunning(it) || hot;
   const bad = !now && !!problemOf(it);
   const when = short(it.ts * 1000, now);
-  const text = `${solo ? '' : it.actor + ' '}${plainText(predicate(it))}${n > 1 ? `, ${n} times` : ''}`;
+  const text = `${solo ? '' : it.actor + ' '}${plainText(predicate(it))}${n > 1 ? `, ${t('{n} times', { n })}` : ''}`;
   return `<div class="rp3-ln${solo ? ' solo' : ''}${now ? ' now' : ''}${bad ? ' bad' : ''}" role="button" tabindex="0" data-nav data-act="${attr(
     it.id,
-  )}" style="--ag:${attr(agentColor(it.actor, kid))}" aria-label="${attr(`${text}, ${now ? 'working now' : when}`)}">
+  )}" style="--ag:${attr(agentColor(it.actor, kid))}" aria-label="${attr(`${text}, ${now ? t('working now') : when}`)}">
     ${solo ? '<i class="rp3-k" aria-hidden="true"></i>' : avatarHTML(it.actor, 22, now ? 'live' : '', kid)}
     <span class="rp3-tx">${solo ? '' : `<b>${esc(it.actor)}</b> `}${flat(it)}</span>
     ${n > 1 ? `<span class="rp3-n" aria-hidden="true">×${n}</span>` : ''}<span class="rp3-t">${esc(when)}</span></div>`;
@@ -313,12 +314,12 @@ function keyOf(el: HTMLElement): string {
 
 function statusLine(d: PopData, seen: number, working: number, last: number): string {
   const idle = seen - working;
-  if (d.state === 'off') return '<div class="rp3-st off">Offline, retrying</div>';
-  if (d.state === 'connecting') return '<div class="rp3-st">Connecting…</div>';
-  if (!seen) return '<div class="rp3-st">No AI has connected yet</div>';
+  if (d.state === 'off') return `<div class="rp3-st off">${t('Offline, retrying')}</div>`;
+  if (d.state === 'connecting') return `<div class="rp3-st">${t('Connecting…')}</div>`;
+  if (!seen) return `<div class="rp3-st">${t('No AI has connected yet')}</div>`;
   if (working)
-    return `<div class="rp3-st"><i class="rp3-dot" aria-hidden="true"></i><span><b>${working}</b> working${idle ? ` · ${idle} idle` : ''}</span></div>`;
-  return `<div class="rp3-st"><span>All idle${last ? ` · last active ${esc(when(last, false))}` : ''}</span></div>`;
+    return `<div class="rp3-st"><i class="rp3-dot" aria-hidden="true"></i><span>${t('{n} working', { n: `<b>${working}</b>` })}${idle ? ` · ${t('{n} idle', { n: idle })}` : ''}</span></div>`;
+  return `<div class="rp3-st"><span>${t('All idle')}${last ? ` · ${t('last active {when}', { when: esc(when(last, false)) })}` : ''}</span></div>`;
 }
 
 function overview(d: PopData, all: ActivityItem[]): string {
@@ -332,16 +333,16 @@ function overview(d: PopData, all: ActivityItem[]): string {
   const agentRow = ({ a, at }: { a: PopAgent; at: number }, dim = false): string => {
     const key = a.id || a.name;
     const right = a.active
-      ? '<span class="rp3-chip"><i class="rp3-dot" aria-hidden="true"></i>Working</span>'
+      ? `<span class="rp3-chip"><i class="rp3-dot" aria-hidden="true"></i>${t('Working')}</span>`
       : at
         ? `<span class="t">${esc(short(at))}</span>`
         : '';
     // Mnemo is built in: it has no key of its own to remove.
-    const note = a.id === 'mnemo' ? 'built in' : a.keyed ? '' : 'key removed';
-    const state = a.active ? 'working now' : at ? 'last active ' + when(at, false) : dim ? 'not connected yet' : 'idle';
+    const note = a.id === 'mnemo' ? t('built in') : a.keyed ? '' : t('key removed');
+    const state = a.active ? t('working now') : at ? t('last active {when}', { when: when(at, false) }) : dim ? t('not connected yet') : t('idle');
     return `<button type="button" class="rp3-ag${dim ? ' dim' : ''}" data-nav data-agent="${attr(key)}" style="--ag:${attr(
       agentColor(a.name, a.id),
-    )}" aria-label="${attr(`${a.name}, ${state}${note ? ', ' + note : ''}`)}" title="${attr(`${a.name}: what it did recently`)}">
+    )}" aria-label="${attr(`${a.name}, ${state}${note ? ', ' + note : ''}`)}" title="${attr(t('{name}: what it did recently', { name: a.name }))}">
       ${avatarHTML(a.name, 26, a.active ? 'live' : '', a.id)}
       <span class="n"><span>${esc(a.name)}</span>${note ? `<small>${note}</small>` : ''}</span>${right}</button>`;
   };
@@ -355,15 +356,15 @@ function overview(d: PopData, all: ActivityItem[]): string {
   };
   const feedHTML = latest.length
     ? latest.map((r) => line(r.it, false, r.n, hot(r.it))).join('')
-    : `<div class="rp3-empty">${feed ? 'No AI activity in the last 24 hours.' : 'Loading activity…'}</div>`;
+    : `<div class="rp3-empty">${feed ? t('No AI activity in the last 24 hours.') : t('Loading activity…')}</div>`;
   const agentsHTML = d.agents.length
     ? `<div class="rp3-sep" aria-hidden="true"></div>
-      <div class="rp3-sec">${seen.length ? 'Agents' : 'Not connected yet'} <span>${d.agents.length}</span></div>
+      <div class="rp3-sec">${seen.length ? t('Agents') : t('Not connected yet')} <span>${d.agents.length}</span></div>
       ${(showAllAgents ? seen : seen.slice(0, AGENTS_SHOWN)).map((r) => agentRow(r)).join('')}
       ${
         seen.length > AGENTS_SHOWN
           ? `<button type="button" class="rp3-more" data-nav data-rp="all-agents" aria-expanded="${showAllAgents}">${icon('chev-down')}<span>${
-              showAllAgents ? 'Show fewer' : `Show all <b>(${seen.length})</b>`
+              showAllAgents ? t('Show fewer') : t('Show all {n}', { n: `<b>(${seen.length})</b>` })
             }</span></button>`
           : ''
       }
@@ -371,25 +372,25 @@ function overview(d: PopData, all: ActivityItem[]): string {
         never.length
           ? `${
               seen.length
-                ? `<button type="button" class="rp3-more" data-nav data-rp="never" aria-expanded="${open}">${icon('chev-down')}<span>Not connected yet <b>(${never.length})</b></span></button>`
+                ? `<button type="button" class="rp3-more" data-nav data-rp="never" aria-expanded="${open}">${icon('chev-down')}<span>${t('Not connected yet')} <b>(${never.length})</b></span></button>`
                 : ''
             }${open ? never.map((r) => agentRow(r, true)).join('') : ''}`
           : ''
       }`
-    : `<div class="rp3-sep" aria-hidden="true"></div><div class="rp3-empty">No AIs yet. Connect one, and it shows up here the moment it does something.</div>`;
+    : `<div class="rp3-sep" aria-hidden="true"></div><div class="rp3-empty">${t('No AIs yet. Connect one, and it shows up here the moment it does something.')}</div>`;
   return `<div class="rp2-view"><i class="rp2-grab" aria-hidden="true"></i>
-    <div class="rp3-h"><div class="rp3-ht"><h3>Your AIs</h3>${statusLine(d, seen.length, working, last)}</div>
-      ${d.state === 'off' ? `<button type="button" class="rp3-ib" data-rp="retry" title="Reconnect" aria-label="Reconnect">${icon('refresh')}</button>` : ''}
-      <button type="button" class="rp3-ib x" data-rp="close" title="Close" aria-label="Close">${icon('close')}</button>
+    <div class="rp3-h"><div class="rp3-ht"><h3>${t('Your AIs')}</h3>${statusLine(d, seen.length, working, last)}</div>
+      ${d.state === 'off' ? `<button type="button" class="rp3-ib" data-rp="retry" title="${t('Reconnect')}" aria-label="${t('Reconnect')}">${icon('refresh')}</button>` : ''}
+      <button type="button" class="rp3-ib x" data-rp="close" title="${t('Close')}" aria-label="${t('Close')}">${icon('close')}</button>
     </div>
     <div class="rp2-list">
-      <div class="rp3-sec">Latest</div>
+      <div class="rp3-sec">${t('Latest')}</div>
       <div class="rp3-feed">${feedHTML}</div>
       ${agentsHTML}
     </div>
     <div class="rp3-f">
-      <button type="button" class="rp3-fb" data-rp="keys">${icon('key')}Manage agents</button>
-      <button type="button" class="rp3-fb go" data-rp="activity">All activity${icon('arrow')}</button>
+      <button type="button" class="rp3-fb" data-rp="keys">${icon('key')}${t('Manage agents')}</button>
+      <button type="button" class="rp3-fb go" data-rp="activity">${t('All activity')}${icon('arrow')}</button>
     </div>
   </div>`;
 }
@@ -401,47 +402,47 @@ function detail(a: PopAgent, all: ActivityItem[]): string {
   const failed = today.filter((it) => !settleRunning(it) && !!problemOf(it)).length;
   const at = lastAt(a, all);
   const status = a.active
-    ? '<div class="rp3-st"><i class="rp3-dot" aria-hidden="true"></i><span>Working now</span></div>'
+    ? `<div class="rp3-st"><i class="rp3-dot" aria-hidden="true"></i><span>${t('Working now')}</span></div>`
     : `<div class="rp3-st"><span>${
-        at ? 'Last active ' + esc(when(at, false)) : a.id === 'mnemo' ? 'Built in' : !a.keyed ? 'Key removed' : feed ? 'Not connected yet' : 'Loading…'
+        at ? t('Last active {when}', { when: esc(when(at, false)) }) : a.id === 'mnemo' ? t('Built in') : !a.keyed ? t('Key removed') : feed ? t('Not connected yet') : t('Loading…')
       }</span></div>`;
   const n = (v: number, one: string, many: string, bad = false): string =>
     `<span><b${bad && v ? ' class="bad"' : ''}>${feed ? v : '…'}</b> ${v === 1 ? one : many}</span>`;
-  const figs = `<div class="rp3-figs">${n(today.length, 'action in 24h', 'actions in 24h')}<i aria-hidden="true">·</i>${n(
+  const figs = `<div class="rp3-figs">${n(today.length, t('action in 24h'), t('actions in 24h'))}<i aria-hidden="true">·</i>${n(
     failed,
-    'problem',
-    'problems',
+    t('problem'),
+    t('problems'),
     true,
-  )}${at ? `<i aria-hidden="true">·</i><span>last action <b>${esc(when(at, false))}</b></span>` : ''}</div>`;
+  )}${at ? `<i aria-hidden="true">·</i><span>${t('last action {when}', { when: `<b>${esc(when(at, false))}</b>` })}</span>` : ''}</div>`;
   const items = runs(own, AGENT_N);
   const never = !!feed && !at && !items.length && a.keyed;
   return `<div class="rp2-view"><i class="rp2-grab" aria-hidden="true"></i>
     <div class="rp3-h ag">
-      <button type="button" class="rp3-ib" data-rp="back" aria-label="Back to all agents" title="All agents">${icon('chev-left')}</button>
+      <button type="button" class="rp3-ib" data-rp="back" aria-label="${t('Back to all agents')}" title="${t('All agents')}">${icon('chev-left')}</button>
       ${avatarHTML(a.name, 30, a.active ? 'live' : '', a.id)}
       <div class="rp3-ht"><h3>${esc(a.name)}</h3>${status}</div>
-      <button type="button" class="rp3-ib x" data-rp="close" title="Close" aria-label="Close">${icon('close')}</button>
+      <button type="button" class="rp3-ib x" data-rp="close" title="${t('Close')}" aria-label="${t('Close')}">${icon('close')}</button>
     </div>
     ${never ? '' : figs}
     <div class="rp2-list">
-      ${never ? '' : '<div class="rp3-sec">Recent</div>'}
+      ${never ? '' : `<div class="rp3-sec">${t('Recent')}</div>`}
       <div class="rp3-feed">${
         !feed && !items.length
-          ? '<div class="rp3-empty">Loading activity…</div>'
+          ? `<div class="rp3-empty">${t('Loading activity…')}</div>`
           : items.length
             ? items.map((r, i) => line(r.it, true, r.n, a.active && i === 0)).join('')
             : never
-              ? `<div class="rp3-empty">Its page shows how to connect it.</div>`
-              : `<div class="rp3-empty">Nothing from ${esc(a.name)} in the last 24 hours.</div>`
+              ? `<div class="rp3-empty">${t('Its page shows how to connect it.')}</div>`
+              : `<div class="rp3-empty">${t('Nothing from {name} in the last 24 hours.', { name: esc(a.name) })}</div>`
       }</div>
     </div>
     <div class="rp3-f">
       ${
         a.id
-          ? `<button type="button" class="rp3-fb" data-rp="agent-page" title="Setup, what it may do and settings">${icon('agents')}Its page</button>`
-          : `<button type="button" class="rp3-fb" data-rp="keys">${icon('key')}Manage agents</button>`
+          ? `<button type="button" class="rp3-fb" data-rp="agent-page" title="${t('Setup, what it may do and settings')}">${icon('agents')}${t('Its page')}</button>`
+          : `<button type="button" class="rp3-fb" data-rp="keys">${icon('key')}${t('Manage agents')}</button>`
       }
-      <button type="button" class="rp3-fb go" data-rp="agent-activity" title="Everything it did">Open activity${icon('arrow')}</button>
+      <button type="button" class="rp3-fb go" data-rp="agent-activity" title="${t('Everything it did')}">${t('Open activity')}${icon('arrow')}</button>
     </div>
   </div>`;
 }

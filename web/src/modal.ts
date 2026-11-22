@@ -2,6 +2,7 @@
 
 import { $, $$, el, esc, attr } from './dom';
 import { icon } from './ui/icons';
+import { t } from './i18n';
 
 interface ModalAction {
   label: string;
@@ -79,7 +80,7 @@ export const Modal = {
       'modal-head',
       `<h3 class="modal-title" id="${titleId}">${esc(opts.title)}</h3>${
         opts.sub ? `<span class="modal-sub">${esc(opts.sub)}</span>` : ''
-      }<button class="modal-x" type="button" title="Close (Esc)" aria-label="Close">${icon('close')}</button>`,
+      }<button class="modal-x" type="button" title="${t('Close (Esc)')}" aria-label="${t('Close')}">${icon('close')}</button>`,
     );
     const bodyEl = el('div', 'modal-body');
     if (opts.body instanceof Node) bodyEl.appendChild(opts.body);
@@ -179,9 +180,9 @@ export const Modal = {
       title,
       body: `<p>${esc(text)}</p>`,
       actions: [
-        { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+        { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
         {
-          label: confirmLabel || 'Continue',
+          label: confirmLabel || t('Continue'),
           cls: danger ? 'danger' : 'primary',
           run: async () => {
             await run();

@@ -2,6 +2,8 @@
 import { DEFAULT_REFRESH_TREE, DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import './global.css';
 import { initMnemoLauncher } from './assistant/launcher';
+import { initPromo } from './assistant/promo';
+import { translateStatic } from './i18n';
 import { initKeepAlive } from './keepalive';
 import { renderAssistant } from './assistant/page';
 import { updateInfo, type UpdateInfo } from './version';
@@ -72,6 +74,10 @@ import type { BootSplash } from './boot-splash';
 import type { Page } from './state';
 import type { SettingsInfo } from './types';
 import { initStorageBanner } from './views/storage';
+import { t } from './i18n';
+
+// The shell in index.html is drawn before the language is known: translate it first.
+translateStatic();
 
 // Styles first, so nothing paints unstyled once the splash fades.
 installStyles();
@@ -85,7 +91,7 @@ function isTyping(t: EventTarget | null): boolean {
 async function reloadAll(): Promise<void> {
   await loadCore();
   refreshPage();
-  toast('Data reloaded', 'ok', 1600);
+  toast(t('Data reloaded'), 'ok', 1600);
 }
 
 /** One warning toast per new release and device; a later sign-in stays quiet. */
@@ -93,8 +99,8 @@ function announceUpdate(u: UpdateInfo): void {
   if (!u.available || !u.latest || updateNoticeSeen() === u.latest) return;
   markUpdateNoticeSeen(u.latest);
   const url = u.url;
-  notify(`Memora v${u.latest} is available. This server runs v${u.current}.`, 'warn', 12000, {
-    label: 'What changed',
+  notify(t('Memora v{latest} is available. This server runs v{current}.', { latest: u.latest, current: u.current }), 'warn', 12000, {
+    label: t('What changed'),
     run: () => void window.open(url, '_blank', 'noopener,noreferrer'),
   });
 }
@@ -126,29 +132,29 @@ function wireShell(): void {
   onAgents((n) => setLiveAgents(n));
 
   registerCommands([
-    { id: 'new-note', title: 'New note', hint: 'Write a new note', icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
-    { id: 'open-brain', title: 'Open brain', hint: 'Your memory as a living brain', icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
-    { id: 'new-folder', title: 'New folder', hint: 'Create a folder', icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
-    { id: 'mnemo', title: 'Ask Mnemo', hint: 'Chat with your notes agent', icon: 'mnemo', keywords: 'ai agent chat assistant gpt claude llm', kbd: 'Ctrl J', run: () => hooks.askMnemo('global') },
-    { id: 'mnemo-fab', title: 'Show or hide the Mnemo button', hint: 'The floating button in the corner, on this device', icon: 'eye', keywords: 'ai agent floating launcher bubble', run: () => void hooks.mnemoButton(!hooks.mnemoButton()) },
-    { id: 'mnemo-page', title: 'Open Mnemo chats', hint: 'Every chat with your notes agent', icon: 'chat', keywords: 'ai agent chat assistant history sessions', run: () => go('assistant') },
-    { id: 'activity', title: 'Show live activity', hint: 'What agents are doing now', icon: 'activity', keywords: 'logs agents feed', run: () => go('logs') },
-    { id: 'new-key', title: 'Connect an agent', hint: 'Set up an AI app so it can use your notes', icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
-    { id: 'theme', title: 'Switch theme', hint: 'Dark, light or system', icon: 'sun', keywords: 'dark light mode appearance', run: () => cycleTheme() },
-    { id: 'theme-dark', title: 'Use dark theme', icon: 'moon', keywords: 'appearance mode', run: () => setThemePref('dark') },
-    { id: 'theme-light', title: 'Use light theme', icon: 'sun', keywords: 'appearance mode', run: () => setThemePref('light') },
-    { id: 'sidebar', title: 'Toggle sidebar', hint: 'Slim icon rail or full sidebar', icon: 'sidebar', kbd: '[', keywords: 'collapse expand minimize', run: () => (isMobile() ? undefined : toggleCollapsed()) },
-    { id: 'reload', title: 'Reload data', hint: 'Load your notes again', icon: 'refresh', keywords: 'refresh sync', run: () => void reloadAll() },
-    { id: 'install', title: 'Install app', hint: 'Add Memora to your device', icon: 'download', keywords: 'pwa home screen', run: () => void PWA.install() },
-    { id: 'guide', title: 'Keyboard shortcuts and guide', icon: 'help', keywords: 'help keys', run: () => openGuide() },
-    { id: 'docs', title: 'Open documentation', hint: 'Guides, agent instructions and reference', icon: 'book', keywords: 'docs help manual guide reference api mcp install', run: () => openDocs() },
-    { id: 'docs-prompt', title: 'Agent instructions', hint: 'The recommended prompt for your agents', icon: 'book', keywords: 'docs prompt system instructions claude chatgpt cursor rules agents.md', run: () => openDocs('agent-instructions') },
-    { id: 'docs-tools', title: 'MCP tool reference', hint: 'Every tool agents can call', icon: 'book', keywords: 'docs tools catalog mcp reference', run: () => openDocs('tool-reference') },
-    { id: 'welcome', title: 'Welcome to Memora', icon: 'sparkle', keywords: 'about intro tour what is memora', run: () => openWelcome() },
-    { id: 'account', title: 'Account', hint: 'Session and appearance', icon: 'user', keywords: 'profile session', run: () => void openAccount() },
-    { id: 'open-nodes', title: 'Open notes', hint: 'Browse every note', icon: 'note', keywords: 'notes vault list', run: () => { state.note = null; go('vault'); } },
-    { id: 'open-trash', title: 'Open Trash', hint: 'Deleted notes, ready to restore', icon: 'trash', keywords: 'trash deleted restore bin recycle undo', run: () => hooks.openTrash() },
-    { id: 'signout', title: 'Sign out', icon: 'logout', keywords: 'logout exit', run: () => void signOut() },
+    { id: 'new-note', title: t('New note'), hint: t('Write a new note'), icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
+    { id: 'open-brain', title: t('Open brain'), hint: t('Your memory as a living brain'), icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
+    { id: 'new-folder', title: t('New folder'), hint: t('Create a folder'), icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
+    { id: 'mnemo', title: t('Ask Mnemo'), hint: t('Chat with your notes agent'), icon: 'mnemo', keywords: 'ai agent chat assistant gpt claude llm', kbd: 'Ctrl J', run: () => hooks.askMnemo('global') },
+    { id: 'mnemo-fab', title: t('Show or hide the Mnemo button'), hint: t('The floating button in the corner, on this device'), icon: 'eye', keywords: 'ai agent floating launcher bubble', run: () => void hooks.mnemoButton(!hooks.mnemoButton()) },
+    { id: 'mnemo-page', title: t('Open Mnemo chats'), hint: t('Every chat with your notes agent'), icon: 'chat', keywords: 'ai agent chat assistant history sessions', run: () => go('assistant') },
+    { id: 'activity', title: t('Show live activity'), hint: t('What agents are doing now'), icon: 'activity', keywords: 'logs agents feed', run: () => go('logs') },
+    { id: 'new-key', title: t('Connect an agent'), hint: t('Set up an AI app so it can use your notes'), icon: 'key', keywords: 'api key mcp token', run: () => (connectOnLoad(), go('keys')) },
+    { id: 'theme', title: t('Switch theme'), hint: t('Dark, light or system'), icon: 'sun', keywords: 'dark light mode appearance', run: () => cycleTheme() },
+    { id: 'theme-dark', title: t('Use dark theme'), icon: 'moon', keywords: 'appearance mode', run: () => setThemePref('dark') },
+    { id: 'theme-light', title: t('Use light theme'), icon: 'sun', keywords: 'appearance mode', run: () => setThemePref('light') },
+    { id: 'sidebar', title: t('Toggle sidebar'), hint: t('Slim icon rail or full sidebar'), icon: 'sidebar', kbd: '[', keywords: 'collapse expand minimize', run: () => (isMobile() ? undefined : toggleCollapsed()) },
+    { id: 'reload', title: t('Reload data'), hint: t('Load your notes again'), icon: 'refresh', keywords: 'refresh sync', run: () => void reloadAll() },
+    { id: 'install', title: t('Install app'), hint: t('Add Memora to your device'), icon: 'download', keywords: 'pwa home screen', run: () => void PWA.install() },
+    { id: 'guide', title: t('Keyboard shortcuts and guide'), icon: 'help', keywords: 'help keys', run: () => openGuide() },
+    { id: 'docs', title: t('Open documentation'), hint: t('Guides, agent instructions and reference'), icon: 'book', keywords: 'docs help manual guide reference api mcp install', run: () => openDocs() },
+    { id: 'docs-prompt', title: t('Agent instructions'), hint: t('The recommended prompt for your agents'), icon: 'book', keywords: 'docs prompt system instructions claude chatgpt cursor rules agents.md', run: () => openDocs('agent-instructions') },
+    { id: 'docs-tools', title: t('MCP tool reference'), hint: t('Every tool agents can call'), icon: 'book', keywords: 'docs tools catalog mcp reference', run: () => openDocs('tool-reference') },
+    { id: 'welcome', title: t('Welcome to Memora'), icon: 'sparkle', keywords: 'about intro tour what is memora', run: () => openWelcome() },
+    { id: 'account', title: t('Account'), hint: t('Session and appearance'), icon: 'user', keywords: 'profile session', run: () => void openAccount() },
+    { id: 'open-nodes', title: t('Open notes'), hint: t('Browse every note'), icon: 'note', keywords: 'notes vault list', run: () => { state.note = null; go('vault'); } },
+    { id: 'open-trash', title: t('Open Trash'), hint: t('Deleted notes, ready to restore'), icon: 'trash', keywords: 'trash deleted restore bin recycle undo', run: () => hooks.openTrash() },
+    { id: 'signout', title: t('Sign out'), icon: 'logout', keywords: 'logout exit', run: () => void signOut() },
   ]);
 
   window.addEventListener('keydown', (e) => {
@@ -298,7 +304,7 @@ async function boot(): Promise<void> {
     if (vaultSwitch.pending || (vault && vault === state.health.vault)) return;
     void reloadVaultData().then(() => {
       if (state.page !== 'settings') go('brain');
-      toast('The vault was switched to ' + vault, 'warn', 5000);
+      toast(t('The vault was switched to {vault}', { vault }), 'warn', 5000);
     });
   };
 
@@ -321,17 +327,17 @@ async function boot(): Promise<void> {
   const pSettings = quiet(fetchSettings());
   const pGraph = quiet(apiGet<{ nodes?: unknown[]; links?: unknown[] }>('/api/graph'));
   const pCore = quiet(loadCore());
-  splash.step('Signing in…', 0.3);
+  splash.step(t('Signing in…'), 0.3);
 
   state.me = await pMe;
 
   if (!state.me) {
-    splash.step('Opening sign-in…', 1);
+    splash.step(t('Opening sign-in…'), 1);
     window.location.replace('/login?r=' + encodeURIComponent(location.pathname + location.search));
     return;
   }
 
-  splash.step('Loading your notes…', 0.55);
+  splash.step(t('Loading your notes…'), 0.55);
   const info: SettingsInfo | null = await pSettings;
   if (info && info.vault_configured === false) {
     splash.done();
@@ -355,11 +361,11 @@ async function boot(): Promise<void> {
     const badge = document.getElementById('brandUpd');
     if (!badge || !u.available || !u.latest) return;
     badge.hidden = false;
-    badge.title = 'v' + u.latest + ' is available';
+    badge.title = t('v{version} is available', { version: u.latest });
   });
 
   const first = parseLocation();
-  splash.step(first.page === 'brain' ? 'Starting the brain…' : `Opening ${PAGE_META[first.page].label}…`, 0.85);
+  splash.step(first.page === 'brain' ? t('Starting the brain…') : t('Opening {page}…', { page: PAGE_META[first.page].label }), 0.85);
   await painted();
   if (shell) shell.classList.remove('hidden');
   applyRoute(first);
@@ -372,6 +378,7 @@ async function boot(): Promise<void> {
   RT.start();
   PWA.init();
   initMnemoLauncher();
+  initPromo();
   initKeepAlive();
   initStorageBanner();
 }
@@ -379,7 +386,7 @@ async function boot(): Promise<void> {
 function start(): void {
   boot().catch((e: unknown) => {
     console.error('Memora could not start', e);
-    splash.fail('Memora could not start.', 'Reload to try again.');
+    splash.fail(t('Memora could not start.'), t('Reload to try again.'));
   });
 }
 

@@ -9,31 +9,32 @@ import { ICO, openMenu, systemHeader, useControlStyles } from '../control/ui';
 import { skBlock } from '../ui/skeleton';
 import { icon } from '../ui/icons';
 import type { ToolInfo } from '../types';
+import { t, tn } from '../i18n';
 
 /** Category names and one plain line each, in the order people think of them. */
 const CATEGORIES: Record<string, { label: string; desc: string }> = {
-  note: { label: 'Notes', desc: 'Read, create, edit, move and delete single notes.' },
-  search: { label: 'Search', desc: 'Find notes by words and count what is in your notes.' },
-  tag: { label: 'Tags', desc: 'See every tag and add or remove tags on a note.' },
-  folder: { label: 'Folders', desc: 'List folders and create new ones.' },
-  graph: { label: 'Links and graph', desc: 'Follow links between notes: neighbours, paths, hubs and loose ends.' },
-  query: { label: 'Queries and tag upkeep', desc: 'Filter notes by their properties, find similar notes, rename or merge tags.' },
-  version: { label: 'History', desc: 'Older versions of a note: read, compare, restore, and the trash.' },
-  write: { label: 'Bulk writing', desc: 'Create, copy, merge, replace or delete many notes in one call.' },
-  collab: { label: 'Working together', desc: 'Locks, mentions and assignments so agents do not overwrite each other.' },
-  ops: { label: 'Activity and upkeep', desc: 'Activity logs, health checks, stale notes, folder settings and folder moves.' },
-  identity: { label: 'Identity', desc: 'How the agent itself shows up: its display name and colour.' },
-  interop: { label: 'Import and export', desc: 'Bring notes in or take them out as a zip of text files.' },
-  ux: { label: 'Tasks, checks and pins', desc: 'To-dos, follow-ups, checks that a note is well formed, and the pinned notes and folders.' },
+  note: { label: t('Notes'), desc: t('Read, create, edit, move and delete single notes.') },
+  search: { label: t('Search'), desc: t('Find notes by words and count what is in your notes.') },
+  tag: { label: t('Tags'), desc: t('See every tag and add or remove tags on a note.') },
+  folder: { label: t('Folders'), desc: t('List folders and create new ones.') },
+  graph: { label: t('Links and graph'), desc: t('Follow links between notes: neighbours, paths, hubs and loose ends.') },
+  query: { label: t('Queries and tag upkeep'), desc: t('Filter notes by their properties, find similar notes, rename or merge tags.') },
+  version: { label: t('History'), desc: t('Older versions of a note: read, compare, restore, and the trash.') },
+  write: { label: t('Bulk writing'), desc: t('Create, copy, merge, replace or delete many notes in one call.') },
+  collab: { label: t('Working together'), desc: t('Locks, mentions and assignments so agents do not overwrite each other.') },
+  ops: { label: t('Activity and upkeep'), desc: t('Activity logs, health checks, stale notes, folder settings and folder moves.') },
+  identity: { label: t('Identity'), desc: t('How the agent itself shows up: its display name and colour.') },
+  interop: { label: t('Import and export'), desc: t('Bring notes in or take them out as a zip of text files.') },
+  ux: { label: t('Tasks, checks and pins'), desc: t('To-dos, follow-ups, checks that a note is well formed, and the pinned notes and folders.') },
 };
 const CAT_ORDER = Object.keys(CATEGORIES);
 
 type ToolRisk = 'read' | 'write' | 'admin';
 
 const RISKS: Record<ToolRisk, { label: string; desc: string }> = {
-  read: { label: 'Reads', desc: 'Only looks at notes; changes nothing.' },
-  write: { label: 'Changes', desc: 'Creates, edits, moves or renames notes, tags or folders.' },
-  admin: { label: 'Can delete', desc: 'Can remove notes or folders, or overwrite text in many notes at once.' },
+  read: { label: t('Reads'), desc: t('Only looks at notes; changes nothing.') },
+  write: { label: t('Changes'), desc: t('Creates, edits, moves or renames notes, tags or folders.') },
+  admin: { label: t('Can delete'), desc: t('Can remove notes or folders, or overwrite text in many notes at once.') },
 };
 
 /** The "Can delete" tier: tools that remove notes or folders, or can overwrite text in many notes. */
@@ -86,7 +87,7 @@ export function toolMatches(t: ToolInfo, q: string): boolean {
 export function categoryLabel(c: string): string {
   if (CATEGORIES[c]) return CATEGORIES[c].label;
   const s = c.replace(/[_-]+/g, ' ').trim();
-  return s ? s[0].toUpperCase() + s.slice(1) : 'Other';
+  return s ? s[0].toUpperCase() + s.slice(1) : t('Other');
 }
 
 export function categoryDesc(c: string): string {
@@ -301,13 +302,13 @@ function summaryHTML(): string {
     const all = tools.filter((t) => toolRisk(t) === r);
     const n = all.filter((t) => t.enabled).length;
     return `<div class="tl3-k"><div class="lb tl-risk ${r}" title="${attr(RISKS[r].desc)}">${esc(RISKS[r].label)}</div>
-      <div class="v">${all.length}</div><div class="h">${n === all.length ? 'All on' : `${n} on`}</div></div>`;
+      <div class="v">${all.length}</div><div class="h">${n === all.length ? t('All on') : t('{n} on', { n })}</div></div>`;
   };
-  return `<div class="tl3-k"><div class="lb">Switched on</div><div class="v">${on}<small>/ ${total}</small></div>
+  return `<div class="tl3-k"><div class="lb">${t('Switched on')}</div><div class="v">${on}<small>/ ${total}</small></div>
       <div class="tl3-meter" aria-hidden="true">${Array.from({ length: TICKS }, (_, i) => `<i${i < lit ? ' class="on"' : ''}></i>`).join('')}</div></div>
     ${(Object.keys(RISKS) as ToolRisk[]).map(tier).join('')}
-    <div class="tl3-why"><span>${ICO.x}<span><b>Off for every AI.</b> A switched off tool is hidden from all of them.</span></span>
-      <span>${ICO.shield}<span><b>Less for one AI.</b> An agent's own page can allow it fewer tools.</span></span></div>`;
+    <div class="tl3-why"><span>${ICO.x}<span><b>${t('Off for every AI.')}</b> ${t('A switched off tool is hidden from all of them.')}</span></span>
+      <span>${ICO.shield}<span><b>${t('Less for one AI.')}</b> ${t("An agent's own page can allow it fewer tools.")}</span></span></div>`;
 }
 
 export async function renderTools(): Promise<void> {
@@ -316,22 +317,22 @@ export async function renderTools(): Promise<void> {
   const host = $('#view-tools');
   host.innerHTML = `<div class="cc tl3">${systemHeader(
     'tools',
-    'Tools',
-    'What connected AIs can do in Memora. A tool switched off here is off for every AI.',
-    `<button type="button" class="cc-ibtn" id="tlMore" aria-haspopup="menu" aria-label="More actions" title="More">${ICO.more}</button>`,
+    t('Tools'),
+    t('What connected AIs can do in Memora. A tool switched off here is off for every AI.'),
+    `<button type="button" class="cc-ibtn" id="tlMore" aria-haspopup="menu" aria-label="${t('More actions')}" title="${t('More')}">${ICO.more}</button>`,
   )}
-    <section class="tl3-sum" id="tlSum" aria-label="Summary"><div class="tl3-k">${skBlock('40%', 12)}<div style="height:12px"></div>${skBlock('55%', 28)}</div>${[0, 1, 2]
+    <section class="tl3-sum" id="tlSum" aria-label="${t('Summary')}"><div class="tl3-k">${skBlock('40%', 12)}<div style="height:12px"></div>${skBlock('55%', 28)}</div>${[0, 1, 2]
       .map(() => `<div class="tl3-k">${skBlock('50%', 12)}<div style="height:12px"></div>${skBlock('30%', 28)}</div>`)
       .join('')}</section>
     <div class="tl3-bar">
-      <label class="tl3-q">${ICO.search}<span class="sr-only">Search tools</span>
-        <input type="search" id="tlQ" placeholder="Search by name or what it does" autocomplete="off" value="${attr(query)}"></label>
-      <div class="tl3-pills" role="group" aria-label="Show" id="tlShow">${(['all', 'on', 'off'] as const)
-        .map((v) => `<button type="button" class="tl3-pill" data-v="${v}" aria-pressed="${show === v}">${v === 'all' ? 'All' : v === 'on' ? 'On' : 'Off'}</button>`)
+      <label class="tl3-q">${ICO.search}<span class="sr-only">${t('Search tools')}</span>
+        <input type="search" id="tlQ" placeholder="${t('Search by name or what it does')}" autocomplete="off" value="${attr(query)}"></label>
+      <div class="tl3-pills" role="group" aria-label="${t('Show')}" id="tlShow">${(['all', 'on', 'off'] as const)
+        .map((v) => `<button type="button" class="tl3-pill" data-v="${v}" aria-pressed="${show === v}">${v === 'all' ? t('All') : v === 'on' ? t('On') : t('Off')}</button>`)
         .join('')}</div>
       <span class="tl3-count" id="tlCount" aria-live="polite"></span>
     </div>
-    <div class="tl3-cols" aria-hidden="true"><span>Tool</span><span>What it does</span><span>Access</span><span>On</span></div>
+    <div class="tl3-cols" aria-hidden="true"><span>${t('Tool')}</span><span>${t('What it does')}</span><span>${t('Access')}</span><span>${t('On')}</span></div>
     <div id="tlList">${[0, 1]
       .map(
         () =>
@@ -349,24 +350,24 @@ export async function renderTools(): Promise<void> {
       e.currentTarget as HTMLElement,
       [
         {
-          label: filtered ? 'Turn on the tools shown' : 'Turn every tool on',
-          desc: offN ? `Switches ${offN} tool${offN === 1 ? '' : 's'} back on for every AI.` : 'Everything shown is already on.',
+          label: filtered ? t('Turn on the tools shown') : t('Turn every tool on'),
+          desc: offN ? tn(offN, 'Switches {n} tool back on for every AI.', 'Switches {n} tools back on for every AI.') : t('Everything shown is already on.'),
           icon: ICO.check,
           disabled: !offN,
           run: () => void flip(shown.filter((t) => !t.enabled).map((t) => t.name), true),
         },
         {
-          label: filtered ? 'Turn off the tools shown' : 'Turn every tool off',
-          desc: onN ? `Every AI loses ${onN} tool${onN === 1 ? '' : 's'} at once. Asks first.` : 'Everything shown is already off.',
+          label: filtered ? t('Turn off the tools shown') : t('Turn every tool off'),
+          desc: onN ? tn(onN, 'Every AI loses {n} tool at once. Asks first.', 'Every AI loses {n} tools at once. Asks first.') : t('Everything shown is already off.'),
           icon: ICO.pause,
           danger: true,
           disabled: !onN,
           run: () => confirmOff(shown.filter((t) => t.enabled).map((t) => t.name), !filtered),
         },
         { sep: true, label: '' },
-        { label: 'Reload the list', icon: ICO.refresh, run: () => void renderTools() },
+        { label: t('Reload the list'), icon: ICO.refresh, run: () => void renderTools() },
       ],
-      { title: 'Tools' },
+      { title: t('Tools') },
     );
   };
   const q = $('#tlQ') as HTMLInputElement;
@@ -390,9 +391,9 @@ export async function renderTools(): Promise<void> {
     if (seq !== loadSeq) return;
     $('#tlCount').textContent = '';
     $('#tlSum').hidden = true;
-    $('#tlList').innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.refresh}</span><b>Could not load the tool list</b><p>${esc(
+    $('#tlList').innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.refresh}</span><b>${t('Could not load the tool list')}</b><p>${esc(
       (e as Error).message,
-    )}</p><button type="button" class="btn" id="tlRetry">${ICO.refresh}Try again</button></div>`;
+    )}</p><button type="button" class="btn" id="tlRetry">${ICO.refresh}${t('Try again')}</button></div>`;
     $('#tlRetry').onclick = () => void renderTools();
     return;
   }
@@ -406,11 +407,13 @@ function confirmOff(names: string[], every = false): void {
   if (!names.length) return;
   const n = names.length;
   Modal.confirm(
-    every ? 'Turn every tool off?' : n === 1 ? 'Turn this tool off?' : `Turn ${n} tools off?`,
+    every ? t('Turn every tool off?') : n === 1 ? t('Turn this tool off?') : t('Turn {n} tools off?', { n }),
     every
-      ? `Every connected AI loses all ${n} tools at once and can no longer read or change your notes until you turn tools back on here.`
-      : `Every connected AI loses ${n === 1 ? 'it' : 'them'} at once. You can turn ${n === 1 ? 'it' : 'them'} back on any time.`,
-    every ? 'Turn every tool off' : 'Turn off',
+      ? t('Every connected AI loses all {n} tools at once and can no longer read or change your notes until you turn tools back on here.', { n })
+      : n === 1
+        ? t('Every connected AI loses it at once. You can turn it back on any time.')
+        : t('Every connected AI loses them at once. You can turn them back on any time.'),
+    every ? t('Turn every tool off') : t('Turn off'),
     () => {
       Modal.close();
       void flip(names, false);
@@ -430,17 +433,17 @@ function paint(): void {
   const on = tools.filter((t) => t.enabled).length;
   const shown = visible();
   $('#tlCount').innerHTML =
-    `<b>${on}</b> of ${tools.length} on` + (query || show !== 'all' ? ` &middot; ${shown.length} shown` : '');
+    t('{n} of {total} on', { n: `<b>${on}</b>`, total: tools.length }) + (query || show !== 'all' ? ` &middot; ${t('{n} shown', { n: shown.length })}` : '');
   const sum = $('#tlSum');
   sum.hidden = !tools.length;
   if (tools.length) sum.innerHTML = summaryHTML();
 
   if (!tools.length) {
-    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${icon('tools')}</span><b>No tools</b><p>The server lists no tools. Try reloading the page.</p></div>`;
+    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${icon('tools')}</span><b>${t('No tools')}</b><p>${t('The server lists no tools. Try reloading the page.')}</p></div>`;
     return;
   }
   if (!shown.length) {
-    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.search}</span><b>Nothing matches</b><p>Try another word, or show all tools.</p></div>`;
+    list.innerHTML = `<div class="tl3-card tl3-empty"><span class="ic">${ICO.search}</span><b>${t('Nothing matches')}</b><p>${t('Try another word, or show all tools.')}</p></div>`;
     return;
   }
 
@@ -455,11 +458,11 @@ function paint(): void {
       return `<section class="tl3-grp" aria-labelledby="${attr(hid)}">
         <div class="tl3-gh"><button type="button" class="tl3-tg" id="${attr(hid)}" data-tg="${attr(cat)}" aria-expanded="${open}" aria-controls="${attr(hid)}-b">
           <svg class="cc-i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-          <b>${esc(categoryLabel(cat))}</b><span class="n${n ? '' : ' none'}">${n} of ${all.length} on</span>${
+          <b>${esc(categoryLabel(cat))}</b><span class="n${n ? '' : ' none'}">${t('{n} of {total} on', { n, total: all.length })}</span>${
             categoryDesc(cat) ? `<small>${esc(categoryDesc(cat))}</small>` : ''
           }</button>
           <button type="button" class="cc-sw" role="switch" id="${attr(hid)}-sw" data-cat="${attr(cat)}" aria-checked="${state}"${busy ? ' disabled' : ''}
-            aria-label="All ${attr(categoryLabel(cat))} tools" title="${n === all.length ? 'Turn all off' : 'Turn all on'}"><i></i></button></div>
+            aria-label="${t('All {category} tools', { category: attr(categoryLabel(cat)) })}" title="${n === all.length ? t('Turn all off') : t('Turn all on')}"><i></i></button></div>
         <div class="tl3-card" id="${attr(hid)}-b"${open ? '' : ' hidden'}>${items.map(row).join('')}</div></section>`;
     })
     .join('');
@@ -472,7 +475,7 @@ function paint(): void {
       (b.onclick = () => {
         const open = b.getAttribute('aria-expanded') !== 'true';
         b.setAttribute('aria-expanded', String(open));
-        b.textContent = open ? 'Less' : 'More';
+        b.textContent = open ? t('Less') : t('More');
         b.previousElementSibling?.classList.toggle('open', open);
       }),
   );
@@ -501,20 +504,20 @@ function paint(): void {
 /** Descriptions longer than this are clamped to two lines with a "More" toggle. */
 const LONG_DESC = 150;
 
-function row(t: ToolInfo): string {
-  const id = 'tls-' + t.name.replace(/[^a-z0-9_-]+/gi, '-');
-  const code = `<code class="tl-code" title="The technical name an AI uses for it">${esc(t.name)}</code>`;
-  return `<div class="tl3-row${t.enabled ? '' : ' off'}">
-    <span class="tl3-ic" aria-hidden="true">${catIcon(t.category || 'other')}</span>
-    <div class="tl3-nm"><b id="${attr(id)}-l">${esc(toolTitle(t.name))}</b>${code}</div>
-    <div class="tl3-ds">${t.description ? `<div class="ds" id="${attr(id)}-d">${esc(t.description)}</div>` : ''}${
-      t.description.length > LONG_DESC
-        ? `<button type="button" class="tl3-more" data-more aria-expanded="false" aria-controls="${attr(id)}-d">More</button>`
+function row(tool: ToolInfo): string {
+  const id = 'tls-' + tool.name.replace(/[^a-z0-9_-]+/gi, '-');
+  const code = `<code class="tl-code" title="${t('The technical name an AI uses for it')}">${esc(tool.name)}</code>`;
+  return `<div class="tl3-row${tool.enabled ? '' : ' off'}">
+    <span class="tl3-ic" aria-hidden="true">${catIcon(tool.category || 'other')}</span>
+    <div class="tl3-nm"><b id="${attr(id)}-l">${esc(toolTitle(tool.name))}</b>${code}</div>
+    <div class="tl3-ds">${tool.description ? `<div class="ds" id="${attr(id)}-d">${esc(tool.description)}</div>` : ''}${
+      tool.description.length > LONG_DESC
+        ? `<button type="button" class="tl3-more" data-more aria-expanded="false" aria-controls="${attr(id)}-d">${t('More')}</button>`
         : ''
-    }<div class="tl3-mt">${riskChip(toolRisk(t))}${code}</div></div>
-    <span class="tl3-rk">${riskChip(toolRisk(t))}</span>
-    <button type="button" class="cc-sw" role="switch" id="${attr(id)}" data-name="${attr(t.name)}" aria-checked="${t.enabled}"
-      aria-labelledby="${attr(id)}-l"${t.description ? ` aria-describedby="${attr(id)}-d"` : ''}${pending.has(t.name) ? ' disabled' : ''}><i></i></button></div>`;
+    }<div class="tl3-mt">${riskChip(toolRisk(tool))}${code}</div></div>
+    <span class="tl3-rk">${riskChip(toolRisk(tool))}</span>
+    <button type="button" class="cc-sw" role="switch" id="${attr(id)}" data-name="${attr(tool.name)}" aria-checked="${tool.enabled}"
+      aria-labelledby="${attr(id)}-l"${tool.description ? ` aria-describedby="${attr(id)}-d"` : ''}${pending.has(tool.name) ? ' disabled' : ''}><i></i></button></div>`;
 }
 
 /** Optimistically switch tools, then confirm each with the server. */
@@ -531,28 +534,33 @@ async function flip(names: string[], enabled: boolean): Promise<void> {
   const failed: string[] = [];
   let lastErr = '';
   results.forEach((r, i) => {
-    const t = targets[i];
-    pending.delete(t.name);
+    const tool = targets[i];
+    pending.delete(tool.name);
     if (r.status === 'rejected') {
-      t.enabled = !enabled;
-      failed.push(t.name);
-      lastErr = (r.reason as Error)?.message || 'error';
+      tool.enabled = !enabled;
+      failed.push(tool.name);
+      lastErr = (r.reason as Error)?.message || t('error');
     } else if (r.value && typeof r.value.enabled === 'boolean') {
-      t.enabled = r.value.enabled;
+      tool.enabled = r.value.enabled;
     }
   });
   if (document.getElementById('tlList')) paint();
 
-  const verb = enabled ? 'on' : 'off';
   if (failed.length) {
     toast(
-      failed.length === 1 ? `Could not switch ${failed[0]}: ${lastErr}` : `${failed.length} tools could not be turned ${verb}: ${lastErr}`,
+      failed.length === 1
+        ? t('Could not switch {name}: {error}', { name: failed[0], error: lastErr })
+        : enabled
+          ? t('{n} tools could not be turned on: {error}', { n: failed.length, error: lastErr })
+          : t('{n} tools could not be turned off: {error}', { n: failed.length, error: lastErr }),
       'err',
       5200,
     );
   } else if (targets.length === 1) {
-    toast(`${toolTitle(targets[0].name)} is ${verb}`, enabled ? 'ok' : 'warn');
+    const name = toolTitle(targets[0].name);
+    toast(enabled ? t('{name} is on', { name }) : t('{name} is off', { name }), enabled ? 'ok' : 'warn');
   } else {
-    toast(`${targets.length} tools turned ${verb}`, enabled ? 'ok' : 'warn');
+    const n = targets.length;
+    toast(enabled ? t('{n} tools turned on', { n }) : t('{n} tools turned off', { n }), enabled ? 'ok' : 'warn');
   }
 }

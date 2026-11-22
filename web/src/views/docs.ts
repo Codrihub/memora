@@ -10,6 +10,7 @@ import { HEADING_PREFIX } from '../docs/markdown';
 import { SECTIONS, SOURCE_URL, findSection, pageCtx, type DocSection } from '../docs/content';
 import { DOCS_CSS } from '../docs/styles';
 import { TOOL_ROW_CSS } from './tools';
+import { t, tn } from '../i18n';
 
 const DEFAULT = SECTIONS[0].slug;
 /** `current` while the "Page not found in help" article is shown. */
@@ -95,20 +96,20 @@ function navHTML(): string {
 function buildShell(host: HTMLElement): void {
   host.innerHTML = `<div class="dc">
     <div class="dc-mbar">
-      <button type="button" class="dc-mtoggle" aria-expanded="false" aria-controls="dcSide">${icon('book')}<span id="dcMTitle">Documentation</span>${icon(
+      <button type="button" class="dc-mtoggle" aria-expanded="false" aria-controls="dcSide">${icon('book')}<span id="dcMTitle">${t('Documentation')}</span>${icon(
         'chev-down',
         'i chev',
       )}</button>
     </div>
-    <aside class="dc-side" id="dcSide" aria-label="Documentation sections">
-      <div class="dc-search" role="search">${icon('search')}<input id="dcQ" type="search" placeholder="Search docs" aria-label="Search the documentation" autocomplete="off" spellcheck="false"></div>
-      <nav class="dc-nav" id="dcNav" aria-label="Sections">${navHTML()}</nav>
+    <aside class="dc-side" id="dcSide" aria-label="${t('Documentation sections')}">
+      <div class="dc-search" role="search">${icon('search')}<input id="dcQ" type="search" placeholder="${t('Search docs')}" aria-label="${t('Search the documentation')}" autocomplete="off" spellcheck="false"></div>
+      <nav class="dc-nav" id="dcNav" aria-label="${t('Sections')}">${navHTML()}</nav>
     </aside>
     <main class="dc-main" id="dcMain" tabindex="-1">
       <article class="dc-article" id="dcArticle"></article>
     </main>
-    <aside class="dc-toc" aria-label="On this page"><p class="dc-toc-t">On this page</p><ul id="dcToc"></ul>
-      <a class="dc-top" href="#" data-top>${icon('arrow', 'i')}Back to top</a></aside>
+    <aside class="dc-toc" aria-label="${t('On this page')}"><p class="dc-toc-t">${t('On this page')}</p><ul id="dcToc"></ul>
+      <a class="dc-top" href="#" data-top>${icon('arrow', 'i')}${t('Back to top')}</a></aside>
   </div>`;
   const root = $('.dc', host);
   root.addEventListener('click', onClick);
@@ -146,16 +147,16 @@ function articleHTML(sec: DocSection, body: string): string {
   const next = SECTIONS[i + 1];
   const pager =
     prev || next
-      ? `<nav class="dc-pager" aria-label="Previous and next">${
-          prev ? `<a class="prev" href="${docUrl(prev.slug)}" data-doc="${prev.slug}" data-hash=""><small>Previous</small>${esc(prev.title)}</a>` : ''
-        }${next ? `<a class="next" href="${docUrl(next.slug)}" data-doc="${next.slug}" data-hash=""><small>Next</small>${esc(next.title)}</a>` : ''}</nav>`
+      ? `<nav class="dc-pager" aria-label="${t('Previous and next')}">${
+          prev ? `<a class="prev" href="${docUrl(prev.slug)}" data-doc="${prev.slug}" data-hash=""><small>${t('Previous')}</small>${esc(prev.title)}</a>` : ''
+        }${next ? `<a class="next" href="${docUrl(next.slug)}" data-doc="${next.slug}" data-hash=""><small>${t('Next')}</small>${esc(next.title)}</a>` : ''}</nav>`
       : '';
   const meta = sec.source
-    ? `<div class="dc-meta"><span>From <code>${esc(sec.source)}</code></span><a href="${esc(
+    ? `<div class="dc-meta"><span>${t('From {file}', { file: `<code>${esc(sec.source)}</code>` })}</span><a href="${esc(
         SOURCE_URL(sec.source),
-      )}" target="_blank" rel="noopener noreferrer">${icon('arrow')}View on GitHub</a></div>`
+      )}" target="_blank" rel="noopener noreferrer">${icon('arrow')}${t('View on GitHub')}</a></div>`
     : '<div class="dc-meta"></div>';
-  return `<p class="dc-eyebrow"><span>Documentation</span>${icon('chev-right')}<span>${esc(sec.group)}</span></p><h1>${esc(sec.title)}</h1><p class="dc-lead">${esc(sec.lead)}</p>${meta}
+  return `<p class="dc-eyebrow"><span>${t('Documentation')}</span>${icon('chev-right')}<span>${esc(sec.group)}</span></p><h1>${esc(sec.title)}</h1><p class="dc-lead">${esc(sec.lead)}</p>${meta}
     <div class="dc-body">${body}</div>${pager}`;
 }
 
@@ -257,20 +258,20 @@ function showMissing(slug: string): void {
   const first = SECTIONS[0];
   const card = (sec: DocSection): string =>
     `<a class="dc-card" href="${docUrl(sec.slug)}" data-doc="${sec.slug}" data-hash=""><b>${esc(sec.title)}</b><span>${esc(sec.lead)}</span></a>`;
-  $('#dcArticle').innerHTML = `<p class="dc-eyebrow"><span>Documentation</span></p><h1>Page not found in help</h1>
-    <p class="dc-lead">There is no help page called “${esc(slug)}”. The link may be old or mistyped.</p>
+  $('#dcArticle').innerHTML = `<p class="dc-eyebrow"><span>${t('Documentation')}</span></p><h1>${t('Page not found in help')}</h1>
+    <p class="dc-lead">${t('There is no help page called “{name}”. The link may be old or mistyped.', { name: esc(slug) })}</p>
     <div class="dc-miss-acts">
-      <a class="btn primary" href="${docUrl(first.slug)}" data-doc="${first.slug}" data-hash="">Go to ${esc(first.title)}</a>
-      <button type="button" class="btn" data-miss-search>${icon('search')}Search the help</button>
+      <a class="btn primary" href="${docUrl(first.slug)}" data-doc="${first.slug}" data-hash="">${t('Go to {page}', { page: esc(first.title) })}</a>
+      <button type="button" class="btn" data-miss-search>${icon('search')}${t('Search the help')}</button>
     </div>
-    ${sug.length ? `<div class="dc-body"><p class="dc-miss-sug">Maybe you meant</p><div class="dc-cards">${sug.map(card).join('')}</div></div>` : ''}`;
+    ${sug.length ? `<div class="dc-body"><p class="dc-miss-sug">${t('Maybe you meant')}</p><div class="dc-cards">${sug.map(card).join('')}</div></div>` : ''}`;
   $('#dcMain').scrollTop = 0;
   document.querySelectorAll<HTMLElement>('#dcNav .dc-link').forEach((a) => {
     a.classList.remove('active');
     a.removeAttribute('aria-current');
   });
-  $('#dcMTitle').textContent = 'Page not found';
-  document.title = 'Page not found · Documentation · Memora';
+  $('#dcMTitle').textContent = t('Page not found');
+  document.title = `${t('Page not found')} · ${t('Documentation')} · Memora`;
   paintToc();
   setDrawer(false);
 }
@@ -295,7 +296,7 @@ function show(slug: string, hash: string): void {
       else a.removeAttribute('aria-current');
     });
     $('#dcMTitle').innerHTML = `${esc(sec.title)} <small>· ${esc(sec.group)}</small>`;
-    document.title = sec.title + ' · Documentation · Memora';
+    document.title = sec.title + ' · ' + t('Documentation') + ' · Memora';
     paintToc();
     if (sec.mount) {
       void sec.mount(article, ctx).then(() => {
@@ -330,27 +331,27 @@ function open(slug: string, hash: string): void {
 }
 
 function onClick(e: MouseEvent): void {
-  const t = e.target as HTMLElement;
-  const copy = t.closest<HTMLElement>('[data-copy-code]');
+  const tg = e.target as HTMLElement;
+  const copy = tg.closest<HTMLElement>('[data-copy-code]');
   if (copy) {
     const text = copy.closest('.dc-code')?.querySelector('pre')?.textContent || '';
-    void copyText(text, 'Copied to the clipboard');
-    copy.textContent = 'Copied';
+    void copyText(text, t('Copied to the clipboard'));
+    copy.textContent = t('Copied');
     copy.classList.add('done');
     window.setTimeout(() => {
-      copy.textContent = 'Copy';
+      copy.textContent = t('Copy');
       copy.classList.remove('done');
     }, 1600);
     return;
   }
-  if (t.closest('[data-miss-search]')) {
+  if (tg.closest('[data-miss-search]')) {
     const q = $('#dcQ') as HTMLInputElement;
     setDrawer(true);
     q.focus();
     q.select();
     return;
   }
-  const a = t.closest<HTMLAnchorElement>('a');
+  const a = tg.closest<HTMLAnchorElement>('a');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   if (a.dataset.doc) {
     e.preventDefault();
@@ -365,7 +366,7 @@ function onClick(e: MouseEvent): void {
     } catch {
       /* sandboxed frames */
     }
-    if (a.classList.contains('dc-anchor')) void copyText(location.href, 'Link copied');
+    if (a.classList.contains('dc-anchor')) void copyText(location.href, t('Link copied'));
     setDrawer(false);
   } else if (a.dataset.top !== undefined) {
     e.preventDefault();
@@ -419,7 +420,7 @@ function paintSearch(raw: string): void {
     })
     .sort((a, b) => b.score - a.score);
   nav.innerHTML = hits.length
-    ? `<div class="dc-group"><p class="dc-group-t">${hits.length} ${hits.length === 1 ? 'section' : 'sections'}</p>${hits
+    ? `<div class="dc-group"><p class="dc-group-t">${tn(hits.length, '{n} section', '{n} sections')}</p>${hits
         .map(
           ({ e, heads }) =>
             `<a class="dc-hit" href="${docUrl(e.sec.slug)}" data-doc="${e.sec.slug}" data-hash="">${mark(e.sec.title, words)}<small>${esc(
@@ -432,7 +433,7 @@ function paintSearch(raw: string): void {
               .join('')}`,
         )
         .join('')}</div>`
-    : `<p class="dc-empty">No section mentions “${esc(raw.trim())}”.</p>`;
+    : `<p class="dc-empty">${t('No section mentions “{q}”.', { q: esc(raw.trim()) })}</p>`;
 }
 
 function onSearchKey(e: KeyboardEvent): void {

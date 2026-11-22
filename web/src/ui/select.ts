@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { attr, esc, useStyles } from '../dom';
 import { fadeScroll } from './scroll-fade';
 
@@ -9,6 +10,8 @@ export interface SelectOption {
   lead?: string;
   group?: string;
   disabled?: boolean;
+  /** A small button at the end of the row (e.g. pin as default): runs without choosing. */
+  trail?: { html: string; label: string; on?: boolean; run: () => void };
 }
 
 interface SelectConfig {
@@ -20,6 +23,8 @@ interface SelectConfig {
   placeholder?: string;
   searchable?: boolean;
   className?: string;
+  /** A class for the open list (its own look, e.g. the model picker). */
+  popClass?: string;
   /** Trusted HTML for the button content. */
   render?: (o: SelectOption | undefined) => string;
   align?: 'start' | 'end';
@@ -83,6 +88,11 @@ const CSS = `
 .ui-sel-o[aria-disabled=true]{opacity:.45;cursor:not-allowed}
 .ui-sel-o .ld{display:grid;place-items:center;flex:none}
 .ui-sel-o .tx{flex:1;min-width:0}
+.ui-sel-tr{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer;opacity:.55}
+.ui-sel-o:hover .ui-sel-tr,.ui-sel-o.on .ui-sel-tr,.ui-sel-tr.on,.ui-sel-tr:focus-visible{opacity:1}
+.ui-sel-tr:hover{background:var(--hover);color:var(--fg)}
+.ui-sel-tr.on{color:var(--accent)}
+.ui-sel-tr svg{width:14px;height:14px}
 .ui-sel-o .tx b{display:block;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ui-sel-o .tx small{display:block;font-size:12px;color:var(--muted);line-height:1.35;margin-top:1px}
 .ui-sel-ck{width:16px;height:16px;flex:none;fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;visibility:hidden}
@@ -141,7 +151,7 @@ export function createSelect(cfg: SelectConfig): Select {
     btn.innerHTML = cfg.render
       ? cfg.render(o)
       : `${o?.lead ? `<span class="ui-sel-ld">${o.lead}</span>` : ''}<span class="ui-sel-v${o ? '' : ' ph'}">${esc(
-          o?.label || cfg.placeholder || 'Choose',
+          o?.label || cfg.placeholder || t('Choose'),
         )}</span>${CHEV}`;
   };
   paintButton();
@@ -195,7 +205,9 @@ export function createSelect(cfg: SelectConfig): Select {
         o.disabled ? ' aria-disabled="true"' : ''
       }>${o.lead ? `<span class="ld">${o.lead}</span>` : ''}<span class="tx"><b>${esc(o.label)}</b>${
         o.hint ? `<small>${esc(o.hint)}</small>` : ''
-      }</span>${CHECK}</li>`;
+      }</span>${
+        o.trail ? `<button type="button" class="ui-sel-tr${o.trail.on ? ' on' : ''}" data-tr="${i}" aria-label="${attr(o.trail.label)}" title="${attr(o.trail.label)}" aria-pressed="${!!o.trail.on}">${o.trail.html}</button>` : ''
+      }${CHECK}</li>`;
     });
     list.innerHTML = html;
     (pop.querySelector('.ui-sel-empty') as HTMLElement).hidden = shown.length > 0;
@@ -308,14 +320,14 @@ export function createSelect(cfg: SelectConfig): Select {
     scrim = document.createElement('div');
     scrim.className = 'ui-sel-scrim' + (sheet ? ' dim' : '');
     pop = document.createElement('div');
-    pop.className = 'ui-sel-pop' + (sheet ? ' sheet' : '');
-    pop.innerHTML = `<div class="ui-sel-h"><i aria-hidden="true"></i><b aria-hidden="true">${esc(cfg.label)}</b><button type="button" class="ui-sel-x" aria-label="Close" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>${
+    pop.className = 'ui-sel-pop' + (sheet ? ' sheet' : '') + (cfg.popClass ? ' ' + cfg.popClass : '');
+    pop.innerHTML = `<div class="ui-sel-h"><i aria-hidden="true"></i><b aria-hidden="true">${esc(cfg.label)}</b><button type="button" class="ui-sel-x" aria-label="${t('Close')}" title="${t('Close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>${
       cfg.searchable
-        ? `<label class="ui-sel-q">${SEARCH}<span class="sr-only">Filter</span><input type="text" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="${attr(
+        ? `<label class="ui-sel-q">${SEARCH}<span class="sr-only">${t('Filter')}</span><input type="text" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="${attr(
             uid,
-          )}-lb" placeholder="Search" autocomplete="off" spellcheck="false"></label>`
+          )}-lb" placeholder="${t('Search')}" autocomplete="off" spellcheck="false"></label>`
         : ''
-    }<ul class="ui-sel-lb" role="listbox" id="${attr(uid)}-lb" aria-label="${attr(cfg.label)}" tabindex="-1"></ul><p class="ui-sel-empty" hidden>Nothing matches</p>${
+    }<ul class="ui-sel-lb" role="listbox" id="${attr(uid)}-lb" aria-label="${attr(cfg.label)}" tabindex="-1"></ul><p class="ui-sel-empty" hidden>${t('Nothing matches')}</p>${
       cfg.footer ? `<button type="button" class="ui-sel-foot">${cfg.footer.icon || ''}<span>${esc(cfg.footer.label)}</span></button>` : ''
     }`;
     list = pop.querySelector('.ui-sel-lb');
@@ -349,6 +361,12 @@ export function createSelect(cfg: SelectConfig): Select {
     });
     list!.addEventListener('mousedown', (e) => e.preventDefault());
     list!.addEventListener('click', (e) => {
+      const tr = (e.target as HTMLElement).closest<HTMLElement>('[data-tr]');
+      if (tr) {
+        e.stopPropagation();
+        options[Number(tr.dataset.tr)]?.trail?.run();
+        return;
+      }
       const li = (e.target as HTMLElement).closest<HTMLElement>('.ui-sel-o');
       if (li) choose(Number(li.dataset.i));
     });

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useStyles } from '../dom';
 import { onNavigate } from '../router';
 import type { Page } from '../state';
@@ -49,7 +50,7 @@ export function initMapEnter(): void {
       void wait(350).then(() => host.querySelector<HTMLElement>('[data-z=fit]')?.click());
       return;
     }
-    const done = veil(host, page === 'canvas' ? 'Tidying the board…' : 'Laying out the graph…');
+    const done = veil(host, page === 'canvas' ? t('Tidying the board…') : t('Laying out the graph…'));
     void (async () => {
       await wait(VEIL_MS);
       if (page === 'canvas') {

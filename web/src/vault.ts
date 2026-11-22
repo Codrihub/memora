@@ -8,6 +8,7 @@ import { loadCore } from './core-data';
 import { clearTagIndex } from './storage';
 import { state } from './state';
 import type { SettingsInfo, VaultSwitchResult } from './types';
+import { t, tn } from './i18n';
 
 const CSS = `
 .vf-suggest{display:flex;align-items:center;gap:12px;padding:11px 13px;margin-bottom:14px;
@@ -53,8 +54,8 @@ function isAbsolutePath(p: string): boolean {
 
 export function notesLabel(n: number | undefined | null): string {
   const c = n || 0;
-  if (!c) return 'no notes yet';
-  return c === 1 ? '1 note' : `${c} notes`;
+  if (!c) return t('no notes yet');
+  return tn(c, '{n} note', '{n} notes');
 }
 
 export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
@@ -63,16 +64,16 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
   host.innerHTML = `<form class="vf" id="${o.id}Form" novalidate>
     ${
       showSuggest
-        ? `<div class="vf-suggest"><div class="vf-suggest-txt"><div class="vf-suggest-k">Suggested</div>
-        <div class="vf-suggest-v">${esc(o.suggested)}<small>from MEMORA_VAULT</small></div></div>
-        <button type="button" class="btn" id="${o.id}Use">Use suggested</button></div>`
+        ? `<div class="vf-suggest"><div class="vf-suggest-txt"><div class="vf-suggest-k">${t('Suggested')}</div>
+        <div class="vf-suggest-v">${esc(o.suggested)}<small>${t('from {env}', { env: 'MEMORA_VAULT' })}</small></div></div>
+        <button type="button" class="btn" id="${o.id}Use">${t('Use suggested')}</button></div>`
         : ''
     }
-    <div class="field" style="margin-bottom:10px"><label for="${o.id}Path">Folder on the server</label>
+    <div class="field" style="margin-bottom:10px"><label for="${o.id}Path">${t('Folder on the server')}</label>
       <input id="${o.id}Path" class="vf-path" type="text" placeholder="/srv/memora/vault"
         autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="${o.id}Err">
-      <span class="hint">An absolute path, such as /srv/memora/vault or, on Windows, C:\\Users\\you\\memora.</span></div>
-    <label class="switch"><input type="checkbox" id="${o.id}Create"> Create the folder if it is missing</label>
+      <span class="hint">${t('An absolute path, such as {posix} or, on Windows, {win}.', { posix: '/srv/memora/vault', win: 'C:\\Users\\you\\memora' })}</span></div>
+    <label class="switch"><input type="checkbox" id="${o.id}Create"> ${t('Create the folder if it is missing')}</label>
     <div id="${o.id}Err" role="alert" aria-live="polite"></div>
     <div class="vf-row"><button type="submit" class="btn primary" id="${o.id}Go">${esc(o.submitLabel)}</button></div>
   </form>`;
@@ -99,9 +100,9 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
 
   const submit = async (path: string): Promise<void> => {
     path = path.trim();
-    if (!path) return showError('Enter the folder path.');
+    if (!path) return showError(t('Enter the folder path.'));
     if (!isAbsolutePath(path)) {
-      return showError('Use an absolute path, starting with / (or C:\\ or \\\\server\\share on Windows).');
+      return showError(t('Use an absolute path, starting with / (or {drive} or {unc} on Windows).', { drive: 'C:\\', unc: '\\\\server\\share' }));
     }
     if (o.confirm) {
       const ok = await o.confirm(path, create.checked);
@@ -112,7 +113,7 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
     go.disabled = true;
     if (use) use.disabled = true;
     const label = go.textContent;
-    go.textContent = 'Checking...';
+    go.textContent = t('Checking...');
     vaultSwitch.pending = true;
     try {
       const res = await apiPost<VaultSwitchResult>('/api/settings/vault', {
@@ -121,7 +122,7 @@ export function mountVaultForm(host: HTMLElement, o: VaultFormOptions): void {
       });
       await o.onDone(res);
     } catch (e) {
-      showError((e as Error).message || 'The folder could not be used.');
+      showError((e as Error).message || t('The folder could not be used.'));
       input.focus();
     } finally {
       vaultSwitch.pending = false;

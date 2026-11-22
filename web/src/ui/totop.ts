@@ -1,5 +1,6 @@
 // On phones row buttons sit at the right edge, so the button is a centred pill shown only while scrolling up.
 
+import { t } from '../i18n';
 import { useStyles } from '../dom';
 import { state } from '../state';
 import { onNavigate } from '../router';
@@ -121,10 +122,10 @@ export function initToTop(): void {
   btn.className = 'totop';
   btn.tabIndex = -1;
   btn.setAttribute('aria-hidden', 'true');
-  btn.setAttribute('aria-label', 'Back to top');
-  btn.title = 'Back to top';
+  btn.setAttribute('aria-label', t('Back to top'));
+  btn.title = t('Back to top');
   btn.innerHTML =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span>Top</span>';
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span>${t('Top')}</span>`;
   btn.onclick = () => {
     const sc = current || fallback();
     if (!sc) return;

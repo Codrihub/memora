@@ -330,7 +330,7 @@ fn models_text(store: &Store) -> String {
 }
 
 /// A model the owner named, as `provider/model`: an exact id, or the name without its provider
-/// (`hai-gpt` for `9r/hai-gpt`), or a model's label; any letter case. `None` when no usable
+/// (the model id without its provider), or a model's label; any letter case. `None` when no usable
 /// model matches, or the name fits several.
 pub(crate) fn find_model(store: &Store, name: &str) -> Option<String> {
     let name = name.trim();
@@ -708,6 +708,18 @@ pub(crate) fn delegate_all(
     if mine.is_empty() {
         return out;
     }
+    // Switched off for Mnemo: a model that still calls it (from earlier turns) is refused.
+    if super::tools_off(store, false).contains(DELEGATE) {
+        for c in &mine {
+            out.insert(
+                c.id.clone(),
+                Err(format!(
+                    "Not done: the owner switched {DELEGATE} off for {NAME} (Settings, {NAME})."
+                )),
+            );
+        }
+        return out;
+    }
     for c in &mine {
         if tx
             .send(
@@ -797,9 +809,15 @@ fn run_sub(
     // delegating, or the owner's memory, which belong to Mnemo itself.
     let mut tools: Vec<ToolDef> = super::tool_defs(st)
         .into_iter()
-        .filter(|t| t.name != super::ASK_OWNER && t.name != super::VIEW_IMAGE)
+        .filter(|t| {
+            t.name != super::ASK_OWNER
+                && t.name != super::VIEW_IMAGE
+                && t.name != super::UPDATE_PLAN
+        })
         .collect();
     tools.extend(defs(st, store, true));
+    let off = super::tools_off(store, true);
+    tools.retain(|t| !off.contains(&t.name));
     tools.push(ask_main_def());
     let system = format!(
         "You are {agent_name}, a sub-agent of {NAME}, the assistant inside Memora, the owner's notes vault.\n\
@@ -1232,7 +1250,7 @@ mod tests {
         use memora_state::assistant::ListedModel;
         let s = Store::open_memory().unwrap();
         s.save_provider(
-            "9r",
+            "acme",
             "custom",
             "Router",
             "http://x/v1",
@@ -1249,38 +1267,38 @@ mod tests {
             max_output: None,
         };
         s.replace_fetched(
-            "9r",
+            "acme",
             &[
-                m("hai-gpt", ""),
-                m("HAI/gpt-6-sol", "GPT Six"),
-                m("HAI/gpt-6.1-sol", ""),
-                m("hai-flash", ""),
+                m("smart", ""),
+                m("team/gpt-x", "GPT Six"),
+                m("team/gpt-x2", ""),
+                m("quick", ""),
             ],
         )
         .unwrap();
-        s.set_pref("default_model", &json!("9r/hai-gpt")).unwrap();
-        s.set_pref(super::super::FALLBACKS, &json!(["9r/hai-flash"]))
+        s.set_pref("default_model", &json!("acme/smart")).unwrap();
+        s.set_pref(super::super::FALLBACKS, &json!(["acme/quick"]))
             .unwrap();
-        assert_eq!(find_model(&s, "9r/hai-gpt").as_deref(), Some("9r/hai-gpt"));
+        assert_eq!(find_model(&s, "acme/smart").as_deref(), Some("acme/smart"));
         assert_eq!(
-            find_model(&s, "HAI-GPT").as_deref(),
-            Some("9r/hai-gpt"),
+            find_model(&s, "SMART").as_deref(),
+            Some("acme/smart"),
             "the name without its provider"
         );
         assert_eq!(
             find_model(&s, "gpt six").as_deref(),
-            Some("9r/HAI/gpt-6-sol"),
+            Some("acme/team/gpt-x"),
             "a label"
         );
         assert_eq!(find_model(&s, "gpt"), None);
         assert_eq!(asked_model(&s, &json!({})), Ok(None));
         assert_eq!(
-            asked_model(&s, &json!({"model": "hai-gpt"})),
-            Ok(Some("9r/hai-gpt".into()))
+            asked_model(&s, &json!({"model": "smart"})),
+            Ok(Some("acme/smart".into()))
         );
-        let e = asked_model(&s, &json!({"model": "gpt-6"})).unwrap_err();
+        let e = asked_model(&s, &json!({"model": "gpt-x"})).unwrap_err();
         assert!(
-            e.contains("9r/HAI/gpt-6-sol") && e.contains("9r/HAI/gpt-6.1-sol"),
+            e.contains("acme/team/gpt-x") && e.contains("acme/team/gpt-x2"),
             "{e}"
         );
         assert!(asked_model(&s, &json!({"model": "llama"}))
@@ -1288,7 +1306,7 @@ mod tests {
             .contains("no model"));
         let t = models_text(&s);
         assert!(
-            t.contains("default model: 9r/hai-gpt") && t.contains("Fallback models: 9r/hai-flash"),
+            t.contains("default model: acme/smart") && t.contains("Fallback models: acme/quick"),
             "{t}"
         );
         assert!(t.contains("(4, the full list)"), "{t}");

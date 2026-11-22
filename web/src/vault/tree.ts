@@ -1,6 +1,7 @@
 // Folder tree with the Pinned section: mounted in the vault view and, through mountTree(), in the shell sidebar.
 
 import { el, esc, attr } from '../dom';
+import { t, tn } from '../i18n';
 import { Modal } from '../modal';
 import { noteTitle, state } from '../state';
 import { stemTitle } from '../format';
@@ -108,8 +109,8 @@ window.addEventListener('memora:sections-ask', () => announceSections());
 
 /** The "more" button at the end of a tree row: opens the same menu as a right-click. */
 function moreBtn(name: string): string {
-  const label = `More actions for ${name}`;
-  return `<button class="vx-row-more" type="button" tabindex="-1" aria-label="${attr(label)}" title="More actions">${I.more}</button>`;
+  const label = t('More actions for {name}', { name });
+  return `<button class="vx-row-more" type="button" tabindex="-1" aria-label="${attr(label)}" title="${attr(t('More actions'))}">${I.more}</button>`;
 }
 
 /** A group of rows one level down; `--gx` places its branch line under the parent's chevron. */
@@ -122,7 +123,7 @@ function branchGroup(depth: number): HTMLElement {
 
 /** Past the indent cap, a row shows its level instead of moving further right. */
 function depthBadge(depth: number): string {
-  return showsDepthBadge(depth) ? `<span class="vx-lvl" title="Level ${depth}" aria-hidden="true">${depth}</span>` : '';
+  return showsDepthBadge(depth) ? `<span class="vx-lvl" title="${attr(t('Level {n}', { n: depth }))}" aria-hidden="true">${depth}</span>` : '';
 }
 
 /** A move confirmed: what it moves, from where, to which full path. */
@@ -131,14 +132,16 @@ function moveBody(d: DragPayload, dest: string): string {
   const paths = d.kind === 'notes' ? d.paths : d.kind === 'folder' ? [d.path] : [d.item.key];
   const froms = Array.from(new Set(paths.map((p) => (folder ? p : dirOf(p)))));
   const show = (p: string): string => (p === '' ? ROOT_LABEL : p);
-  const from = folder ? show(paths[0]) : froms.length === 1 ? show(froms[0]) : `${froms.length} folders`;
+  const from = folder ? show(paths[0]) : froms.length === 1 ? show(froms[0]) : tn(froms.length, '{n} folder', '{n} folders');
   const to = folder ? show((dest ? dest + '/' : '') + baseName(paths[0])) : show(dest);
   const what = folder
-    ? 'The folder moves with everything in it; links to its notes are updated and pins follow.'
-    : `${count > 1 ? 'They move' : 'It moves'}; links to ${count > 1 ? 'them' : 'it'} are updated and pins follow.`;
+    ? t('The folder moves with everything in it; links to its notes are updated and pins follow.')
+    : count > 1
+      ? t('They move; links to them are updated and pins follow.')
+      : t('It moves; links to it are updated and pins follow.');
   return `<div class="vx-mv">
-    <div class="vx-mv-row"><span class="vx-mv-k">From</span><span class="vx-mv-p mono" title="${attr(from)}">${esc(from)}</span></div>
-    <div class="vx-mv-row"><span class="vx-mv-k">To</span><span class="vx-mv-p mono to" title="${attr(to)}">${esc(to)}</span></div>
+    <div class="vx-mv-row"><span class="vx-mv-k">${t('From')}</span><span class="vx-mv-p mono" title="${attr(from)}">${esc(from)}</span></div>
+    <div class="vx-mv-row"><span class="vx-mv-k">${t('To')}</span><span class="vx-mv-p mono to" title="${attr(to)}">${esc(to)}</span></div>
   </div><p class="panel-sub" style="margin:10px 0 0">${what}</p>`;
 }
 
@@ -470,7 +473,7 @@ export class TreeView {
     const items = pinnedItems();
     const sec = el('section', 'vx-sec vx-pins');
     sec.classList.toggle('folded', !secOpen.pins);
-    sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.pin}<span>Pinned</span><span class="vx-sec-count">${items.length}</span></span><span class="vx-fold-caret">${I.caret}</span></header>`;
+    sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.pin}<span>${t('Pinned')}</span><span class="vx-sec-count">${items.length}</span></span><span class="vx-fold-caret">${I.caret}</span></header>`;
     foldable(sec.querySelector('header')!, secOpen.pins, () => setSections({ pins: !secOpen.pins }));
     // The drop slot always shows (even while folded), so Pinned clearly takes drags.
     const list = el('div', 'vx-pin-list');
@@ -478,7 +481,7 @@ export class TreeView {
     items.forEach((it, i) => list.appendChild(this.pinRow(it, i)));
     sec.appendChild(foldBody(list, secOpen.pins));
     sec.appendChild(
-      el('div', 'vx-pin-empty' + (items.length ? ' slim' : ''), items.length ? `${I.pin}Drag a note here to pin it` : 'Drag notes or folders here to pin them'),
+      el('div', 'vx-pin-empty' + (items.length ? ' slim' : ''), items.length ? `${I.pin}${t('Drag a note here to pin it')}` : t('Drag notes or folders here to pin them')),
     );
 
     // HTML5 drop (drags from the note list); drags that start in the tree use pointer events (onPress).
@@ -540,15 +543,15 @@ export class TreeView {
     if (active) row.classList.add('active');
     const label = isNote ? noteTitle(it.key) : baseName(it.key);
     const sub = missing
-      ? `<span class="vx-pin-sub vx-pin-miss">Not found</span>`
+      ? `<span class="vx-pin-sub vx-pin-miss">${t('Not found')}</span>`
       : isNote
         ? ''
         : `<span class="vx-pin-sub">${esc(dirOf(it.key) || '')}</span>`;
     row.innerHTML = `<span class="vx-pin-ico" style="color:${attr(color)}">${
       isNote ? I.note : folderGlyph(folderIcon(it.key), false)
-    }</span><span class="vx-pin-name" title="${attr(missing ? it.key + ' (not found)' : it.key)}">${esc(label)}</span>${sub}<button class="vx-pin-x" aria-label="${
-      missing ? 'Remove pin' : 'Unpin'
-    } ${attr(label)}" title="${missing ? 'Remove pin' : 'Unpin'}">${I.close}</button>`;
+    }</span><span class="vx-pin-name" title="${attr(missing ? t('{path} (not found)', { path: it.key }) : it.key)}">${esc(label)}</span>${sub}<button class="vx-pin-x" aria-label="${attr(
+      missing ? t('Remove pin {name}', { name: label }) : t('Unpin {name}', { name: label }),
+    )}" title="${attr(missing ? t('Remove pin') : t('Unpin'))}">${I.close}</button>`;
     const open = (): void => {
       if (missing) return;
       if (isNote) nav.openNote(it.key);
@@ -565,7 +568,7 @@ export class TreeView {
         return;
       }
       unpin(it);
-      undoToast(`Removed the pin of "${label}"`, () => pinAt(it, i), 'info', 4000);
+      undoToast(t('Removed the pin of "{name}"', { name: label }), () => pinAt(it, i), 'info', 4000);
     };
     row.querySelector<HTMLButtonElement>('.vx-pin-x')!.onclick = (e) => {
       e.stopPropagation();
@@ -593,11 +596,11 @@ export class TreeView {
   private folderSection(): HTMLElement {
     const sec = el('section', 'vx-sec vx-folders');
     sec.classList.toggle('folded', !secOpen.folders);
-    sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.folder}<span>Folders</span></span>
+    sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.folder}<span>${t('Folders')}</span></span>
       <span class="vx-sec-acts">
-        <button class="vx-icon-btn" data-act="note" title="New note" aria-label="New note">${I.newNote}</button>
-        <button class="vx-icon-btn" data-act="folder" title="New folder" aria-label="New folder">${I.newFolder}</button>
-        <button class="vx-icon-btn" data-act="collapse" title="Close all subfolders" aria-label="Close all subfolders">${FOLD_ALL}</button>
+        <button class="vx-icon-btn" data-act="note" title="${attr(t('New note'))}" aria-label="${attr(t('New note'))}">${I.newNote}</button>
+        <button class="vx-icon-btn" data-act="folder" title="${attr(t('New folder'))}" aria-label="${attr(t('New folder'))}">${I.newFolder}</button>
+        <button class="vx-icon-btn" data-act="collapse" title="${attr(t('Close all subfolders'))}" aria-label="${attr(t('Close all subfolders'))}">${FOLD_ALL}</button>
       </span><span class="vx-fold-caret">${I.caret}</span></header>`;
     // Section-wide buttons: start at the root, not at the last folder opened.
     sec.querySelector<HTMLElement>('[data-act=note]')!.onclick = () => nav.newNote('');
@@ -606,7 +609,7 @@ export class TreeView {
     foldable(sec.querySelector('header')!, secOpen.folders, () => setSections({ folders: !secOpen.folders }));
     const tree = el('div', 'vx-tree');
     tree.setAttribute('role', 'tree');
-    tree.setAttribute('aria-label', 'Folders');
+    tree.setAttribute('aria-label', t('Folders'));
     tree.setAttribute('aria-multiselectable', 'true');
     const root = folderTree();
     tree.appendChild(this.folderRow(root));
@@ -640,7 +643,7 @@ export class TreeView {
     if (this.opts.showNotes) for (const n of f.notes) inner.appendChild(this.noteRow(n, f.depth + 1));
     if (!inner.childElementCount) {
       // An empty folder still opens, and says so (trees that hide notes say there are no subfolders).
-      const what = f.notes.length ? 'No subfolders' : 'Empty folder';
+      const what = f.notes.length ? t('No subfolders') : t('Empty folder');
       const empty = el('div', 'vx-row vx-tempty', `<span class="vx-twist none"></span>${depthBadge(f.depth + 1)}<span class="vx-fname">${what}</span>`);
       empty.style.setProperty('--depth', String(indentLevel(f.depth + 1)));
       inner.appendChild(empty);
@@ -908,9 +911,9 @@ export class TreeView {
       title: confirmTitle(d, dest),
       body: moveBody(d, dest),
       actions: [
-        { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
+        { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
         {
-          label: 'Move',
+          label: t('Move'),
           cls: 'primary',
           run: async () => {
             Modal.close();

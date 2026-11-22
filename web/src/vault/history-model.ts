@@ -1,5 +1,7 @@
 // DOM-free model for the version history panel (kept separate so it can be tested).
 
+import { t } from '../i18n';
+
 export interface Version {
   rev: string;
   /** `git log %ai`: "2026-10-24 10:42:07 +0700". */
@@ -36,10 +38,10 @@ const startOfDay = (ms: number): number => {
 
 /** "Today", "Yesterday", "Mon, Oct 20", or "Oct 20, 2025" in another year. */
 export function dayLabel(ms: number, now = Date.now()): string {
-  if (!ms) return 'Unknown date';
+  if (!ms) return t('Unknown date');
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86400000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
+  if (days === 0) return t('Today');
+  if (days === 1) return t('Yesterday');
   const d = new Date(ms);
   if (d.getFullYear() === new Date(now).getFullYear())
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -53,10 +55,12 @@ export function timeLabel(ms: number): string {
 
 /** "today at 10:42 AM", "yesterday at …", "Oct 20 at …" for the preview banner. */
 export function whenLabel(ms: number, now = Date.now()): string {
-  if (!ms) return 'an unknown date';
-  const day = dayLabel(ms, now);
-  const d = day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day.replace(/^[A-Z][a-z]{2}, /, '');
-  return `${d} at ${timeLabel(ms)}`;
+  if (!ms) return t('an unknown date');
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86400000);
+  const time = timeLabel(ms);
+  if (days === 0) return t('today at {time}', { time });
+  if (days === 1) return t('yesterday at {time}', { time });
+  return t('{day} at {time}', { day: dayLabel(ms, now).replace(/^[A-Z][a-z]{2}, /, ''), time });
 }
 
 /** Revisions in day groups, newest first (the order the server sends). */
@@ -73,32 +77,32 @@ export function groupByDay(list: Version[], now = Date.now()): { label: string; 
 
 /** Who made a revision: "You" for the owner, else the agent's (or git user's) name. */
 export function whoOf(v: Pick<Version, 'author' | 'owner'>): string {
-  if (v.owner) return 'You';
-  return (v.author || '').trim() || 'Unknown';
+  if (v.owner) return t('You');
+  return (v.author || '').trim() || t('Unknown');
 }
 
 /** What a revision did, in plain words, from the commit message Memora writes. */
 export function actionOf(message: string): string {
   const m = (message || '').trim();
   const rules: [RegExp, string][] = [
-    [/^edit:/, 'Edited'],
-    [/^create:/, 'Created'],
-    [/^restore from trash:/, 'Restored from the Trash'],
-    [/^restore:/, 'Restored an older version'],
-    [/^rename:/, 'Renamed'],
-    [/^move:/, 'Moved'],
-    [/^trash:/, 'Moved to the Trash'],
-    [/^delete:/, 'Deleted'],
-    [/^import:/, 'Imported'],
-    [/^bulk replace/, 'Find and replace'],
-    [/^snapshot:/, 'Snapshot'],
-    [/^(move|rename|delete)\b.*folder|^move (part of )?the contents/, 'Folder moved'],
-    [/^merge/, 'Merged'],
+    [/^edit:/, t('Edited')],
+    [/^create:/, t('Created')],
+    [/^restore from trash:/, t('Restored from the Trash')],
+    [/^restore:/, t('Restored an older version')],
+    [/^rename:/, t('Renamed')],
+    [/^move:/, t('Moved')],
+    [/^trash:/, t('Moved to the Trash')],
+    [/^delete:/, t('Deleted')],
+    [/^import:/, t('Imported')],
+    [/^bulk replace/, t('Find and replace')],
+    [/^snapshot:/, t('Snapshot')],
+    [/^(move|rename|delete)\b.*folder|^move (part of )?the contents/, t('Folder moved')],
+    [/^merge/, t('Merged')],
   ];
   for (const [re, label] of rules) if (re.test(m)) return label;
-  if (m === '(hidden)') return 'Changed';
+  if (m === '(hidden)') return t('Changed');
   // Changes made outside Memora keep their own message.
-  return m ? m.charAt(0).toUpperCase() + m.slice(1) : 'Changed';
+  return m ? m.charAt(0).toUpperCase() + m.slice(1) : t('Changed');
 }
 
 /** The revision a `restore: <path>@<rev>` commit brought back, or null. */

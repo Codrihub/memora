@@ -1,7 +1,8 @@
 // Notes page: an optional folder tree beside one main area, either the folder browser or the note reader.
 // Both layers stay mounted so going back to a folder keeps its scroll position.
 
-import { $, el, esc, useStyles } from '../dom';
+import { $, attr, el, esc, useStyles } from '../dom';
+import { t } from '../i18n';
 import { hooks } from '../hooks';
 import { allNotes, noteTitle, state } from '../state';
 import { I } from './icons';
@@ -69,11 +70,11 @@ function build(host: HTMLElement): void {
   host.innerHTML = '';
   shell = el('div', 'vx-shell');
   shell.style.setProperty('--tree-w', prefs.treeW + 'px');
-  shell.innerHTML = `<div class="vx-pane vx-pane-tree" aria-label="Folders"></div>
-    <div class="vx-resizer" data-r="tree" role="separator" aria-orientation="vertical" aria-label="Resize folders" tabindex="0"></div>
+  shell.innerHTML = `<div class="vx-pane vx-pane-tree" aria-label="${attr(t('Folders'))}"></div>
+    <div class="vx-resizer" data-r="tree" role="separator" aria-orientation="vertical" aria-label="${attr(t('Resize folders'))}" tabindex="0"></div>
     <div class="vx-main">
-      <div class="vx-pane vx-pane-list" aria-label="Folder"></div>
-      <div class="vx-pane vx-pane-note" aria-label="Note"></div>
+      <div class="vx-pane vx-pane-list" aria-label="${attr(t('Folder'))}"></div>
+      <div class="vx-pane vx-pane-note" aria-label="${attr(t('Note'))}"></div>
     </div>`;
   host.appendChild(shell);
   tree = new TreeView(shell.querySelector<HTMLElement>('.vx-pane-tree')!, {
@@ -136,9 +137,9 @@ async function drawNote(quiet = false): Promise<void> {
     setPane('note');
     h.innerHTML = emptyState(
       I.note,
-      'Note not found',
-      `“${esc(noteTitle(missing))}” may have been moved, renamed or deleted. Deleted notes wait in the Trash.`,
-      '<span><button class="btn sm primary" data-home>Show all notes</button> <button class="btn sm ghost" data-trash>Open Trash</button></span>',
+      t('Note not found'),
+      t('“{name}” may have been moved, renamed or deleted. Deleted notes wait in the Trash.', { name: esc(noteTitle(missing)) }),
+      `<span><button class="btn sm primary" data-home>${t('Show all notes')}</button> <button class="btn sm ghost" data-trash>${t('Open Trash')}</button></span>`,
     ).replace('vx-empty', 'vx-empty vx-missing');
     h.querySelector<HTMLElement>('[data-trash]')!.onclick = () => nav.openTrash();
     h.querySelector<HTMLElement>('[data-home]')!.onclick = () => {
@@ -160,8 +161,8 @@ function setCrumb(): void {
   crumb.textContent = state.note
     ? noteTitle(state.note)
     : prefs.folder
-      ? 'Notes / ' + prefs.folder
-      : 'Notes';
+      ? t('Notes') + ' / ' + prefs.folder
+      : t('Notes');
 }
 
 /** Hide the page's own tree on phones, or when the shell sidebar already shows one. */
@@ -340,19 +341,19 @@ nav.newNote = (folder) => {
     await openInPane(p, true);
   };
   Modal.open({
-    title: 'New note',
+    title: t('New note'),
     body:
-      Modal.field('Title', 'vxName', { value: '' }) +
-      `<div class="field"><label id="vxWhereL">Location</label><div id="vxWhere"></div></div>`,
+      Modal.field(t('Title'), 'vxName', { value: '' }) +
+      `<div class="field"><label id="vxWhereL">${t('Location')}</label><div id="vxWhere"></div></div>`,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      { label: 'Create', cls: 'primary', run: create },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      { label: t('Create'), cls: 'primary', run: create },
     ],
     onOpen: (body) => {
       picker = createFolderPicker({
         folders,
         value: start,
-        label: 'Location',
+        label: t('Location'),
         onPick: () => void create(body),
       });
       body.querySelector('#vxWhere')?.appendChild(picker.el);
@@ -370,7 +371,7 @@ nav.newNote = (folder) => {
 };
 
 nav.newFolder = (parent) => {
-  promptName(parent ? `New folder in ${parent}` : 'New folder', 'Folder name', '', async (name) => {
+  promptName(parent ? t('New folder in {parent}', { parent }) : t('New folder'), t('Folder name'), '', async (name) => {
     const p = await createFolder(parent, name);
     if (p) selectFolder(p);
   });

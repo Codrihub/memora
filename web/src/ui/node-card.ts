@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { apiGet } from '../api';
 import { on } from '../bus';
 import { attr, esc, useStyles } from '../dom';
@@ -160,7 +161,7 @@ export class NodeCard {
     sheet();
     this.sheetMq.addEventListener('change', sheet, { signal: this.off.signal });
     this.el.setAttribute('role', 'dialog');
-    this.el.setAttribute('aria-label', 'Note details');
+    this.el.setAttribute('aria-label', t('Note details'));
     host.root.appendChild(this.el);
     for (const ev of ['pointerdown', 'wheel', 'dblclick', 'contextmenu'] as const)
       this.el.addEventListener(ev, (e) => e.stopPropagation(), { passive: ev === 'wheel' });
@@ -246,29 +247,29 @@ export class NodeCard {
     this.path = path;
     if (!reopen) this.tab = 'preview';
     if (!reopen) this.expand();
-    this.el.setAttribute('aria-label', `Note ${name}`);
+    this.el.setAttribute('aria-label', t('Note {name}', { name }));
     this.el.innerHTML = `<div class="nc-grab" aria-hidden="true"></div>
       <div class="nc-head"><div class="nc-crumb"><i style="--c:${attr(color)}"></i><span title="${attr(path)}">${esc(this.crumb(folder))}</span></div>
         ${extras.map((x) => `<button type="button" class="nc-ib${x.on ? ' on' : ''}" data-x="${attr(x.id)}" title="${attr(x.label)}" aria-label="${attr(x.label)}">${x.icon}</button>`).join('')}
-        <button type="button" class="nc-ib" data-a="menu" title="More: rename, move, pin, delete" aria-label="More actions">${ICON.more}</button>
-        <button type="button" class="nc-ib nc-fold-b" data-a="fold" title="Fold or open the details" aria-label="Fold or open the details">${ICON.up}</button>
-        <button type="button" class="nc-ib" data-a="close" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>
+        <button type="button" class="nc-ib" data-a="menu" title="${t('More: rename, move, pin, delete')}" aria-label="${t('More actions')}">${ICON.more}</button>
+        <button type="button" class="nc-ib nc-fold-b" data-a="fold" title="${t('Fold or open the details')}" aria-label="${t('Fold or open the details')}">${ICON.up}</button>
+        <button type="button" class="nc-ib" data-a="close" title="${t('Close (Esc)')}" aria-label="${t('Close')}">${ICON.close}</button></div>
       <h2 class="nc-title">${esc(name)}</h2>
       <div class="nc-fold"><div class="nc-fold-in">
       <dl class="nc-props">
-        <dt>Links</dt><dd>${out.length} out · ${inc.length} in</dd>
-        <dt>Edited</dt><dd data-meta></dd>
-        <dt>Tags</dt><dd class="nc-tags nc-tagrow">${this.tagChips(cached?.tags.length ? cached.tags : tags)}</dd>
+        <dt>${t('Links')}</dt><dd>${t('{out} out · {in} in', { out: out.length, in: inc.length })}</dd>
+        <dt>${t('Edited')}</dt><dd data-meta></dd>
+        <dt>${t('Tags')}</dt><dd class="nc-tags nc-tagrow">${this.tagChips(cached?.tags.length ? cached.tags : tags)}</dd>
       </dl>
       <div class="nc-acts">
-        <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open note</button>
-        ${this.host.focusNode ? `<button type="button" class="nc-act" data-a="node" title="Center the map on this note">${ICON.target}Focus</button>` : ''}
-        <button type="button" class="nc-act" data-a="folder" title="Show its whole folder">${ICON.folder}Folder</button>
+        <button type="button" class="nc-act pri" data-a="open">${ICON.open}${t('Open note')}</button>
+        ${this.host.focusNode ? `<button type="button" class="nc-act" data-a="node" title="${t('Center the map on this note')}">${ICON.target}${t('Focus')}</button>` : ''}
+        <button type="button" class="nc-act" data-a="folder" title="${t('Show its whole folder')}">${ICON.folder}${t('Folder')}</button>
       </div>
       <div class="nc-tabs" role="tablist">
-        <button type="button" role="tab" data-tab="preview">Preview</button>
-        <button type="button" role="tab" data-tab="out">Links out<span>${out.length}</span></button>
-        <button type="button" role="tab" data-tab="in">Backlinks<span>${inc.length}</span></button>
+        <button type="button" role="tab" data-tab="preview">${t('Preview')}</button>
+        <button type="button" role="tab" data-tab="out">${t('Links out')}<span>${out.length}</span></button>
+        <button type="button" role="tab" data-tab="in">${t('Backlinks')}<span>${inc.length}</span></button>
       </div>
       <div class="nc-body" role="tabpanel"></div>
       </div></div>`;
@@ -283,7 +284,7 @@ export class NodeCard {
       body.innerHTML =
         this.tab === 'preview'
           ? `<div class="nc-prev note-body">${preview}</div>`
-          : this.rows(this.tab === 'out' ? out : inc, this.tab === 'out' ? 'This note links to nothing yet.' : 'Nothing links here yet.');
+          : this.rows(this.tab === 'out' ? out : inc, this.tab === 'out' ? t('This note links to nothing yet.') : t('Nothing links here yet.'));
       this.wireRows(body);
       body.querySelector<HTMLElement>('[data-a=more]')?.addEventListener('click', () => hooks.openNote(path));
     };
@@ -325,7 +326,7 @@ export class NodeCard {
           this.wireTags(host);
         }
         const text = d.html || (d.content ? `<pre>${esc(d.content)}</pre>` : '');
-        const fresh = text ? clipPreview(text) : '<div class="nc-empty">This note is empty.</div>';
+        const fresh = text ? clipPreview(text) : `<div class="nc-empty">${t('This note is empty.')}</div>`;
         this.doc = { path, preview: fresh, meta: metaText, tags: d.tags || [] };
         if (fresh === preview) return;
         preview = fresh;
@@ -335,7 +336,7 @@ export class NodeCard {
         if (seq !== this.seq) return;
         this.loading = null;
         if (cached) return;
-        preview = `<div class="nc-empty">Could not load the preview: ${esc(e.message)}</div>`;
+        preview = `<div class="nc-empty">${t('Could not load the preview: {error}', { error: esc(e.message) })}</div>`;
         if (this.tab === 'preview') paint();
       });
   }
@@ -356,29 +357,29 @@ export class NodeCard {
     const items = this.host.folderItems(folder);
     const n = count ?? items.length;
     const root = !folder || folder === 'Root';
-    const name = root ? 'Vault root' : folder.split('/').pop() || folder;
+    const name = root ? t('Vault root') : folder.split('/').pop() || folder;
     const parent = root ? '' : folder.split('/').slice(0, -1).join('/');
     if (!again) this.expand();
-    this.el.setAttribute('aria-label', `Folder ${name}`);
+    this.el.setAttribute('aria-label', t('Folder {name}', { name }));
     this.el.innerHTML = `<div class="nc-grab" aria-hidden="true"></div>
-      <div class="nc-head"><div class="nc-crumb"><i class="sq" style="--c:${attr(color)}"></i><span>${esc(parent ? this.crumb(parent) : 'Vault')}</span></div>
-        ${root ? '' : `<button type="button" class="nc-ib" data-a="menu" title="More: rename, move, colour, delete" aria-label="More actions">${ICON.more}</button>`}
-        <button type="button" class="nc-ib nc-fold-b" data-a="fold" title="Fold or open the details" aria-label="Fold or open the details">${ICON.up}</button>
-        <button type="button" class="nc-ib" data-a="close" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>
+      <div class="nc-head"><div class="nc-crumb"><i class="sq" style="--c:${attr(color)}"></i><span>${esc(parent ? this.crumb(parent) : t('Vault'))}</span></div>
+        ${root ? '' : `<button type="button" class="nc-ib" data-a="menu" title="${t('More: rename, move, colour, delete')}" aria-label="${t('More actions')}">${ICON.more}</button>`}
+        <button type="button" class="nc-ib nc-fold-b" data-a="fold" title="${t('Fold or open the details')}" aria-label="${t('Fold or open the details')}">${ICON.up}</button>
+        <button type="button" class="nc-ib" data-a="close" title="${t('Close (Esc)')}" aria-label="${t('Close')}">${ICON.close}</button></div>
       <h2 class="nc-title">${esc(name)}</h2>
       <div class="nc-fold"><div class="nc-fold-in">
-      <dl class="nc-props"><dt>Kind</dt><dd>Folder</dd><dt>Notes</dt><dd>${n}</dd></dl>
+      <dl class="nc-props"><dt>${t('Kind')}</dt><dd>${t('Folder')}</dd><dt>${t('Notes')}</dt><dd>${n}</dd></dl>
       <div class="nc-acts">
-        <button type="button" class="nc-act pri" data-a="open">${ICON.open}Open folder</button>
-        <button type="button" class="nc-act" data-a="folder" title="Show the whole folder">${ICON.target}Focus</button>
+        <button type="button" class="nc-act pri" data-a="open">${ICON.open}${t('Open folder')}</button>
+        <button type="button" class="nc-act" data-a="folder" title="${t('Show the whole folder')}">${ICON.target}${t('Focus')}</button>
         ${
           this.host.onlyFolder
-            ? `<button type="button" class="nc-act" data-a="only" title="Hide every other folder">${ICON.only}Only this</button>`
-            : `<button type="button" class="nc-act" data-a="new" title="New note in this folder">${ICON.plus}New note</button>`
+            ? `<button type="button" class="nc-act" data-a="only" title="${t('Hide every other folder')}">${ICON.only}${t('Only this')}</button>`
+            : `<button type="button" class="nc-act" data-a="new" title="${t('New note in this folder')}">${ICON.plus}${t('New note')}</button>`
         }
       </div>
-      <div class="nc-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">Notes<span>${n}</span></button></div>
-      <div class="nc-body" role="tabpanel">${this.rows(items, 'No notes directly in this folder.')}</div>
+      <div class="nc-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">${t('Notes')}<span>${n}</span></button></div>
+      <div class="nc-body" role="tabpanel">${this.rows(items, t('No notes directly in this folder.'))}</div>
       </div></div>`;
     this.wireRows(this.el.querySelector('.nc-body')!);
     this.wireCommon([]);
@@ -400,11 +401,11 @@ export class NodeCard {
   }
 
   private crumb(folder: string): string {
-    return !folder || folder === 'Root' ? 'Vault root' : folder.split('/').join(' / ');
+    return !folder || folder === 'Root' ? t('Vault root') : folder.split('/').join(' / ');
   }
 
   private tagChips(tags: string[]): string {
-    return tags.map((t) => `<button type="button" class="nc-tag" data-tag="${attr(t)}" title="${attr(this.host.tagLabel ? this.host.tagLabel(t) : `Find #${t} on the map`)}">#${esc(t)}</button>`).join('');
+    return tags.map((tg) => `<button type="button" class="nc-tag" data-tag="${attr(tg)}" title="${attr(this.host.tagLabel ? this.host.tagLabel(tg) : t('Find #{tag} on the map', { tag: tg }))}">#${esc(tg)}</button>`).join('');
   }
 
   private rows(list: CardLink[], empty: string): string {
@@ -417,7 +418,7 @@ export class NodeCard {
             l.degree !== undefined ? `<em>${l.degree}</em>` : ''
           }</button>`,
       )
-      .join('')}</div>${list.length > 80 ? `<div class="nc-empty">and ${list.length - 80} more</div>` : ''}`;
+      .join('')}</div>${list.length > 80 ? `<div class="nc-empty">${t('and {n} more', { n: list.length - 80 })}</div>` : ''}`;
   }
 
   private wireRows(host: HTMLElement): void {
@@ -493,5 +494,5 @@ function clipPreview(html: string): string {
   }
   if (keep >= blocks.length) return html;
   blocks.slice(keep).forEach((b) => b.remove());
-  return box.innerHTML + '<button type="button" class="nc-more" data-a="more">Read more</button>';
+  return box.innerHTML + `<button type="button" class="nc-more" data-a="more">${t('Read more')}</button>`;
 }

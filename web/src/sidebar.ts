@@ -16,6 +16,7 @@ import { DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import { icon } from './ui/icons';
 import { fadeScroll } from './ui/scroll-fade';
 import type { NoteRef } from './types';
+import { t, tn } from './i18n';
 
 const MOBILE = '(max-width: 760px)';
 
@@ -86,7 +87,7 @@ function wireLibrary(): void {
   const toggle = (): void => {
     window.dispatchEvent(new Event('memora:sections-toggle'));
   };
-  head.title = 'Fold or unfold Pinned and Folders';
+  head.title = t('Fold or unfold Pinned and Folders');
   head.onclick = toggle;
   if (fold) fold.onclick = toggle;
   window.addEventListener('memora:sections', (e) => {
@@ -105,12 +106,12 @@ export function setLiveAgents(n: number): void {
   $$<HTMLElement>('[data-live-badge]').forEach((b) => {
     b.textContent = txt;
     b.classList.toggle('on', n > 0);
-    b.setAttribute('aria-label', n + (n === 1 ? ' agent working' : ' agents working'));
-    b.title = n + (n === 1 ? ' agent working now' : ' agents working now');
+    b.setAttribute('aria-label', tn(n, '{n} agent working', '{n} agents working'));
+    b.title = tn(n, '{n} agent working now', '{n} agents working now');
   });
   // The footer shows vault size; while agents run it alternates with their count.
   const sub = $('#profileSub');
-  if (n > 0) $('#profileLive').textContent = `${txt} agent${n === 1 ? '' : 's'} running`;
+  if (n > 0) $('#profileLive').textContent = tn(n, '{n} agent running', '{n} agents running', { n: txt });
   sub.classList.toggle('live', n > 0);
   if (n > 0 && !flipTimer) {
     sub.classList.add('flip');
@@ -129,7 +130,7 @@ function railMode(): boolean {
 function paintCollapse(): void {
   const collapsed = $('#app').classList.contains('side-collapsed');
   const b = $('#sideCollapse');
-  const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  const label = collapsed ? t('Expand sidebar') : t('Collapse sidebar');
   b.setAttribute('aria-label', label);
   const text = b.querySelector('.sc-label');
   if (text) text.textContent = label;
@@ -155,7 +156,7 @@ function wireStatsPop(): void {
     if (!pop.hidden) return close();
     hideTip();
     const n = (v: number | undefined): string => (v || 0).toLocaleString();
-    pop.innerHTML = `<h4>Your notes</h4><dl><dt>Notes</dt><dd>${n(state.stats.notes)}</dd><dt>Links</dt><dd>${n(state.stats.links)}</dd><dt>Folders</dt><dd>${n(folderCount())}</dd></dl>`;
+    pop.innerHTML = `<h4>${t('Your notes')}</h4><dl><dt>${t('Notes')}</dt><dd>${n(state.stats.notes)}</dd><dt>${t('Links')}</dt><dd>${n(state.stats.links)}</dd><dt>${t('Folders')}</dt><dd>${n(folderCount())}</dd></dl>`;
     const r = btn.getBoundingClientRect();
     pop.style.left = $('#sidebar').getBoundingClientRect().right + 8 + 'px';
     pop.style.top = '0px';
@@ -362,11 +363,11 @@ function buildTabbar(openProfile: (anchor: HTMLElement) => void): void {
   const bar = $('#tabbar');
   // "More" opens the account sheet with every other page.
   const tabs: TabDef[] = [
-    { id: 'home', label: 'Overview', icon: 'overview', page: 'home' },
-    { id: 'nodes', label: 'Notes', icon: 'note', page: 'vault' },
-    { id: 'brain', label: 'Brain', icon: 'brain', page: 'brain' },
-    { id: 'logs', label: 'Activity', icon: 'activity', page: 'logs' },
-    { id: 'profile', label: 'More', icon: 'more' },
+    { id: 'home', label: t('Overview'), icon: 'overview', page: 'home' },
+    { id: 'nodes', label: t('Notes'), icon: 'note', page: 'vault' },
+    { id: 'brain', label: t('Brain'), icon: 'brain', page: 'brain' },
+    { id: 'logs', label: t('Activity'), icon: 'activity', page: 'logs' },
+    { id: 'profile', label: t('More'), icon: 'more' },
   ];
   bar.innerHTML = '';
   const dock = el('div', 'tb-dock');
@@ -556,7 +557,7 @@ function fallbackTree(): void {
     );
   });
   if (!names.length) {
-    host.appendChild(el('div', 'tree-empty', q ? 'No folder or note matches.' : 'No folders yet.'));
+    host.appendChild(el('div', 'tree-empty', q ? t('No folder or note matches.') : t('No folders yet.')));
     renderPinned();
     return;
   }
@@ -586,15 +587,15 @@ function folderNode(folder: string, q: string): HTMLElement {
 
   const acts = el('span', 'f-acts');
   acts.appendChild(pinBtn('folder', folder));
-  acts.appendChild(smallBtn(ICO_MOVE, 'Move notes in folder', () => hooks.openMoveFolder(folder)));
-  acts.appendChild(smallBtn(ICO_GEO, 'Set folder color', () => hooks.openFolderColor(folder)));
-  acts.appendChild(smallBtn(ICO_TRASH, 'Delete folder', () => hooks.confirmDeleteFolder(folder)));
+  acts.appendChild(smallBtn(ICO_MOVE, t('Move notes in folder'), () => hooks.openMoveFolder(folder)));
+  acts.appendChild(smallBtn(ICO_GEO, t('Set folder color'), () => hooks.openFolderColor(folder)));
+  acts.appendChild(smallBtn(ICO_TRASH, t('Delete folder'), () => hooks.confirmDeleteFolder(folder)));
   row.appendChild(acts);
   box.appendChild(row);
 
   const body = el('div', 'f-body');
   const inner = el('div', 'f-body-inner');
-  if (!notes.length) inner.appendChild(el('div', 'tree-empty', 'Empty'));
+  if (!notes.length) inner.appendChild(el('div', 'tree-empty', t('Empty')));
   for (const n of notes) inner.appendChild(noteNode(n));
   body.appendChild(inner);
   box.appendChild(body);
@@ -656,7 +657,7 @@ function noteNode(note: NoteRef): HTMLElement {
 
   const acts = el('span', 'n-acts');
   acts.appendChild(pinBtn('note', note.path));
-  acts.appendChild(smallBtn(ICO_MOVE, 'Move note', () => hooks.openMoveNote(note.path)));
+  acts.appendChild(smallBtn(ICO_MOVE, t('Move note'), () => hooks.openMoveNote(note.path)));
   row.appendChild(acts);
 
   row.onclick = (e) => {
@@ -687,7 +688,7 @@ function smallBtn(ico: string, title: string, fn: () => void): HTMLElement {
 
 function pinBtn(kind: 'note' | 'folder', key: string): HTMLElement {
   const pinned = isPinned(kind, key);
-  const b = smallBtn(pinned ? ICO_PIN_OFF : ICO_PIN, pinned ? 'Unpin' : 'Pin', () => {
+  const b = smallBtn(pinned ? ICO_PIN_OFF : ICO_PIN, pinned ? t('Unpin') : t('Pin'), () => {
     togglePin({ kind, key });
     renderTree();
   });
@@ -701,14 +702,14 @@ function renderPinned(): void {
   const items = pinnedItems().map((p) => ({ ...p, label: p.kind === 'note' ? noteTitle(p.key) : p.key }));
   $('#pinCount').textContent = String(items.length);
   if (!items.length) {
-    host.appendChild(el('div', 'tree-empty', 'Pin notes or folders for quick access.'));
+    host.appendChild(el('div', 'tree-empty', t('Pin notes or folders for quick access.')));
     return;
   }
   for (const it of items) {
     const row = el('div', 'pin-row');
     const open = el('button', 'pin-open');
     open.type = 'button';
-    open.innerHTML = `<span class="p-tag">${it.kind}</span><span class="p-name" title="${attr(
+    open.innerHTML = `<span class="p-tag">${t(it.kind)}</span><span class="p-name" title="${attr(
       it.key,
     )}">${esc(it.label)}</span>`;
     open.onclick = () => {
@@ -724,8 +725,8 @@ function renderPinned(): void {
     };
     const x = el('button', 'p-x', '&#10005;');
     x.type = 'button';
-    x.title = 'Unpin';
-    x.setAttribute('aria-label', 'Unpin ' + it.label);
+    x.title = t('Unpin');
+    x.setAttribute('aria-label', t('Unpin {name}', { name: it.label }));
     x.onclick = () => {
       unpin(it);
       renderTree();

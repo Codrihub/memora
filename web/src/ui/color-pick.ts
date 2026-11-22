@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { attr, esc, useStyles } from '../dom';
 import { AGENT_PALETTE } from '../control/agents';
 
@@ -33,15 +34,15 @@ export function colorPickHTML(id: string, value: string, opts: { auto?: boolean;
   const v = normHex(value) || '';
   const custom = v && !presets.includes(v);
   return `<div class="cpk" id="${attr(id)}" role="radiogroup" data-value="${attr(v)}">
-    ${opts.auto ? `<button type="button" class="cpk-sw auto" role="radio" data-v="" aria-checked="${!v}" title="Automatic (from the name)" aria-label="Automatic color"></button>` : ''}
+    ${opts.auto ? `<button type="button" class="cpk-sw auto" role="radio" data-v="" aria-checked="${!v}" title="${t('Automatic (from the name)')}" aria-label="${t('Automatic color')}"></button>` : ''}
     ${presets
       .map(
         (c) =>
           `<button type="button" class="cpk-sw" role="radio" data-v="${attr(c)}" style="--c:${attr(c)}" aria-checked="${c === v}" aria-label="${attr(c)}" title="${attr(c)}"></button>`,
       )
       .join('')}
-    <label class="cpk-box${custom ? ' on' : ''}" style="--c:${esc(v || '#888888')}" title="Any color"><input type="color" value="${esc(v || '#2dd4bf')}" aria-label="Pick any color"></label>
-    <input class="cpk-hex" type="text" value="${esc(v)}" placeholder="${opts.auto ? 'auto' : '#rrggbb'}" maxlength="7" aria-label="Hex color" spellcheck="false">
+    <label class="cpk-box${custom ? ' on' : ''}" style="--c:${esc(v || '#888888')}" title="${t('Any color')}"><input type="color" value="${esc(v || '#2dd4bf')}" aria-label="${t('Pick any color')}"></label>
+    <input class="cpk-hex" type="text" value="${esc(v)}" placeholder="${opts.auto ? t('auto') : '#rrggbb'}" maxlength="7" aria-label="${t('Hex color')}" spellcheck="false">
   </div>`;
 }
 

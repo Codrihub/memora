@@ -1,3 +1,4 @@
+import { t, tn } from '../i18n';
 import { api } from '../api';
 import { attr, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
@@ -200,7 +201,7 @@ export function lockMark(kind: PrivacyKind, path: string): string {
   }
   styles();
   return marks.has(markKey(kind, path))
-    ? `<span class="pv-lock" title="Private: hidden from some agents" aria-label="Private">${LOCK}</span>`
+    ? `<span class="pv-lock" title="${t('Private: hidden from some agents')}" aria-label="${t('Private')}">${LOCK}</span>`
     : '';
 }
 
@@ -210,11 +211,11 @@ const baseName = (p: string): string => (p.split('/').pop() || p).replace(/\.md$
 function names(list: string[], max = 3): string {
   const b = list.map((n) => `<b>${esc(n)}</b>`);
   if (b.length <= 1) return b.join('');
-  if (b.length <= max) return b.slice(0, -1).join(', ') + ' and ' + b[b.length - 1];
-  return b.slice(0, max - 1).join(', ') + ` and ${b.length - max + 1} more`;
+  if (b.length <= max) return t('{list} and {last}', { list: b.slice(0, -1).join(', '), last: b[b.length - 1] });
+  return t('{list} and {n} more', { list: b.slice(0, max - 1).join(', '), n: b.length - max + 1 });
 }
 
-const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+const agentsN = (n: number): string => tn(n, '{n} agent', '{n} agents');
 
 /** Node paths include .md. */
 export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void> {
@@ -223,10 +224,10 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
   try {
     d = await api<Described>(`/api/privacy/path?kind=${kind}&path=${encodeURIComponent(path)}`);
   } catch (e) {
-    toast('Could not load privacy settings: ' + (e as Error).message, 'err');
+    toast(t('Could not load privacy settings: {error}', { error: (e as Error).message }), 'err');
     return;
   }
-  const what = kind === 'node' ? 'node' : 'folder';
+  const what = kind === 'node' ? t('node') : t('folder');
   const name = baseName(d.path) || d.path;
 
   const lockedBy = new Map<string, string>();
@@ -268,9 +269,9 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
     return Array.from(byFolder)
       .map(
         ([p, who]) =>
-          `<div class="pv-note">${I_INFO}<span>The folder <b>${esc(p)}</b> already hides this ${what} from ${names(who)}. <button type="button" data-folder="${attr(
+          `<div class="pv-note">${I_INFO}<span>${t('The folder {folder} already hides this {what} from {names}.', { folder: `<b>${esc(p)}</b>`, what, names: names(who) })} <button type="button" data-folder="${attr(
             p,
-          )}">Edit folder rule</button></span></div>`,
+          )}">${t('Edit folder rule')}</button></span></div>`,
       )
       .join('');
   })();
@@ -281,14 +282,14 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
 
   const help =
     kind === 'folder'
-      ? 'Covers everything inside it, now and later · You always see everything'
-      : 'Rules follow the node when it’s renamed or moved · You always see everything';
+      ? t('Covers everything inside it, now and later · You always see everything')
+      : t('Rules follow the node when it’s renamed or moved · You always see everything');
 
   const rowHTML = (a: AgentState): string => {
     const by = lockedBy.get(a.id);
-    const sub = by ? `Hidden by folder ${esc(by)}` : esc(a.id) + (a.enabled ? '' : ' · switched off');
+    const sub = by ? t('Hidden by folder {folder}', { folder: esc(by) }) : esc(a.id) + (a.enabled ? '' : ` · ${t('switched off')}`);
     const ctrl = by
-      ? `<input type="checkbox" disabled aria-label="${attr(a.name)}, hidden by folder ${attr(by)}"><span class="pv-box">${LOCK}</span>`
+      ? `<input type="checkbox" disabled aria-label="${attr(t('{name}, hidden by folder {folder}', { name: a.name, folder: by }))}"><span class="pv-box">${LOCK}</span>`
       : `<input type="checkbox" data-id="${attr(a.id)}" aria-label="${attr(a.name)}"><span class="pv-box">${I_CHECK}</span>`;
     return `<label class="pv-row${by ? ' locked' : ''}" data-q="${attr((a.name + ' ' + a.id).toLowerCase())}">${avatarHTML(
       a.name,
@@ -305,10 +306,10 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
       .map(
         ([p, list]) =>
           `<div class="pv-row locked" data-q="${attr(list.map((a) => a.name + ' ' + a.id).join(' ').toLowerCase())}" aria-label="${attr(
-            `${list.length} agents hidden by folder ${p}`,
-          )}"><span class="pv-cnt" aria-hidden="true">${list.length}</span><span class="pv-who"><b>${list.length === 1 ? esc(list[0].name) : `${list.length} agents`}</b><small>Hidden by folder ${esc(
+            tn(list.length, '{n} agent hidden by folder {folder}', '{n} agents hidden by folder {folder}', { folder: p }),
+          )}"><span class="pv-cnt" aria-hidden="true">${list.length}</span><span class="pv-who"><b>${list.length === 1 ? esc(list[0].name) : agentsN(list.length)}</b><small>${t('Hidden by folder {folder}', { folder: esc(
             p,
-          )}</small></span><span class="pv-box">${LOCK}</span></div>`,
+          ) })}</small></span><span class="pv-box">${LOCK}</span></div>`,
       )
       .join('');
   };
@@ -316,22 +317,22 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
   const body = document.createElement('div');
   body.className = 'pv';
   body.innerHTML = `${notice}
-    <fieldset class="pv-q" aria-label="Who can see this ${what}?">
-      ${card('all', I_ALL, 'All agents', 'No restriction. Every agent can read it.')}
-      ${card('deny', I_EXCEPT, 'All agents except…', 'Hide it from the agents you pick.')}
-      ${card('allow_only', I_ONLY, 'Only these agents', 'Only the agents you pick. New agents can’t see it.')}
+    <fieldset class="pv-q" aria-label="${attr(t('Who can see this {what}?', { what }))}">
+      ${card('all', I_ALL, t('All agents'), t('No restriction. Every agent can read it.'))}
+      ${card('deny', I_EXCEPT, t('All agents except…'), t('Hide it from the agents you pick.'))}
+      ${card('allow_only', I_ONLY, t('Only these agents'), t('Only the agents you pick. New agents can’t see it.'))}
     </fieldset>
     <div class="pv-pick" aria-hidden="true"><div>
       <div class="pv-pick-h"><span id="pvPickLbl"></span><span class="pv-count"></span></div>
       ${
         free.length > 6
-          ? `<label class="pv-search">${I_SEARCH}<input type="search" placeholder="Search agents" aria-label="Search agents" autocomplete="off" spellcheck="false"></label>`
+          ? `<label class="pv-search">${I_SEARCH}<input type="search" placeholder="${t('Search agents')}" aria-label="${t('Search agents')}" autocomplete="off" spellcheck="false"></label>`
           : ''
       }
       <div class="pv-list" role="group" aria-labelledby="pvPickLbl">${
         d.agents.length
-          ? free.map(rowHTML).join('') + lockedHTML() + `<div class="pv-empty" hidden>No agent matches.</div>`
-          : `<div class="pv-empty">No agents yet. Agents are API keys and connected apps; add one on the Agents page.</div>`
+          ? free.map(rowHTML).join('') + lockedHTML() + `<div class="pv-empty" hidden>${t('No agent matches.')}</div>`
+          : `<div class="pv-empty">${t('No agents yet. Agents are API keys and connected apps; add one on the Agents page.')}</div>`
       }</div>
     </div></div>
     <div class="pv-sum" role="status" aria-live="polite"></div>
@@ -344,13 +345,13 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
 
   const summary = (): { html: string; priv: boolean } => {
     const total = d.agents.length;
-    if (!total) return { html: `No agents yet, so only you can see this ${what}.`, priv: false };
+    if (!total) return { html: t('No agents yet, so only you can see this {what}.', { what }), priv: false };
     const seeing = d.agents.filter(sees);
-    const lockedNote = locked.length ? ` ${locked.length === 1 ? 'One is' : `${locked.length} are`} hidden by the folder rule.` : '';
+    const lockedNote = locked.length ? ` ${tn(locked.length, 'One is hidden by the folder rule.', '{n} are hidden by the folder rule.')}` : '';
     if (choice === 'allow_only') {
-      if (!seeing.length) return { html: `No agent can see this ${what}, including agents added later.${lockedNote}`, priv: true };
+      if (!seeing.length) return { html: t('No agent can see this {what}, including agents added later.', { what }) + lockedNote, priv: true };
       return {
-        html: `Only ${names(seeing.map((a) => a.name))} can see this ${what}. Every other agent, including ones added later, is blocked.${lockedNote}`,
+        html: t('Only {names} can see this {what}. Every other agent, including ones added later, is blocked.', { names: names(seeing.map((a) => a.name)), what }) + lockedNote,
         priv: true,
       };
     }
@@ -359,21 +360,23 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
       return {
         html:
           choice === 'deny'
-            ? `Nothing hidden yet: tick the agents to hide it from. Right now ${total === 1 ? 'the only agent' : `all ${total} agents`} can see it.`
+            ? total === 1
+              ? t('Nothing hidden yet: tick the agents to hide it from. Right now the only agent can see it.')
+              : t('Nothing hidden yet: tick the agents to hide it from. Right now all {n} agents can see it.', { n: total })
             : total === 1
-              ? `The only agent, ${names([d.agents[0].name])}, can see this ${what}.`
-              : `All ${total} agents can see this ${what}.`,
+              ? t('The only agent, {name}, can see this {what}.', { name: names([d.agents[0].name]), what })
+              : t('All {n} agents can see this {what}.', { n: total, what }),
         priv: false,
       };
     }
     const parts: string[] = [];
-    if (hiddenHere.length) parts.push(`Hidden from ${names(hiddenHere.map((a) => a.name))}.`);
+    if (hiddenHere.length) parts.push(t('Hidden from {names}.', { names: names(hiddenHere.map((a) => a.name)) }));
     parts.push(
       seeing.length === total
-        ? `All ${plural(total, 'agent')} can see it.`
+        ? tn(total, 'All {n} agent can see it.', 'All {n} agents can see it.')
         : seeing.length
-          ? `${seeing.length} of ${plural(total, 'agent')} can see it.`
-          : `No agent can see it.`,
+          ? tn(total, '{k} of {n} agent can see it.', '{k} of {n} agents can see it.', { k: seeing.length })
+          : t('No agent can see it.'),
     );
     return { html: parts.join(' ') + lockedNote, priv: true };
   };
@@ -386,13 +389,13 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
     pick.querySelectorAll<HTMLElement>('input').forEach((i) => (i.tabIndex = open ? 0 : -1));
     if (open) {
       const set = picked[choice as Mode];
-      (body.querySelector('#pvPickLbl') as HTMLElement).textContent = choice === 'deny' ? 'Hide it from:' : 'Who may see it:';
+      (body.querySelector('#pvPickLbl') as HTMLElement).textContent = choice === 'deny' ? t('Hide it from:') : t('Who may see it:');
       for (const b of boxes) b.checked = set.has(b.dataset.id!);
       const n = free.filter((a) => set.has(a.id)).length;
       (body.querySelector('.pv-count') as HTMLElement).textContent = free.length
         ? choice === 'deny'
-          ? n ? `${n} hidden` : 'none hidden'
-          : `${n} of ${free.length} selected`
+          ? n ? t('{n} hidden', { n }) : t('none hidden')
+          : t('{n} of {total} selected', { n, total: free.length })
         : '';
     }
     const s = summary();
@@ -450,15 +453,15 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
       Modal.close();
       toast(
         eff === 'all'
-          ? `“${name}” is visible to every agent`
+          ? t('“{name}” is visible to every agent', { name })
           : choice === 'deny'
-            ? `“${name}” is now hidden from ${plural(picked.deny.size, 'agent')}`
-            : `Only ${plural(picked.allow_only.size, 'agent')} can now see “${name}”`,
+            ? tn(picked.deny.size, '“{name}” is now hidden from {n} agent', '“{name}” is now hidden from {n} agents', { name })
+            : tn(picked.allow_only.size, 'Only {n} agent can now see “{name}”', 'Only {n} agents can now see “{name}”', { name }),
         'ok',
       );
       void loadPrivacyMarks();
     } catch (e) {
-      toast('Could not save: ' + (e as Error).message, 'err');
+      toast(t('Could not save: {error}', { error: (e as Error).message }), 'err');
     } finally {
       // Modal re-enables the button after the run.
       setTimeout(() => {
@@ -468,12 +471,12 @@ export async function openPrivacy(kind: PrivacyKind, path: string): Promise<void
   };
 
   Modal.open({
-    title: `Who can see “${name}”?`,
+    title: t('Who can see “{name}”?', { name }),
     sub: d.path,
     body,
     actions: [
-      { label: 'Cancel', cls: 'ghost', run: () => Modal.close() },
-      { label: 'Apply', cls: 'primary', run: apply },
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      { label: t('Apply'), cls: 'primary', run: apply },
     ],
     onOpen: (bodyEl) => {
       const box = bodyEl.parentElement as HTMLElement;

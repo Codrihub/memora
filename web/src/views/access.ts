@@ -10,6 +10,7 @@ import { SYS_PAGE_CSS } from './tools';
 import { ICO_EDIT, ICO_INFO, ICO_TRASH } from './agents-data';
 import { skBlock } from '../ui/skeleton';
 import type { AccessRule, AccessStack, AccessTestResult, OkResult } from '../types';
+import { t, tn } from '../i18n';
 
 interface Rule extends AccessRule {
   id?: string;
@@ -24,37 +25,37 @@ type Action = 'allow' | 'block';
 const KINDS: { v: Kind; l: string; short: string; field: string; ph: string; hint: string }[] = [
   {
     v: 'ip',
-    l: 'One address',
-    short: 'One device or connection.',
-    field: 'Internet address (IP)',
+    l: t('One address'),
+    short: t('One device or connection.'),
+    field: t('Internet address (IP)'),
     ph: '203.0.113.7',
-    hint: 'One device or connection, such as 203.0.113.7. Searching "what is my IP" shows yours.',
+    hint: t('One device or connection, such as 203.0.113.7. Searching "what is my IP" shows yours.'),
   },
   {
     v: 'cidr',
-    l: 'A whole network',
-    short: 'Every device on a home or office network.',
-    field: 'Network (address/size)',
+    l: t('A whole network'),
+    short: t('Every device on a home or office network.'),
+    field: t('Network (address/size)'),
     ph: '192.168.1.0/24',
-    hint: 'Every device on a home or office network, written as address/size: 192.168.1.0/24 covers 192.168.1.0 to 192.168.1.255.',
+    hint: t('Every device on a home or office network, written as address/size: 192.168.1.0/24 covers 192.168.1.0 to 192.168.1.255.'),
   },
   {
     v: 'range',
-    l: 'A run of addresses',
-    short: 'Every address from one to another.',
-    field: 'First and last address',
+    l: t('A run of addresses'),
+    short: t('Every address from one to another.'),
+    field: t('First and last address'),
     ph: '203.0.113.10-203.0.113.50',
-    hint: 'Every address from the first to the last, joined by a dash.',
+    hint: t('Every address from the first to the last, joined by a dash.'),
   },
   {
     v: 'domain',
-    l: 'A web address',
-    short: 'The name typed in the browser to open Memora.',
-    field: 'Web address (domain)',
-    ph: 'memory.example.com',
-    hint: 'The name typed in the browser to open Memora, such as memory.example.com. *.example.com covers every name ending in example.com.',
+    l: t('A web address'),
+    short: t('The name typed in the browser to open Memora.'),
+    field: t('Web address (domain)'),
+    ph: 'memora.example.com',
+    hint: t('The name typed in the browser to open Memora, such as memora.example.com. *.example.com covers every name ending in example.com.'),
   },
-  { v: 'all', l: 'Everyone', short: 'Every request. Put it last, to catch whatever the rules above did not.', field: '', ph: '', hint: 'Every request. Put it last, to catch whatever the rules above did not.' },
+  { v: 'all', l: t('Everyone'), short: t('Every request. Put it last, to catch whatever the rules above did not.'), field: '', ph: '', hint: t('Every request. Put it last, to catch whatever the rules above did not.') },
 ];
 
 const CSS = `
@@ -212,41 +213,41 @@ function ruleAction(r: Rule): Action {
   return (r.action || r.mode) === 'block' ? 'block' : 'allow';
 }
 function kindLabel(k: Kind): string {
-  return { ip: 'One address', cidr: 'Whole network', range: 'Run of addresses', domain: 'Web address', all: 'Everyone' }[k];
+  return { ip: t('One address'), cidr: t('Whole network'), range: t('Run of addresses'), domain: t('Web address'), all: t('Everyone') }[k];
 }
 
 /** "Block 203.0.113.7" style sentence for a rule; before a value is typed, what it will do once filled in. */
 function sentence(k: Kind, v: string, a: Action): string {
-  const verb = a === 'block' ? 'blocked' : 'allowed';
-  if (k === 'all') return `Every request that reaches this rule is <b>${verb}</b>.`;
+  const verb = `<b>${a === 'block' ? t('blocked') : t('allowed')}</b>`;
+  if (k === 'all') return t('Every request that reaches this rule is {verb}.', { verb });
   if (!v) {
-    const what = k === 'domain' ? 'web address' : k === 'ip' ? 'address' : k === 'cidr' ? 'network' : 'range';
-    return `Fill in the ${what} above. Requests ${k === 'domain' ? 'sent to' : 'from'} it will then be <b>${verb}</b>.`;
+    if (k === 'domain') return t('Fill in the web address above. Requests sent to it will then be {verb}.', { verb });
+    const what = k === 'ip' ? t('address') : k === 'cidr' ? t('network') : t('range');
+    return t('Fill in the {what} above. Requests from it will then be {verb}.', { what, verb });
   }
-  const who =
-    k === 'domain'
-      ? `Requests sent to <code>${esc(v)}</code>`
-      : k === 'ip'
-        ? `Requests from <code>${esc(v)}</code>`
-        : `Requests from any address in <code>${esc(v)}</code>`;
-  return `${who} are <b>${verb}</b>.`;
+  const code = `<code>${esc(v)}</code>`;
+  return k === 'domain'
+    ? t('Requests sent to {value} are {verb}.', { value: code, verb })
+    : k === 'ip'
+      ? t('Requests from {value} are {verb}.', { value: code, verb })
+      : t('Requests from any address in {value} are {verb}.', { value: code, verb });
 }
 
 function check(k: Kind, v: string): string {
   if (k === 'all') return '';
-  if (!v) return 'A value is required.';
+  if (!v) return t('A value is required.');
   const ip4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
   const ip = (s: string): boolean => ip4.test(s) || (/^[0-9a-f:]+$/i.test(s) && s.includes(':'));
-  if (k === 'ip' && !ip(v)) return 'That is not an IP address.';
+  if (k === 'ip' && !ip(v)) return t('That is not an IP address.');
   if (k === 'cidr') {
     const [a, b] = v.split('/');
-    if (!a || !b || !ip(a) || !/^\d{1,3}$/.test(b)) return 'Use address/prefix, e.g. 10.0.0.0/8.';
+    if (!a || !b || !ip(a) || !/^\d{1,3}$/.test(b)) return t('Use address/prefix, e.g. 10.0.0.0/8.');
   }
   if (k === 'range') {
     const [a, b] = v.split('-').map((s) => s.trim());
-    if (!a || !b || !ip(a) || !ip(b)) return 'Use first-last, e.g. 10.0.0.1-10.0.0.9.';
+    if (!a || !b || !ip(a) || !ip(b)) return t('Use first-last, e.g. 10.0.0.1-10.0.0.9.');
   }
-  if (k === 'domain' && !/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9-]+)+$/i.test(v)) return 'That is not a domain name.';
+  if (k === 'domain' && !/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9-]+)+$/i.test(v)) return t('That is not a domain name.');
   return '';
 }
 
@@ -279,32 +280,32 @@ export async function renderAccess(): Promise<void> {
   const seq = ++renderSeq;
   host.innerHTML = `<div class="cc ac3">${systemHeader(
     'access',
-    'Access rules',
-    'Let in or keep out addresses and networks before anyone sees the sign-in page.',
-    `<button type="button" class="cc-ibtn" id="aReload" aria-label="Reload" title="Reload">${ICO.refresh}</button>
-     <button type="button" class="btn primary" id="aAdd">${ICO.plus}Add rule</button>`,
+    t('Access rules'),
+    t('Let in or keep out addresses and networks before anyone sees the sign-in page.'),
+    `<button type="button" class="cc-ibtn" id="aReload" aria-label="${t('Reload')}" title="${t('Reload')}">${ICO.refresh}</button>
+     <button type="button" class="btn primary" id="aAdd">${ICO.plus}${t('Add rule')}</button>`,
   )}
-    <section class="ac3-flow" aria-labelledby="acHowT"><h2 class="sr-only" id="acHowT">How it works</h2>
+    <section class="ac3-flow" aria-labelledby="acHowT"><h2 class="sr-only" id="acHowT">${t('How it works')}</h2>
       <ol class="ac3-steps">
-        <li><span class="ac3-tile">${ICO_ENTER}</span><span><span class="k">Step 1</span><span class="tt">Someone opens Memora</span><span class="ds">A browser or an AI app. These rules are checked before the sign-in page.</span></span></li>
-        <li><span class="ac3-tile">${ICO_LIST}</span><span><span class="k">Step 2</span><span class="tt">Rules are checked from the top</span><span class="ds">The first rule that fits decides. The rest are skipped.</span></span></li>
-        <li><span class="ac3-tile">${ICO_GLOBE}</span><span><span class="k">Step 3</span><span class="tt">No rule fits</span><span class="ds" id="aDefTxt">"Everything else" decides.</span></span></li>
+        <li><span class="ac3-tile">${ICO_ENTER}</span><span><span class="k">${t('Step {n}', { n: 1 })}</span><span class="tt">${t('Someone opens Memora')}</span><span class="ds">${t('A browser or an AI app. These rules are checked before the sign-in page.')}</span></span></li>
+        <li><span class="ac3-tile">${ICO_LIST}</span><span><span class="k">${t('Step {n}', { n: 2 })}</span><span class="tt">${t('Rules are checked from the top')}</span><span class="ds">${t('The first rule that fits decides. The rest are skipped.')}</span></span></li>
+        <li><span class="ac3-tile">${ICO_GLOBE}</span><span><span class="k">${t('Step {n}', { n: 3 })}</span><span class="tt">${t('No rule fits')}</span><span class="ds" id="aDefTxt">${t('"Everything else" decides.')}</span></span></li>
       </ol>
-      <div class="ac3-flow-f">${ICO_INFO}<span>The server's own computer (localhost) always gets in, so a rule can never lock it out.</span></div>
+      <div class="ac3-flow-f">${ICO_INFO}<span>${t("The server's own computer (localhost) always gets in, so a rule can never lock it out.")}</span></div>
     </section>
     <div class="ac3-grid">
-      <section class="ac3-card" aria-labelledby="acStackT"><div class="ac3-h"><h2 id="acStackT">Rules</h2>
+      <section class="ac3-card" aria-labelledby="acStackT"><div class="ac3-h"><h2 id="acStackT">${t('Rules')}</h2>
         <span class="sub" id="aCount"></span><span class="grow"></span></div>
         <div id="aList"><div class="ac3-sk" aria-busy="true">${[0, 1, 2]
           .map(() => `<div class="r">${skBlock('30px', 30)}${skBlock('64px', 12)}${skBlock('36%', 14)}</div>`)
           .join('')}</div></div></section>
-      <section class="ac3-card" aria-labelledby="acTestT"><div class="ac3-h"><h2 id="acTestT">Test an address</h2></div>
+      <section class="ac3-card" aria-labelledby="acTestT"><div class="ac3-h"><h2 id="acTestT">${t('Test an address')}</h2></div>
         <form class="ac3-test" id="tForm" novalidate>
-          <p>See what an address would get. Nothing changes.</p>
-          <label class="ac3-f"><span>Internet address (IP)</span><input class="ac3-in" id="tIp" type="text" inputmode="decimal" placeholder="203.0.113.7" spellcheck="false" autocomplete="off"></label>
-          <label class="ac3-f"><span>Web address <em>(optional)</em></span><input class="ac3-in" id="tDom" type="text" placeholder="memory.example.com" spellcheck="false" autocomplete="off" autocapitalize="off"></label>
-          <div class="ac3-res" id="tRes" role="status">Enter an address or a web address, then test.</div>
-          <button class="btn" id="aTest" type="submit">${ICO.search}Test</button>
+          <p>${t('See what an address would get. Nothing changes.')}</p>
+          <label class="ac3-f"><span>${t('Internet address (IP)')}</span><input class="ac3-in" id="tIp" type="text" inputmode="decimal" placeholder="203.0.113.7" spellcheck="false" autocomplete="off"></label>
+          <label class="ac3-f"><span>${t('Web address')} <em>${t('(optional)')}</em></span><input class="ac3-in" id="tDom" type="text" placeholder="memora.example.com" spellcheck="false" autocomplete="off" autocapitalize="off"></label>
+          <div class="ac3-res" id="tRes" role="status">${t('Enter an address or a web address, then test.')}</div>
+          <button class="btn" id="aTest" type="submit">${ICO.search}${t('Test')}</button>
         </form></section>
     </div></div>`;
 
@@ -319,8 +320,8 @@ export async function renderAccess(): Promise<void> {
     defaultAllow = d.default_allow !== false;
   } catch (e) {
     if (seq !== renderSeq) return;
-    $('#aList').innerHTML = `<div class="ac3-empty"><span class="ic">${ICO.refresh}</span><b>Could not load the rules</b><p>${esc((e as Error).message)}</p>
-      <button type="button" class="btn" id="aRetry">${ICO.refresh}Try again</button></div>`;
+    $('#aList').innerHTML = `<div class="ac3-empty"><span class="ic">${ICO.refresh}</span><b>${t('Could not load the rules')}</b><p>${esc((e as Error).message)}</p>
+      <button type="button" class="btn" id="aRetry">${ICO.refresh}${t('Try again')}</button></div>`;
     $('#aRetry').onclick = () => void renderAccess();
     return;
   }
@@ -328,33 +329,33 @@ export async function renderAccess(): Promise<void> {
 }
 
 function paintRules(): void {
-  $('#aCount').textContent = rules.length ? `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}, checked from the top` : '';
-  $('#aDefTxt').innerHTML = `"Everything else" decides: right now it is <b>${defaultAllow ? 'let in' : 'kept out'}</b>.`;
-  const defAct = `<span class="ac3-act ${defaultAllow ? 'allow' : 'block'}">${defaultAllow ? 'Allow' : 'Block'}</span>`;
+  $('#aCount').textContent = rules.length ? tn(rules.length, '{n} rule, checked from the top', '{n} rules, checked from the top') : '';
+  $('#aDefTxt').innerHTML = t('"Everything else" decides: right now it is {state}.', { state: `<b>${defaultAllow ? t('let in') : t('kept out')}</b>` });
+  const defAct = `<span class="ac3-act ${defaultAllow ? 'allow' : 'block'}">${defaultAllow ? t('Allow') : t('Block')}</span>`;
   const def = `<div class="ac3-rule ac3-def"><span class="ac3-num" aria-hidden="true">${ICO_GLOBE}</span>${defAct}
-    <span class="ac3-what"><span class="ac3-val plain">Everything else</span><span class="ac3-sm">${defAct}<span>When no rule fits</span></span></span>
-    <span class="ac3-kind">When no rule fits. Change it on the server with memora-cli.</span><span></span></div>`;
+    <span class="ac3-what"><span class="ac3-val plain">${t('Everything else')}</span><span class="ac3-sm">${defAct}<span>${t('When no rule fits')}</span></span></span>
+    <span class="ac3-kind">${t('When no rule fits. Change it on the server with memora-cli.')}</span><span></span></div>`;
   if (!rules.length) {
-    $('#aList').innerHTML = `<div class="ac3-empty"><span class="ic">${ICO.shield}</span><b>No rules yet</b>
-      <p>Anyone who reaches the server sees the sign-in page and still needs a password or a key. Add a rule to keep an address out or let only your network in.</p>
-      <button type="button" class="btn" id="aAddFirst">${ICO.plus}Add the first rule</button></div>${def}`;
+    $('#aList').innerHTML = `<div class="ac3-empty"><span class="ic">${ICO.shield}</span><b>${t('No rules yet')}</b>
+      <p>${t('Anyone who reaches the server sees the sign-in page and still needs a password or a key. Add a rule to keep an address out or let only your network in.')}</p>
+      <button type="button" class="btn" id="aAddFirst">${ICO.plus}${t('Add the first rule')}</button></div>${def}`;
     $('#aAddFirst').onclick = () => openRule();
     return;
   }
   $('#aList').innerHTML =
-    `<div class="ac3-cols" aria-hidden="true"><span>#</span><span>Action</span><span>Matches</span><span>Type</span><span></span></div><div class="ac3-rows">` +
+    `<div class="ac3-cols" aria-hidden="true"><span>#</span><span>${t('Action')}</span><span>${t('Matches')}</span><span>${t('Type')}</span><span></span></div><div class="ac3-rows">` +
     rules
       .map((r, i) => {
         const a = ruleAction(r);
         const k = ruleKind(r);
         const v = ruleValue(r);
         const paused = r.enabled === false;
-        const act = `<span class="ac3-act ${a}">${a === 'block' ? 'Block' : 'Allow'}</span>`;
-        const kind = `${esc(kindLabel(k))}${paused ? ' · paused, skipped' : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
-        return `<div class="ac3-rule${paused ? ' paused' : ''}"><span class="ac3-num" title="Checked ${i === 0 ? 'first' : 'as number ' + (i + 1)}">${i + 1}</span>
-          ${act}<span class="ac3-what"><span class="ac3-val${k === 'all' ? ' plain' : ''}">${esc(k === 'all' ? 'Everyone' : v)}</span><span class="ac3-sm">${act}<span>${kind}</span></span></span>
+        const act = `<span class="ac3-act ${a}">${a === 'block' ? t('Block') : t('Allow')}</span>`;
+        const kind = `${esc(kindLabel(k))}${paused ? ` · ${t('paused, skipped')}` : ''}${r.note ? ' · ' + esc(r.note) : ''}`;
+        return `<div class="ac3-rule${paused ? ' paused' : ''}"><span class="ac3-num" title="${i === 0 ? t('Checked first') : t('Checked as number {n}', { n: i + 1 })}">${i + 1}</span>
+          ${act}<span class="ac3-what"><span class="ac3-val${k === 'all' ? ' plain' : ''}">${esc(k === 'all' ? t('Everyone') : v)}</span><span class="ac3-sm">${act}<span>${kind}</span></span></span>
           <span class="ac3-kind">${kind}</span>
-          <button type="button" class="cc-ibtn" data-i="${i}" aria-haspopup="menu" aria-label="Actions for rule ${i + 1}" title="More">${ICO.more}</button></div>`;
+          <button type="button" class="cc-ibtn" data-i="${i}" aria-haspopup="menu" aria-label="${t('Actions for rule {n}', { n: i + 1 })}" title="${t('More')}">${ICO.more}</button></div>`;
       })
       .join('') +
     `</div>` +
@@ -365,18 +366,19 @@ function paintRules(): void {
         const i = Number(b.dataset.i);
         const r = rules[i];
         const a = ruleAction(r);
-        const label = `${a === 'block' ? 'Block' : 'Allow'} ${ruleKind(r) === 'all' ? 'everyone' : ruleValue(r)}`;
+        const who = ruleKind(r) === 'all' ? t('everyone') : ruleValue(r);
+        const label = a === 'block' ? t('Block {who}', { who }) : t('Allow {who}', { who });
         openMenu(
           b,
           [
-            { label: 'Edit rule', desc: 'Change what it matches or what it does.', icon: ICO_EDIT, run: () => openRule(r, i) },
+            { label: t('Edit rule'), desc: t('Change what it matches or what it does.'), icon: ICO_EDIT, run: () => openRule(r, i) },
             ...(ruleKind(r) === 'ip'
-              ? [{ label: 'Test this address', desc: 'Fill the tester with it and see the result.', icon: ICO.search, run: () => testValue(ruleValue(r)) }]
+              ? [{ label: t('Test this address'), desc: t('Fill the tester with it and see the result.'), icon: ICO.search, run: () => testValue(ruleValue(r)) }]
               : []),
             { sep: true, label: '' },
-            { label: 'Delete rule', desc: 'Remove it; the rules below move up.', icon: ICO_TRASH, danger: true, run: () => delRule(r) },
+            { label: t('Delete rule'), desc: t('Remove it; the rules below move up.'), icon: ICO_TRASH, danger: true, run: () => delRule(r) },
           ],
-          { title: `Rule ${i + 1}: ${label}` },
+          { title: t('Rule {n}: {label}', { n: i + 1, label }) },
         );
       }),
   );
@@ -391,15 +393,16 @@ function testValue(ip: string): void {
 }
 
 function delRule(r: Rule): void {
-  const v = ruleKind(r) === 'all' ? 'everyone' : ruleValue(r);
-  Modal.confirm('Delete rule', `Remove the rule that ${ruleAction(r) === 'block' ? 'blocks' : 'allows'} ${v}? It stops applying at once.`, 'Delete rule', async () => {
+  const v = ruleKind(r) === 'all' ? t('everyone') : ruleValue(r);
+  const msg = ruleAction(r) === 'block' ? t('Remove the rule that blocks {v}? It stops applying at once.', { v }) : t('Remove the rule that allows {v}? It stops applying at once.', { v });
+  Modal.confirm(t('Delete rule'), msg, t('Delete rule'), async () => {
     try {
       await remove(r);
       Modal.close();
-      toast('Rule deleted', 'ok');
+      toast(t('Rule deleted'), 'ok');
       void renderAccess();
     } catch (e) {
-      toast('Could not delete: ' + (e as Error).message, 'err');
+      toast(t('Could not delete: {error}', { error: (e as Error).message }), 'err');
     }
   });
 }
@@ -417,7 +420,7 @@ function openRule(r?: Rule, idx = -1): void {
   let action: Action = r ? ruleAction(r) : 'block';
   const last = idx === rules.length - 1;
   const body = `
-    <section class="cc-sh-sec"><h3 id="arKindT">Who does it match?</h3><p>Pick what to look at in each request.</p>
+    <section class="cc-sh-sec"><h3 id="arKindT">${t('Who does it match?')}</h3><p>${t('Pick what to look at in each request.')}</p>
       <div class="ac3-opts" role="radiogroup" aria-labelledby="arKindT">${KINDS.map(
         (k) => `<label class="ac3-opt"><input type="radio" name="ar-kind" value="${k.v}"${k.v === kind ? ' checked' : ''}>
           <span class="ac3-tile">${KIND_ICO[k.v]}</span><span class="tx"><b>${esc(k.l)}</b><small>${esc(k.short)}</small></span><span class="rd" aria-hidden="true"></span></label>`,
@@ -425,25 +428,25 @@ function openRule(r?: Rule, idx = -1): void {
       <label class="ac3-f" id="arValF" style="margin-top:16px"><span id="arValL"></span>
         <input class="ac3-in" id="arVal" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" value="${attr(r ? ruleValue(r) : '')}" aria-describedby="arHint"></label>
       <div class="ac3-hint" id="arHint" style="margin-top:6px"></div></section>
-    <section class="cc-sh-sec"><h3 id="arActT">What happens?</h3><p>Only the first rule that fits a request counts.</p>
+    <section class="cc-sh-sec"><h3 id="arActT">${t('What happens?')}</h3><p>${t('Only the first rule that fits a request counts.')}</p>
       <div class="ac3-acts" role="radiogroup" aria-labelledby="arActT">
         <label class="ac3-opt"><input type="radio" name="ar-act" value="allow"${action === 'allow' ? ' checked' : ''}>
-          <span class="ac3-act allow">Allow</span><small>Let it in. People still sign in and AIs still need their key.</small><span class="rd" aria-hidden="true"></span></label>
+          <span class="ac3-act allow">${t('Allow')}</span><small>${t('Let it in. People still sign in and AIs still need their key.')}</small><span class="rd" aria-hidden="true"></span></label>
         <label class="ac3-opt"><input type="radio" name="ar-act" value="block"${action === 'block' ? ' checked' : ''}>
-          <span class="ac3-act block">Block</span><small>Keep it out. It cannot even see the sign-in page.</small><span class="rd" aria-hidden="true"></span></label></div></section>
-    <section class="cc-sh-sec"><h3>In short</h3><div class="ac3-prev">${ICO_INFO}<span id="arPrev" aria-live="polite"></span></div>
+          <span class="ac3-act block">${t('Block')}</span><small>${t('Keep it out. It cannot even see the sign-in page.')}</small><span class="rd" aria-hidden="true"></span></label></div></section>
+    <section class="cc-sh-sec"><h3>${t('In short')}</h3><div class="ac3-prev">${ICO_INFO}<span id="arPrev" aria-live="polite"></span></div>
       <div class="ac3-warn" id="arWarn" hidden></div>
-      ${r && !last ? `<div class="ac3-warn">Saving moves this rule from position ${idx + 1} to the end of the list, so it is checked last.</div>` : ''}</section>`;
+      ${r && !last ? `<div class="ac3-warn">${t('Saving moves this rule from position {n} to the end of the list, so it is checked last.', { n: idx + 1 })}</div>` : ''}</section>`;
 
   openSheet({
-    title: r ? `Edit rule ${idx + 1}` : 'Add a rule',
+    title: r ? t('Edit rule {n}', { n: idx + 1 }) : t('Add a rule'),
     lead: `<span class="ac3-shlead" aria-hidden="true">${ICO.shield}</span>`,
-    sub: r ? undefined : rules.length ? `It is added at the end, as rule ${rules.length + 1}, so it is checked last.` : 'It becomes your first rule.',
+    sub: r ? undefined : rules.length ? t('It is added at the end, as rule {n}, so it is checked last.', { n: rules.length + 1 }) : t('It becomes your first rule.'),
     body,
     width: 540,
     actions: [
-      { label: 'Cancel', cls: 'ghost', left: true, run: (s) => s.close() },
-      { label: r ? 'Save rule' : 'Add rule', cls: 'primary', run: (s) => save(s) },
+      { label: t('Cancel'), cls: 'ghost', left: true, run: (s) => s.close() },
+      { label: r ? t('Save rule') : t('Add rule'), cls: 'primary', run: (s) => save(s) },
     ],
     onOpen: (s) => {
       const b = s.body;
@@ -459,7 +462,7 @@ function openRule(r?: Rule, idx = -1): void {
         $('#arPrev', b).innerHTML = sentence(kind, val.value.trim(), action);
         const warn = $('#arWarn', b) as HTMLElement;
         warn.hidden = !(kind === 'all' && action === 'block');
-        warn.innerHTML = 'This keeps out everyone that no rule above it lets in, including you, unless a rule allowing your own address comes first.';
+        warn.innerHTML = t('This keeps out everyone that no rule above it lets in, including you, unless a rule allowing your own address comes first.');
       };
       $$<HTMLInputElement>('input[name=ar-kind]', b).forEach(
         (i) =>
@@ -524,12 +527,12 @@ function openRule(r?: Rule, idx = -1): void {
         await add(kind, v, action);
       }
       s.close();
-      toast(r ? 'Rule saved' : 'Rule added', 'ok');
+      toast(r ? t('Rule saved') : t('Rule added'), 'ok');
       void renderAccess();
     } catch (e) {
       hint.hidden = false;
       hint.classList.add('err');
-      hint.textContent = 'Could not save: ' + (e as Error).message;
+      hint.textContent = t('Could not save: {error}', { error: (e as Error).message });
     }
   }
 }
@@ -542,7 +545,7 @@ function wireTest(): void {
     const domain = ($('#tDom') as HTMLInputElement).value.trim();
     if (!ip && !domain) {
       res.className = 'ac3-res';
-      res.textContent = 'Enter an address or a web address first.';
+      res.textContent = t('Enter an address or a web address first.');
       return;
     }
     const seq = ++testSeq;
@@ -551,13 +554,13 @@ function wireTest(): void {
       if (seq !== testSeq) return;
       const a = r.action === 'block' ? 'block' : 'allow';
       res.className = 'ac3-res ' + a;
-      res.innerHTML = `<span><b>${a === 'block' ? 'Blocked' : 'Allowed'}</b><span class="who">${esc(
+      res.innerHTML = `<span><b>${a === 'block' ? t('Blocked') : t('Allowed')}</b><span class="who">${esc(
         [ip, domain].filter(Boolean).join(' · '),
-      )}</span>${r.would_lock_out_caller ? '<span class="lock">This address would be locked out.</span>' : ''}</span>`;
+      )}</span>${r.would_lock_out_caller ? `<span class="lock">${t('This address would be locked out.')}</span>` : ''}</span>`;
     } catch (err2) {
       if (seq !== testSeq) return;
       res.className = 'ac3-res';
-      res.textContent = 'Could not test: ' + (err2 as Error).message;
+      res.textContent = t('Could not test: {error}', { error: (err2 as Error).message });
     }
   };
 }

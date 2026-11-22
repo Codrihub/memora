@@ -418,7 +418,7 @@ fn env_secret(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// Host part of a URL such as `https://memory.example.com:8443/x`.
+/// Host part of a URL such as `https://memora.example.com:8443/x`.
 pub fn url_host(url: &str) -> Option<String> {
     let rest = url.split("://").nth(1).unwrap_or(url);
     let host = rest.split(['/', '?', '#']).next()?;
@@ -799,11 +799,11 @@ mod tests {
     #[test]
     fn host_allow_list() {
         let d = vec![
-            "memory.example.com".to_string(),
+            "memora.example.com".to_string(),
             "*.lan.example".to_string(),
         ];
-        assert!(host_allowed(&d, "memory.example.com"));
-        assert!(host_allowed(&d, "Memory.Example.com:443"));
+        assert!(host_allowed(&d, "memora.example.com"));
+        assert!(host_allowed(&d, "Memora.Example.com:443"));
         assert!(host_allowed(&d, "box.lan.example:8400"));
         assert!(host_allowed(&d, "127.0.0.1:8400"));
         assert!(host_allowed(&d, "localhost"));
@@ -811,8 +811,8 @@ mod tests {
         assert!(!host_allowed(&d, "evil.com"));
         assert!(host_allowed(&[], "anything"));
         assert_eq!(
-            url_host("https://memory.example.com:8443/x").as_deref(),
-            Some("memory.example.com")
+            url_host("https://memora.example.com:8443/x").as_deref(),
+            Some("memora.example.com")
         );
     }
 

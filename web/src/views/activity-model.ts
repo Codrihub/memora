@@ -3,6 +3,7 @@
 import { rangeWindow, settleRunning, verb, type ActivityItem, type FeedRange, type Source } from '../control/feed';
 import { isSystem, problemOf, sentenceText } from '../control/sentence';
 import type { KeyRow } from '../types';
+import { t } from '../i18n';
 
 export type Cat = 'read' | 'search' | 'write' | 'delete' | 'auth' | 'other';
 export type St = 'ok' | 'fail' | 'running';
@@ -10,41 +11,41 @@ export type TimeKey = '1h' | 'today' | '1d' | '7d' | '30d' | 'all' | 'custom';
 type AgentClass = 'active' | 'recent' | 'idle' | 'removed' | 'people';
 
 export const CATS: { id: Cat; label: string; hint: string }[] = [
-  { id: 'read', label: 'Reads', hint: 'Opened or looked through notes' },
-  { id: 'search', label: 'Searches', hint: 'Searched or looked for similar notes' },
-  { id: 'write', label: 'Changes', hint: 'Created, edited, moved, tagged' },
-  { id: 'delete', label: 'Deletes', hint: 'Deleted or moved to Trash' },
-  { id: 'auth', label: 'Sign-in & keys', hint: 'Sign-ins, AI keys, access rules' },
-  { id: 'other', label: 'Other', hint: 'Everything else' },
+  { id: 'read', label: t('Reads'), hint: t('Opened or looked through notes') },
+  { id: 'search', label: t('Searches'), hint: t('Searched or looked for similar notes') },
+  { id: 'write', label: t('Changes'), hint: t('Created, edited, moved, tagged') },
+  { id: 'delete', label: t('Deletes'), hint: t('Deleted or moved to Trash') },
+  { id: 'auth', label: t('Sign-in & keys'), hint: t('Sign-ins, AI keys, access rules') },
+  { id: 'other', label: t('Other'), hint: t('Everything else') },
 ];
 
 export const SRCS: { id: Source; label: string; hint: string }[] = [
-  { id: 'agent', label: 'AI apps', hint: 'What your connected AIs did' },
-  { id: 'vault', label: 'Note changes', hint: 'Notes changed in the app or in the folder' },
-  { id: 'auth', label: 'Sign-in & keys', hint: 'Sign-ins, AI keys and access' },
+  { id: 'agent', label: t('AI apps'), hint: t('What your connected AIs did') },
+  { id: 'vault', label: t('Note changes'), hint: t('Notes changed in the app or in the folder') },
+  { id: 'auth', label: t('Sign-in & keys'), hint: t('Sign-ins, AI keys and access') },
 ];
 
 export const STATUSES: { id: St; label: string }[] = [
-  { id: 'ok', label: 'Done' },
-  { id: 'fail', label: 'Failed or refused' },
-  { id: 'running', label: 'Working' },
+  { id: 'ok', label: t('Done') },
+  { id: 'fail', label: t('Failed or refused') },
+  { id: 'running', label: t('Working') },
 ];
 
 export const TIMES: { id: TimeKey; label: string; short: string }[] = [
-  { id: '1h', label: 'Last hour', short: '1h' },
-  { id: 'today', label: 'Today', short: 'Today' },
-  { id: '1d', label: 'Last 24 hours', short: '24h' },
-  { id: '7d', label: 'Last 7 days', short: '7d' },
-  { id: '30d', label: 'Last 30 days', short: '30d' },
-  { id: 'all', label: 'All time', short: 'All' },
+  { id: '1h', label: t('Last hour'), short: '1h' },
+  { id: 'today', label: t('Today'), short: t('Today') },
+  { id: '1d', label: t('Last 24 hours'), short: '24h' },
+  { id: '7d', label: t('Last 7 days'), short: '7d' },
+  { id: '30d', label: t('Last 30 days'), short: '30d' },
+  { id: 'all', label: t('All time'), short: t('All') },
 ];
 
 export const CLASSES: { id: AgentClass; label: string }[] = [
-  { id: 'active', label: 'Active now' },
-  { id: 'recent', label: 'Seen recently' },
-  { id: 'idle', label: 'Idle' },
-  { id: 'removed', label: 'No longer connected' },
-  { id: 'people', label: 'People & server' },
+  { id: 'active', label: t('Active now') },
+  { id: 'recent', label: t('Seen recently') },
+  { id: 'idle', label: t('Idle') },
+  { id: 'removed', label: t('No longer connected') },
+  { id: 'people', label: t('People & server') },
 ];
 
 export interface Filters {
@@ -137,13 +138,13 @@ export function timeLabel(): string {
   return labelOf(F);
 }
 
-export function labelOf(t: Pick<Filters, 'time' | 'from' | 'to'>): string {
-  if (t.time !== 'custom') return TIMES.find((x) => x.id === t.time)!.label;
+export function labelOf(w: Pick<Filters, 'time' | 'from' | 'to'>): string {
+  if (w.time !== 'custom') return TIMES.find((x) => x.id === w.time)!.label;
   const fmt = (d: string): string => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  if (t.from && t.to) return t.from === t.to ? fmt(t.from) : `${fmt(t.from)} – ${fmt(t.to)}`;
-  if (t.from) return `Since ${fmt(t.from)}`;
-  if (t.to) return `Until ${fmt(t.to)}`;
-  return 'All time';
+  if (w.from && w.to) return w.from === w.to ? fmt(w.from) : `${fmt(w.from)} – ${fmt(w.to)}`;
+  if (w.from) return t('Since {date}', { date: fmt(w.from) });
+  if (w.to) return t('Until {date}', { date: fmt(w.to) });
+  return t('All time');
 }
 
 export function searchText(it: ActivityItem): string {
@@ -189,11 +190,11 @@ export function activeCount(): number {
 /** The quick filter pills above the list: each sets the action types and status at once. */
 export type Quick = 'all' | 'write' | 'read' | 'search' | 'fail';
 export const QUICK: { id: Quick; label: string; cats: Cat[]; status: St[] }[] = [
-  { id: 'all', label: 'All', cats: [], status: [] },
-  { id: 'write', label: 'Changes', cats: ['write', 'delete'], status: [] },
-  { id: 'read', label: 'Reads', cats: ['read'], status: [] },
-  { id: 'search', label: 'Searches', cats: ['search'], status: [] },
-  { id: 'fail', label: 'Problems', cats: [], status: ['fail'] },
+  { id: 'all', label: t('All'), cats: [], status: [] },
+  { id: 'write', label: t('Changes'), cats: ['write', 'delete'], status: [] },
+  { id: 'read', label: t('Reads'), cats: ['read'], status: [] },
+  { id: 'search', label: t('Searches'), cats: ['search'], status: [] },
+  { id: 'fail', label: t('Problems'), cats: [], status: ['fail'] },
 ];
 
 type QuickState = { cats: Set<Cat>; status: Set<St>; actions: Set<string> };

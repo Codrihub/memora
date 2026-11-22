@@ -7,6 +7,7 @@ import { onNavigate } from '../router';
 import { state } from '../state';
 import { notify } from '../toast';
 import { icon } from '../ui/icons';
+import { t } from '../i18n';
 import { prefs as vaultPrefs } from '../vault/store';
 import * as A from './api';
 import { leaveMnemo, openOnPage } from './page';
@@ -108,8 +109,8 @@ export function setFabHidden(hidden: boolean, undo = true): void {
   savePlace();
   paintVisible();
   if (hidden && undo) {
-    notify(`${A.MNEMO} button hidden. Bring it back from More, Show the ${A.MNEMO} button.`, 'info', 6000, {
-      label: 'Undo',
+    notify(t('{mnemo} button hidden. Bring it back from More, Show the {mnemo} button.', { mnemo: A.MNEMO }), 'info', 6000, {
+      label: t('Undo'),
       run: () => setFabHidden(false, false),
     });
   }
@@ -202,20 +203,20 @@ export function initMnemoLauncher(): void {
   dock.hidden = true;
   fab = el('button', 'mnf-fab') as HTMLButtonElement;
   fab.type = 'button';
-  fab.setAttribute('aria-label', `Ask ${A.MNEMO}`);
-  fab.title = `Ask ${A.MNEMO} (Ctrl+J). Drag to move it.`;
-  fab.innerHTML = `<span class="mnf-glyph">${icon('mnemo')}</span><span class="mnf-tip">Ask ${A.MNEMO}<small>drag to move</small></span>`;
+  fab.setAttribute('aria-label', t('Ask {mnemo}', { mnemo: A.MNEMO }));
+  fab.title = t('Ask {mnemo} (Ctrl+J). Drag to move it.', { mnemo: A.MNEMO });
+  fab.innerHTML = `<span class="mnf-glyph">${icon('mnemo')}</span><span class="mnf-tip">${t('Ask {mnemo}', { mnemo: A.MNEMO })}<small>${t('drag to move')}</small></span>`;
   fab.onclick = () => go(contextScope(), undefined, true);
   const hideBtn = el('button', 'mnf-hide', icon('close')) as HTMLButtonElement;
   hideBtn.type = 'button';
-  hideBtn.title = `Hide the ${A.MNEMO} button`;
-  hideBtn.setAttribute('aria-label', `Hide the ${A.MNEMO} button`);
+  hideBtn.title = t('Hide the {mnemo} button', { mnemo: A.MNEMO });
+  hideBtn.setAttribute('aria-label', t('Hide the {mnemo} button', { mnemo: A.MNEMO }));
   hideBtn.onclick = (e) => {
     e.stopPropagation();
     setFabHidden(true);
   };
   dock.append(fab, hideBtn);
-  zone = el('div', 'mnf-zone', `${icon('close')}<span>Drop here to hide</span>`);
+  zone = el('div', 'mnf-zone', `${icon('close')}<span>${t('Drop here to hide')}</span>`);
   zone.hidden = true;
 
   document.body.append(zone, dock);
@@ -252,6 +253,12 @@ function go(scope: string, text?: string, fresh = false): void {
 /** "Ask Mnemo" on a note or folder: a new chat about it, on the Mnemo page. */
 export function askMnemo(scope: string, text?: string): void {
   go(scope, text, true);
+}
+
+/** A new chat on the Mnemo page that sends `text` at once. */
+export function sendToMnemo(text: string): void {
+  openOnPage('', { scope: '', text, send: true });
+  hooks.go('assistant');
 }
 
 const CSS = `

@@ -1,6 +1,7 @@
 // One floating panel at a time: a popover under its button, or a bottom sheet on phones.
 
-import { el, esc } from '../dom';
+import { attr, el, esc } from '../dom';
+import { t } from '../i18n';
 import { I } from './icons';
 import { fadeScroll } from '../ui/scroll-fade';
 
@@ -46,7 +47,7 @@ export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement,
   const card = el('div', 'vx-pop-card');
   card.innerHTML = `${phone ? '<span class="vx-sheet-grab" aria-hidden="true"></span>' : ''}<header class="vx-pop-head"><b>${esc(
     title,
-  )}</b><button class="vx-icon-btn" data-close aria-label="Close">${I.close}</button></header>`;
+  )}</b><button class="vx-icon-btn" data-close aria-label="${attr(t('Close'))}">${I.close}</button></header>`;
   body.classList.add('vx-pop-body');
   card.appendChild(body);
   fadeScroll(body);

@@ -41,6 +41,7 @@ import { flushLayout, loadLayout, saveLayout } from './store';
 import { buildChrome, CURSOR_SVG, ICON, Toast, type Chrome } from './ui';
 import { NodeCard, type CardLink } from '../ui/node-card';
 import { toggleHTML, ViewChrome } from '../ui/view-chrome';
+import { t, tn } from '../i18n';
 
 /** Pause excerpt fetching so the write is not queued behind reads. */
 async function held<T>(p: () => Promise<T>): Promise<T> {
@@ -687,7 +688,7 @@ export class Board {
     const e = document.createElement('div');
     e.className = 'cv-frame';
     e.dataset.frame = f.name;
-    e.innerHTML = `<div class="cv-flabel" title="Drag to move the folder frame; double-click to rename"><i class="cv-fdot"></i><span class="cv-ftitle"></span><span class="cv-fcount"></span><button class="cv-fbtn" data-fact="tidy" title="Tidy this frame">⊞</button><button class="cv-fbtn" data-fact="color" title="Folder color">◐</button></div><div class="cv-fresize" title="Resize frame"></div>`;
+    e.innerHTML = `<div class="cv-flabel" title="${t('Drag to move the folder frame; double-click to rename')}"><i class="cv-fdot"></i><span class="cv-ftitle"></span><span class="cv-fcount"></span><button class="cv-fbtn" data-fact="tidy" title="${t('Tidy this frame')}">⊞</button><button class="cv-fbtn" data-fact="color" title="${t('Folder color')}">◐</button></div><div class="cv-fresize" title="${t('Resize frame')}"></div>`;
     f.el = e;
     this.bg.appendChild(e);
     this.fillFrame(f);
@@ -696,8 +697,8 @@ export class Board {
   private fillFrame(f: Frame): void {
     if (!f.el) return;
     f.el.style.setProperty('--fc', colorOfFolder(f.name));
-    const t = f.el.querySelector<HTMLElement>('.cv-ftitle')!;
-    if (!t.querySelector('input')) t.textContent = /^root$/i.test(f.name) ? 'Top level' : f.name;
+    const ti = f.el.querySelector<HTMLElement>('.cv-ftitle')!;
+    if (!ti.querySelector('input')) ti.textContent = /^root$/i.test(f.name) ? t('Top level') : f.name;
     f.el.querySelector<HTMLElement>('.cv-fcount')!.textContent = String(f.cards.length);
     f.el.classList.toggle('sel', this.selFrames.has(f.name));
   }
@@ -730,27 +731,27 @@ export class Board {
     if (!ex || ex.m < c.mtime) want(c.path, c.mtime);
     const tags = ex ? ex.tags.slice(0, 3).map((t) => `<span>#${esc(t)}</span>`).join('') : '';
     const n = this.linkCount.get(c.path) || 0;
-    const t = c.touch && Date.now() - c.touch.at < TOUCH_MS ? c.touch : null;
-    const ac = t ? agentColor(t.actor) : '';
+    const tc = c.touch && Date.now() - c.touch.at < TOUCH_MS ? c.touch : null;
+    const ac = tc ? agentColor(tc.actor) : '';
     e.style.setProperty('--fc', colorOfFolder(c.folder));
     if (ac) e.style.setProperty('--ac', ac);
-    e.classList.toggle('touched', !!t);
-    e.classList.toggle('live', !!(t && t.live));
+    e.classList.toggle('touched', !!tc);
+    e.classList.toggle('live', !!(tc && tc.live));
     e.classList.toggle('sel', this.sel.has(c.path));
     this.markHit(c);
     e.innerHTML = `<div class="cv-ctitle"><span>${esc(c.name)}</span></div>
       <div class="cv-cex${ex ? '' : ' loading'}">${ex ? esc(ex.text) : ''}</div>
       <div class="cv-ctags">${tags}</div>
-      <div class="cv-cfoot"><span title="Last edited">${esc(relTs(c.mtime))}</span>${
-        n ? `<span title="${n} ${n === 1 ? 'link' : 'links'} to other notes">↔ ${n}</span>` : ''
+      <div class="cv-cfoot"><span title="${t('Last edited')}">${esc(relTs(c.mtime))}</span>${
+        n ? `<span title="${tn(n, '{n} link to other notes', '{n} links to other notes')}">↔ ${n}</span>` : ''
       }<span class="grow"></span>${
-        t
-          ? `<span class="cv-agent${t.live ? ' live' : ''}" title="${esc(t.actor)}: ${esc(t.label)} (${esc(
-              relTs(t.at / 1000),
-            )})">${esc(initials(t.actor))}</span>`
+        tc
+          ? `<span class="cv-agent${tc.live ? ' live' : ''}" title="${esc(tc.actor)}: ${esc(tc.label)} (${esc(
+              relTs(tc.at / 1000),
+            )})">${esc(initials(tc.actor))}</span>`
           : ''
       }</div>
-      <button class="cv-copen" title="Preview (Enter)" aria-label="Preview">${ICON.open}</button>`;
+      <button class="cv-copen" title="${t('Preview (Enter)')}" aria-label="${t('Preview')}">${ICON.open}</button>`;
   }
 
   private placeCard(c: Card, f = this.frameOf(c)): void {
@@ -860,7 +861,7 @@ export class Board {
       page: 'canvas',
       root,
       search: {
-        placeholder: 'Find a note, #tag or in:folder',
+        placeholder: t('Find a note, #tag or in:folder'),
         find: {
           items: () => {
             const meta = new Map(state.graph.nodes.map((n) => [n.path || n.id, n as { tags?: unknown; degree?: number }]));
@@ -908,8 +909,8 @@ export class Board {
           this.applyLabelPrefs();
         },
         help: {
-          nodes: 'The preview text, tags and footer on each card. Titles always stay.',
-          folders: 'The name and count over each folder frame.',
+          nodes: t('The preview text, tags and footer on each card. Titles always stay.'),
+          folders: t('The name and count over each folder frame.'),
         },
       },
       filter: (host) => this.renderFilter(host),
@@ -992,10 +993,10 @@ export class Board {
 
   private renderFilter(host: HTMLElement): void {
     host.innerHTML =
-      '<h4>Canvas</h4>' +
-      toggleHTML('links', 'Link lines', this.showLinks, 'Lines between cards for every link from one note to another, routed around cards and frames.') +
-      '<button type="button" class="vc-act" data-tidy title="Lay every folder frame out in a neat grid">Tidy the whole board</button>' +
-      '<div class="vc-hint">V select · H or Space pan · T tidy · L wires · M minimap · ? all shortcuts</div>';
+      `<h4>${t('Canvas')}</h4>` +
+      toggleHTML('links', t('Link lines'), this.showLinks, t('Lines between cards for every link from one note to another, routed around cards and frames.')) +
+      `<button type="button" class="vc-act" data-tidy title="${t('Lay every folder frame out in a neat grid')}">${t('Tidy the whole board')}</button>` +
+      `<div class="vc-hint">${t('V select · H or Space pan · T tidy · L wires · M minimap · ? all shortcuts')}</div>`;
     host.querySelector<HTMLElement>('[data-t=links]')!.onclick = () => {
       this.command('links');
       this.vc.renderPanel();
@@ -1089,8 +1090,8 @@ export class Board {
     this.root.classList.toggle('has-sel', show);
     const cnt = this.ui.selbar.querySelector<HTMLElement>('.cnt')!;
     cnt.textContent = n
-      ? `${n} note${n === 1 ? '' : 's'}`
-      : `${this.selFrames.size} folder${this.selFrames.size === 1 ? '' : 's'}`;
+      ? tn(n, '{n} note', '{n} notes')
+      : tn(this.selFrames.size, '{n} folder', '{n} folders');
     this.ui.selbar.querySelectorAll<HTMLElement>('[data-act^=al-],[data-act^=dis-]').forEach((b) => {
       b.classList.toggle('hidden', b.dataset.act!.startsWith('dis-') ? n < 3 : n < 2);
     });
@@ -1109,8 +1110,8 @@ export class Board {
         .slice(0, 3)
         .map(
           (f) =>
-            `<button class="cv-btn cv-fchip" data-fchip="${esc(f)}" title="Focus folder ${esc(f)}"><i class="cv-fdot" style="--fc:${esc(colorOfFolder(f))}"></i><span>${esc(
-              f === 'Root' ? 'Vault' : f.split('/').pop() || f,
+            `<button class="cv-btn cv-fchip" data-fchip="${esc(f)}" title="${t('Focus folder {name}', { name: esc(f) })}"><i class="cv-fdot" style="--fc:${esc(colorOfFolder(f))}"></i><span>${esc(
+              f === 'Root' ? t('Vault') : f.split('/').pop() || f,
             )}</span></button>`,
         )
         .join('') + (list.length > 3 ? `<span class="cv-fmore">+${list.length - 3}</span>` : '');
@@ -1682,8 +1683,8 @@ export class Board {
     normalizeFrame(target);
     this.separate(target);
     this.kick(true);
-    const label = plan.length === 1 ? `"${plan[0].o.c.name}"` : `${plan.length} notes`;
-    this.toast.show(`Moving ${label} to ${target.name}...`, { ms: 20000 });
+    const label = plan.length === 1 ? `"${plan[0].o.c.name}"` : tn(plan.length, '{n} note', '{n} notes');
+    this.toast.show(t('Moving {what} to {folder}...', { what: label, folder: target.name }), { ms: 20000 });
     const done: { c: Card; from: string; oldPath: string; fx: number; fy: number; frame: Frame }[] = [];
     let failed = 0;
     let lastErr = '';
@@ -1725,22 +1726,23 @@ export class Board {
             this.frames.get(d.from)!.cards.push(d.c);
             if (d.c.el) this.fillCard(d.c);
           } catch (err) {
-            this.toast.show('Undo failed: ' + (err as Error).message, { err: true });
+            this.toast.show(t('Undo failed: {error}', { error: (err as Error).message }), { err: true });
           }
         }
         this.kick(true);
         this.persist();
         await this.afterWrite();
       };
-      this.pushUndo(`Move ${label}`, undo);
+      this.pushUndo(t('Move {what}', { what: label }), undo);
       this.toast.show(
-        `Moved ${done.length === 1 ? `"${done[0].c.name}"` : done.length + ' notes'} to ${target.name}${
-          failed ? ` · ${failed} failed: ${lastErr}` : ''
-        }`,
+        t('Moved {what} to {folder}', {
+          what: done.length === 1 ? `"${done[0].c.name}"` : tn(done.length, '{n} note', '{n} notes'),
+          folder: target.name,
+        }) + (failed ? ' · ' + t('{n} failed: {error}', { n: failed, error: lastErr }) : ''),
         { undo: () => void this.runUndo(), err: failed > 0 },
       );
     } else {
-      this.toast.show(`Could not move: ${lastErr}`, { err: true });
+      this.toast.show(t('Could not move: {error}', { error: lastErr }), { err: true });
     }
     await this.afterWrite();
   }
@@ -1764,9 +1766,14 @@ export class Board {
   private confirmFolderInto(src: Frame, target: Frame): void {
     const n = src.cards.length;
     Modal.confirm(
-      'Move folder',
-      `Move the folder "${src.name}" with its ${n} note${n === 1 ? '' : 's'} into "${target.name}"? The notes move on disk to ${target.name}/${src.name}/.`,
-      'Move folder',
+      t('Move folder'),
+      tn(
+        n,
+        'Move the folder "{name}" with its {n} note into "{target}"? The notes move on disk to {path}.',
+        'Move the folder "{name}" with its {n} notes into "{target}"? The notes move on disk to {path}.',
+        { name: src.name, target: target.name, path: `${target.name}/${src.name}/` },
+      ),
+      t('Move folder'),
       async () => {
         Modal.close();
         await this.moveFolderInto(src, target);
@@ -1780,7 +1787,7 @@ export class Board {
     const paths = src.cards.map((c) => c.path);
     const before = new Map(src.cards.map((c) => [c.path, { x: c.x, y: c.y }]));
     const srcBox = { x: src.x, y: src.y, w: src.w, h: src.h };
-    this.toast.show(`Moving ${paths.length} notes into ${target.name}...`, { ms: 30000 });
+    this.toast.show(tn(paths.length, 'Moving {n} note into {folder}...', 'Moving {n} notes into {folder}...', { folder: target.name }), { ms: 30000 });
     this.busy = true;
     const r = await moveMany(paths, dest);
     this.busy = false;
@@ -1819,9 +1826,10 @@ export class Board {
       }
       await this.afterWrite();
     };
-    this.pushUndo(`Move folder ${src.name}`, undo);
+    this.pushUndo(t('Move folder {name}', { name: src.name }), undo);
     this.toast.show(
-      `Moved ${r.moved.length} notes into ${target.name}/${src.name}${r.failed.length ? ` · ${r.failed.length} failed` : ''}`,
+      tn(r.moved.length, 'Moved {n} note into {folder}', 'Moved {n} notes into {folder}', { folder: `${target.name}/${src.name}` }) +
+        (r.failed.length ? ' · ' + t('{n} failed', { n: r.failed.length }) : ''),
       { undo: () => void this.runUndo(), err: r.failed.length > 0 },
     );
     await this.afterWrite();
@@ -1858,15 +1866,15 @@ export class Board {
   private async runUndo(): Promise<void> {
     const u = this.undoStack.pop();
     if (!u) {
-      this.toast.show('Nothing to undo');
+      this.toast.show(t('Nothing to undo'));
       return;
     }
-    this.toast.show(`Undoing: ${u.label}...`);
+    this.toast.show(t('Undoing: {label}...', { label: u.label }));
     try {
       await u.run();
-      this.toast.show(`Undone: ${u.label}`);
+      this.toast.show(t('Undone: {label}', { label: u.label }));
     } catch (e) {
-      this.toast.show('Undo failed: ' + (e as Error).message, { err: true });
+      this.toast.show(t('Undo failed: {error}', { error: (e as Error).message }), { err: true });
     }
   }
 
@@ -1920,20 +1928,20 @@ export class Board {
     try {
       const np = await renameNote(oldPath, name);
       this.rekey(c, np);
-      this.pushUndo(`Rename "${oldName}"`, async () => {
+      this.pushUndo(t('Rename "{name}"', { name: oldName }), async () => {
         const back = await renameNote(c.path, oldName);
         c.name = oldName;
         this.rekey(c, back);
         this.fillCard(c);
         await this.afterWrite();
       });
-      this.toast.show(`Renamed to "${name}"`, { undo: () => void this.runUndo() });
+      this.toast.show(t('Renamed to "{name}"', { name }), { undo: () => void this.runUndo() });
       if (this.panel.path === c.path) void this.openPanel(c);
     } catch (e) {
       c.name = oldName;
       this.rekey(c, oldPath);
       this.fillCard(c);
-      this.toast.show('Rename failed: ' + (e as Error).message, { err: true });
+      this.toast.show(t('Rename failed: {error}', { error: (e as Error).message }), { err: true });
     }
     this.persist();
     await this.afterWrite();
@@ -1941,12 +1949,12 @@ export class Board {
 
   private startRenameFrame(f: Frame): void {
     if (f.name === 'Root') {
-      this.toast.show('Root is the vault itself and cannot be renamed');
+      this.toast.show(t('Root is the vault itself and cannot be renamed'));
       return;
     }
-    const t = f.el?.querySelector<HTMLElement>('.cv-ftitle');
-    if (!t) return;
-    this.inlineEdit(t, f.name, (v) => {
+    const ti = f.el?.querySelector<HTMLElement>('.cv-ftitle');
+    if (!ti) return;
+    this.inlineEdit(ti, f.name, (v) => {
       if (!v) {
         this.fillFrame(f);
         return;
@@ -1964,7 +1972,7 @@ export class Board {
     }
     if (state.tree[name] || this.frames.has(name)) {
       this.fillFrame(f);
-      this.toast.show(`A folder named "${name}" already exists`, { err: true });
+      this.toast.show(t('A folder named "{name}" already exists', { name }), { err: true });
       return;
     }
     const color = state.folderMeta[old]?.color;
@@ -1980,7 +1988,7 @@ export class Board {
     }
     this.fillFrame(f);
     this.kick(true);
-    this.toast.show(`Renaming folder to ${name} (${paths.length} notes)...`, { ms: 30000 });
+    this.toast.show(tn(paths.length, 'Renaming folder to {name} ({n} note)...', 'Renaming folder to {name} ({n} notes)...', { name }), { ms: 30000 });
     this.busy = true;
     const r = await moveMany(paths, name);
     this.busy = false;
@@ -1996,13 +2004,13 @@ export class Board {
         /* color is cosmetic */
       }
     }
-    if (r.failed.length) this.toast.show(`Renamed with ${r.failed.length} failures: ${r.failed[0].error}`, { err: true });
+    if (r.failed.length) this.toast.show(t('Renamed with {n} failures: {error}', { n: r.failed.length, error: r.failed[0].error }), { err: true });
     else if (!isUndo) {
-      this.pushUndo(`Rename folder ${old}`, async () => {
+      this.pushUndo(t('Rename folder {name}', { name: old }), async () => {
         const cur = this.frames.get(name);
         if (cur) await this.renameFrame(cur, old, true);
       });
-      this.toast.show(`Folder renamed to ${name}`, { undo: () => void this.runUndo() });
+      this.toast.show(t('Folder renamed to {name}', { name }), { undo: () => void this.runUndo() });
     }
     this.persist();
     await this.afterWrite();
@@ -2074,7 +2082,7 @@ export class Board {
         packFrames(Array.from(this.frames.values()), b ? b.x : 0, b ? b.y : 0);
       }
     });
-    this.toast.show(packAll ? 'Board tidied' : `Tidied ${list.length} frame${list.length === 1 ? '' : 's'}`);
+    this.toast.show(packAll ? t('Board tidied') : tn(list.length, 'Tidied {n} frame', 'Tidied {n} frames'));
   }
 
   private align(kind: 'l' | 'c' | 'r' | 't' | 'm' | 'b'): void {

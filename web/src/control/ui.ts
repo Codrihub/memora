@@ -1,5 +1,6 @@
 // Shared building blocks for the control center pages: styles, drawer, menu, sheet and helpers.
 
+import { t } from '../i18n';
 import { esc, useStyles } from '../dom';
 import { toast } from '../toast';
 
@@ -226,11 +227,11 @@ export function sparkSVG(values: number[], w = 120, h = 28): string {
 export function ago(tsSec: number): string {
   if (!tsSec) return '-';
   const s = Math.max(0, Date.now() / 1000 - tsSec);
-  if (s < 10) return 'now';
-  if (s < 60) return Math.floor(s) + 's';
-  if (s < 3600) return Math.floor(s / 60) + 'm';
-  if (s < 86400) return Math.floor(s / 3600) + 'h';
-  return Math.floor(s / 86400) + 'd';
+  if (s < 10) return t('now');
+  if (s < 60) return t('{n}s', { n: Math.floor(s) });
+  if (s < 3600) return t('{n}m', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('{n}h', { n: Math.floor(s / 3600) });
+  return t('{n}d', { n: Math.floor(s / 86400) });
 }
 
 export function clock(tsSec: number, seconds = false): string {
@@ -243,7 +244,7 @@ export function clock(tsSec: number, seconds = false): string {
   });
 }
 
-export async function copyText(text: string, what = 'Copied'): Promise<void> {
+export async function copyText(text: string, what = t('Copied')): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
     toast(what, 'ok', 1800);
@@ -262,12 +263,12 @@ export async function copyText(text: string, what = 'Copied'): Promise<void> {
       ok = false;
     }
     ta.remove();
-    toast(ok ? what : 'Copy failed, select the text instead', ok ? 'ok' : 'err', 2200);
+    toast(ok ? what : t('Copy failed, select the text instead'), ok ? 'ok' : 'err', 2200);
   }
 }
 
 /** A code block with a copy button. */
-export function codeHTML(code: string, label = 'Copy'): string {
+export function codeHTML(code: string, label = t('Copy')): string {
   return `<div class="cc-code-wrap"><pre class="cc-code">${esc(code)}</pre><button type="button" class="cc-ibtn cc-copy" data-copy="${esc(
     code,
   )}" aria-label="${esc(label)}" title="${esc(label)}">${ICO.copy}</button></div>`;
@@ -349,7 +350,7 @@ export function openDrawer(o: DrawerOptions): HTMLElement {
   d.innerHTML = `<div class="cc-grab" aria-hidden="true"></div><div class="cc-drawer-h">${o.lead || ''}<div class="t"><h3 id="${tid}">${esc(
     o.title,
   )}</h3>${o.sub ? `<div class="s">${esc(o.sub)}</div>` : ''}</div>
-    <button type="button" class="cc-ibtn" data-x aria-label="Close">${ICO.close}</button></div>
+    <button type="button" class="cc-ibtn" data-x aria-label="${t('Close')}">${ICO.close}</button></div>
     <div class="cc-drawer-b">${o.body}</div>${o.foot ? `<div class="cc-drawer-f">${o.foot}</div>` : ''}`;
   document.body.append(scrim, d);
   requestAnimationFrame(() => {
@@ -554,9 +555,9 @@ export function openSheet(o: SheetOptions): Sheet {
   d.style.setProperty('--sh-w', width + 'px');
   document.documentElement.style.setProperty('--cc-sh-open', Math.min(width, window.innerWidth) + 'px');
   d.innerHTML = `<div class="cc-grab" aria-hidden="true"></div><header class="cc-sh-h">${
-    o.back ? `<button type="button" class="cc-ibtn cc-sh-back" data-back aria-label="Back" title="Back">${BACK_ICO}</button>` : ''
+    o.back ? `<button type="button" class="cc-ibtn cc-sh-back" data-back aria-label="${t('Back')}" title="${t('Back')}">${BACK_ICO}</button>` : ''
   }${o.lead || ''}<div class="t"><h2 id="${tid}">${esc(o.title)}</h2>${o.sub ? `<p>${esc(o.sub)}</p>` : ''}</div>
-    <button type="button" class="cc-ibtn cc-sh-x" data-x aria-label="Close">${ICO.close}</button></header>
+    <button type="button" class="cc-ibtn cc-sh-x" data-x aria-label="${t('Close')}">${ICO.close}</button></header>
     <div class="cc-sh-b">${o.body}</div>${o.actions?.length ? '<footer class="cc-sh-f"></footer>' : ''}`;
   const body = d.querySelector('.cc-sh-b') as HTMLElement;
   const foot = d.querySelector('.cc-sh-f') as HTMLElement | null;

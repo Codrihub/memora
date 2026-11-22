@@ -22,6 +22,7 @@ import { agentSide, blockerBoxes, clearOf, labelBox, type Box, type LabelKind } 
 import { hexToRgb } from './palette';
 import { hashStr, rng, sampleShell, type Vec3 } from './shape';
 import { HOME_DIR, HOME_FOV_DEG, HOME_TARGET, homeDistance, type BrainView } from './home-view';
+import { t } from '../i18n';
 
 export interface ParticleSpec {
   key: string;
@@ -784,7 +785,7 @@ export class BrainScene {
       const el = document.createElement('div');
       el.className = 'bl-region';
       el.style.setProperty('--c', rg.color);
-      el.textContent = /^root$/i.test(rg.name) ? 'Top level' : rg.name;
+      el.textContent = /^root$/i.test(rg.name) ? t('Top level') : rg.name;
       this.labels.appendChild(el);
       return { el, anchor: rg.anchor, name: rg.name };
     });

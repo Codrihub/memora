@@ -14,6 +14,7 @@ import { loadFeed } from '../control/feed';
 import { cachedCatalog, loadCatalog, scopesOf, toolsOf, type Permissions } from '../control/perms';
 import { ago, codeHTML, copyText, ICO, openSheet, wireCopy, type Sheet } from '../control/ui';
 import type { KeyCreated, KeyRow, KeysResult } from '../types';
+import { t } from '../i18n';
 
 export const KEY_PATHS = {
   create: '/api/keys',
@@ -81,11 +82,11 @@ export function appFor(k: KeyRow): AppInfo {
 
 export function statusOf(k: KeyRowFull, now = Date.now() / 1000): { st: Status; label: string; seen: string } {
   const u = usageOf(k);
-  const seen = u ? (ago(u.last) === 'now' ? 'Just now' : ago(u.last) + ' ago') : k.uses ? 'Over a week ago' : 'Never';
-  if (k.enabled === false) return { st: 'off', label: 'Off', seen };
-  if (u && now - u.last < ACTIVE_SECS) return { st: 'active', label: 'Active', seen };
-  if (u || k.uses) return { st: 'idle', label: 'Idle', seen };
-  return { st: 'never', label: 'Never used', seen };
+  const seen = u ? (ago(u.last) === t('now') ? t('Just now') : t('{time} ago', { time: ago(u.last) })) : k.uses ? t('Over a week ago') : t('Never');
+  if (k.enabled === false) return { st: 'off', label: t('Off'), seen };
+  if (u && now - u.last < ACTIVE_SECS) return { st: 'active', label: t('Active'), seen };
+  if (u || k.uses) return { st: 'idle', label: t('Idle'), seen };
+  return { st: 'never', label: t('Never used'), seen };
 }
 
 export function connectKey(k: KeyRowFull): ConnectKey {
@@ -155,7 +156,7 @@ export function loadAgents(reload = false): Promise<void> {
       data.error = '';
     } catch (e) {
       if (seq !== loadSeq) return;
-      data.error = (e as Error).message || 'Could not load the agents';
+      data.error = (e as Error).message || t('Could not load the agents');
     }
     emit();
   })();
@@ -210,19 +211,19 @@ export function wireAgentLinks(scope: HTMLElement): void {
 export async function createAgent(name: string, p: Permissions): Promise<{ key: ConnectKey; secret: string } | null> {
   try {
     const r = await apiPost<KeyCreated>(KEY_PATHS.create, { name, scopes: p.scopes, tools: p.tools });
-    if (!r || !r.id || !r.key) throw new Error('the server returned no key');
+    if (!r || !r.id || !r.key) throw new Error(t('the server returned no key'));
     if (Array.isArray(p.tools)) {
       try {
         await updateKeyPermissions({ id: r.id, scopes: p.scopes, tools: p.tools });
       } catch (e) {
-        toast('Agent created, but its tool list was not saved: ' + (e as Error).message, 'err', 6000);
+        toast(t('Agent created, but its tool list was not saved: {error}', { error: (e as Error).message }), 'err', 6000);
       }
     }
     freshSecrets.set(r.id, r.key);
     void loadAgents(true);
     return { key: { id: r.id, name: r.name || name, perms: p }, secret: r.key };
   } catch (e) {
-    toast('Could not create the agent: ' + (e as Error).message, 'err');
+    toast(t('Could not create the agent: {error}', { error: (e as Error).message }), 'err');
     return null;
   }
 }
@@ -231,10 +232,10 @@ export async function toggleKey(k: KeyRowFull): Promise<void> {
   const on = k.enabled !== false;
   try {
     await apiPost(KEY_PATHS.update, { id: k.id, enabled: !on });
-    toast(on ? `${nameOf(k)} is turned off` : `${nameOf(k)} is turned on`, 'ok');
+    toast(on ? t('{name} is turned off', { name: nameOf(k) }) : t('{name} is turned on', { name: nameOf(k) }), 'ok');
     await loadAgents(true);
   } catch (e) {
-    toast('Failed: ' + (e as Error).message, 'err');
+    toast(t('Failed: {error}', { error: (e as Error).message }), 'err');
   }
 }
 
@@ -242,9 +243,9 @@ export async function toggleKey(k: KeyRowFull): Promise<void> {
 export function rollKey(k: KeyRowFull, onSetup?: () => void): void {
   const name = nameOf(k);
   Modal.confirm(
-    'Make a new key',
-    `${name}'s current key stops working at once. The new key is shown next; update the app that uses ${name}.`,
-    'Make a new key',
+    t('Make a new key'),
+    t("{name}'s current key stops working at once. The new key is shown next; update the app that uses {name}.", { name }),
+    t('Make a new key'),
     async () => {
       try {
         const r = await apiPost<KeyCreated>(KEY_PATHS.roll, { id: k.id });
@@ -254,7 +255,7 @@ export function rollKey(k: KeyRowFull, onSetup?: () => void): void {
         showSecret(k, secret, onSetup);
         void loadAgents(true);
       } catch (e) {
-        toast('Could not make a new key: ' + (e as Error).message, 'err');
+        toast(t('Could not make a new key: {error}', { error: (e as Error).message }), 'err');
       }
     },
     false,
@@ -266,19 +267,17 @@ function showSecret(k: KeyRowFull, secret: string, onSetup?: () => void): void {
   const name = nameOf(k);
   const has = !!secret;
   openSheet({
-    title: 'New key made',
+    title: t('New key made'),
     sub: name,
     lead: avatarHTML(name, 36, '', k.id),
     width: 560,
-    body: `<div class="ky-secret" role="note">${ICO.key}<span><b>This key is shown once. Copy it now and keep it private.</b> Anyone with this key can read and write your notes as ${esc(
-      name,
-    )}. The old key stopped working.</span></div>
-      ${codeHTML(has ? secret : 'The server did not return a key.', 'Copy key')}`,
+    body: `<div class="ky-secret" role="note">${ICO.key}<span><b>${t('This key is shown once. Copy it now and keep it private.')}</b> ${t('Anyone with this key can read and write your notes as {name}. The old key stopped working.', { name: esc(name) })}</span></div>
+      ${codeHTML(has ? secret : t('The server did not return a key.'), t('Copy key'))}`,
     actions: [
-      { label: 'Copy key', icon: ICO.copy, left: true, run: () => void copyText(has ? secret : '', 'Key copied') },
+      { label: t('Copy key'), icon: ICO.copy, left: true, run: () => void copyText(has ? secret : '', t('Key copied')) },
       ...(has && onSetup
-        ? [{ label: 'Set up with the new key', cls: 'primary', icon: ICO.plug, run: (s: Sheet) => (s.close(), onSetup()) }]
-        : [{ label: 'Done', cls: 'primary', run: (s: Sheet) => s.close() }]),
+        ? [{ label: t('Set up with the new key'), cls: 'primary', icon: ICO.plug, run: (s: Sheet) => (s.close(), onSetup()) }]
+        : [{ label: t('Done'), cls: 'primary', run: (s: Sheet) => s.close() }]),
     ],
   });
 }
@@ -287,17 +286,17 @@ function showSecret(k: KeyRowFull, secret: string, onSetup?: () => void): void {
 export function openReveal(k: KeyRowFull): void {
   const name = nameOf(k);
   openSheet({
-    title: 'Show key',
+    title: t('Show key'),
     sub: name,
     lead: avatarHTML(name, 36, '', k.id),
     width: 520,
-    body: `<form id="krForm" class="ui-fld" style="margin:0"><label for="krPw">Your Memora password</label>
+    body: `<form id="krForm" class="ui-fld" style="margin:0"><label for="krPw">${t('Your Memora password')}</label>
         <input id="krPw" class="ui-input" type="password" autocomplete="current-password">
-        <span class="ui-help">The key is stored sealed on the server; your password unlocks it.</span></form>
+        <span class="ui-help">${t('The key is stored sealed on the server; your password unlocks it.')}</span></form>
       <div id="krOut" class="ky-reveal" style="margin-top:16px"></div>`,
     actions: [
-      { label: 'Close', cls: 'ghost', left: true, run: (s) => s.close() },
-      { label: 'Show key', cls: 'primary', icon: ICO_EYE, run: (s) => reveal(s) },
+      { label: t('Close'), cls: 'ghost', left: true, run: (s) => s.close() },
+      { label: t('Show key'), cls: 'primary', icon: ICO_EYE, run: (s) => reveal(s) },
     ],
     onOpen: (s) => {
       ($('#krForm', s.body) as HTMLFormElement).onsubmit = (e) => {
@@ -309,19 +308,19 @@ export function openReveal(k: KeyRowFull): void {
   async function reveal(s: Sheet): Promise<void> {
     const pw = $('#krPw', s.body) as HTMLInputElement;
     if (!pw.value) {
-      toast('Enter your password', 'warn');
+      toast(t('Enter your password'), 'warn');
       pw.focus();
       return;
     }
     try {
       const r = await apiPost<{ key?: string }>(KEY_PATHS.reveal, { id: k.id, current: pw.value });
-      if (!r || !r.key) throw new Error('the server returned no key');
+      if (!r || !r.key) throw new Error(t('the server returned no key'));
       pw.value = '';
       const out = $('#krOut', s.body);
-      out.innerHTML = codeHTML(r.key, 'Copy key');
+      out.innerHTML = codeHTML(r.key, t('Copy key'));
       wireCopy(out);
     } catch (e) {
-      toast((e as Error).message || 'Could not show the key', 'err');
+      toast((e as Error).message || t('Could not show the key'), 'err');
     }
   }
 }
@@ -330,20 +329,20 @@ export function openReveal(k: KeyRowFull): void {
 export function delKey(k: KeyRowFull, after?: () => void): void {
   const name = nameOf(k);
   Modal.confirm(
-    'Delete agent',
-    `${name} will be deleted and its key stops working at once. You can restore it until you reload the app.`,
-    'Delete agent',
+    t('Delete agent'),
+    t('{name} will be deleted and its key stops working at once. You can restore it until you reload the app.', { name }),
+    t('Delete agent'),
     async () => {
       try {
         await apiPost(KEY_PATHS.del, { id: k.id });
         state.keysDeleted.push({ id: k.id, name: k.name });
         freshSecrets.delete(k.id);
         Modal.close();
-        toast(name + ' deleted', 'ok');
+        toast(t('{name} deleted', { name }), 'ok');
         after?.();
         void loadAgents(true);
       } catch (e) {
-        toast('Failed: ' + (e as Error).message, 'err');
+        toast(t('Failed: {error}', { error: (e as Error).message }), 'err');
       }
     },
   );
@@ -353,10 +352,10 @@ export async function restoreKey(id: string): Promise<void> {
   try {
     await apiPost<KeyCreated>(KEY_PATHS.restore, { id });
     state.keysDeleted = state.keysDeleted.filter((k) => k.id !== id);
-    toast('Agent restored', 'ok');
+    toast(t('Agent restored'), 'ok');
     void loadAgents(true);
   } catch (e) {
-    toast('Could not restore: ' + (e as Error).message, 'err');
+    toast(t('Could not restore: {error}', { error: (e as Error).message }), 'err');
   }
 }
 

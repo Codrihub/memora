@@ -226,15 +226,9 @@ async fn h_state(State(st): State<AppState>, key: Option<Extension<ApiKeyCaller>
         Ok(s) => s,
         Err(r) => return r,
     };
-    let providers = store.providers().unwrap_or_default();
-    let models = store.models().unwrap_or_default();
-    let prefs = store.prefs().unwrap_or_default();
-    let ready = resolve_model(store, None, None).is_ok();
-    Json(json!({
-        "name": NAME, "ready": ready, "providers": providers, "models": models, "prefs": prefs,
-        "tools": TOOLS, "defaults": {"context_tokens": DEFAULT_CONTEXT, "max_output_tokens": DEFAULT_MAX_OUTPUT, "max_steps": DEFAULT_STEPS},
-    }))
-    .into_response()
+    // The same state every change answers with (models say whether they can think, so the
+    // chat offers a thinking level before the first message too).
+    Json(state_json(store)).into_response()
 }
 
 async fn h_provider_save(
@@ -568,6 +562,7 @@ fn state_json(store: &Store) -> Value {
         "models": models,
         "prefs": prefs,
         "tools": TOOLS,
+        "own_tools": OWN_TOOLS,
         "defaults": {"context_tokens": DEFAULT_CONTEXT, "max_output_tokens": DEFAULT_MAX_OUTPUT, "max_steps": DEFAULT_STEPS},
     })
 }
@@ -686,7 +681,20 @@ async fn h_prefs(
                     || v.as_str()
                         .is_some_and(|x| ["ask", "auto", "read"].contains(&x))
             }
-            "launcher" => v.is_null() || v.is_boolean(),
+            "launcher" | "intro_done" => v.is_null() || v.is_boolean(),
+            UI_LANG => {
+                v.is_null()
+                    || v.as_str()
+                        .is_some_and(|x| !x.is_empty() && x.chars().count() <= 40)
+            }
+            TOOLS_OFF_MAIN | TOOLS_OFF_SUB => {
+                v.is_null()
+                    || v.as_array().is_some_and(|a| {
+                        a.len() <= 200
+                            && a.iter()
+                                .all(|x| x.as_str().is_some_and(|n| !n.is_empty() && n.len() <= 64))
+                    })
+            }
             THINKING => {
                 v.is_null()
                     || v.as_str()
@@ -1439,6 +1447,24 @@ A picture on the web (an http or https address) cannot be opened: you have no br
 
 /// Open a picture from the vault for the model: it is staged like an image the owner sent and
 /// goes to the model with the next step (see `history_within`).
+/// The vault as Mnemo (and its sub-agents) may see it: notes, folders and pictures the owner
+/// keeps private from Mnemo are left out of listings and read as not found, exactly as for
+/// any agent's key. Every read Mnemo makes outside its MCP tools goes through this.
+pub(crate) fn mnemo_store(st: &AppState) -> memora_core::privacy::Viewed<'_> {
+    memora_core::privacy::lock_as(
+        &st.store,
+        memora_mcp::privacy::view_for_key(&st.db, ACTOR_ID),
+    )
+}
+
+/// Whether Mnemo (and its sub-agents) may see a vault path: the owner can keep notes, folders
+/// and pictures private from it like from any agent (privacy rules on the key id `mnemo`).
+pub(crate) fn mnemo_sees(st: &AppState, path: &str) -> bool {
+    st.db
+        .read(|c| Ok(memora_state::privacy::visible(c, ACTOR_ID, path)))
+        .unwrap_or(false)
+}
+
 fn view_image(st: &AppState, args: &Value) -> Result<Value, String> {
     let raw = args["path"].as_str().unwrap_or("").trim();
     let raw = raw
@@ -1473,7 +1499,7 @@ fn view_image(st: &AppState, args: &Value) -> Result<Value, String> {
             vec![format!("{note_dir}/{path}"), path.to_string()]
         };
     let found = candidates.iter().find_map(|p| {
-        let full = crate::store_as(st, None).resolve(p).ok()?;
+        let full = mnemo_store(st).resolve(p).ok()?;
         full.is_file().then(|| (p.clone(), full))
     });
     let Some((rel, full)) = found else {
@@ -1481,6 +1507,12 @@ fn view_image(st: &AppState, args: &Value) -> Result<Value, String> {
             "no picture at {raw} in the vault (list_images shows the pictures there)"
         ));
     };
+    // A picture (or its folder) the owner keeps private from Mnemo stays unseen, like a note.
+    if !mnemo_sees(st, &rel) {
+        return Err(format!(
+            "no picture at {raw} in the vault (list_images shows the pictures there)"
+        ));
+    }
     let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
     let Some((ext, _)) = uploads::sniff(&bytes) else {
         return Err("only PNG, JPEG, WebP or GIF pictures can be looked at".into());
@@ -1556,7 +1588,7 @@ made or changed), instead of only naming them. Paths are vault paths: a note end
 /// Check the items Mnemo wants to show: each one that exists, with a title.
 fn show_items(st: &AppState, args: &Value) -> Result<Value, String> {
     let list = args["items"].as_array().ok_or("items is required")?;
-    let store = crate::store_as(st, None);
+    let store = mnemo_store(st);
     let mut shown = Vec::new();
     let mut missing = Vec::new();
     for it in list.iter().take(12) {
@@ -1665,6 +1697,106 @@ fn ask_check(args: &Value) -> Result<Value, String> {
         "options": opts,
         "allow_other": args["allow_other"] != false,
     }))
+}
+
+/// Mnemo's own tools (besides the Memora ones in [`TOOLS`]) the owner can switch off for Mnemo
+/// or for its sub-agents in Settings.
+pub(crate) const OWN_TOOLS: &[&str] = &[
+    "view_image",
+    "place_image",
+    "show_items",
+    "ask_owner",
+    "update_plan",
+    "current_time",
+    "list_chats",
+    "search_chats",
+    "read_chat",
+    "search_docs",
+    "read_docs",
+    "delegate",
+    "describe_image",
+    "generate_image",
+];
+/// Tools the owner switched off for Mnemo (`tools_off_main`) or for sub-agents (`tools_off_sub`).
+pub(crate) const TOOLS_OFF_MAIN: &str = "tools_off_main";
+pub(crate) const TOOLS_OFF_SUB: &str = "tools_off_sub";
+
+/// The tools switched off for Mnemo itself (`sub` false) or for its sub-agents.
+pub(crate) fn tools_off(store: &Store, sub: bool) -> BTreeSet<String> {
+    store
+        .prefs()
+        .ok()
+        .and_then(|p| {
+            p.get(if sub { TOOLS_OFF_SUB } else { TOOLS_OFF_MAIN })
+                .cloned()
+        })
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect()
+}
+
+/// Mnemo's plan for a longer task: the steps, each not started, in progress or done. The
+/// owner sees it as a checklist above the message box while Mnemo works.
+pub(crate) const UPDATE_PLAN: &str = "update_plan";
+const PLAN_MAX: usize = 12;
+
+fn update_plan_def() -> ToolDef {
+    ToolDef {
+        name: UPDATE_PLAN.into(),
+        description: format!(
+            "Show the owner your plan as a checklist while you work. Use it for a task of three or more \
+steps (an audit of many notes, a reorganisation, a long edit): call it first with every step (status pending, \
+the first one in_progress), then again with the whole list each time a step is done or starts. At most \
+{PLAN_MAX} steps of a few words each, in the owner's language. Skip it for short tasks."
+        ),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "maxItems": PLAN_MAX,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "description": "The step, a few words"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}
+                        },
+                        "required": ["text", "status"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["steps"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+/// The plan, checked: `{steps: [{text, status}]}` (the reply's stream shows it as it is called).
+fn update_plan(args: &Value) -> Result<Value, String> {
+    let steps = args["steps"].as_array().ok_or("steps is a list")?;
+    if steps.is_empty() || steps.len() > PLAN_MAX {
+        return Err(format!("give 1 to {PLAN_MAX} steps"));
+    }
+    let mut out = Vec::new();
+    for s in steps {
+        let text: String = s["text"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(120)
+            .collect();
+        let status = s["status"].as_str().unwrap_or("pending");
+        if text.is_empty() || !["pending", "in_progress", "done"].contains(&status) {
+            return Err("each step needs text and a status: pending, in_progress or done".into());
+        }
+        out.push(json!({"text": text, "status": status}));
+    }
+    let done = out.iter().filter(|s| s["status"] == "done").count();
+    Ok(json!({"ok": true, "steps": out.len(), "done": done}))
 }
 
 /// Mnemo's clock: the time now where the owner is (their browser says its zone).
@@ -2477,6 +2609,7 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
     defs.push(view_image_def());
     defs.push(show_items_def());
     defs.push(current_time_def());
+    defs.push(update_plan_def());
     defs.push(ask_owner_def());
     defs.extend(docs::defs());
     defs
@@ -2524,7 +2657,9 @@ they like answers, who they are and what they like, learned quietly as you go; t
 owner sees, edits and deletes them in Settings, Mnemo, What Mnemo knows about you, and can turn learning off. \
 Nothing is learned in a fleeting chat.\n\
 - Fleeting chats: the owner can start a chat that is not kept; it disappears (with the images sent in it) when \
-they leave it, and it is left out of search and of list_chats. Changes you make to notes in it stay.\n\
+they leave it, and it is left out of search and of list_chats. Changes you make to notes in it stay. Everything \
+else works as in any chat: every tool, sub-agents, skills and the models for each job; only your notes about \
+the owner are left out.\n\
 - Pictures: view_image lets you look at a picture in the vault (one a note shows: its path, or the path as written \
 plus the note). A picture on the web (an http address) cannot be opened, as you have no browser: say so, and ask the \
 owner to download it and send it in the chat or put it in the note.\n\
@@ -2548,7 +2683,7 @@ it. Give a page a new <title> only when they ask for a new, separate one.";
 
 fn system_prompt(st: &AppState, scope: &str, extra: Option<&str>) -> String {
     let (stats, note) = {
-        let store = crate::store_as(st, None);
+        let store = mnemo_store(st);
         let note = scope
             .strip_prefix("note:")
             .and_then(|p| store.read_note_impl(p).ok())
@@ -3128,7 +3263,7 @@ fn parse_attach(b: &Value) -> Result<Vec<(String, String)>, String> {
 
 /// What the model gets for the attached items, and the items as the chat shows them.
 fn attach_snapshot(st: &AppState, wanted: &[(String, String)]) -> Result<(Value, String), String> {
-    let store = crate::store_as(st, None);
+    let store = mnemo_store(st);
     let mut items = Vec::new();
     let mut text = String::new();
     for (kind, path) in wanted {
@@ -3365,7 +3500,7 @@ fn skill_for(st: &AppState, text: &str) -> Option<(Skill, String)> {
     let sk = skills(st)
         .into_iter()
         .find(|s| s.name.eq_ignore_ascii_case(name))?;
-    let body = crate::store_as(st, None)
+    let body = mnemo_store(st)
         .read_note_impl(&sk.path)
         .ok()
         .and_then(|v| v["content"].as_str().map(str::to_string))?;
@@ -3396,6 +3531,7 @@ const SUGGEST_EVERY: i64 = 12 * 3600;
 async fn h_suggestions(
     State(st): State<AppState>,
     key: Option<Extension<ApiKeyCaller>>,
+    req: axum::extract::Request,
 ) -> Response {
     if let Some(r) = browser_only(&key) {
         return r;
@@ -3404,10 +3540,31 @@ async fn h_suggestions(
         Ok(s) => s,
         Err(r) => return r,
     };
+    // The screen's language comes with the request, so a language just picked is used at once.
+    if let Some(l) = crate::query_value(req.uri(), "lang")
+        .map(|l| l.trim().to_string())
+        .filter(|l| {
+            !l.is_empty()
+                && l.chars().count() <= 40
+                && l.chars().all(|c| c.is_alphabetic() || c == ' ')
+        })
+    {
+        if store
+            .prefs()
+            .ok()
+            .and_then(|p| p.get(UI_LANG).and_then(Value::as_str).map(str::to_string))
+            .as_deref()
+            != Some(l.as_str())
+        {
+            let _ = store.set_pref(UI_LANG, &json!(l));
+        }
+    }
     let prefs = store.prefs().unwrap_or_default();
     let own = prefs.get(OWN_SUGGESTIONS).cloned().unwrap_or(json!([]));
     let ai = prefs.get(AI_SUGGESTIONS).cloned().unwrap_or(json!({}));
-    let stale = ai["at"].as_i64().unwrap_or(0) < memora_state::now() - SUGGEST_EVERY;
+    // Ones written in another language than the screen's are not shown; new ones are written.
+    let same_lang = ai["lang"].as_str() == Some(ui_language(store).as_str());
+    let stale = !same_lang || ai["at"].as_i64().unwrap_or(0) < memora_state::now() - SUGGEST_EVERY;
     if stale {
         // Write new ones in the background; this answer has the ones from before.
         let st2 = st.clone();
@@ -3415,7 +3572,8 @@ async fn h_suggestions(
             refresh_suggestions(&st2);
         });
     }
-    Json(json!({"own": own, "ai": ai["items"].clone()})).into_response()
+    Json(json!({"own": own, "ai": if same_lang { ai["items"].clone() } else { json!([]) }}))
+        .into_response()
 }
 
 async fn h_suggestions_set(
@@ -3457,7 +3615,7 @@ async fn h_suggestions_set(
 
 /// The names of the notes changed most recently (skills left out).
 fn recent_titles(st: &AppState, n: usize) -> Vec<String> {
-    let notes = crate::store_as(st, None).walk();
+    let notes = mnemo_store(st).walk();
     let mut dated: Vec<(std::time::SystemTime, String)> = notes
         .into_iter()
         .filter(|(rel, _, _)| !rel.starts_with(&format!("{SKILLS}/")))
@@ -3497,6 +3655,18 @@ async fn h_suggestions_refresh(
 static SUGGESTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Ask the default model for a few things worth asking, from the titles of recent notes.
+/// The language the owner's screen is in (`Indonesian`), sent by the web app.
+const UI_LANG: &str = "ui_lang";
+
+/// The language the owner's screen is in (`Indonesian`), English until the web app says.
+fn ui_language(store: &Store) -> String {
+    store
+        .prefs()
+        .ok()
+        .and_then(|p| p.get(UI_LANG).and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| "English".into())
+}
+
 fn refresh_suggestions(st: &AppState) -> bool {
     use std::sync::atomic::Ordering;
     if SUGGESTING.swap(true, Ordering::SeqCst) {
@@ -3510,10 +3680,16 @@ fn refresh_suggestions(st: &AppState) -> bool {
         if recent.is_empty() {
             return None;
         }
+        // The language the owner picked for their screen, never the language of the notes.
+        let screen = ui_language(store);
+        let lang = format!(
+            "Write every request in {screen}, the owner's language, even when the note titles are in another \
+language (keep note names as they are)."
+        );
         let prompt = format!(
             "Recently changed notes in the owner's vault:\n{}\n\nWrite 6 short requests (at most 12 words each) the owner \
 might ask {NAME}, their notes agent, about these notes right now: finding, summarising, linking, tidying, planning. \
-Write them in the language most of the titles are in. One per line, no numbers, no quotes, nothing else.",
+{lang}\nOne per line, no numbers, no quotes, nothing else.",
             recent.join("\n")
         );
         let opts = Options {
@@ -3560,9 +3736,15 @@ Write them in the language most of the titles are in. One per line, no numbers, 
         let items = items
             .map(|i| json!(i))
             .unwrap_or_else(|| old["items"].clone());
+        // Kept with the language they are in: another language on screen asks for new ones.
+        let lang = if fresh {
+            json!(ui_language(store))
+        } else {
+            old["lang"].clone()
+        };
         let _ = store.set_pref(
             AI_SUGGESTIONS,
-            &json!({"at": memora_state::now(), "items": items}),
+            &json!({"at": memora_state::now(), "items": items, "lang": lang}),
         );
     }
     SUGGESTING.store(false, Ordering::SeqCst);
@@ -4300,6 +4482,8 @@ fn setup(
     if owner::learning(store) && !fleeting_ids(store).contains(id) {
         tools.extend(owner::defs());
     }
+    let off = tools_off(store, false);
+    tools.retain(|t| !off.contains(&t.name));
     let fixed = approx_tokens(&system)
         + approx_tokens(
             &serde_json::to_string(&tools.iter().map(|t| &t.parameters).collect::<Vec<_>>())
@@ -4550,6 +4734,13 @@ pub(crate) fn exec_tool(
     sub: Option<&str>,
 ) -> Result<Value, String> {
     let off = st.mcp.disabled_tools();
+    if tools_off(store, sub.is_some()).contains(&c.name) {
+        return Err(format!(
+            "Not done: the owner switched {} off for {} (Settings, {NAME}).",
+            c.name,
+            if sub.is_some() { "sub-agents" } else { NAME }
+        ));
+    }
     let allowed = TOOLS.contains(&c.name.as_str()) && !off.contains(&c.name);
     let writes = c.name == PLACE_IMAGE
         || (c.name == roles::GENERATE_IMAGE && c.arguments["note"].is_string())
@@ -4586,6 +4777,8 @@ answer what should change; Mnemo asks the owner."
         place_image(st, who, &c.arguments)
     } else if c.name == SHOW_ITEMS {
         show_items(st, &c.arguments)
+    } else if c.name == UPDATE_PLAN {
+        update_plan(&c.arguments)
     } else if c.name == CURRENT_TIME {
         Ok(current_time(store, id))
     } else if c.name == docs::SEARCH || c.name == docs::READ {
@@ -4867,7 +5060,11 @@ fn run_agent(
         // Delegating before the owner's OK: the step asks them first instead (stored as the
         // question it is, so it shows the same way after a reload).
         let mut turn = turn;
-        if !subs_ok && turn.calls.iter().any(|c| c.name == roles::DELEGATE) {
+        // (A switched-off delegate is refused below, without asking the owner first.)
+        if !subs_ok
+            && turn.calls.iter().any(|c| c.name == roles::DELEGATE)
+            && !tools_off(store, false).contains(roles::DELEGATE)
+        {
             turn.calls = roles::confirm_calls(store, &turn.calls, stp.fixed);
         }
         let calls_json = (!turn.calls.is_empty()).then(|| {
@@ -4941,7 +5138,12 @@ fn run_agent(
                 return Outcome::Stopped;
             }
             let started = Instant::now();
-            let res = if c.name == ASK_OWNER {
+            // A question the owner switched off is refused like any tool; the sub-agent OK
+            // question Memora itself asks still goes through.
+            let res = if c.name == ASK_OWNER
+                && (c.arguments["subagents"] == true
+                    || !tools_off(store, false).contains(ASK_OWNER))
+            {
                 match ask_check(&c.arguments) {
                     Ok(q) => {
                         asked = true;
@@ -5279,7 +5481,7 @@ mod tests {
     #[test]
     fn only_passing_failures_are_tried_again() {
         assert!(transient(
-            "the provider answered 503: [x] [502]: holver.id | 502: Bad gateway (reset after 30s)"
+            "the provider answered 503: [x] [502]: proxy.example | 502: Bad gateway (reset after 30s)"
         ));
         assert!(transient("the provider answered 429: rate limited"));
         assert!(transient(

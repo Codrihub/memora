@@ -57,6 +57,7 @@ const P: Record<string, string> = {
   'wifi-off':
     '<path d="M3 3l18 18M8.6 16a5 5 0 0 1 6.8 0M5.5 12.5a9.5 9.5 0 0 1 4-2.3M14.6 10.3a9.5 9.5 0 0 1 3.9 2.2M2.5 9a14 14 0 0 1 4-2.6M11 5.6A14 14 0 0 1 21.5 9"/><circle cx="12" cy="19.3" r=".9"/>',
   enter: '<path d="M19.5 5v6a3 3 0 0 1-3 3h-12"/><path d="m8.5 10-4 4 4 4"/>',
+  'arrow-down': '<path d="M12 5v14M6 13l6 6 6-6"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   alert: '<path d="M12 3.5 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2h.01"/>',

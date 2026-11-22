@@ -6,6 +6,7 @@
 
 import { esc } from '../dom';
 import { icon } from '../ui/icons';
+import { t } from '../i18n';
 
 const FRAME = '/preview-frame';
 /** Beside the chat from this width (and only on the Mnemo page); full screen below it. */
@@ -175,20 +176,20 @@ function build(): HTMLElement {
   const p = document.createElement('aside');
   p.className = 'mn-pv';
   p.setAttribute('role', 'dialog');
-  p.setAttribute('aria-label', 'Preview');
+  p.setAttribute('aria-label', t('Preview'));
   p.innerHTML =
     `<header class="mn-pv-h">` +
     `<span class="mn-pv-ic">${icon('code')}</span><div class="mn-pv-t"><b></b><small></small></div>` +
     `<div class="mn-pv-vers" hidden></div>` +
-    `<div class="mn-pv-tabs" role="tablist" aria-label="Show">` +
-    `<button type="button" role="tab" data-pv-view="preview" aria-selected="true">${icon('eye')}<span>Preview</span></button>` +
-    `<button type="button" role="tab" data-pv-view="code" aria-selected="false">${icon('code')}<span>Code</span></button></div>` +
+    `<div class="mn-pv-tabs" role="tablist" aria-label="${t('Show')}">` +
+    `<button type="button" role="tab" data-pv-view="preview" aria-selected="true">${icon('eye')}<span>${t('Preview')}</span></button>` +
+    `<button type="button" role="tab" data-pv-view="code" aria-selected="false">${icon('code')}<span>${t('Code')}</span></button></div>` +
     `<div class="mn-pv-acts">` +
-    `<button type="button" class="mn-pv-b" data-pv-copy title="Copy the code" aria-label="Copy the code">${icon('copy')}<span>Copy</span></button>` +
-    `<button type="button" class="mn-pv-b" data-pv-dl title="Download the file" aria-label="Download the file">${icon('download')}<span>Download</span></button>` +
-    `<button type="button" class="mn-pv-b mn-pv-x" data-pv-close title="Close (Esc)" aria-label="Close">${icon('close')}</button>` +
+    `<button type="button" class="mn-pv-b" data-pv-copy title="${t('Copy the code')}" aria-label="${t('Copy the code')}">${icon('copy')}<span>${t('Copy')}</span></button>` +
+    `<button type="button" class="mn-pv-b" data-pv-dl title="${t('Download the file')}" aria-label="${t('Download the file')}">${icon('download')}<span>${t('Download')}</span></button>` +
+    `<button type="button" class="mn-pv-b mn-pv-x" data-pv-close title="${t('Close (Esc)')}" aria-label="${t('Close')}">${icon('close')}</button>` +
     `</div></header><div class="mn-pv-body"><div class="mn-pv-frame"></div><pre class="mn-pv-code"><code></code></pre></div>` +
-    `<div class="mn-pv-grip" role="separator" aria-orientation="vertical" aria-label="Resize the preview" aria-valuemin="${PANE_MIN}" tabindex="0" title="Drag to resize · double-click to reset"></div>`;
+    `<div class="mn-pv-grip" role="separator" aria-orientation="vertical" aria-label="${t('Resize the preview')}" aria-valuemin="${PANE_MIN}" tabindex="0" title="${t('Drag to resize · double-click to reset')}"></div>`;
   document.body.append(p);
   wireGrip(p);
   return p;
@@ -208,13 +209,13 @@ export function openPreview(card: HTMLElement): void {
   document.querySelectorAll('.mn-file.on').forEach((c) => c.classList.remove('on'));
   card.classList.add('on');
   const kind = kindOf(card);
-  panel.querySelector('.mn-pv-t b')!.textContent = card.dataset.title || 'Page';
+  panel.querySelector('.mn-pv-t b')!.textContent = card.dataset.title || t('Page');
   panel.querySelector('.mn-pv-t small')!.textContent = kind === 'svg' ? 'SVG' : 'HTML';
   panel.querySelector('.mn-pv-code code')!.innerHTML = esc(source(card));
   const f = document.createElement('iframe');
   f.setAttribute('sandbox', 'allow-scripts');
   f.setAttribute('referrerpolicy', 'no-referrer');
-  f.setAttribute('title', `${card.dataset.title || 'Page'} preview`);
+  f.setAttribute('title', t('{name} preview', { name: card.dataset.title || t('Page') }));
   panel.querySelector<HTMLElement>('.mn-pv-frame')!.replaceChildren(f);
   f.src = FRAME;
   setView('preview');
@@ -265,7 +266,7 @@ function numberVersions(scope: ParentNode): void {
       if (list.length < 2) return;
       const v = document.createElement('span');
       v.className = 'mn-file-v';
-      v.textContent = last ? `v${i + 1} · latest` : `v${i + 1}`;
+      v.textContent = last ? t('v{n} · latest', { n: i + 1 }) : `v${i + 1}`;
       c.querySelector('.mn-file-t b')?.after(v);
     });
   }
@@ -279,9 +280,9 @@ function paintVersions(card: HTMLElement): void {
   box.hidden = all.length < 2;
   if (all.length < 2) return;
   box.innerHTML =
-    `<button type="button" data-pv-ver="-1" aria-label="Earlier version" title="Earlier version"${i <= 0 ? ' disabled' : ''}>${icon('chev')}</button>` +
-    `<span>v${i + 1} of ${all.length}</span>` +
-    `<button type="button" data-pv-ver="1" aria-label="Later version" title="Later version"${i >= all.length - 1 ? ' disabled' : ''}>${icon('chev')}</button>`;
+    `<button type="button" data-pv-ver="-1" aria-label="${t('Earlier version')}" title="${t('Earlier version')}"${i <= 0 ? ' disabled' : ''}>${icon('chev')}</button>` +
+    `<span>${t('v{n} of {total}', { n: i + 1, total: all.length })}</span>` +
+    `<button type="button" data-pv-ver="1" aria-label="${t('Later version')}" title="${t('Later version')}"${i >= all.length - 1 ? ' disabled' : ''}>${icon('chev')}</button>`;
 }
 
 function fileName(card: HTMLElement): string {
@@ -314,16 +315,16 @@ function flash(b: HTMLElement, text: string): void {
 }
 
 function onClick(e: MouseEvent): void {
-  const t = e.target as HTMLElement | null;
-  if (!t) return;
-  const card = t.closest<HTMLElement>('.mn-file');
+  const tg = e.target as HTMLElement | null;
+  if (!tg) return;
+  const card = tg.closest<HTMLElement>('.mn-file');
   if (card) {
-    if (t.closest('[data-file-dl]')) download(card);
+    if (tg.closest('[data-file-dl]')) download(card);
     else openPreview(card);
     return;
   }
-  if (!panel || !t.closest('.mn-pv')) return;
-  const ver = t.closest<HTMLButtonElement>('[data-pv-ver]');
+  if (!panel || !tg.closest('.mn-pv')) return;
+  const ver = tg.closest<HTMLButtonElement>('[data-pv-ver]');
   if (ver && current) {
     const all = versionsOf(current);
     const next = all[all.indexOf(current) + Number(ver.dataset.pvVer)];
@@ -334,16 +335,16 @@ function onClick(e: MouseEvent): void {
     }
     return;
   }
-  const view = t.closest<HTMLElement>('[data-pv-view]');
+  const view = tg.closest<HTMLElement>('[data-pv-view]');
   if (view) setView(view.dataset.pvView === 'code' ? 'code' : 'preview');
-  else if (t.closest('[data-pv-close]')) closePreview();
-  else if (t.closest('[data-pv-dl]') && current) download(current);
+  else if (tg.closest('[data-pv-close]')) closePreview();
+  else if (tg.closest('[data-pv-dl]') && current) download(current);
   else {
-    const copy = t.closest<HTMLElement>('[data-pv-copy]');
+    const copy = tg.closest<HTMLElement>('[data-pv-copy]');
     if (copy && current)
       void navigator.clipboard?.writeText(source(current)).then(
-        () => flash(copy, 'Copied'),
-        () => flash(copy, 'Could not copy'),
+        () => flash(copy, t('Copied')),
+        () => flash(copy, t('Could not copy')),
       );
   }
 }

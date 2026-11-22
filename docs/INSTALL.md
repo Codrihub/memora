@@ -591,8 +591,8 @@ Then set, with `/config` or in `.env`:
 
 | Variable | Why |
 |---|---|
-| `MEMORA_BASE_URL=https://memory.example.com` | Public URL; links and MCP snippets use it, and its host becomes an allowed domain |
-| `MEMORA_DOMAIN=memory.example.com` | Only these hostnames are served; requests for the bare IP or other names get 404 |
+| `MEMORA_BASE_URL=https://memora.example.com` | Public URL; links and MCP snippets use it, and its host becomes an allowed domain |
+| `MEMORA_DOMAIN=memora.example.com` | Only these hostnames are served; requests for the bare IP or other names get 404 |
 | `MEMORA_TRUSTED_PROXIES=203.0.113.10` | Proxies whose forwarding headers are believed. Loopback (same-host nginx, cloudflared) is always trusted; only list remote proxies |
 
 In Docker, a proxy on the host reaches the container through the Docker

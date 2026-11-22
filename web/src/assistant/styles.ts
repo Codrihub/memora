@@ -201,7 +201,19 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-chat:not(:has(.mn-hello)) .mn-fine{display:none}
 /* Fleeting chat: anonymous, not loud. Neutral greys from the theme (light, dark, any backdrop the
    owner picked in Appearance); colour drains from the marks, bubbles go plain, the prompt is dashed. */
-.mn-chat.fleeting{--fl-ink:color-mix(in srgb,var(--fg) 82%,transparent);--fl-tint:color-mix(in srgb,var(--fg) 6%,transparent);--fl-edge:color-mix(in srgb,var(--fg) 22%,transparent)}
+/* Fleeting chats wear their own look in every theme ("veil"): a deep ink room with a faint
+   weave, silver instead of colour, and a quiet pill saying nothing is kept; the backdrop
+   picked in Appearance does not apply here. */
+.mn-chat.fleeting{color-scheme:dark;--bg:#0d0f13;--surface-0:#14171c;--surface-1:#191d23;--panel:#191d23;--fg:#e6e8ec;--text-2:#c4c8d0;--muted:#8d94a0;
+  --line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.15);--hover:rgba(255,255,255,.06);--accent:#5eead4;--accent-soft:rgba(94,234,212,.14);--ok:#86efac;
+  --fl-ink:#d9dde3;--fl-tint:rgba(45,212,191,.13);--fl-edge:rgba(94,234,212,.28);
+  color:var(--fg);background-color:#0d0f13;
+  background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1px),radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.05),transparent 60%);
+  background-size:22px 22px,auto;border:1px solid rgba(255,255,255,.08);border-radius:18px;overflow:hidden;box-shadow:0 18px 50px -30px rgba(0,0,0,.6)}
+.mn-chat.compact.fleeting{border-radius:14px}
+.mn-chat.fleeting .mn-comp-box{background:#14171c}
+.mn-chat.fleeting .mn-send{background:linear-gradient(135deg,#5eead4,#22d3ee);color:#06201d}
+@media (max-width:640px){.mnp.fleeting .mnp-chat{padding:6px}.mn-chat.fleeting{border-radius:14px}}
 .mn-incog{display:grid;place-items:center;margin-bottom:14px;color:var(--fl-ink)}
 .mn-incog .i{width:44px;height:44px;stroke-width:1.4}
 .mn-chat.fleeting .mn-hello h2{font-weight:600;letter-spacing:-.01em}
@@ -213,7 +225,11 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-fleet dd{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
 .mn-chat.fleeting .mn-comp-box{border-style:dashed;border-color:var(--fl-edge)}
 .mn-chat.fleeting .mn-ub{background:var(--fl-tint);border-color:var(--fl-edge);color:var(--fg)}
-.mn-chat.fleeting :is(.mn-av,.mn-hello-mark){filter:grayscale(1);opacity:.85}
+.mn-chat.fleeting .mn-hello-mark{filter:grayscale(1);opacity:.85}
+/* In the veil: your messages in a soft Mnemo teal, Mnemo's replies on a slightly lifted surface. */
+.mn-chat.fleeting .mn-tb{background:#171a21;border-color:rgba(255,255,255,.07)}
+.mn-chat.fleeting .mn-tray-box{background:#171a21;border-color:rgba(255,255,255,.08);box-shadow:0 -10px 24px -18px rgba(0,0,0,.6)}
+.mn-chat.fleeting .mn-fleet-n{max-width:440px;margin:6px auto 0;font-size:13px;line-height:1.55;color:#8d94a0}
 .mn-sugs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin-top:22px}
 .mn-chat.compact .mn-sugs{grid-template-columns:1fr;margin-top:16px}
 .mn-sug{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg));
@@ -226,19 +242,148 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-setup .btn{margin-top:8px}
 
 .mn-comp{flex:none;padding:10px 24px 14px;position:relative}
-.mn-down{position:absolute;left:50%;bottom:calc(100% + 6px);z-index:6;display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;
+.mn-down{position:absolute;left:50%;bottom:calc(100% + 6px);z-index:6;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 10px 0 14px;white-space:nowrap;
   border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--surface-1,var(--panel)) 92%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px -8px rgba(15,23,42,.35);
   opacity:0;pointer-events:none;transform:translate(-50%,8px) scale(.96);transition:opacity .2s,transform .25s var(--ease-out,ease-out),background .15s}
-.mn-down .i{width:16px;height:16px}
+.mn-down .i{width:16px;height:16px;flex:none}
+@media (max-width:640px){.mn-down span{display:none}.mn-down{width:36px;height:36px;padding:0}}
 .mn-down.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
 .mn-down:hover{background:var(--hover)}
 .mn-down:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mn-chat.compact .mn-comp{padding:8px 12px 12px}
-/* The live status: one line above the composer, outside the reply, only while Mnemo works. */
-.mn-live{display:flex;align-items:center;gap:8px;max-width:780px;width:100%;margin:0 auto 8px;padding:2px 6px;border:0;background:none;
-  font:inherit;font-size:calc(var(--mn-fs,14.5px) - 1px);color:var(--muted);text-align:left;cursor:pointer;border-radius:8px;min-width:0}
+/* The one-time "tell Mnemo about you" card on a new chat. */
+.mn-intro{display:flex;flex-direction:column;gap:8px;width:100%;max-width:560px;margin:4px auto 14px;padding:14px 16px;text-align:left;border:1px solid var(--line);border-radius:16px;background:var(--surface-1,var(--panel))}
+.mn-intro>b{font-size:14px;font-weight:620}
+.mn-intro>span{font-size:12.5px;line-height:1.5;color:var(--muted)}
+.mn-intro textarea{width:100%;min-height:64px;resize:vertical;font:inherit;line-height:1.45;padding:9px 11px}
+.mn-intro-a{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:640px){.mn-intro textarea{font-size:16px}}
+/* The tray: one drawer on top of the message box for everything about the reply at work:
+   the live line (what Mnemo does now), its plan, and the messages queued after it. Each part
+   unfolds and folds smoothly (grid rows 0fr <-> 1fr), and the chat above shrinks with it, so
+   nothing ever floats over the conversation. */
+.mn-col{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;
+  transition:grid-template-rows .36s cubic-bezier(.22,.8,.24,1),opacity .24s ease,visibility 0s linear .36s}
+.mn-col.on{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows .36s cubic-bezier(.22,.8,.24,1),opacity .28s ease .04s,visibility 0s}
+.mn-col-in{min-height:0;overflow:hidden}
+.mn-comp{isolation:isolate}
+.mn-tray{max-width:780px;margin:0 auto -1px;padding:0 18px;position:relative;z-index:-1}
+.mn-tray-box{border:1px solid var(--line);border-bottom:0;border-radius:14px 14px 0 0;padding-bottom:2px;
+  background:color-mix(in srgb,var(--surface-1,var(--panel)) 92%,var(--fg) 2%);box-shadow:0 -10px 24px -18px rgba(15,23,42,.28);
+  transform:translateY(8px);transition:transform .36s cubic-bezier(.22,.8,.24,1)}
+.mn-tray.on .mn-tray-box{transform:none}
+.mn-tray-h{display:flex;align-items:center;gap:10px;min-height:38px;padding:5px 8px 5px 14px}
+.mn-plan-ttl{flex:none;font-size:12.5px;font-weight:620;color:var(--fg)}
+.mn-tray-h:has(.mn-live:not([hidden])) .mn-plan-ttl{display:none}
+.mn-plan-h{display:inline-flex;align-items:center;gap:8px;flex:none;margin-inline-start:auto;height:28px;padding:0 6px 0 8px;border:0;border-radius:8px;background:none;
+  font:inherit;color:var(--fg);cursor:pointer;transition:background .15s,opacity .2s}
+.mn-plan-h:hover{background:var(--hover)}
+.mn-plan-h:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.mn-tray:not(.has-plan) :is(.mn-plan-ttl,.mn-plan-h){opacity:0;pointer-events:none}
+.mn-plan-n{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mn-plan-bar{flex:none;width:64px;height:3px;border-radius:3px;background:var(--line);overflow:hidden}
+.mn-plan-bar>i{display:block;width:0;height:100%;background:var(--ok,#10b981);border-radius:3px;transition:width .4s cubic-bezier(.22,.8,.24,1)}
+.mn-plan-chev{flex:none;width:14px;height:14px;color:var(--muted);transition:transform .2s}
+.mn-tray.folded .mn-plan-chev{transform:rotate(-90deg)}
+.mn-plan{display:flex;flex-direction:column;padding:0 14px 10px;max-height:min(30vh,220px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.mn-plan::-webkit-scrollbar{display:none}
+.mn-tray.folded .mn-ps:not(.in_progress){display:none}
+/* The queue under the plan, split from it by a hairline. */
+.mn-tray-hc.on~.mn-queue-c .mn-queue{border-top:1px solid var(--line)}
+@media (max-width:640px){.mn-tray{padding:0 10px}.mn-tray-h{padding-inline-start:12px}.mn-plan{padding-inline:12px}}
+@media (prefers-reduced-motion:reduce){.mn-col,.mn-col.on,.mn-tray-box{transition:none}}
+/* The row under the header: the model on the left (a plain name with a chevron, its pin before
+   it) and Fleeting on the right. */
+.mn-top{position:absolute;top:8px;inset-inline:16px;z-index:4;display:flex;align-items:center;justify-content:space-between;gap:8px;pointer-events:none}
+.mn-top>*{pointer-events:auto;display:flex;align-items:center;gap:2px;min-width:0}
+.mn-top-l{flex:1 1 auto}
+.mn-top-r{flex:none}
+/* The model name reads as plain text with a chevron: no capsule, no background, just a darker
+   name and a turning chevron when pointed at or open. */
+.mn-top .ui-sel.mn-model{height:32px;max-width:min(360px,62vw);gap:6px;padding:0 2px;border:0;border-radius:6px;background:none !important;box-shadow:none;
+  font-size:15px;font-weight:650;letter-spacing:-.01em;color:var(--text-2,var(--fg))}
+.mn-top .ui-sel.mn-model:hover,.mn-top .ui-sel.mn-model[aria-expanded=true]{color:var(--fg)}
+.mn-top .ui-sel.mn-model:hover .mn-model-chev,.mn-top .ui-sel.mn-model[aria-expanded=true] .mn-model-chev{color:var(--fg)}
+.mn-top .ui-sel.mn-model:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-top .mn-pin{display:none !important}
+.mn-model-chev{width:15px;height:15px;flex:none;color:var(--muted);transition:transform .18s}
+.ui-sel.mn-model-pick[aria-expanded=true] .mn-model-chev{transform:rotate(180deg)}
+.mn-top .mn-model-v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.mn-top .mn-pin{width:28px;height:28px;flex:none}
+.mn-log{padding-top:calc(var(--lp) + 34px)}
+/* Under the box on the right: Agents (when there are any), the context meter and Think, plain
+   icons of one size, outside the message box. */
+.mn-under .ui-sel.mn-think{position:relative;width:32px;height:32px;padding:0;justify-content:center;border:0;border-radius:50%;background:none;max-width:none;color:var(--muted)}
+.mn-under .ui-sel.mn-think:hover{background:var(--hover);color:var(--fg)}
+.mn-under .ui-sel.mn-think .ui-sel-chev{display:none}
+.mn-under .ui-sel.mn-think>.i{width:17px;height:17px;color:inherit}
+.mn-under .mn-meter{width:32px;height:32px;background:none}
+.mn-under .mn-meter:hover{background:var(--hover)}
+.mn-under .ui-sel.mn-think .mn-model-v{display:none}
+.mn-under .ui-sel.mn-think.set::after{content:"";position:absolute;top:5px;inset-inline-end:5px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+/* Under the message box: the quiet note centred (it wraps, and goes once the chat has begun),
+   the icons on the right. */
+.mn-under{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;min-height:34px}
+.mn-under .mn-grow{display:none}
+.mn-under .mn-fine{grid-column:1;min-width:0;margin:0;white-space:normal;text-align:center;font-size:11px;line-height:1.45;color:var(--muted);padding-inline-start:96px}
+@media (max-width:640px){.mn-under .mn-fine{display:block;grid-column:1/-1;grid-row:2;padding:0 4px}}
+.mn-under>:not(.mn-fine):not(.mn-grow){grid-row:1}
+.mn-under-r{display:flex;align-items:center;gap:2px;grid-column:2;margin-inline-start:auto}
+.mn-comp .mn-under{display:grid;grid-template-columns:minmax(0,1fr) auto}
+.mn-chat:not(:has(.mn-hello)) .mn-fine{visibility:hidden}
+.mn-under .mn-think-slot,.mn-under .mn-ag-slot{display:inline-flex}
+@media (max-width:640px){
+  .mn-comp-bar{gap:4px}
+  .mn-comp-bar .mn-perm-slot .mn-model-v{display:none}
+  .mn-top{inset-inline:12px}
+}
+/* The model list: wide, grouped, the chosen model marked with an accent bar, each row with its
+   context size and a pin that makes it the default for new chats. */
+.ui-sel-pop.mn-model-pop{padding:6px;border-radius:16px;box-shadow:0 24px 60px -24px rgba(15,23,42,.45),0 2px 6px rgba(15,23,42,.06)}
+.ui-sel-pop.mn-model-pop .ui-sel-q,.ui-sel-pop.mn-model-pop input[type=search]{border-radius:10px}
+.ui-sel-pop.mn-model-pop .ui-sel-g{padding:10px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.ui-sel-pop.mn-model-pop .ui-sel-o{position:relative;min-height:44px;padding:7px 8px 7px 12px;border-radius:10px;gap:10px}
+.ui-sel-pop.mn-model-pop .ui-sel-o[aria-selected=true]{background:var(--accent-soft)}
+.ui-sel-pop.mn-model-pop .ui-sel-o[aria-selected=true]::before{content:"";position:absolute;inset-inline-start:3px;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--accent)}
+.ui-sel-pop.mn-model-pop .ui-sel-o .tx b{font-size:13.5px}
+.ui-sel-pop.mn-model-pop .ui-sel-o .tx small{font-size:11.5px}
+.ui-sel-pop.mn-model-pop .ui-sel-ck{display:none}
+/* The pin per model: faint until the row is hovered; the default's is a filled pin with a
+   Default badge. The trigger repeats the filled pin after the default's name. */
+.ui-sel-pop.mn-model-pop .ui-sel-tr{opacity:0;transition:opacity .15s,background .15s,color .15s}
+.ui-sel-pop.mn-model-pop .ui-sel-o:is(:hover,.on) .ui-sel-tr,.ui-sel-pop.mn-model-pop .ui-sel-tr:focus-visible{opacity:.7}
+.ui-sel-pop.mn-model-pop .ui-sel-tr:hover{opacity:1}
+@media (hover:none){.ui-sel-pop.mn-model-pop .ui-sel-tr{opacity:.45}}
+.ui-sel-pop.mn-model-pop .ui-sel-tr svg{transform:rotate(35deg)}
+.ui-sel-pop.mn-model-pop .ui-sel-tr.on{opacity:1;width:auto;gap:4px;padding:0 9px 0 7px;height:24px;display:inline-flex;align-items:center;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent);font:inherit;font-size:11px;font-weight:650;letter-spacing:.01em}
+.ui-sel-pop.mn-model-pop .ui-sel-tr.on svg{fill:currentColor;width:12px;height:12px}
+.ui-sel-pop.mn-model-pop .ui-sel-tr.on:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+.mn-model-def{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;margin-inline-start:-2px;color:var(--accent)}
+.mn-model-def .i,.mn-model-def svg{width:12px;height:12px;fill:currentColor;transform:rotate(35deg)}
+/* The plan's steps: not started (a dashed ring), in progress (a spinner) or done (a tick), live. */
+.mn-ps{display:flex;align-items:flex-start;gap:10px;padding:3px 2px;font-size:calc(var(--mn-fs,14.5px) - 1.5px);line-height:1.4;color:var(--fg);min-width:0}
+.mn-ps-i{flex:none;display:grid;place-items:center;width:18px;height:18px;margin-top:1px}
+.mn-ps-i{width:16px;height:16px}
+.mn-ps-i .i{width:11px;height:11px;stroke-width:3;color:var(--surface-0,#fff)}
+.mn-ps.done .mn-ps-i{border-radius:50%;background:var(--ok,#10b981)}
+.mn-ps-i .mn-spin{width:14px;height:14px}
+.mn-ps-o{width:14px;height:14px;border-radius:50%;border:1.6px dashed var(--muted);opacity:.8}
+.mn-ps-t{min-width:0;display:flex;flex-direction:column;overflow-wrap:anywhere}
+.mn-ps-t small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-ps.pending .mn-ps-t{color:var(--muted)}
+.mn-ps.done .mn-ps-t{color:var(--text-2,var(--muted))}
+.mn-ps.in_progress .mn-ps-t{font-weight:560}
+.mn-ps.now .mn-ps-i{animation:mnPop .35s var(--ease-out,ease-out)}
+@keyframes mnPop{0%{transform:scale(.6)}60%{transform:scale(1.15)}100%{transform:none}}
+@media (prefers-reduced-motion:reduce){.mn-ps.now .mn-ps-i{animation:none}}
+/* The live status: the tray's top row, only while Mnemo works (it fades out with the row). */
+.mn-live{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;height:28px;margin:0;padding:0 6px;margin-inline-start:-6px;border:0;background:none;
+  font:inherit;font-size:calc(var(--mn-fs,14.5px) - 1.5px);color:var(--muted);text-align:start;cursor:pointer;border-radius:8px}
+.mn-live:hover{background:var(--hover)}
 .mn-live[hidden]{display:none}
+.mn-tray-hc:not(.on) .mn-live[hidden]{display:flex}
 .mn-live>i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--accent);animation:mnLive 1.4s ease-in-out infinite}
 .mn-live-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   background:linear-gradient(90deg,var(--muted) 30%,var(--fg) 50%,var(--muted) 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:mnShine 2.4s linear infinite}
@@ -246,6 +391,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-live>.i,.mn-live>svg{flex:none;width:14px;height:14px;opacity:.6;transition:transform .15s}
 .mn-live:hover{color:var(--fg)}.mn-live:hover>.i,.mn-live:hover>svg{transform:translateX(2px);opacity:1}
 .mn-live:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-live:focus:not(:focus-visible){outline:none}
+.mn-live.still{cursor:default;pointer-events:none}.mn-live.still>.i,.mn-live.still>svg{display:none}
 @keyframes mnLive{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
 .mn-turn.live:has(.mn-tb:empty){display:none}
 @media (prefers-reduced-motion:reduce){.mn-live>i,.mn-live-t{animation:none}.mn-live-t{color:var(--muted);background:none}}
@@ -306,12 +453,12 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-send.queue{background:var(--accent);color:var(--on-accent,#fff)}
 /* Under the prompt: the fine print on the left, the chat's model and its memory ring on the
    right (the prompt itself keeps the thinking level and Send). */
-.mn-under{display:flex;align-items:center;justify-content:flex-end;gap:4px;max-width:780px;min-height:30px;margin:6px auto 0;padding:0 4px 0 10px}
+.mn-under{display:flex;align-items:center;justify-content:flex-start;gap:4px;max-width:780px;min-height:0;margin:6px auto 0;padding:0 4px 0 10px}
 .mn-fine{flex:1 1 auto;min-width:0;margin:0;font-size:11.5px;color:var(--text-3,var(--muted));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mn-under .mn-grow{flex:0 0 8px}
+
 .mn-chat.compact .mn-fine{display:none}
 .mn-chat.compact .mn-under{margin-top:4px;padding-left:4px}
-@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 10px 10px}.mn-sugs{grid-template-columns:1fr}.mn-fine{display:none}.mn-under{padding-left:4px;margin-top:4px}}
+@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 12px 10px}.mn-sugs{grid-template-columns:1fr}.mn-under{padding-left:4px;margin-top:4px}}
 @media (prefers-reduced-motion:reduce){.mn-u,.mn-turn,.mn-tool,.mn-sug{animation:none}.mn-hello-mark::before,.mn-mark.pulse,.mn-turn.live .mn-av .mn-mark{animation:none}.mn-think i,.mn-think span,.mn-caret{animation:none}}
 
 /* Composer: + attach, chips that grow the box, the model pill once there is something to send. */
@@ -572,11 +719,11 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-log{scrollbar-width:none}
 .mn-log::-webkit-scrollbar{display:none!important}
 /* The queue above the prompt, and messages that steered a running reply. */
-.mn-queue{display:flex;flex-direction:column;gap:4px;padding:10px 10px 2px}
-.mn-queue[hidden]{display:none}
-.mn-queue-h{display:flex;align-items:center;gap:6px;padding:0 4px 2px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.mn-queue{display:flex;flex-direction:column;gap:2px;padding:8px 8px 8px}
+.mn-queue-h{display:flex;align-items:center;gap:6px;min-height:28px;padding:0 0 2px 6px;font-size:12px;font-weight:600;color:var(--muted)}
 .mn-queue-h .i{width:13px;height:13px}
-.mn-q-i{display:flex;align-items:center;gap:8px;min-height:34px;padding:2px 4px 2px 8px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--fg) 3%,transparent);cursor:grab}
+.mn-q-i{display:flex;align-items:center;gap:10px;min-height:32px;padding:1px 2px 1px 6px;border-radius:9px;cursor:grab;transition:background .15s}
+.mn-q-i:hover{background:var(--hover)}
 .mn-q-n{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
 .mn-q-t{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-q-t small{color:var(--muted)}
@@ -593,7 +740,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-qh-b:hover{color:var(--fg);border-color:var(--line-strong)}
 .mn-qh-b .i{width:12px;height:12px}
 .mn-qh-b.acc{color:var(--accent);border-color:var(--accent-line,var(--accent))}
-.mn-q-list{display:flex;flex-direction:column;gap:4px;max-height:118px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.mn-q-list{display:flex;flex-direction:column;gap:2px;max-height:106px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .mn-q-list.all{max-height:min(46vh,420px)}
 .mn-q-list.fb{-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
 .mn-q-list.ft{-webkit-mask-image:linear-gradient(transparent,#000 22px);mask-image:linear-gradient(transparent,#000 22px)}
@@ -704,7 +851,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 @media (min-width:641px){
   .mn-chat.w-wide:not(.compact) .mn-log>*{max-width:1100px}
   .mn-chat.w-wide:not(.compact) .mn-ub,.mn-chat.w-wide:not(.compact) .mn-u-att{max-width:70%}
-  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash,.mn-live){max-width:1100px}
+  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash,.mn-tray){max-width:1100px}
   .mn-chat.w-full:not(.compact) .mn-log{padding-left:32px;padding-right:32px}
   .mn-chat.w-full.has-rail:not(.compact) .mn-log{padding-right:48px}
   .mn-chat.w-full:not(.compact) .mn-log>*{max-width:none}
@@ -712,22 +859,24 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   .mn-chat.w-full:not(.compact) .mn-ub,.mn-chat.w-full:not(.compact) .mn-u-att{max-width:70%}
   .mn-chat.w-full:not(.compact) .mn-md>:is(p,ul,ol,blockquote,h1,h2,h3,h4,h5,h6,dl){max-width:90ch}
   .mn-chat.w-full:not(.compact) .mn-comp{padding-left:32px;padding-right:32px}
-  .mn-chat.w-full:not(.compact) :is(.mn-comp-box,.mn-under){max-width:none}
+  .mn-chat.w-full:not(.compact) :is(.mn-comp-box,.mn-under,.mn-tray){max-width:none}
   .mn-chat.w-full:not(.compact) .mn-slash{max-width:none;left:32px;right:32px}
 }
 
 /* Sub-agents: a reply keeps one line per group; their work shows in the Agents panel. */
-.mn-team-line{display:flex;align-items:center;gap:8px;width:100%;max-width:520px;margin:8px 0;padding:7px 10px 7px 8px;border:1px solid var(--line);border-radius:12px;
+.mn-team-line{display:flex;align-items:center;gap:10px;width:100%;max-width:none;margin:8px 0;padding:8px 8px 8px 10px;border:1px solid var(--line);border-radius:12px;
   background:var(--surface-1,var(--panel));color:var(--text-2,var(--fg));font:inherit;font-size:calc(var(--mn-fs,14.5px) - 1.5px);text-align:left;cursor:pointer;
   transition:background .15s,border-color .15s;animation:mnIn .25s var(--ease-out,ease-out) both}
 .mn-team-line:hover{background:var(--hover);border-color:var(--line-strong)}
 .mn-team-line:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-team-line:focus:not(:focus-visible){outline:none}
 .mn-team-ic{display:grid;place-items:center;flex:none;width:24px;height:24px;border-radius:7px;color:var(--accent);background:var(--accent-soft)}
 .mn-team-ic .i{width:13px;height:13px;stroke-width:2.2}
 .mn-team-line.err .mn-team-ic{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
 .mn-team-line.stop .mn-team-ic{color:var(--muted);background:color-mix(in srgb,var(--fg) 6%,transparent)}
 .mn-team-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
-.mn-team-go{display:inline-flex;align-items:center;gap:2px;flex:none;font-size:12.5px;font-weight:600;color:var(--accent)}
+.mn-team-go{display:inline-flex;align-items:center;gap:4px;flex:none;height:28px;padding:0 10px 0 12px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);transition:background .15s}
+.mn-team-line:hover .mn-team-go{background:color-mix(in srgb,var(--accent) 18%,transparent)}
 .mn-team-go .i{width:13px;height:13px}
 /* The Agents panel: Running, Idle, and Done (folded under its count). */
 .mn-agents{display:flex;flex-direction:column;gap:16px;min-width:0;padding:12px}
@@ -755,7 +904,7 @@ details.mn-ag-done{display:block}
 .mn-agents .mn-tool summary{display:grid;grid-template-columns:26px minmax(0,1fr) 14px;grid-template-areas:"ic t ch" "ic s ch";column-gap:10px;row-gap:1px;align-items:center;padding:7px 10px 7px 7px}
 .mn-agents .mn-tool-ic{grid-area:ic;align-self:center}
 .mn-agents .mn-tool-t{grid-area:t;min-width:0;overflow:hidden}
-.mn-agents .mn-tool-t b{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.mn-agents .mn-tool-t b{flex:none}
 .mn-agents .mn-tool-s{grid-area:s;max-width:100%;justify-self:start;font-size:11.5px}
 .mn-agents .mn-tool summary>.mn-tool-chev{grid-area:ch}
 .mn-sub{display:flex;flex-direction:column;gap:8px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-0,var(--bg))}
@@ -794,6 +943,16 @@ details.mn-ag-done{display:block}
 .mn-sub-log{display:flex;flex-direction:column;gap:6px;margin:0;padding:0 0 0 12px;border-left:2px solid var(--line);list-style:none}
 .mn-sub:not([data-state=run]):not([data-state=ask]) .mn-sub-log{margin-top:8px}
 .mn-sub-log:empty{display:none}
+/* A sub-agent's activity: newest first in a short window, no scrollbar, fading at the bottom;
+   Show all grows it down smoothly and folds it back up. */
+.mn-agents .mn-sub-log{max-height:300px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;transition:max-height .32s var(--ease-out,ease-out)}
+.mn-agents .mn-sub-log::-webkit-scrollbar{display:none}
+.mn-agents .mn-sub-log.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 56px),transparent);mask-image:linear-gradient(#000 calc(100% - 56px),transparent)}
+.mn-agents .mn-sub-log.all{overflow:hidden}
+.mn-sub-all{display:block;margin:6px 0 0 12px;padding:3px 8px;border:0;border-radius:8px;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer}
+.mn-sub-all:hover{background:var(--accent-soft)}
+.mn-sub-all[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){.mn-agents .mn-sub-log{transition:none}}
 .mn-sub-li{display:flex;align-items:flex-start;gap:7px;min-width:0;font-size:12px;line-height:1.45;color:var(--muted)}
 .mn-sub-li>.i,.mn-sub-li>.mn-spin{flex:none;width:12px;height:12px;margin-top:2px}
 .mn-sub-li>span{min-width:0;overflow-wrap:anywhere}
@@ -814,4 +973,23 @@ details.mn-ag-done{display:block}
 .mn-sub-ans .mn-md{margin-top:6px;max-height:360px;overflow:auto;font-size:13px}
 @media (max-width:640px){.mn-sub{padding:9px 10px}.mn-sub-chip{max-width:46%}.mn-agents{padding:10px}}
 @media (prefers-reduced-motion:reduce){.mn-sub-bar i,.mn-sub-chev,.mn-ag-chev{transition:none}.mn-team-line{animation:none}}
+
+/* Mnemo's replies span the same width as the message box (same left and right edge); its mark
+   hangs just outside on the left when there is room for it, else it stays inside as before. */
+.mn-log{container-type:inline-size}
+@container (min-width: 868px){
+  .mn-chat:not(.compact):not(.w-wide):not(.w-full) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
+  .mn-chat:not(.compact):not(.w-wide):not(.w-full) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
+}
+@container (min-width: 1188px){
+  .mn-chat.w-wide:not(.compact) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
+  .mn-chat.w-wide:not(.compact) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
+}
+/* Full width: the chat, the dock and the message box share one gutter wide enough for the mark. */
+@media (min-width:1100px){
+  .mn-chat.w-full:not(.compact) .mn-log{padding-left:76px;padding-right:76px}
+  .mn-chat.w-full:not(.compact) .mn-comp{padding-left:76px;padding-right:76px}
+  .mn-chat.w-full:not(.compact) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
+  .mn-chat.w-full:not(.compact) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
+}
 `;

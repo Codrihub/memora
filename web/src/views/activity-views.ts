@@ -6,11 +6,12 @@ import { actRowHTML, canUndo } from '../control/activity';
 import { actionLabel, groupBursts, plainText, predicate, problemOf } from '../control/sentence';
 import { agentColor, avatarHTML } from '../control/agents';
 import type { ActivityItem } from '../control/feed';
-import { ago, download, ICO, plural } from '../control/ui';
+import { ago, download, ICO } from '../control/ui';
 import { rowsSkeleton, skBlock } from '../ui/skeleton';
 import { createSelect, type Select, type SelectOption } from '../ui/select';
 import { toast } from '../toast';
 import { CLASSES, QUICK, TIMES, catOf, isoDay, labelOf, stOf, type AgentInfo, type Cat, type Quick, type TimeKey } from './activity-model';
+import { t, tn } from '../i18n';
 
 export const CAT_COLOR: Record<Cat, string> = {
   read: 'var(--info)',
@@ -362,7 +363,7 @@ export function useTimelineStyles(): void {
 /** A removable filter chip; `rm` is the `<facet>:<value>` it clears. */
 export function chip(rm: string, label: string, lead = '', kind = ''): string {
   return `<button type="button" class="ax-chip" data-rm="${attr(rm)}" title="${attr(`${kind}${label}`)}" aria-label="${attr(
-    `Remove filter: ${kind}${label}`,
+    t('Remove filter: {label}', { label: `${kind}${label}` }),
   )}">${lead}${kind ? `<span class="k">${esc(kind)}</span>` : ''}<span class="t">${esc(label)}</span>${X}</button>`;
 }
 
@@ -370,7 +371,7 @@ export function chip(rm: string, label: string, lead = '', kind = ''): string {
 export function statTile(k: string, v: number | string, h: string, bad = false, go = ''): string {
   const inner = `<div class="k">${esc(k)}</div><div class="v${bad ? ' bad' : ''}">${v}</div><div class="h">${esc(h)}</div>`;
   return go
-    ? `<button type="button" class="ax-kpi" data-f="${attr(go)}" title="${attr(`Show these in the timeline`)}">${inner}</button>`
+    ? `<button type="button" class="ax-kpi" data-f="${attr(go)}" title="${attr(t('Show these in the timeline'))}">${inner}</button>`
     : `<div class="ax-kpi">${inner}</div>`;
 }
 
@@ -381,8 +382,8 @@ function dayTitle(ts: number): { t: string; d: string } {
   y.setDate(y.getDate() - 1);
   const yest = isoDay(y.getTime() / 1000);
   const full = dayLabel(ts);
-  if (day === today) return { t: 'Today', d: full };
-  if (day === yest) return { t: 'Yesterday', d: full };
+  if (day === today) return { t: t('Today'), d: full };
+  if (day === yest) return { t: t('Yesterday'), d: full };
   const d = new Date(ts * 1000);
   return { t: d.toLocaleDateString('en-US', { weekday: 'long' }), d: full };
 }
@@ -390,7 +391,7 @@ function dayTitle(ts: number): { t: string; d: string } {
 /** "just now" / "5m ago". */
 function agoText(ts: number): string {
   const a = ago(ts);
-  return a === 'now' ? 'just now' : a + ' ago';
+  return a === t('now') ? t('just now') : t('{time} ago', { time: a });
 }
 
 /** A count over events since `since`, with "+" when older events may be missing (`trimmed`). */
@@ -402,17 +403,17 @@ export function atLeast(n: number, since: number, oldest: number, trimmed: boole
 /** The timeline's toolbar, chips row, counts row and list, with ids prefixed by `p`. */
 export function timelineHTML(p: string, q: string, placeholder: string): string {
   return `<div class="tl-bar" id="${p}Bar"><div class="tl-bar-in">
-      <label class="ax-q" id="${p}QWrap">${ICO.search}<span class="sr-only">Search the timeline</span>
+      <label class="ax-q" id="${p}QWrap">${ICO.search}<span class="sr-only">${t('Search the timeline')}</span>
         <input id="${p}Q" type="search" enterkeyhint="search" placeholder="${attr(placeholder)}" autocomplete="off" spellcheck="false" value="${attr(q)}">
-        <kbd aria-hidden="true">/</kbd><button type="button" class="ax-qx" id="${p}Qx" aria-label="Clear search" hidden>${ICO.x}</button></label>
-      <div class="cc-pills tl-pills" id="${p}Pills" role="group" aria-label="Show">${QUICK.map(
+        <kbd aria-hidden="true">/</kbd><button type="button" class="ax-qx" id="${p}Qx" aria-label="${t('Clear search')}" hidden>${ICO.x}</button></label>
+      <div class="cc-pills tl-pills" id="${p}Pills" role="group" aria-label="${t('Show')}">${QUICK.map(
         (x) => `<button type="button" class="chip" data-quick="${x.id}" aria-pressed="false">${x.label}</button>`,
       ).join('')}</div>
-      <button type="button" class="ax-fbtn" id="${p}Filt" aria-haspopup="dialog">${ICO.filter}<span class="l">Filters</span><span class="ax-badge" id="${p}Badge" hidden></span></button>
+      <button type="button" class="ax-fbtn" id="${p}Filt" aria-haspopup="dialog">${ICO.filter}<span class="l">${t('Filters')}</span><span class="ax-badge" id="${p}Badge" hidden></span></button>
       <button type="button" class="ax-newb" id="${p}New" hidden></button>
     </div></div>
-    <div class="tl-fx" id="${p}Fx" hidden><div class="tl-chips" id="${p}Chips" role="group" aria-label="Filters in use"></div>
-      <div class="tl-fx-end"><span class="tl-fn" id="${p}Fn"></span><button type="button" class="ax-clear" data-clear>Clear all</button></div></div>
+    <div class="tl-fx" id="${p}Fx" hidden><div class="tl-chips" id="${p}Chips" role="group" aria-label="${t('Filters in use')}"></div>
+      <div class="tl-fx-end"><span class="tl-fn" id="${p}Fn"></span><button type="button" class="ax-clear" data-clear>${t('Clear all')}</button></div></div>
     <div class="tl-meta" id="${p}Sum" aria-live="polite"></div>
     <div class="tl-body" id="${p}Body"></div>`;
 }
@@ -495,11 +496,11 @@ export function paintChips(root: HTMLElement, p: string, chips: string[], n: num
   if (!fx || !box) return;
   fx.hidden = !chips.length;
   box.innerHTML = chips.join('');
-  root.querySelector<HTMLElement>('#' + p + 'Fn')!.textContent = chips.length > 1 ? plural(chips.length, 'filter') : '';
+  root.querySelector<HTMLElement>('#' + p + 'Fn')!.textContent = chips.length > 1 ? tn(chips.length, '{n} filter', '{n} filters') : '';
   const badge = root.querySelector<HTMLElement>('#' + p + 'Badge')!;
   badge.hidden = !n;
   badge.textContent = String(n);
-  root.querySelector<HTMLElement>('#' + p + 'Filt')!.setAttribute('aria-label', n ? `Filters, ${n} in use` : 'Filters');
+  root.querySelector<HTMLElement>('#' + p + 'Filt')!.setAttribute('aria-label', n ? t('Filters, {n} in use', { n }) : t('Filters'));
   requestAnimationFrame(() => fadeRow(box));
 }
 
@@ -518,10 +519,10 @@ export function paintPills(root: HTMLElement, p: string, quick: Quick | null): v
 /** The counts row under the chips. */
 export function sumHTML(o: { n: string; unit: [string, string]; fails: number; extra?: string; hidden?: number; compact: boolean; note?: string }): string {
   return `<span><b>${o.n}</b> ${o.n === '1' ? o.unit[0] : o.unit[1]}${o.note ? ` <small>· ${esc(o.note)}</small>` : ''}</span>${o.extra || ''}${
-    o.fails ? `<span class="bad"><b>${o.fails}</b> ${o.fails === 1 ? 'problem' : 'problems'}</span>` : ''
+    o.fails ? `<span class="bad">${tn(o.fails, '{n} problem', '{n} problems', { n: `<b>${o.fails}</b>` })}</span>` : ''
   }<span class="grow"></span>${
-    o.hidden ? `<button type="button" class="ax-sys" data-sys title="Server, sign-in and note-saving lines">${plural(o.hidden, 'system line')} hidden · Show</button>` : ''
-  }<button type="button" class="ax-tgl" data-compact aria-pressed="${o.compact}" title="Show similar actions in a row as one line"><i></i>Group similar</button>`;
+    o.hidden ? `<button type="button" class="ax-sys" data-sys title="${t('Server, sign-in and note-saving lines')}">${tn(o.hidden, '{n} system line hidden · Show', '{n} system lines hidden · Show')}</button>` : ''
+  }<button type="button" class="ax-tgl" data-compact aria-pressed="${o.compact}" title="${t('Show similar actions in a row as one line')}"><i></i>${t('Group similar')}</button>`;
 }
 
 /** Sticks the toolbar `top` px from the scroller's top and the day labels under it; returns the on-scroll handler. */
@@ -549,16 +550,16 @@ export function stickTimeline(root: HTMLElement, p: string, scroller: HTMLElemen
 /** The time range select: the presets, and custom dates (picked in the Filters sheet). */
 export function timeSelect(cur: () => { time: TimeKey; from: string; to: string }, pick: (v: TimeKey | 'custom') => void): Select {
   const opts = (): SelectOption[] => {
-    const t = cur();
+    const c = cur();
     return [
       ...TIMES.map((x) => ({ value: x.id, label: x.label })),
-      { value: 'custom', label: t.time === 'custom' ? labelOf(t) : 'Custom dates…', hint: 'Pick a start and an end day' },
+      { value: 'custom', label: c.time === 'custom' ? labelOf(c) : t('Custom dates…'), hint: t('Pick a start and an end day') },
     ];
   };
   const s = createSelect({
     options: opts(),
     value: cur().time,
-    label: 'Time range',
+    label: t('Time range'),
     className: 'tl-time',
     align: 'end',
     minWidth: 220,
@@ -617,17 +618,17 @@ export function daySkeleton(): string {
 
 /** Rows that stand where more will load (the list's end, while there is more). */
 function sentinelHTML(): string {
-  return `<div class="tl-sent" data-sentinel aria-busy="true" aria-label="Loading more activity">${rowsSkeleton(3)}</div>`;
+  return `<div class="tl-sent" data-sentinel aria-busy="true" aria-label="${t('Loading more activity')}">${rowsSkeleton(3)}</div>`;
 }
 
 function emptyHTML(c: DayCtx): string {
   if (c.none)
-    return `<div class="ax-empty"><span class="ax-empty-i">${CLOCK}</span><b>No activity in this time range</b>
-      <span>${esc(c.what || 'What your AIs read, write and search shows up here as it happens.')}</span>
-      <button type="button" class="btn" data-pick="time:all">Show all time</button></div>`;
-  return `<div class="ax-empty"><span class="ax-empty-i">${ICO.filter}</span><b>Nothing matches</b>
-    <span>${c.narrowed ? 'Try other words or remove a filter.' : 'Try a wider time range.'}</span>
-    ${c.narrowed ? '<button type="button" class="btn" data-pick="clear">Clear search and filters</button>' : ''}</div>`;
+    return `<div class="ax-empty"><span class="ax-empty-i">${CLOCK}</span><b>${t('No activity in this time range')}</b>
+      <span>${esc(c.what || t('What your AIs read, write and search shows up here as it happens.'))}</span>
+      <button type="button" class="btn" data-pick="time:all">${t('Show all time')}</button></div>`;
+  return `<div class="ax-empty"><span class="ax-empty-i">${ICO.filter}</span><b>${t('Nothing matches')}</b>
+    <span>${c.narrowed ? t('Try other words or remove a filter.') : t('Try a wider time range.')}</span>
+    ${c.narrowed ? `<button type="button" class="btn" data-pick="clear">${t('Clear search and filters')}</button>` : ''}</div>`;
 }
 
 /** A timeline row: the clock moves out of the meta column into its own column before the avatar. */
@@ -635,7 +636,7 @@ function railRow(html: string): string {
   return html.replace(
     /(<div class="act[^"]*"[^>]*>)(\s*<span class="av">[\s\S]*?)<span class="act-meta"><span title="([^"]*)">([^<]*?)(?: · ([^<]*))?<\/span>/g,
     (_m, open: string, mid: string, title: string, clk: string, rel?: string) =>
-      `${open}<span class="act-t" title="${title}"><b>${clk}</b>${rel ? `<small>${rel === 'now' ? 'just now' : rel === '-' ? '' : esc(rel) + ' ago'}</small>` : ''}</span>${mid}<span class="act-meta">`,
+      `${open}<span class="act-t" title="${title}"><b>${clk}</b>${rel ? `<small>${rel === t('now') ? t('just now') : rel === '-' ? '' : t('{time} ago', { time: esc(rel) })}</small>` : ''}</span>${mid}<span class="act-meta">`,
   );
 }
 
@@ -664,15 +665,15 @@ export function dayViewHTML(c: DayCtx): string {
       const s = perDay.get(k)!;
       html += `<section class="ax-day" data-day="${k}" aria-label="${attr(t.t)}"><h3 class="ax-dh"><span class="ax-dh-c"><span class="ax-dh-t">${esc(
         t.t,
-      )}</span><span class="ax-dh-d">${esc(t.d)}</span></span><span class="grow"></span><span class="ax-dh-n">${plural(s.n, 'action')}${
-        s.f ? `<span class="ax-dh-f">${plural(s.f, 'problem')}</span>` : ''
+      )}</span><span class="ax-dh-d">${esc(t.d)}</span></span><span class="grow"></span><span class="ax-dh-n">${tn(s.n, '{n} action', '{n} actions')}${
+        s.f ? `<span class="ax-dh-f">${tn(s.f, '{n} problem', '{n} problems')}</span>` : ''
       }</span></h3><div class="act-list">`;
     }
     html += railRow(actRowHTML(b.it, { fresh: c.fresh.has(b.it.id), burst: b, open: c.open.has(b.it.id), undo: b.items.length === 1 && canUndo(b.it) }));
   }
   if (cur) html += '</div></section>';
   if (groups.length > cap.length || c.older) html += sentinelHTML();
-  else html += `<div class="tl-end">That’s everything</div>`;
+  else html += `<div class="tl-end">${t('That’s everything')}</div>`;
   return html;
 }
 
@@ -699,12 +700,12 @@ export function unwatchSentinel(body: HTMLElement | null): void {
   if (body) sentinels.get(body)?.disconnect();
 }
 
-export function bars(items: { label: string; n: number; color: string; lead?: string; f: string }[], total: number, empty = 'Nothing in this range'): string {
+export function bars(items: { label: string; n: number; color: string; lead?: string; f: string }[], total: number, empty = t('Nothing in this range')): string {
   if (!items.length) return `<div class="ax-bempty">${esc(empty)}</div>`;
   const max = Math.max(1, ...items.map((x) => x.n));
   return `<div class="ax-hbs">${items
     .map(
-      (x) => `<button type="button" class="ax-hb" data-f="${attr(x.f)}" style="--c:${x.color}" title="${attr(`Show only: ${x.label}`)}">
+      (x) => `<button type="button" class="ax-hb" data-f="${attr(x.f)}" style="--c:${x.color}" title="${attr(t('Show only: {label}', { label: x.label }))}">
         <span class="ax-hb-l">${x.lead || `<i class="sw"></i>`}<span class="t">${esc(x.label)}</span></span>
         <span class="ax-hb-n">${x.n}<em>${total ? Math.round((x.n / total) * 100) : 0}%</em></span>
         <span class="ax-hb-track"><span style="width:${Math.max(2, (x.n / max) * 100)}%"></span></span></button>`,
@@ -725,7 +726,7 @@ export function topActionsHTML(rows: ActivityItem[], n = 6): string {
 
 /** Calls per hour (two days or less) or per day, problems stacked on top. */
 export function timeChart(rows: ActivityItem[], w: { since: number; until: number }): string {
-  if (!rows.length) return '<div class="ax-bempty">Nothing in this range</div>';
+  if (!rows.length) return `<div class="ax-bempty">${t('Nothing in this range')}</div>`;
   const now = Date.now() / 1000;
   const until = Number.isFinite(w.until) ? Math.min(w.until, now) : now;
   const since = w.since > 0 ? w.since : Math.min(...rows.map((r) => r.ts));
@@ -753,10 +754,10 @@ export function timeChart(rows: ActivityItem[], w: { since: number; until: numbe
     return hourly ? d.toLocaleTimeString('en-US', { hour: 'numeric' }) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
   const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-  return `<div class="ax-cols" role="img" aria-label="Actions per ${hourly ? 'hour' : 'day'}">${b
+  return `<div class="ax-cols" role="img" aria-label="${hourly ? t('Actions per hour') : t('Actions per day')}">${b
     .map(
       (v, i) =>
-        `<span class="ax-col" title="${attr(`${lbl(i)}: ${plural(v, 'action')}${fb[i] ? `, ${plural(fb[i], 'problem')}` : ''}`)}"><i style="height:${
+        `<span class="ax-col" title="${attr(`${lbl(i)}: ${tn(v, '{n} action', '{n} actions')}${fb[i] ? `, ${tn(fb[i], '{n} problem', '{n} problems')}` : ''}`)}"><i style="height:${
           v ? Math.max(4, (v / max) * 100) : 0
         }%"><b style="height:${v ? (fb[i] / v) * 100 : 0}%"></b></i></span>`,
     )
@@ -768,19 +769,19 @@ export function chartTitle(rows: ActivityItem[], w: { since: number; until: numb
   const now = Date.now() / 1000;
   const until = Number.isFinite(w.until) ? Math.min(w.until, now) : now;
   const since = w.since > 0 ? w.since : rows.length ? rows[rows.length - 1].ts : now;
-  return until - since <= 2 * 86400 ? 'Actions per hour' : 'Actions per day';
+  return until - since <= 2 * 86400 ? t('Actions per hour') : t('Actions per day');
 }
 
 /** The notes touched most, each opening the note. */
-export function notesHTML(rows: ActivityItem[], n = 6, empty = 'No notes were touched in this range'): string {
+export function notesHTML(rows: ActivityItem[], n = 6, empty = t('No notes were touched in this range')): string {
   const m = new Map<string, number>();
   rows.forEach((x) => x.paths.forEach((p) => m.set(p, (m.get(p) || 0) + 1)));
   const top = [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
   if (!top.length) return `<div class="sm-card-b"><div class="ax-bempty">${esc(empty)}</div></div>`;
   return `<div class="sm-notes">${top
     .map(([p, k]) => {
-      const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : 'Top level';
-      return `<button type="button" class="ax-node" data-note="${attr(p)}" title="${attr(`Open ${p}`)}">${ICO.note}<span class="t"><span>${esc(
+      const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : t('Top level');
+      return `<button type="button" class="ax-node" data-note="${attr(p)}" title="${attr(t('Open {path}', { path: p }))}">${ICO.note}<span class="t"><span>${esc(
         noteName(p),
       )}</span><small>${esc(dir)}</small></span><span class="n">${k}×</span></button>`;
     })
@@ -803,16 +804,16 @@ export function problemsHTML(rows: ActivityItem[], n = 4, withWho = true): strin
     const k = x.actor + '\u0000' + x.action + '\u0000' + p;
     (g.get(k) || g.set(k, []).get(k)!).push(x);
   }
-  if (!g.size) return `<div class="sm-card-b"><div class="ax-bempty ok">No problems in this range</div></div>`;
+  if (!g.size) return `<div class="sm-card-b"><div class="ax-bempty ok">${t('No problems in this range')}</div></div>`;
   const top = [...g.values()].sort((a, b) => b.length - a.length || b[0].ts - a[0].ts).slice(0, n);
   return `<div class="sm-probs">${top
     .map((xs) => {
       const it = xs[0];
       const kid = typeof it.raw.actor_id === 'string' ? it.raw.actor_id : null;
       const said = plainText(predicate(it));
-      const kind = problemOf(it) === 'refused' ? 'Refused' : 'Did not work';
+      const kind = problemOf(it) === 'refused' ? t('Refused') : t('Did not work');
       const lead = withWho ? avatarHTML(it.actor, 30, '', kid) : `<span class="sm-prob-i">${CAT_ICON[catOf(it)] || ICO.x}</span>`;
-      return `<button type="button" class="sm-prob" data-prob="${attr(it.actor)}" title="${attr(withWho ? `Show ${it.actor}'s problems in the timeline` : 'Show its problems in the timeline')}">${lead}<span class="s">${withWho ? `<b>${esc(it.actor)}</b> ` : ''}${esc(withWho ? said : said.charAt(0).toUpperCase() + said.slice(1))}</span><span class="m">${kind} · ${esc(
+      return `<button type="button" class="sm-prob" data-prob="${attr(it.actor)}" title="${attr(withWho ? t("Show {name}'s problems in the timeline", { name: it.actor }) : t('Show its problems in the timeline'))}">${lead}<span class="s">${withWho ? `<b>${esc(it.actor)}</b> ` : ''}${esc(withWho ? said : said.charAt(0).toUpperCase() + said.slice(1))}</span><span class="m">${kind} · ${esc(
         agoText(it.ts),
       )}</span><span class="n">${xs.length > 1 ? xs.length + '×' : ''}</span></button>`;
     })
@@ -838,12 +839,12 @@ function sparkBars(rows: ActivityItem[], w: { since: number; until: number }, n 
 
 /** A status as a dot and one word. */
 function statusWord(a: AgentInfo): { cls: string; word: string } {
-  if (a.disabled) return { cls: 'off', word: 'Turned off' };
-  if (a.cls === 'active') return { cls: 'active', word: 'Active' };
-  if (a.cls === 'recent') return { cls: 'recent', word: 'Recent' };
-  if (a.cls === 'removed') return { cls: 'removed', word: 'Removed' };
-  if (a.cls === 'people') return { cls: 'people', word: /^(gateway|system|memora|memora-cli)$/i.test(a.name) ? 'Server' : 'Person' };
-  return { cls: 'idle', word: 'Idle' };
+  if (a.disabled) return { cls: 'off', word: t('Turned off') };
+  if (a.cls === 'active') return { cls: 'active', word: t('Active') };
+  if (a.cls === 'recent') return { cls: 'recent', word: t('Recent') };
+  if (a.cls === 'removed') return { cls: 'removed', word: t('Removed') };
+  if (a.cls === 'people') return { cls: 'people', word: /^(gateway|system|memora|memora-cli)$/i.test(a.name) ? t('Server') : t('Person') };
+  return { cls: 'idle', word: t('Idle') };
 }
 
 /** The last thing an agent did, as a short sentence. */
@@ -852,13 +853,13 @@ function lastLine(a: AgentInfo): string {
     const said = plainText(predicate(a.last));
     return said.charAt(0).toUpperCase() + said.slice(1);
   }
-  return a.lastTs ? 'Nothing in this range' : 'No activity yet';
+  return a.lastTs ? t('Nothing in this range') : t('No activity yet');
 }
 
 /** One row per agent; a connected agent opens its own page, the others filter the timeline. */
 export function agentRowsHTML(agents: AgentInfo[], rowsOf: (a: AgentInfo) => ActivityItem[], w: { since: number; until: number }, cap: number): string {
-  if (!agents.length) return `<div class="sm-card-b"><div class="ax-bempty">No agents yet</div></div>`;
-  const head = `<div class="sm-ag sm-ag-h" aria-hidden="true"><span></span><span>Agent</span><span>Last action</span><span class="r">Actions</span><span class="r">Problems</span><span>Over time</span><span></span></div>`;
+  if (!agents.length) return `<div class="sm-card-b"><div class="ax-bempty">${t('No agents yet')}</div></div>`;
+  const head = `<div class="sm-ag sm-ag-h" aria-hidden="true"><span></span><span>${t('Agent')}</span><span>${t('Last action')}</span><span class="r">${t('Actions')}</span><span class="r">${t('Problems')}</span><span>${t('Over time')}</span><span></span></div>`;
   let html = '';
   let group = '';
   agents.slice(0, cap).forEach((a) => {
@@ -873,15 +874,15 @@ export function agentRowsHTML(agents: AgentInfo[], rowsOf: (a: AgentInfo) => Act
       ? `<a class="sm-ag${rows.length ? '' : ' dim'}" href="/agents/${attr(encodeURIComponent(a.id!))}/activity" data-kid="${attr(a.id!)}"`
       : `<button type="button" class="sm-ag${rows.length ? '' : ' dim'}" data-only="${attr(a.name)}"`;
     html += `${tag} style="--ag:${agentColor(a.name, a.id)}" aria-label="${attr(
-      `${a.name}, ${st.word}: ${plural(rows.length, 'action')}. ${open ? 'Open its activity' : 'Show only its activity below'}`,
+      `${a.name}, ${st.word}: ${tn(rows.length, '{n} action', '{n} actions')}. ${open ? t('Open its activity') : t('Show only its activity below')}`,
     )}">
       <span class="sm-ag-av">${avatarHTML(a.name, 36, a.cls === 'active' ? 'live' : '', a.id)}</span>
-      <span class="sm-ag-id"><b>${esc(a.name)}</b><span class="sm-st ${st.cls}">${esc(st.word)}${a.fails ? `<em>${plural(a.fails, 'problem')}</em>` : ''}</span></span>
+      <span class="sm-ag-id"><b>${esc(a.name)}</b><span class="sm-st ${st.cls}">${esc(st.word)}${a.fails ? `<em>${tn(a.fails, '{n} problem', '{n} problems')}</em>` : ''}</span></span>
       <span class="sm-ag-last"><span class="t">${esc(lastLine(a))}</span><small>${esc(when)}</small></span>
       <span class="sm-ag-n r${rows.length ? '' : ' z'}">${rows.length}</span>
       <span class="sm-ag-f r${a.fails ? ' bad' : ' z'}">${a.fails}</span>
       <span class="sm-ag-sp">${rows.length ? sparkBars(rows, w) : ''}</span>
-      <span class="sm-ag-go" title="${open ? 'Open its activity' : 'Show only its activity'}">${open ? CHEV_R : ICO.filter}</span>
+      <span class="sm-ag-go" title="${open ? t('Open its activity') : t('Show only its activity')}">${open ? CHEV_R : ICO.filter}</span>
     ${open ? '</a>' : '</button>'}`;
   });
   return `<div class="sm-ags" role="list">${head}${html}</div>`;
@@ -935,5 +936,5 @@ export function exportRows(rs: ActivityItem[], kind: 'json' | 'csv', who?: strin
     );
     download(`${stem}.csv`, lines.join('\n'), 'text/csv');
   }
-  toast(`Exported ${plural(rs.length, 'event')}`, 'ok');
+  toast(tn(rs.length, 'Exported {n} event', 'Exported {n} events'), 'ok');
 }

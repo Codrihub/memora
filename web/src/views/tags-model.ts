@@ -1,5 +1,7 @@
 // Pure helpers behind the Tags page (no DOM, no requests) so they can be tested on their own.
 
+import { t } from '../i18n';
+
 /** One note carrying a tag, as the tag index keeps it. */
 export interface TagEntry {
   path: string;
@@ -109,7 +111,7 @@ function lex(src: string): Tok[] | string {
     }
     re.lastIndex = i;
     const m = re.exec(src);
-    if (!m) return `“${src.slice(i, i + 12)}” is not a tag or a word Memora knows here`;
+    if (!m) return t('“{text}” is not a tag or a word Memora knows here', { text: src.slice(i, i + 12) });
     i = re.lastIndex;
     const w = m[1];
     const lw = w.toLowerCase();
@@ -130,32 +132,32 @@ function lex(src: string): Tok[] | string {
 export function parsePattern(src: string): PatternResult {
   const toks = lex(src);
   if (typeof toks === 'string') return { ok: false, error: toks };
-  if (!toks.length) return { ok: false, error: 'Type at least one tag' };
+  if (!toks.length) return { ok: false, error: t('Type at least one tag') };
   let i = 0;
   const tags: string[] = [];
   const fail = (e: string): never => {
     throw new Error(e);
   };
   const atom = (): Pattern => {
-    const t = toks[i];
-    if (!t) return fail('The pattern ends too early: a tag is missing at the end');
-    if (t.k === 'not') {
+    const tok = toks[i];
+    if (!tok) return fail(t('The pattern ends too early: a tag is missing at the end'));
+    if (tok.k === 'not') {
       i++;
       return { k: 'not', a: atom() };
     }
-    if (t.k === '(') {
+    if (tok.k === '(') {
       i++;
       const inner = or();
-      if (toks[i]?.k !== ')') fail('A “(” is never closed');
+      if (toks[i]?.k !== ')') fail(t('A “(” is never closed'));
       i++;
       return inner;
     }
-    if (t.k === 'tag') {
+    if (tok.k === 'tag') {
       i++;
-      if (!tags.includes(t.t.toLowerCase())) tags.push(t.t.toLowerCase());
-      return { k: 'tag', t: t.t };
+      if (!tags.includes(tok.t.toLowerCase())) tags.push(tok.t.toLowerCase());
+      return { k: 'tag', t: tok.t };
     }
-    return fail(t.k === ')' ? 'A “)” has no “(” before it' : `“${t.k}” needs a tag before and after it`);
+    return fail(tok.k === ')' ? t('A “)” has no “(” before it') : t('“{op}” needs a tag before and after it', { op: tok.k }));
   };
   const and = (): Pattern => {
     const l = [atom()];
@@ -179,7 +181,7 @@ export function parsePattern(src: string): PatternResult {
   };
   try {
     const p = or();
-    if (i < toks.length) fail(toks[i].k === ')' ? 'A “)” has no “(” before it' : 'Something after the pattern is left over');
+    if (i < toks.length) fail(toks[i].k === ')' ? t('A “)” has no “(” before it') : t('Something after the pattern is left over'));
     return { ok: true, p, tags };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

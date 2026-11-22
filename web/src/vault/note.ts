@@ -5,6 +5,7 @@ import { on } from '../bus';
 import { attr, el, esc, useStyles } from '../dom';
 import { fmtTs, hashColor, noteName, relTs, stemTitle, wikilinks } from '../format';
 import { hooks } from '../hooks';
+import { t, tn } from '../i18n';
 import { allNotes, noteTitle, state } from '../state';
 import type { NoteDoc } from '../types';
 import { I } from './icons';
@@ -90,7 +91,7 @@ export async function flushEditor(): Promise<void> {
   if (!editorDirty()) return;
   if (ed.status !== 'conflict' && (await saveNow())) return;
   if (ed.path) saveDraft(ed.path, editorText(), ed.base);
-  undoToast('Your changes could not be saved. They are kept on this device: open the note again to restore them.', null, 'err', 9000);
+  undoToast(t('Your changes could not be saved. They are kept on this device: open the note again to restore them.'), null, 'err', 9000);
 }
 
 function editorText(): string {
@@ -107,15 +108,15 @@ setLeaveGuard((next, stay) => {
     }
     if (ed.path) saveDraft(ed.path, editorText(), ed.base);
     Modal.open({
-      title: 'Leave without saving?',
+      title: t('Leave without saving?'),
       body: `<p style="margin:0">${
         ed.status === 'conflict'
-          ? 'Someone else changed this note while you were editing. Choose which version to keep before you leave.'
-          : 'Your changes could not be saved right now.'
-      } If you leave, they are kept on this device and offered again when you open the note.</p>`,
+          ? t('Someone else changed this note while you were editing. Choose which version to keep before you leave.')
+          : t('Your changes could not be saved right now.')
+      } ${t('If you leave, they are kept on this device and offered again when you open the note.')}</p>`,
       actions: [
         {
-          label: 'Leave',
+          label: t('Leave'),
           cls: 'ghost',
           run: () => {
             Modal.close();
@@ -124,7 +125,7 @@ setLeaveGuard((next, stay) => {
           },
         },
         {
-          label: 'Stay and edit',
+          label: t('Stay and edit'),
           cls: 'primary',
           run: () => {
             Modal.close();
@@ -145,7 +146,7 @@ export function noteShown(): string | null {
 function readerSkeleton(): string {
   const b = skBlock;
   const lines = (ws: number[]): string => ws.map((w) => `<span class="sk sk-line" style="width:${w}%"></span>`).join('');
-  return `<div class="vx-sk" aria-busy="true" aria-label="Loading the note">
+  return `<div class="vx-sk" aria-busy="true" aria-label="${attr(t('Loading the note'))}">
   <header class="vx-rbar">${b('28px', 28, 'r')}${b('64px')}${b('110px')}<span class="vx-grow"></span>${b('28px', 28, 'r')}${b('28px', 28, 'r')}${b('64px', 30)}${b('28px', 28, 'r')}</header>
   <div class="vx-note-scroll"><div class="vx-page">
     <div class="vx-paper"><div class="vx-col">
@@ -174,7 +175,7 @@ export async function renderNote(container: HTMLElement, path: string, back: boo
   } catch (e) {
     // A rename or move in flight (or the user moved on): keep what is shown.
     if (seq !== loadSeq || state.note !== path || relocating(path) || relocating()) return;
-    container.innerHTML = `<div class="vx-empty">${I.warn}<p>Could not open <b>${esc(path)}</b><br>${esc(
+    container.innerHTML = `<div class="vx-empty">${I.warn}<p>${t('Could not open {path}', { path: `<b>${esc(path)}</b>` })}<br>${esc(
       (e as Error).message,
     )}</p></div>`;
     ed.path = null;
@@ -209,7 +210,7 @@ function draw(): void {
   const backlinks = d.backlinks || [];
   const outs = Array.from(new Set(wikilinks(d.content)));
   const words = (d.content || '').replace(/^---[\s\S]*?---/, '').split(/\s+/).filter(Boolean).length;
-  const t = touched.get(path);
+  const tc = touched.get(path);
   const pinned = isPinned('note', path);
   const prevScroll = c.querySelector<HTMLElement>('.vx-note-scroll')?.scrollTop || 0;
 
@@ -226,38 +227,38 @@ function draw(): void {
   )}</span></span>`;
 
   const bar = el('header', 'vx-rbar');
-  bar.innerHTML = `<button class="vx-icon-btn vx-back" data-back aria-label="Back" title="Back">${I.back}</button>
-    <nav class="vx-crumbs" aria-label="Breadcrumb">${crumbHTML}</nav>
+  bar.innerHTML = `<button class="vx-icon-btn vx-back" data-back aria-label="${attr(t('Back'))}" title="${attr(t('Back'))}">${I.back}</button>
+    <nav class="vx-crumbs" aria-label="${attr(t('Breadcrumb'))}">${crumbHTML}</nav>
     <span class="vx-grow"></span>
     <span class="vx-save" data-state="${ed.status}" aria-live="polite"></span>
     ${
       state.editing
         ? ''
-        : `<span class="vx-rgroup"><button class="vx-ct-btn" type="button" data-contents aria-label="Contents" title="Contents: outline and links">${I.toc}<span>Contents</span></button>
-    <button class="vx-ct-btn vx-hist-btn" type="button" data-hist aria-label="Version history" title="Version history: see and restore earlier versions">${I.history}<span>History</span></button>
-    <button class="vx-ct-btn vx-mn-btn" type="button" data-mnemo aria-label="Ask Mnemo about this note" title="Ask Mnemo about this note">${I.mnemo}<span>Ask</span></button>
-    <button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="Reading settings" title="Reading settings">Aa</button></span><span class="vx-vsep" aria-hidden="true"></span>`
+        : `<span class="vx-rgroup"><button class="vx-ct-btn" type="button" data-contents aria-label="${attr(t('Contents'))}" title="${attr(t('Contents: outline and links'))}">${I.toc}<span>${t('Contents')}</span></button>
+    <button class="vx-ct-btn vx-hist-btn" type="button" data-hist aria-label="${attr(t('Version history'))}" title="${attr(t('Version history: see and restore earlier versions'))}">${I.history}<span>${t('History')}</span></button>
+    <button class="vx-ct-btn vx-mn-btn" type="button" data-mnemo aria-label="${attr(t('Ask Mnemo about this note'))}" title="${attr(t('Ask Mnemo about this note'))}">${I.mnemo}<span>${t('Ask')}</span></button>
+    <button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="${attr(t('Reading settings'))}" title="${attr(t('Reading settings'))}">Aa</button></span><span class="vx-vsep" aria-hidden="true"></span>`
     }
     <span class="vx-rgroup">${
       state.editing
-        ? `<span class="vx-edit-btns"><button class="btn sm ghost" type="button" data-cancel title="Close the editor (Esc). Asks first when there are unsaved changes.">Close</button>
-    <button class="btn sm primary" type="button" data-save title="Save and close (Ctrl+S saves and keeps editing)">${I.check}<span>Save</span></button></span>`
-        : `<button class="btn sm vx-mode" type="button" data-mode="edit" aria-pressed="false" title="Edit (E)">${I.edit}<span>Edit</span></button>`
+        ? `<span class="vx-edit-btns"><button class="btn sm ghost" type="button" data-cancel title="${attr(t('Close the editor (Esc). Asks first when there are unsaved changes.'))}">${t('Close')}</button>
+    <button class="btn sm primary" type="button" data-save title="${attr(t('Save and close (Ctrl+S saves and keeps editing)'))}">${I.check}<span>${t('Save')}</span></button></span>`
+        : `<button class="btn sm vx-mode" type="button" data-mode="edit" aria-pressed="false" title="${attr(t('Edit (E)'))}">${I.edit}<span>${t('Edit')}</span></button>`
     }
-    ${state.editing ? '' : `<button class="vx-icon-btn" data-focus aria-label="Hide the toolbar" title="Hide the toolbar for reading (F)">${I.foldUp}</button>`}
-    <button class="vx-icon-btn" data-more aria-label="More actions" title="More">${I.more}</button></span>`;
+    ${state.editing ? '' : `<button class="vx-icon-btn" data-focus aria-label="${attr(t('Hide the toolbar'))}" title="${attr(t('Hide the toolbar for reading (F)'))}">${I.foldUp}</button>`}
+    <button class="vx-icon-btn" data-more aria-label="${attr(t('More actions'))}" title="${attr(t('More'))}">${I.more}</button></span>`;
   c.appendChild(bar);
   bar.querySelector<HTMLElement>('[data-focus]')?.addEventListener('click', () => setFocus(true));
   const unfocus = el('button', 'vx-unfocus');
   unfocus.setAttribute('type', 'button');
-  unfocus.title = 'Show the toolbar (F)';
-  unfocus.innerHTML = `${I.foldDown}<span>Show toolbar</span>`;
+  unfocus.title = t('Show the toolbar (F)');
+  unfocus.innerHTML = `${I.foldDown}<span>${t('Show toolbar')}</span>`;
   unfocus.onclick = () => setFocus(false);
   c.appendChild(unfocus);
   applyFocus();
   // Phones: the breadcrumb gets its own scrollable row under the bar.
   const pcrumbs = el('nav', 'vx-pcrumbs');
-  pcrumbs.setAttribute('aria-label', 'Breadcrumb');
+  pcrumbs.setAttribute('aria-label', t('Breadcrumb'));
   pcrumbs.innerHTML = crumbHTML;
   c.appendChild(pcrumbs);
   requestAnimationFrame(() => (pcrumbs.scrollLeft = pcrumbs.scrollWidth));
@@ -269,19 +270,19 @@ function draw(): void {
   const head = el('div', 'vx-doc-head');
   const folderBtn = `<button class="vx-meta-folder" data-f="${attr(folder)}"><i></i><span>${esc(folder || ROOT_LABEL)}</span></button>`;
   const updated = `<span title="${attr(fmtTs(d.mtime))}">${esc(relTs(d.mtime))}</span>`;
-  const read = `${Math.max(1, Math.round(words / 220))} min read`;
-  const agent = t
-    ? `<span class="vx-touch" title="${attr(`${t.actor} · ${t.action.replace(/_/g, ' ')} · ${relTs(t.at / 1000)}`)}"><span class="vx-agent sm" style="--ac:${hashColor(
-        t.actor,
-      )}">${esc(initials(t.actor))}</span>${esc(t.actor)}</span>`
+  const read = t('{n} min read', { n: Math.max(1, Math.round(words / 220)) });
+  const agent = tc
+    ? `<span class="vx-touch" title="${attr(`${tc.actor} · ${tc.action.replace(/_/g, ' ')} · ${relTs(tc.at / 1000)}`)}"><span class="vx-agent sm" style="--ac:${hashColor(
+        tc.actor,
+      )}">${esc(initials(tc.actor))}</span>${esc(tc.actor)}</span>`
     : '';
-  const meta: string[] = [folderBtn, `<span>Updated ${updated}</span>`, `<span>${read}</span>`];
-  if (pinned) meta.push(`<span class="vx-meta-pin">${I.pin}Pinned</span>`);
+  const meta: string[] = [folderBtn, `<span>${t('Updated {when}', { when: updated })}</span>`, `<span>${read}</span>`];
+  if (pinned) meta.push(`<span class="vx-meta-pin">${I.pin}${t('Pinned')}</span>`);
   if (agent) meta.push(agent);
   const tagBtns = tags
-    .map((x) => `<button class="vx-tag" data-tag="${attr(x)}" style="--tc:${hashColor(x)}" title="Notes tagged #${attr(x)}"><i></i>${esc(x)}</button>`)
+    .map((x) => `<button class="vx-tag" data-tag="${attr(x)}" style="--tc:${hashColor(x)}" title="${attr(t('Notes tagged #{tag}', { tag: x }))}"><i></i>${esc(x)}</button>`)
     .join('');
-  head.innerHTML = `<h1 class="vx-doc-title" title="Double click to rename">${esc(noteTitle(path))}</h1>
+  head.innerHTML = `<h1 class="vx-doc-title" title="${attr(t('Double click to rename'))}">${esc(noteTitle(path))}</h1>
     <div class="vx-doc-meta">${meta.join('')}</div>${tags.length ? `<div class="vx-tags">${tagBtns}</div>` : ''}`;
   col.appendChild(head);
 
@@ -307,7 +308,7 @@ function draw(): void {
     else {
       art = el('article', 'vx-prose note-body vh-old');
       art.innerHTML = hist.html || `<pre>${esc(hist.content)}</pre>`;
-      if (!hist.content.trim()) art.innerHTML = `<p class="vx-muted vx-empty-doc">Version ${pv.version} of this note was empty.</p>`;
+      if (!hist.content.trim()) art.innerHTML = `<p class="vx-muted vx-empty-doc">${t('Version {n} of this note was empty.', { n: pv.version })}</p>`;
       col.appendChild(art);
       wireProse(art);
     }
@@ -315,7 +316,10 @@ function draw(): void {
     art = el('article', 'vx-prose note-body');
     art.innerHTML = d.html || `<pre>${esc(d.content || '')}</pre>`;
     if (!(d.content || '').trim())
-      art.innerHTML = `<p class="vx-muted vx-empty-doc">This note is empty. <button class="vx-linkbtn" data-start>Start writing</button> or press <kbd>E</kbd>.</p>`;
+      art.innerHTML = `<p class="vx-muted vx-empty-doc">${t('This note is empty. {start} or press {key}.', {
+        start: `<button class="vx-linkbtn" data-start>${t('Start writing')}</button>`,
+        key: '<kbd>E</kbd>',
+      })}</p>`;
     col.appendChild(art);
     wireProse(art);
     const want = takePendingImage(path);
@@ -332,7 +336,7 @@ function draw(): void {
             )}</b><small>${esc(dirOf(b.path) || ROOT_LABEL)}</small></button>`,
         )
         .join('')
-    : '<p class="vx-muted">No other note links here yet.</p>';
+    : `<p class="vx-muted">${t('No other note links here yet.')}</p>`;
   const outHTML = outRefs.length
     ? outRefs
         .map((o) =>
@@ -340,19 +344,19 @@ function draw(): void {
             ? `<button class="vx-link" data-open="${attr(o.path)}" style="--fc:${attr(folderColor(dirOf(o.path)))}"><i></i><b>${esc(
                 noteTitle(o.path),
               )}</b><small>${esc(dirOf(o.path) || ROOT_LABEL)}</small></button>`
-            : `<button class="vx-link missing" data-create="${attr(o.name)}" title="Create this note"><i></i><b>${esc(
+            : `<button class="vx-link missing" data-create="${attr(o.name)}" title="${attr(t('Create this note'))}"><i></i><b>${esc(
                 o.name,
-              )}</b><small>Not created yet · create</small></button>`,
+              )}</b><small>${t('Not created yet · create')}</small></button>`,
         )
         .join('')
-    : '<p class="vx-muted">This note does not link to other notes yet. Type [[ while editing to add a link.</p>';
+    : `<p class="vx-muted">${t('This note does not link to other notes yet. Type [[ while editing to add a link.')}</p>`;
   const heads = art ? Array.from(art.querySelectorAll<HTMLElement>('h1,h2,h3,h4')).filter((h) => (h.textContent || '').trim()) : [];
   const links = art ? Array.from(art.querySelectorAll<HTMLElement>('a.wl')) : [];
   if (!state.editing && !pv) {
     const open = mobileBack ? '' : ' open';
     const foot = el('div', 'vx-rfoot');
-    foot.innerHTML = `<details${open}><summary>Mentioned in<span>${backlinks.length}</span></summary><div>${backHTML}</div></details>
-      <details${open}><summary>Links to<span>${outRefs.length}</span></summary><div>${outHTML}</div></details>`;
+    foot.innerHTML = `<details${open}><summary>${t('Mentioned in')}<span>${backlinks.length}</span></summary><div>${backHTML}</div></details>
+      <details${open}><summary>${t('Links to')}<span>${outRefs.length}</span></summary><div>${outHTML}</div></details>`;
     col.appendChild(foot);
   }
   const paper = el('div', 'vx-paper');
@@ -362,21 +366,21 @@ function draw(): void {
   // Details: property rows, shown as the last tab of Contents.
   const created = createdOf(d);
   const side = el('aside', 'vx-insp');
-  side.setAttribute('aria-label', 'Contents');
+  side.setAttribute('aria-label', t('Contents'));
   const row = (label: string, value: string): string => `<dt>${label}</dt><dd>${value}</dd>`;
   const detailsHTML = `<dl class="vx-info">
-      <div class="vx-igroup">${row('Folder', folderBtn)}${row(
-        'Tags',
-        tags.length ? `<span class="vx-itags">${tagBtns}</span>` : '<span class="vx-none">None</span>',
+      <div class="vx-igroup">${row(t('Folder'), folderBtn)}${row(
+        t('Tags'),
+        tags.length ? `<span class="vx-itags">${tagBtns}</span>` : `<span class="vx-none">${t('None')}</span>`,
       )}</div>
-      <div class="vx-igroup">${row('Updated', updated)}${
-        created ? row('Created', `<span title="${attr(created.full)}">${esc(created.short)}</span>`) : ''
+      <div class="vx-igroup">${row(t('Updated'), updated)}${
+        created ? row(t('Created'), `<span title="${attr(created.full)}">${esc(created.short)}</span>`) : ''
       }</div>
-      <div class="vx-igroup">${row('Words', `<span>${words.toLocaleString()} · ${read}</span>`)}${row(
-        'Links',
+      <div class="vx-igroup">${row(t('Words'), `<span>${words.toLocaleString()} · ${read}</span>`)}${row(
+        t('Links'),
         `<span>${outRefs.length}</span>`,
-      )}${row('Backlinks', `<span>${backlinks.length}</span>`)}</div>
-      <div class="vx-igroup">${row('Pinned', `<span>${pinned ? 'Yes' : 'No'}</span>`)}${agent ? row('Last agent', agent) : ''}</div>
+      )}${row(t('Backlinks'), `<span>${backlinks.length}</span>`)}</div>
+      <div class="vx-igroup">${row(t('Pinned'), `<span>${pinned ? t('Yes') : t('No')}</span>`)}${agent ? row(t('Last agent'), agent) : ''}</div>
     </dl>`;
   page.prepend(side);
   scroller.appendChild(page);
@@ -425,8 +429,8 @@ function draw(): void {
   const ctBtn = bar.querySelector<HTMLElement>('[data-contents]');
   if (ctBtn && !state.editing) {
     const card = el('section', 'vx-icard vx-toc');
-    card.setAttribute('aria-label', 'Contents');
-    card.innerHTML = `<header class="vx-toc-head"><button type="button" class="vx-icon-btn" data-toc-x aria-label="Close the panel" title="Close">${I.close}</button></header>`;
+    card.setAttribute('aria-label', t('Contents'));
+    card.innerHTML = `<header class="vx-toc-head"><button type="button" class="vx-icon-btn" data-toc-x aria-label="${attr(t('Close the panel'))}" title="${attr(t('Close'))}">${I.close}</button></header>`;
     const ctBody = contentsBody(cdata, cact, false);
     card.querySelector('.vx-toc-head')!.prepend(ctBody.querySelector('.vx-ct-main')!);
     card.appendChild(ctBody);
@@ -537,7 +541,7 @@ async function previewVersion(v: Version): Promise<void> {
     if (hist.mode === 'changes') void loadDiff();
     host?.querySelector<HTMLElement>('.vh-banner [data-restore]')?.focus({ preventScroll: true });
   } catch (e) {
-    if (my === hist.seq) undoToast(`Could not open version ${v.version}: ${(e as Error).message}`, null, 'err');
+    if (my === hist.seq) undoToast(t('Could not open version {n}: {error}', { n: v.version, error: (e as Error).message }), null, 'err');
   }
 }
 
@@ -568,7 +572,7 @@ async function loadDiff(): Promise<void> {
   } catch (e) {
     if (my !== hist.seq) return;
     hist.diff = '';
-    undoToast(`Could not compare the versions: ${(e as Error).message}`, null, 'err');
+    undoToast(t('Could not compare the versions: {error}', { error: (e as Error).message }), null, 'err');
   }
   if (hist.mode !== 'changes') return;
   const kept = document.activeElement?.closest('.vh-seg') ? '.vh-seg [data-m=changes]' : '';
@@ -611,7 +615,7 @@ function offerCreate(name: string, at: HTMLElement): void {
   openMenu(
     [
       {
-        label: `Create “${name}”`,
+        label: t('Create “{name}”', { name }),
         icon: I.newNote,
         hint: folder ? baseName(folder) : ROOT_LABEL,
         run: () => void createLinked(name),
@@ -689,10 +693,10 @@ function moreMenu(path: string, at: HTMLElement): void {
   const pinned = isPinned('note', path);
   openMenu(
     [
-      { label: 'Rename', icon: I.rename, hint: 'F2', run: () => renameTitle() },
-      { label: 'Move to…', icon: I.move, hint: 'M', run: () => askMoveNotes([path]) },
+      { label: t('Rename'), icon: I.rename, hint: 'F2', run: () => renameTitle() },
+      { label: t('Move to…'), icon: I.move, hint: 'M', run: () => askMoveNotes([path]) },
       {
-        label: pinned ? 'Unpin' : 'Pin',
+        label: pinned ? t('Unpin') : t('Pin'),
         icon: pinned ? I.pinOff : I.pin,
         hint: 'P',
         run: () => {
@@ -700,21 +704,21 @@ function moreMenu(path: string, at: HTMLElement): void {
           draw();
         },
       },
-      { label: 'Privacy…', icon: LOCK_ICON, run: () => void openPrivacy('node', path) },
-      { label: 'Version history', icon: I.history, run: () => void showHistory() },
-      { label: 'Ask Mnemo about this note', icon: I.mnemo, run: () => hooks.askMnemo('note:' + path) },
+      { label: t('Privacy…'), icon: LOCK_ICON, run: () => void openPrivacy('node', path) },
+      { label: t('Version history'), icon: I.history, run: () => void showHistory() },
+      { label: t('Ask Mnemo about this note'), icon: I.mnemo, run: () => hooks.askMnemo('note:' + path) },
       { sep: true, label: '' },
       {
-        label: 'Copy link',
+        label: t('Copy link'),
         icon: I.link,
-        run: () => copy(location.origin + nodeUrl(path), 'Link copied'),
+        run: () => copy(location.origin + nodeUrl(path), t('Link copied')),
       },
-      { label: 'Copy path', icon: I.copy, run: () => copyPath(path) },
-      { label: 'Copy wikilink', icon: I.wiki, run: () => copyWikilink(path) },
-      { label: 'New note in this folder', icon: I.newNote, run: () => nav.newNote(dirOf(path)) },
+      { label: t('Copy path'), icon: I.copy, run: () => copyPath(path) },
+      { label: t('Copy wikilink'), icon: I.wiki, run: () => copyWikilink(path) },
+      { label: t('New note in this folder'), icon: I.newNote, run: () => nav.newNote(dirOf(path)) },
       { sep: true, label: '' },
       {
-        label: 'Move to Trash',
+        label: t('Move to Trash'),
         icon: I.trash,
         hint: 'Del',
         danger: true,
@@ -728,7 +732,7 @@ function moreMenu(path: string, at: HTMLElement): void {
 function copy(text: string, done: string): void {
   void navigator.clipboard?.writeText(text).then(
     () => undoToast(done, null, 'info', 2500),
-    () => undoToast('Clipboard is not available', null, 'err', 2500),
+    () => undoToast(t('Clipboard is not available'), null, 'err', 2500),
   );
 }
 
@@ -763,8 +767,8 @@ function wireProse(art: HTMLElement): void {
       if (e.key === 'Enter') open();
     };
     if (a.classList.contains('broken')) {
-      a.title = 'Not created yet. Click to create it.';
-      a.setAttribute('aria-label', `${a.textContent || ''} (not created yet, create it)`);
+      a.title = t('Not created yet. Click to create it.');
+      a.setAttribute('aria-label', t('{name} (not created yet, create it)', { name: a.textContent || '' }));
     } else if (a.dataset.path) {
       a.title = `${noteTitle(a.dataset.path)} · ${dirOf(a.dataset.path) || ROOT_LABEL}`;
     }
@@ -836,18 +840,18 @@ function cancelEdit(): void {
   const text = editorText();
   const base = ed.base;
   Modal.open({
-    title: 'Save your changes?',
-    body: '<p style="margin:0">This note has changes that are not saved yet.</p>',
+    title: t('Save your changes?'),
+    body: `<p style="margin:0">${t('This note has changes that are not saved yet.')}</p>`,
     actions: [
-      { label: 'Keep editing', cls: 'ghost', run: () => Modal.close() },
+      { label: t('Keep editing'), cls: 'ghost', run: () => Modal.close() },
       {
-        label: 'Discard',
+        label: t('Discard'),
         cls: 'danger',
         run: async () => {
           Modal.close();
           if (path) clearDraft(path);
           await leave();
-          undoToast('Changes discarded', () => {
+          undoToast(t('Changes discarded'), () => {
             if (!path) return;
             if (ed.path === path && state.note === path && host?.isConnected) editWith(text);
             else saveDraft(path, text, base);
@@ -855,7 +859,7 @@ function cancelEdit(): void {
         },
       },
       {
-        label: 'Save',
+        label: t('Save'),
         cls: 'primary',
         run: async () => {
           Modal.close();
@@ -889,20 +893,18 @@ function draftBanner(path: string, current: string): HTMLElement | null {
   if (state.editing) return null;
   const b = el('div', 'vx-conflict vx-draft');
   b.setAttribute('role', 'status');
-  b.innerHTML = `<div class="vx-conflict-head">${I.edit}<div><b>You have unsaved changes from ${esc(
-    relTs(d.at / 1000),
-  )} on this device.</b>
+  b.innerHTML = `<div class="vx-conflict-head">${I.edit}<div><b>${t('You have unsaved changes from {when} on this device.', { when: esc(relTs(d.at / 1000)) })}</b>
     <p>${
       d.base !== current
-        ? 'The note has changed since then. Restoring puts your version in the editor; nothing is saved until you press Save.'
-        : 'Restore them to keep editing, or discard them.'
+        ? t('The note has changed since then. Restoring puts your version in the editor; nothing is saved until you press Save.')
+        : t('Restore them to keep editing, or discard them.')
     }</p></div></div>
-    <div class="vx-conflict-acts"><button class="btn sm" data-dr="drop">Discard</button><button class="btn sm primary" data-dr="restore">Restore</button></div>`;
+    <div class="vx-conflict-acts"><button class="btn sm" data-dr="drop">${t('Discard')}</button><button class="btn sm primary" data-dr="restore">${t('Restore')}</button></div>`;
   b.querySelector<HTMLElement>('[data-dr=restore]')!.onclick = () => editWith(d.text);
   b.querySelector<HTMLElement>('[data-dr=drop]')!.onclick = () => {
     clearDraft(path);
     draw();
-    undoToast('Unsaved changes discarded', () => {
+    undoToast(t('Unsaved changes discarded'), () => {
       saveDraft(path, d.text, d.base);
       if (ed.path === path) draw();
     }, 'info', 9000);
@@ -975,29 +977,32 @@ function onPaneKey(e: KeyboardEvent): void {
 }
 
 const TOOLS: { k: string; icon: string; label: string; key?: string }[] = [
-  { k: 'h', icon: I.heading, label: 'Heading', key: 'Ctrl+Alt+H' },
-  { k: 'b', icon: I.bold, label: 'Bold', key: 'Ctrl+B' },
-  { k: 'i', icon: I.italic, label: 'Italic', key: 'Ctrl+I' },
-  { k: 'ul', icon: I.list, label: 'Bulleted list', key: 'Ctrl+Shift+8' },
-  { k: 'task', icon: I.task, label: 'Task', key: 'Ctrl+Shift+9' },
-  { k: 'quote', icon: I.quote, label: 'Quote' },
-  { k: 'code', icon: I.code, label: 'Code', key: 'Ctrl+`' },
-  { k: 'link', icon: I.link, label: 'Link', key: 'Ctrl+K' },
-  { k: 'wiki', icon: I.wiki, label: 'Wikilink', key: '[[' },
-  { k: 'img', icon: I.image, label: 'Image (or paste or drop one)' },
+  { k: 'h', icon: I.heading, label: t('Heading'), key: 'Ctrl+Alt+H' },
+  { k: 'b', icon: I.bold, label: t('Bold'), key: 'Ctrl+B' },
+  { k: 'i', icon: I.italic, label: t('Italic'), key: 'Ctrl+I' },
+  { k: 'ul', icon: I.list, label: t('Bulleted list'), key: 'Ctrl+Shift+8' },
+  { k: 'task', icon: I.task, label: t('Task'), key: 'Ctrl+Shift+9' },
+  { k: 'quote', icon: I.quote, label: t('Quote') },
+  { k: 'code', icon: I.code, label: t('Code'), key: 'Ctrl+`' },
+  { k: 'link', icon: I.link, label: t('Link'), key: 'Ctrl+K' },
+  { k: 'wiki', icon: I.wiki, label: t('Wikilink'), key: '[[' },
+  { k: 'img', icon: I.image, label: t('Image (or paste or drop one)') },
 ];
 
 function editorEl(): HTMLElement {
   const wrap = el('div', 'vx-edit');
-  wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="Formatting">${TOOLS.map(
+  wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="${attr(t('Formatting'))}">${TOOLS.map(
     (x) =>
       `${x.k === 'ul' || x.k === 'link' || x.k === 'img' ? '<span class="vx-tsep" aria-hidden="true"></span>' : ''}<button data-t="${x.k}" title="${attr(
         x.label + (x.key ? ' (' + x.key + ')' : ''),
       )}" aria-label="${attr(x.label)}">${x.icon}</button>`,
-  ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint"><kbd>Ctrl</kbd><kbd>S</kbd> save · <kbd>Esc</kbd> close</span></div>
-  <textarea class="vx-editor note-editor" spellcheck="true" aria-label="Note text"></textarea>
+  ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint">${t('{save} save · {close} close', {
+    save: '<kbd>Ctrl</kbd><kbd>S</kbd>',
+    close: '<kbd>Esc</kbd>',
+  })}</span></div>
+  <textarea class="vx-editor note-editor" spellcheck="true" aria-label="${attr(t('Note text'))}"></textarea>
   <div class="vx-edit-foot"><span class="vx-wc"></span><span class="vx-grow"></span>
-    <span class="vx-edit-acts"><button class="btn ghost" type="button" data-cancel>Close</button><button class="btn primary" type="button" data-save>${I.check}<span>Save</span></button></span></div>`;
+    <span class="vx-edit-acts"><button class="btn ghost" type="button" data-cancel>${t('Close')}</button><button class="btn primary" type="button" data-save>${I.check}<span>${t('Save')}</span></button></span></div>`;
   const ta = wrap.querySelector<HTMLTextAreaElement>('.vx-editor')!;
   ta.value = ed.base;
   const autosize = (): void => {
@@ -1006,7 +1011,7 @@ function editorEl(): HTMLElement {
   };
   const count = (): void => {
     const w = ta.value.split(/\s+/).filter(Boolean).length;
-    wrap.querySelector('.vx-wc')!.textContent = `${w} words · ${ta.value.length} characters`;
+    wrap.querySelector('.vx-wc')!.textContent = `${tn(w, '{n} word', '{n} words')} · ${tn(ta.value.length, '{n} character', '{n} characters')}`;
   };
   requestAnimationFrame(autosize);
   count();
@@ -1057,14 +1062,14 @@ function paintSave(): void {
   if (!s) return;
   s.dataset.state = ed.status;
   const label: Record<SaveState, string> = {
-    saved: state.editing && ed.lastSavedAt ? 'Saved' : '',
-    dirty: 'Unsaved changes',
-    saving: 'Saving…',
-    error: 'Save failed',
-    conflict: 'Conflict',
+    saved: state.editing && ed.lastSavedAt ? t('Saved') : '',
+    dirty: t('Unsaved changes'),
+    saving: t('Saving…'),
+    error: t('Save failed'),
+    conflict: t('Conflict'),
   };
   s.innerHTML = label[ed.status] ? `<i></i>${label[ed.status]}` : '';
-  s.title = ed.lastSavedAt ? 'Last saved ' + new Date(ed.lastSavedAt).toLocaleTimeString() : '';
+  s.title = ed.lastSavedAt ? t('Last saved {time}', { time: new Date(ed.lastSavedAt).toLocaleTimeString() }) : '';
 }
 
 /** Write the editor to the server; true once the vault has this text. */
@@ -1085,7 +1090,7 @@ async function saveNow(): Promise<boolean> {
     // Never write blind: if the note changed on the server since we loaded it, stop and ask.
     const cur = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path));
     if ((cur.content || '') !== ed.base && (cur.content || '') !== mine) {
-      raiseConflict(cur.content || '', touched.get(path)?.actor || 'someone else');
+      raiseConflict(cur.content || '', touched.get(path)?.actor || t('someone else'));
       return false;
     }
     await saveNote(path, mine);
@@ -1118,12 +1123,12 @@ function raiseConflict(theirs: string, by: string): void {
 function conflictBanner(): HTMLElement {
   const b = el('div', 'vx-conflict');
   b.setAttribute('role', 'alert');
-  b.innerHTML = `<div class="vx-conflict-head">${I.warn}<div><b>${esc(ed.theirsBy)} changed this note while you were editing.</b>
-    <p>Your edits are kept in the editor and are not saved yet. Choose which version wins.</p></div></div>
+  b.innerHTML = `<div class="vx-conflict-head">${I.warn}<div><b>${t('{who} changed this note while you were editing.', { who: esc(ed.theirsBy) })}</b>
+    <p>${t('Your edits are kept in the editor and are not saved yet. Choose which version wins.')}</p></div></div>
     <div class="vx-conflict-acts">
-      <button class="btn sm" data-c="diff">Compare</button>
-      <button class="btn sm" data-c="theirs">Use their version</button>
-      <button class="btn sm primary" data-c="mine">Keep mine and overwrite</button>
+      <button class="btn sm" data-c="diff">${t('Compare')}</button>
+      <button class="btn sm" data-c="theirs">${t('Use their version')}</button>
+      <button class="btn sm primary" data-c="mine">${t('Keep mine and overwrite')}</button>
     </div><pre class="vx-theirs hidden"></pre>`;
   b.querySelector<HTMLElement>('[data-c=diff]')!.onclick = () => {
     const pre = b.querySelector<HTMLElement>('.vx-theirs')!;
@@ -1140,7 +1145,7 @@ function conflictBanner(): HTMLElement {
     ed.status = 'saved';
     if (ed.doc) ed.doc.content = ed.base;
     draw();
-    undoToast('Loaded their version. Your text was copied to the clipboard.', null, 'info');
+    undoToast(t('Loaded their version. Your text was copied to the clipboard.'), null, 'info');
   };
   b.querySelector<HTMLElement>('[data-c=mine]')!.onclick = async () => {
     const ta = host?.querySelector<HTMLTextAreaElement>('.vx-editor');
@@ -1181,7 +1186,7 @@ function lineDiff(mine: string, theirs: string): string {
       i++;
     }
   }
-  return `<em>Lines marked + are only in their version, - only in yours.</em>` + out.join('');
+  return `<em>${t('Lines marked + are only in their version, - only in yours.')}</em>` + out.join('');
 }
 
 function wrapSel(ta: HTMLTextAreaElement, before: string, after = before, placeholder = 'text'): void {
@@ -1240,16 +1245,16 @@ async function insertImages(ta: HTMLTextAreaElement, files: File[]): Promise<voi
   const note = ed.path;
   const imgs = files.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
   if (!note || !imgs.length) {
-    if (files.length) toast('Only PNG, JPEG, WebP and GIF images can be added', 'err');
+    if (files.length) toast(t('Only PNG, JPEG, WebP and GIF images can be added'), 'err');
     return;
   }
-  toast(imgs.length === 1 ? 'Adding the image…' : `Adding ${imgs.length} images…`, 'info', 2200);
+  toast(imgs.length === 1 ? t('Adding the image…') : t('Adding {n} images…', { n: imgs.length }), 'info', 2200);
   const lines: string[] = [];
   for (const f of imgs) {
     try {
       lines.push((await uploadImage(note, f)).markdown);
     } catch (e) {
-      toast(`${f.name || 'Image'}: ${(e as Error).message}`, 'err', 6000);
+      toast(`${f.name || t('Image')}: ${(e as Error).message}`, 'err', 6000);
     }
   }
   if (!lines.length) return;
@@ -1379,7 +1384,7 @@ function suggest(ta: HTMLTextAreaElement): void {
   const mm = MENTION_RE.exec(before);
   if (mm && 'mnemo'.startsWith(mm[3].toLowerCase()) && (mm[2] === '@' || mm[3].length > 0)) {
     const at = s - mm[3].length - 1;
-    const item: Sug = { name: '@mnemo:', folder: 'Ask Mnemo here; it answers under the line', text: '@mnemo: ', mention: true };
+    const item: Sug = { name: '@mnemo:', folder: t('Ask Mnemo here; it answers under the line'), text: '@mnemo: ', mention: true };
     if (!sug) {
       const box = el('div', 'vx-suggest');
       box.setAttribute('role', 'listbox');
@@ -1503,7 +1508,7 @@ onRelocate((p, verb) => {
   const s = host.querySelector<HTMLElement>('.vx-save');
   if (s && verb) {
     s.dataset.state = 'saving';
-    s.innerHTML = `<i></i>${esc(verb)}…`;
+    s.innerHTML = `<i></i>${esc(t(verb))}…`;
   } else paintSave();
 });
 
@@ -1525,7 +1530,7 @@ function wireBus(): void {
       if (state.note !== m.path) replaceHistory();
       state.note = m.path;
       // Our own rename or move says so itself.
-      if (!relocating(cur) && !relocating(m.path)) undoToast(`${m.actor || 'An agent'} moved this note to ${m.path}`, null, 'info');
+      if (!relocating(cur) && !relocating(m.path)) undoToast(t('{who} moved this note to {path}', { who: m.actor || t('An agent'), path: m.path }), null, 'info');
       if (!state.editing) void renderNote(host, m.path, mobileBack, true);
       else draw();
       return;
@@ -1533,7 +1538,12 @@ function wireBus(): void {
     if (m.type === 'node_deleted' && m.path === cur && !relocating(cur)) {
       if (state.editing) saveDraft(cur, editorText(), ed.base);
       const trashed = (ev as { trashed?: boolean }).trashed;
-      undoToast(`${m.actor || 'An agent'} ${trashed ? 'moved this note to the Trash' : 'deleted this note'}`, null, 'err', 9000);
+      undoToast(
+        trashed ? t('{who} moved this note to the Trash', { who: m.actor || t('An agent') }) : t('{who} deleted this note', { who: m.actor || t('An agent') }),
+        null,
+        'err',
+        9000,
+      );
       return;
     }
     if (m.path !== cur || (m.type !== 'node_updated' && m.type !== 'node_created')) return;
@@ -1549,10 +1559,10 @@ function wireBus(): void {
             ed.base = theirs;
             if (ta) ta.value = theirs;
             if (ed.doc) ed.doc.content = theirs;
-            undoToast(`${m.actor || 'An agent'} updated this note`, null, 'info', 3000);
+            undoToast(t('{who} updated this note', { who: m.actor || t('An agent') }), null, 'info', 3000);
             return;
           }
-          raiseConflict(theirs, m.actor || 'An agent');
+          raiseConflict(theirs, m.actor || t('An agent'));
         })
         .catch(() => {
           /* the next save re-checks for conflicts */

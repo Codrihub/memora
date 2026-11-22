@@ -17,6 +17,7 @@ import type { KeyRow, KeysResult, WsEvent } from './types';
 import { apiGet } from './api';
 import { AGENT_COLORS_EVENT, setAgentColors } from './control/agents';
 import { noteCallEnd } from './control/feed';
+import { t, tn } from './i18n';
 
 const MUTATIONS = new Set(['node_created', 'node_updated', 'node_deleted', 'node_renamed']);
 /** Tools whose success toasts from the pins list instead of the activity event. */
@@ -118,7 +119,7 @@ function replay(el: Element, cls: string): void {
   el.classList.add(cls);
 }
 
-const STATE_LABEL: Record<ConnState, string> = { on: 'Live', connecting: 'Connecting', off: 'Offline' };
+const STATE_LABEL: Record<ConnState, string> = { on: t('Live'), connecting: t('Connecting'), off: t('Offline') };
 
 /** Calls behind each agent's live notice, so it can say "edited 3 notes". */
 const bursts = new Map<string, ActCall[]>();
@@ -171,14 +172,17 @@ export const RT = {
     idleBox.classList.toggle('none', idle === 0);
     pill.setAttribute(
       'aria-label',
-      `Realtime ${STATE_LABEL[this.state].toLowerCase()}, ${n} agent${n === 1 ? '' : 's'} active, ${idle} idle. Show details`,
+      tn(n, 'Realtime {state}, {n} agent active, {idle} idle. Show details', 'Realtime {state}, {n} agents active, {idle} idle. Show details', {
+        state: STATE_LABEL[this.state].toLowerCase(),
+        idle,
+      }),
     );
     pill.title =
       this.state === 'on'
-        ? `Live updates on · ${n} active · ${idle} idle`
+        ? t('Live updates on · {n} active · {idle} idle', { n, idle })
         : this.state === 'off'
-          ? 'Live updates offline, retrying'
-          : 'Connecting to live updates';
+          ? t('Live updates offline, retrying')
+          : t('Connecting to live updates');
     if (n !== this.lastActive) {
       this.lastActive = n;
       const list = agentList();
@@ -421,7 +425,7 @@ export const RT = {
       !state.editing &&
       activityToastAllowed(kind === 'agent' ? keyOf(aid, actor) : '')
     ) {
-      toast(actor + ' · ' + trunc(ev.label, 60) + ' failed', 'warn', 3200);
+      toast(t('{actor} · {label} failed', { actor, label: trunc(ev.label, 60) }), 'warn', 3200);
     }
   },
 
