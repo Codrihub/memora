@@ -2515,8 +2515,10 @@ rename_memory, soft_delete moves one to the Trash); write steps that are clear a
 - Models for each job (Settings, Mnemo): besides the chat model the owner can set a model that reads images \
 (describe_image, and it describes attached pictures for a chat model that cannot see), one that makes images \
 (generate_image), one that reads replies aloud (the Listen button) and one that listens (the mic in the composer). \
-Sub-agents are other models with a name and a job: delegate hands one a self-contained task, several at once \
-(say one note or folder each), and you answer from what they report.\n\
+Sub-agents need no setup: delegate hands a self-contained task to a sub-agent you name (Reader, Audit-1), \
+several at once (say one note or folder each), and you answer from what they report. They run on the owner's \
+default model, then the fallbacks, unless the owner names a model; the delegate tool lists them all. The owner \
+follows them and switches their model in Agents at the top right of the chat.\n\
 - Your notes about the owner: remember_owner, update_owner_memory and forget_owner_memory keep short notes on how \
 they like answers, who they are and what they like, learned quietly as you go; they come with their messages. The \
 owner sees, edits and deletes them in Settings, Mnemo, What Mnemo knows about you, and can turn learning off. \
@@ -4479,31 +4481,61 @@ fn compact(
     Ok(Some((older.len(), tokens, text)))
 }
 
-/// The owner's latest message as an answer: `(approves, it answered the sub-agent question,
-/// it carries a standing OK such as an @mnemo request)`.
+/// The owner's answers: `(the latest message approves a change, they said yes to the latest
+/// sub-agent question, the latest message carries a standing OK such as an @mnemo request)`.
+/// A yes to sub-agents holds until Mnemo asks about sub-agents again, also when the owner
+/// wrote more in between ("where are they?").
 fn latest_answer(store: &Store, id: &str) -> (bool, bool, bool) {
     let msgs = store.messages(id).unwrap_or_default();
+    let sub_ask = |m: &memora_state::assistant::Message| {
+        m.tool_calls
+            .as_ref()
+            .and_then(Value::as_array)
+            .and_then(|cs| {
+                cs.iter()
+                    .find(|c| c["arguments"]["subagents"] == true)
+                    .and_then(|c| c["id"].as_str().map(str::to_string))
+            })
+    };
+    let last_ask = msgs
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, m)| sub_ask(m).map(|c| (i, c)));
+    let subs_yes = last_ask.as_ref().is_some_and(|(i, call)| {
+        let Some(j) = msgs.iter().enumerate().skip(i + 1).find_map(|(j, m)| {
+            (m.role == "user"
+                && m.meta.as_ref().is_some_and(|x| {
+                    x["answer"]["approve"] == true
+                        && x["answer"]["to"].as_str() == Some(call.as_str())
+                }))
+            .then_some(j)
+        }) else {
+            return false;
+        };
+        // Used up once sub-agents ran on it and the owner has written since.
+        let ran = msgs.iter().enumerate().skip(j + 1).find_map(|(k, m)| {
+            m.tool_calls
+                .as_ref()
+                .and_then(Value::as_array)
+                .is_some_and(|cs| cs.iter().any(|c| c["name"] == roles::DELEGATE))
+                .then_some(k)
+        });
+        ran.is_none_or(|k| !msgs[k + 1..].iter().any(|m| m.role == "user"))
+    });
     let Some(meta) = msgs
         .iter()
         .rev()
         .find(|m| m.role == "user")
         .and_then(|m| m.meta.clone())
     else {
-        return (false, false, false);
+        return (false, subs_yes, false);
     };
-    let yes = meta["answer"]["approve"] == true;
     let to = meta["answer"]["to"].as_str().unwrap_or("");
-    let to_subs = !to.is_empty()
-        && msgs.iter().rev().any(|m| {
-            m.tool_calls
-                .as_ref()
-                .and_then(Value::as_array)
-                .is_some_and(|cs| {
-                    cs.iter()
-                        .any(|c| c["id"] == to && c["arguments"]["subagents"] == true)
-                })
-        });
-    (yes, to_subs, meta["approved"] == true)
+    let to_subs = !to.is_empty() && last_ask.as_ref().is_some_and(|(_, c)| c == to);
+    // A yes to sub-agents never lets changes through.
+    let yes = meta["answer"]["approve"] == true && !to_subs;
+    (yes, subs_yes, meta["approved"] == true)
 }
 
 /// Run one of Mnemo's tools (all but ask_owner and delegate, which belong to the reply
@@ -4632,12 +4664,12 @@ fn run_agent(
     // with an option marked approve; that OK holds for this reply.
     // The owner's latest answer, and whether it answered the question about sub-agents (a
     // yes to that spends tokens; it never lets changes through, and the other way round).
-    let (yes, to_subs, said_ok) = latest_answer(store, id);
+    let (yes, subs_yes, said_ok) = latest_answer(store, id);
     let read_only = prefs.get("permission").and_then(Value::as_str) == Some("read");
-    let approved = !read_only && (auto || (yes && !to_subs) || said_ok);
+    let approved = !read_only && (auto || yes || said_ok);
     // Sub-agents spend tokens of their own: in Auto they just run; otherwise once the owner
     // said yes to them, unless the owner turned that question off.
-    let subs_ok = auto || !roles::confirm_first(store) || (yes && to_subs);
+    let subs_ok = auto || !roles::confirm_first(store) || subs_yes;
     let budget = stp.budget;
     // Near full: fold the older turns into a summary before this turn (the whole chat stays
     // in memory, just shorter). If that fails, the oldest turns are left out instead.
@@ -5097,7 +5129,7 @@ fn learn_thinker(store: &Store, key: &str) {
 
 /// The preference with the models to carry on with when a chat's model fails, in order
 /// (`["provider/model", …]`, five at most).
-const FALLBACKS: &str = "fallback_models";
+pub(crate) const FALLBACKS: &str = "fallback_models";
 /// The preference with how hard models think: `auto` (the model's own), `off`, `low`,
 /// `medium` or `high`.
 const THINKING: &str = "thinking";
@@ -5385,6 +5417,65 @@ mod tests {
             "thinking from before the compaction is not replayed"
         );
         assert!(matches!(&h[2], Msg::User(t) if t == "new question"));
+    }
+
+    #[test]
+    fn a_yes_to_sub_agents_holds_through_later_messages_until_they_ran() {
+        let store = Store::open_memory().unwrap();
+        store.create_session("c", "t", "global", "p/m", 0).unwrap();
+        let add = |role: &str, calls: Option<Value>, meta: Option<Value>| {
+            store
+                .append(
+                    "c",
+                    &NewMessage {
+                        role: role.into(),
+                        content: "x".into(),
+                        tool_calls: calls,
+                        meta,
+                        ..Default::default()
+                    },
+                    0,
+                )
+                .unwrap();
+        };
+        let ask =
+            |id: &str| json!([{"id": id, "name": "ask_owner", "arguments": {"subagents": true}}]);
+        let yes = |to: &str| json!({"answer": {"approve": true, "to": to}});
+        add("user", None, None);
+        assert_eq!(latest_answer(&store, "c"), (false, false, false));
+        add("assistant", Some(ask("a1")), None);
+        add("user", None, Some(yes("a1")));
+        assert_eq!(
+            latest_answer(&store, "c"),
+            (false, true, false),
+            "a yes to sub-agents is not a yes to changes"
+        );
+        add("user", None, None);
+        assert!(
+            latest_answer(&store, "c").1,
+            "still yes after \"where are they?\""
+        );
+        add(
+            "assistant",
+            Some(json!([{"id": "d1", "name": "delegate", "arguments": {}}])),
+            None,
+        );
+        assert!(
+            latest_answer(&store, "c").1,
+            "the same reply goes on delegating"
+        );
+        add("user", None, None);
+        assert!(
+            !latest_answer(&store, "c").1,
+            "used up once they ran and the owner wrote again"
+        );
+        add("assistant", Some(ask("a2")), None);
+        add("user", None, Some(yes("old")));
+        assert_eq!(
+            latest_answer(&store, "c"),
+            (true, false, false),
+            "an answer to another question"
+        );
     }
 
     #[test]

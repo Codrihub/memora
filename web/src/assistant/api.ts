@@ -55,8 +55,6 @@ export interface Prefs {
   roles?: Roles | null;
   /** The voice that reads replies aloud. */
   voice?: string | null;
-  /** Helpers Mnemo can hand a task to (6 at most). */
-  subagents?: SubAgent[] | null;
   /** Mnemo may note things about the owner on its own. */
   learn_me?: boolean | null;
   /** Mnemo asks the owner before sub-agents run (they use tokens of their own). */
@@ -70,14 +68,7 @@ export interface Roles {
   stt?: string;
 }
 
-export interface SubAgent {
-  name: string;
-  model: string;
-  about: string;
-}
-
 export const VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
-export const MAX_SUBAGENTS = 6;
 
 /** The model set for a job, or '' when none is. */
 export function roleModel(s: MnemoState | null, role: keyof Roles): string {

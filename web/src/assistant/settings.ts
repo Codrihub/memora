@@ -34,11 +34,8 @@ let modelQuery = '';
 let showHidden = false;
 let defaultSel: Select | null = null;
 let fbSel: Select | null = null;
-/** The selects of the jobs and sub-agents cards (closed before each repaint). */
+/** The selects of the jobs card (closed before each repaint). */
 let jobSels: Select[] = [];
-/** Sub-agents as typed here; saved when every row is complete. */
-let subDraft: A.SubAgent[] | null = null;
-let subTimer = 0;
 /** What Mnemo knows about the owner (loaded once per visit). */
 let mem: { items: A.OwnerMemory[]; learn: boolean } | null = null;
 let memErr = '';
@@ -57,7 +54,6 @@ export async function wireMnemo(host: HTMLElement): Promise<void> {
   useFormStyles();
   const box = host.querySelector<HTMLElement>('#sMnemo');
   if (!box) return;
-  subDraft = null;
   mem = null;
   memErr = '';
   memEditing = '';
@@ -117,35 +113,15 @@ const ROLES: { role: keyof A.Roles; label: string; hint: string }[] = [
   { role: 'stt', label: 'Listens', hint: 'Turns what you say into text: the mic button in the chat.' },
 ];
 
-const NAME_OK = /^[\p{L}\p{N} -]{1,24}$/u;
-
-function subs(s: A.MnemoState): A.SubAgent[] {
-  return subDraft ?? (s.prefs.subagents || []).map((x) => ({ ...x }));
-}
-
 function jobsCard(s: A.MnemoState): string {
   const roles = ROLES.map(
     (r) => `<div class="st-row"><div class="st-l"><b>${r.label}</b><small>${r.hint}</small></div><div class="st-c"><div class="mns-job"><span data-role="${r.role}"></span>${
       r.role === 'tts' ? '<span data-voice></span>' : ''
     }</div></div></div>`,
   ).join('');
-  const list = subs(s);
-  const rows = list
-    .map(
-      (a, i) => `<div class="mns-sub" data-sub="${i}">
-        <input class="ui-input" id="mnsSubN${i}" data-f="name" type="text" maxlength="24" placeholder="Name" value="${attr(a.name)}" aria-label="Sub-agent name" spellcheck="false">
-        <span class="mns-sub-m" data-f="model"></span>
-        <input class="ui-input" id="mnsSubA${i}" data-f="about" type="text" maxlength="200" placeholder="Good at, e.g. Fast summaries of many notes" value="${attr(a.about)}" aria-label="What it is good at">
-        <button type="button" class="mn-ibtn" data-subdel title="Remove" aria-label="Remove ${attr(a.name || 'sub-agent')}">${icon('trash')}</button>
-      </div>`,
-    )
-    .join('');
   return `<div class="st-card mns-jobs" id="mnsJobs"><div class="st-ch"><h3>Models for each job</h3><p>Things the chat model may not do itself. Pick None to leave a job off. Saved at once.</p></div>
     ${roles}
-    <div class="st-row full"><div class="st-l"><b>Sub-agents</b><small>${A.MNEMO} can hand a task to a sub-agent, several at once, and gets their answers back. Name the ones you want with a job; ${A.MNEMO} can also start a general helper. On Auto a sub-agent uses your default model, then the fallbacks; ask in the chat for a specific model when you want one. Up to ${A.MAX_SUBAGENTS}.</small></div>
-      <div class="st-c"><div class="mns-subs">${rows || '<p class="mns-fb-none">None yet.</p>'}
-        <button type="button" class="btn sm" id="mnsSubAdd"${list.length >= A.MAX_SUBAGENTS ? ' disabled' : ''}>${icon('plus')}<span>Add sub-agent</span></button></div></div></div>
-    <div class="st-row sw"><div class="st-l"><b>Ask before sub-agents run</b><small>They use tokens of their own; ${A.MNEMO} asks first and says roughly how many. Saved at once.</small></div><div class="st-c end">${switchHTML(
+    <div class="st-row sw"><div class="st-l"><b>Ask before sub-agents run</b><small>${A.MNEMO} starts sub-agents by itself when a task splits well; there is nothing to set up. They run on your default model, then the fallbacks, unless you name a model in the chat. Follow them, and switch their model, in Agents at the top right of the chat. They use tokens of their own, so in Ask first ${A.MNEMO} asks and says roughly how many; in Auto they just run. Saved at once.</small></div><div class="st-c end">${switchHTML(
       'mnsSubAsk',
       s.prefs.confirm_subagents ?? true,
       'Ask before sub-agents run',
@@ -203,67 +179,6 @@ function wireJobs(box: HTMLElement, s: A.MnemoState): void {
     vslot.append(vs.el);
   }
 
-  // Sub-agents: saved a moment after a change, once every row has a valid, unique name. With
-  // no model of its own a sub-agent runs like a chat: the default model, then the fallbacks.
-  const list = subs(s);
-  const save = (now = false): void => {
-    window.clearTimeout(subTimer);
-    const run = (): void => {
-      const draft = subDraft;
-      if (!draft) return;
-      const names = new Set<string>();
-      for (const a of draft) {
-        const n = a.name.trim().toLowerCase();
-        if (!NAME_OK.test(a.name.trim()) || names.has(n)) return;
-        names.add(n);
-      }
-      const clean = draft.map((a) => ({ name: a.name.trim(), model: a.model, about: a.about.trim().slice(0, 200) }));
-      void A.savePrefs({ subagents: clean }).catch(fail);
-    };
-    if (now) run();
-    else subTimer = window.setTimeout(run, 600);
-  };
-  const edit = (fn: (d: A.SubAgent[]) => void, now = false): void => {
-    subDraft = subs(A.mnemoState() ?? s);
-    fn(subDraft);
-    save(now);
-  };
-  card.querySelectorAll<HTMLElement>('[data-sub]').forEach((row) => {
-    const i = Number(row.dataset.sub);
-    const a = list[i];
-    const nameIn = row.querySelector<HTMLInputElement>('[data-f=name]')!;
-    const aboutIn = row.querySelector<HTMLInputElement>('[data-f=about]')!;
-    const mark = (): void => {
-      const n = nameIn.value.trim().toLowerCase();
-      const dup = !!n && subs(A.mnemoState() ?? s).some((x, j) => j !== i && x.name.trim().toLowerCase() === n);
-      nameIn.classList.toggle('bad', !!nameIn.value && (dup || !NAME_OK.test(nameIn.value.trim())));
-      nameIn.title = dup ? 'Another sub-agent has this name' : '';
-    };
-    mark();
-    nameIn.oninput = () => {
-      const v = nameIn.value.replace(/[^\p{L}\p{N} -]/gu, '');
-      if (v !== nameIn.value) nameIn.value = v;
-      edit((d) => (d[i].name = v));
-      mark();
-    };
-    aboutIn.oninput = () => edit((d) => (d[i].about = aboutIn.value));
-    nameIn.onblur = aboutIn.onblur = () => save(true);
-    const m = createSelect({
-      options: [{ value: '', label: 'Auto', hint: 'Default model, then fallbacks' }, ...modelOptions(s, a.model)],
-      value: a.model || '',
-      label: 'Model',
-      placeholder: 'Auto',
-      searchable: A.usableModels(s).length > 7,
-      minWidth: 240,
-      onChange: (v) => edit((d) => (d[i].model = v), true),
-    });
-    jobSels.push(m);
-    row.querySelector<HTMLElement>('[data-f=model]')!.append(m.el);
-    row.querySelector<HTMLElement>('[data-subdel]')!.onclick = () => {
-      edit((d) => d.splice(i, 1), true);
-      paint(box, A.mnemoState() ?? s);
-    };
-  });
   const ask = card.querySelector<HTMLElement>('#mnsSubAsk');
   if (ask)
     ask.onclick = () => {
@@ -276,15 +191,6 @@ function wireJobs(box: HTMLElement, s: A.MnemoState): void {
           fail(e);
         },
       );
-    };
-  const add = card.querySelector<HTMLButtonElement>('#mnsSubAdd');
-  if (add)
-    add.onclick = () => {
-      const d = subs(A.mnemoState() ?? s);
-      if (d.length >= A.MAX_SUBAGENTS) return;
-      subDraft = [...d, { name: '', model: '', about: '' }];
-      paint(box, A.mnemoState() ?? s);
-      box.querySelector<HTMLInputElement>(`#mnsSubN${subDraft.length - 1}`)?.focus();
     };
 }
 
@@ -942,12 +848,6 @@ const CSS = `
 .mns-job>span[data-role]{flex:1}
 .mns-job .ui-sel{width:100%;max-width:none;height:44px}
 .mns-job>span[data-voice]{flex:0 0 140px}
-.mns-subs{display:flex;flex-direction:column;align-items:flex-start;gap:8px;width:100%}
-.mns-sub{display:grid;grid-template-columns:minmax(110px,160px) minmax(150px,220px) minmax(0,1fr) auto;align-items:center;gap:8px;width:100%}
-.mns-sub .ui-input{height:40px;min-width:0}
-.mns-sub .ui-input.bad{border-color:var(--danger)}
-.mns-sub-m{display:flex;min-width:0}
-.mns-sub-m .ui-sel{width:100%;max-width:none;height:40px}
 .mns-mem{display:flex;flex-direction:column;gap:14px;padding:4px 20px 6px}
 .mns-mem .mns-none{padding:6px 0}
 .mns-mg2>b{display:block;margin-bottom:6px;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg))}
@@ -967,15 +867,13 @@ const CSS = `
 .mns-mem-add .ui-input{flex:1;min-width:180px;height:40px}
 .mns-mem-add .btn{height:40px;flex:none}
 @media (max-width:720px){
-  .mns-sub{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;padding:10px;border:1px solid var(--line);border-radius:12px}
-  .mns-sub [data-f=about]{grid-column:1/-1;grid-row:2}
   .mns-mem{padding:4px 16px 6px}
   .mns-mem-add{padding:12px 16px 16px}
 }
 @media (max-width:640px){
   .mns-job{flex-direction:column}
   .mns-job>span[data-voice]{flex:none}
-  .mns-sub .ui-input,.mns-mem-add .ui-input,.mns-mi-in{font-size:16px}
+  .mns-mem-add .ui-input,.mns-mi-in{font-size:16px}
   .mns-mem-k,.ui-sel.mns-mem-ksel{width:100%}
   .mns-mem-add .btn{width:100%;justify-content:center}
 }

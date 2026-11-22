@@ -3,7 +3,7 @@
 //! to (several at once) and hears back from.
 //!
 //! All kept as assistant preferences: `roles` `{vision, image, tts, stt}` (model keys),
-//! `voice` (for reading aloud) and `subagents` `[{name, model, about}]`.
+//! `voice` (for reading aloud). Sub-agents need no setup: Mnemo names them as it starts them.
 
 use axum::{
     body::Bytes,
@@ -106,7 +106,6 @@ const ROLE_NAMES: &[&str] = &["vision", "image", "tts", "stt"];
 const VOICES: &[&str] = &[
     "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",
 ];
-const MAX_SUBAGENTS: usize = 6;
 /// Steps a sub-agent may take for one task.
 const SUB_STEPS: usize = 16;
 const SPEAK_MAX: usize = 4_096;
@@ -148,26 +147,8 @@ pub(crate) fn valid_pref(_store: &Store, k: &str, v: &Value) -> Option<bool> {
         }
         VOICE => v.is_null() || v.as_str().is_some_and(|x| VOICES.contains(&x)),
         CONFIRM => v.is_null() || v.is_boolean(),
-        SUBAGENTS => {
-            v.is_null()
-                || v.as_array().is_some_and(|a| {
-                    let mut names = std::collections::BTreeSet::new();
-                    a.len() <= MAX_SUBAGENTS
-                        && a.iter().all(|x| {
-                            let name = x["name"].as_str().unwrap_or("").trim().to_string();
-                            !name.is_empty()
-                                && name.chars().count() <= 24
-                                && name
-                                    .chars()
-                                    .all(|c| c.is_alphanumeric() || c == ' ' || c == '-')
-                                && names.insert(name.to_lowercase())
-                                && (x["model"].is_null()
-                                    || x["model"].as_str() == Some("")
-                                    || is_key(&x["model"]))
-                                && x["about"].as_str().unwrap_or("").chars().count() <= 200
-                        })
-                })
-        }
+        // Named sub-agents set up in Settings are gone (2.2.1): only clearing the old value.
+        SUBAGENTS => v.is_null(),
         _ => return None,
     })
 }
@@ -201,14 +182,6 @@ fn open_role(
     })?;
     let (m, ep) = open(st, store, &key)?;
     Ok((key, m, ep))
-}
-
-pub(crate) fn subagents(store: &Store) -> Vec<Value> {
-    prefs(store)
-        .get(SUBAGENTS)
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
 }
 
 /// The tools for the jobs that have a model (`sub`: for a sub-agent, which cannot delegate).
@@ -253,28 +226,6 @@ note to also put it in that note's folder and at the end of the note."
         });
     }
     if !sub {
-        let agents = subagents(store);
-        let list = agents
-            .iter()
-            .map(|a| {
-                format!(
-                    "- {}{}{}",
-                    a["name"].as_str().unwrap_or(""),
-                    a["model"]
-                        .as_str()
-                        .filter(|m| !m.is_empty())
-                        .map(|m| format!(" (on {m})"))
-                        .unwrap_or_default(),
-                    a["about"]
-                        .as_str()
-                        .filter(|t| !t.is_empty())
-                        .map(|t| format!(": {t}"))
-                        .unwrap_or_default()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let models = usable_models(store);
         out.push(ToolDef {
             name: DELEGATE.into(),
             description: format!(
@@ -284,24 +235,20 @@ each). Give everything it needs in task (paths, what to look for, the form of th
 chat or ask the owner, but it may ask you a question, which you answer. Send a follow-up (follow_up: true) to \
 talk with the same sub-agent again. The owner may be asked to OK the extra tokens first; when they say yes, call \
 delegate again with the same tasks. Then answer the owner from what they found.\n\
-Which model it runs on: leave model out and it uses the sub-agent's own model if it has one, else the owner's \
-default model, then their fallback models, like a chat does. Give model only when the owner asks for a \
-specific one, from the models available here.\n\
-Sub-agents the owner set up{}\n\
-Models available: {}",
-                if list.is_empty() {
-                    ": none yet; use any short name (e.g. Helper, Reader-1) for a general helper.".to_string()
-                } else {
-                    format!(" (or any other short name for a general helper):\n{list}")
-                },
-                if models.is_empty() { "the chat's own model".to_string() } else { models.join(", ") }
+Name it with a short name of your choosing (Reader, Audit-1, Helper).\n\
+Which model it runs on: leave model out and it runs like a chat does: the owner's default model, then their \
+fallback models. Give model only when the owner asks for a specific one: the exact id from the list below, \
+or the name as the owner says it (for example a model id without its provider). Never swap in a different \
+model when the one asked for is not in the list; tell the owner instead.\n\
+{}",
+                models_text(store)
             ),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "agent": {"type": "string", "description": "A sub-agent's name, or a short name for a general helper"},
                     "task": {"type": "string", "description": "The whole task, self-contained"},
-                    "model": {"type": "string", "description": "provider/model from the models available; only when the owner asked for that model"},
+                    "model": {"type": "string", "description": "Only when the owner asked for a model: its id from the models available (provider/model), or the model name as the owner wrote it"},
                     "follow_up": {"type": "boolean", "description": "true: go on with this sub-agent's earlier conversation in this chat (a correction, a next step, an answer to what it said); default false starts fresh"}
                 },
                 "required": ["agent", "task"],
@@ -312,9 +259,9 @@ Models available: {}",
     out
 }
 
-/// The models a sub-agent can run on (pinned first, hidden ones left out, at most 40), as
+/// Every model a sub-agent can run on (pinned first, hidden ones left out), as
 /// `provider/model`.
-fn usable_models(store: &Store) -> Vec<String> {
+fn usable_keys(store: &Store) -> Vec<String> {
     let providers = store.providers().unwrap_or_default();
     let mut ms: Vec<_> = store
         .models()
@@ -329,11 +276,114 @@ fn usable_models(store: &Store) -> Vec<String> {
                 })
         })
         .collect();
-    ms.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(a.label.cmp(&b.label)));
+    ms.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then_with(|| a.provider_id.cmp(&b.provider_id))
+            .then_with(|| a.model_id.cmp(&b.model_id))
+    });
     ms.into_iter()
-        .take(40)
+        .take(MODELS_LISTED)
         .map(|m| format!("{}/{}", m.provider_id, m.model_id))
         .collect()
+}
+
+/// Models listed to Mnemo for its sub-agents (a router can carry hundreds).
+const MODELS_LISTED: usize = 400;
+
+/// What the delegate tool says about models: the owner's default and fallbacks (what a
+/// sub-agent runs on when no model is asked for), then every model it may be given.
+fn models_text(store: &Store) -> String {
+    let p = prefs(store);
+    let default = p
+        .get("default_model")
+        .and_then(Value::as_str)
+        .filter(|m| m.contains('/'))
+        .map(str::to_string);
+    let fallbacks: Vec<String> = p
+        .get(super::FALLBACKS)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let all = usable_keys(store);
+    let mut out = format!(
+        "The owner's default model: {}. Fallback models: {}.\n",
+        default.as_deref().unwrap_or("none set"),
+        if fallbacks.is_empty() {
+            "none".to_string()
+        } else {
+            fallbacks.join(", ")
+        }
+    );
+    if all.is_empty() {
+        out.push_str("Models available: only the chat's own model.");
+    } else {
+        out.push_str(&format!(
+            "Models available ({}, the full list): {}",
+            all.len(),
+            all.join(", ")
+        ));
+    }
+    out
+}
+
+/// A model the owner named, as `provider/model`: an exact id, or the name without its provider
+/// (`hai-gpt` for `9r/hai-gpt`), or a model's label; any letter case. `None` when no usable
+/// model matches, or the name fits several.
+pub(crate) fn find_model(store: &Store, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let keys = usable_keys(store);
+    if let Some(k) = keys.iter().find(|k| k.eq_ignore_ascii_case(name)) {
+        return Some(k.clone());
+    }
+    let labels = store.models().unwrap_or_default();
+    let hits: Vec<&String> = keys
+        .iter()
+        .filter(|k| {
+            k.split_once('/')
+                .is_some_and(|(_, m)| m.eq_ignore_ascii_case(name))
+                || labels.iter().any(|m| {
+                    !m.label.is_empty()
+                        && m.label.eq_ignore_ascii_case(name)
+                        && format!("{}/{}", m.provider_id, m.model_id) == **k
+                })
+        })
+        .collect();
+    (hits.len() == 1).then(|| hits[0].clone())
+}
+
+/// The model asked for in a delegate call, checked: `Ok(None)` when none was asked,
+/// `Err` (for Mnemo, with near names) when it is not a model here.
+fn asked_model(store: &Store, args: &Value) -> Result<Option<String>, String> {
+    let Some(name) = args["model"]
+        .as_str()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    else {
+        return Ok(None);
+    };
+    if let Some(k) = find_model(store, name) {
+        return Ok(Some(k));
+    }
+    let low = name.to_lowercase();
+    let near: Vec<String> = usable_keys(store)
+        .into_iter()
+        .filter(|k| k.to_lowercase().contains(&low))
+        .take(8)
+        .collect();
+    Err(if near.is_empty() {
+        format!("Not started: there is no model \"{name}\" here. Tell the owner, or leave model out to use their default model.")
+    } else {
+        format!(
+            "Not started: \"{name}\" fits more than one model or none exactly. Close ones: {}. Ask the owner which, or give the exact id.",
+            near.join(", ")
+        )
+    })
 }
 
 /// Look at a vault picture with the image model.
@@ -541,24 +591,16 @@ fn tokens_label(n: i64) -> String {
 /// Other calls of the step stay as they are.
 pub(crate) fn confirm_calls(store: &Store, calls: &[ToolCall], fixed: i64) -> Vec<ToolCall> {
     let subs: Vec<&ToolCall> = calls.iter().filter(|c| c.name == DELEGATE).collect();
-    let agents = subagents(store);
     let lines: Vec<String> = subs
         .iter()
         .map(|c| {
             let n = c.arguments["agent"].as_str().unwrap_or("?");
-            let own = agents
-                .iter()
-                .find(|a| {
-                    a["name"]
-                        .as_str()
-                        .is_some_and(|x| x.eq_ignore_ascii_case(n))
-                })
-                .and_then(|a| a["model"].as_str())
-                .filter(|m| m.contains('/'));
-            let asked = c.arguments["model"].as_str().filter(|m| m.contains('/'));
-            let model = super::resolve_model(store, asked, own)
-                .map(|(p, m)| format!("{p}/{m}"))
-                .unwrap_or_else(|_| "no model".into());
+            let model = match asked_model(store, &c.arguments) {
+                Err(_) => "a model that is not here".to_string(),
+                Ok(asked) => super::resolve_model(store, asked.as_deref(), None)
+                    .map(|(p, m)| format!("{p}/{m}"))
+                    .unwrap_or_else(|_| "no model".into()),
+            };
             let task: String = c.arguments["task"]
                 .as_str()
                 .unwrap_or("")
@@ -717,33 +759,19 @@ fn run_sub(
     if task.is_empty() {
         return Err("task is required".into());
     }
-    // A sub-agent the owner set up (its job and maybe its own model), or a general helper.
-    let agents = subagents(store);
-    let agent = agents
-        .iter()
-        .find(|a| {
-            a["name"]
-                .as_str()
-                .is_some_and(|n| n.eq_ignore_ascii_case(name))
-        })
-        .cloned()
-        .unwrap_or_else(|| json!({"name": if name.is_empty() { "Helper" } else { name }}));
-    let agent_name: String = agent["name"]
-        .as_str()
-        .unwrap_or("Helper")
+    let agent_name: String = if name.is_empty() { "Helper" } else { name }
         .chars()
         .take(24)
         .collect();
-    // Its model, the way a chat picks one: the model asked for (the owner wanted that one),
-    // else the sub-agent's own, else the default model, then the fallbacks, then the first
-    // pinned one; when it fails, the next fallback carries on.
-    // The owner's switch on the sub-agent's card comes first, then a model asked in the chat.
+    // Its model, the way a chat picks one: the owner's switch on the sub-agent's card, else
+    // the model asked for in the chat (by id or by name; one that is not here stops it), else
+    // the default model, then the fallbacks; when it fails, the next fallback carries on.
     let switched = sub_model(store, id, &agent_name);
-    let asked = switched
-        .as_deref()
-        .or_else(|| args["model"].as_str().filter(|m| m.contains('/')));
-    let own = agent["model"].as_str().filter(|m| m.contains('/'));
-    let (p0, m0) = super::resolve_model(store, asked, own)?;
+    let asked = match switched {
+        Some(k) => Some(k),
+        None => asked_model(store, args)?,
+    };
+    let (p0, m0) = super::resolve_model(store, asked.as_deref(), None)?;
     let mut chain = super::fallback_chain(store, &p0, &m0).into_iter();
     let mut key = format!("{p0}/{m0}");
     let (mut model, mut ep) = open(st, store, &key)?;
@@ -773,14 +801,12 @@ fn run_sub(
         .collect();
     tools.extend(defs(st, store, true));
     tools.push(ask_main_def());
-    let about = agent["about"].as_str().unwrap_or("").trim();
     let system = format!(
-        "You are {agent_name}, a sub-agent of {NAME}, the assistant inside Memora, the owner's notes vault.{}\n\
+        "You are {agent_name}, a sub-agent of {NAME}, the assistant inside Memora, the owner's notes vault.\n\
 {NAME} gives you tasks. Do each with the tools, then answer {NAME} with what you found or did: complete and \
 concise, with the vault paths of the notes you used or changed. You cannot see {NAME}'s chat and cannot ask the \
 owner; ask {NAME} with {ASK_MAIN} when you really need a decision, otherwise choose the sensible reading and say \
 so.{}",
-        if about.is_empty() { String::new() } else { format!(" You are good at: {about}.") },
         if approved {
             ""
         } else {
@@ -1178,7 +1204,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn job_models_voices_and_sub_agents_are_checked() {
+    fn job_models_and_voices_are_checked() {
         let s = Store::open_memory().unwrap();
         let ok = |k: &str, v: Value| valid_pref(&s, k, &v);
         assert_eq!(ok(ROLES, json!({"vision": "p/m", "tts": ""})), Some(true));
@@ -1186,35 +1212,85 @@ mod tests {
         assert_eq!(ok(VOICE, json!("nova")), Some(true));
         assert_eq!(ok(VOICE, json!("robot")), Some(false));
         assert_eq!(
-            ok(
-                SUBAGENTS,
-                json!([{"name": "Reader", "model": "p/m", "about": "images"}, {"name": "Fast one", "model": "p/n"}])
-            ),
-            Some(true)
-        );
-        assert_eq!(
-            ok(
-                SUBAGENTS,
-                json!([{"name": "A", "model": "p/m"}, {"name": "a", "model": "p/n"}])
-            ),
-            Some(false),
-            "names are unique"
-        );
-        assert_eq!(
-            ok(SUBAGENTS, json!([{"name": "bad/name", "model": "p/m"}])),
-            Some(false)
-        );
-        assert_eq!(
-            ok(
-                SUBAGENTS,
-                json!([{"name": "Auto one", "model": ""}, {"name": "Bare"}])
-            ),
+            ok(SUBAGENTS, Value::Null),
             Some(true),
-            "Auto: no model of its own"
+            "the old list can be cleared"
+        );
+        assert_eq!(
+            ok(SUBAGENTS, json!([{"name": "Reader"}])),
+            Some(false),
+            "no named sub-agents any more"
         );
         assert_eq!(ok("other", json!(1)), None);
         s.set_pref(ROLES, &json!({"vision": "p/m"})).unwrap();
         assert_eq!(role(&s, "vision").as_deref(), Some("p/m"));
         assert!(role(&s, "image").is_none());
+    }
+
+    #[test]
+    fn a_model_is_found_by_id_name_or_label_and_unknown_ones_stop() {
+        use memora_state::assistant::ListedModel;
+        let s = Store::open_memory().unwrap();
+        s.save_provider(
+            "9r",
+            "custom",
+            "Router",
+            "http://x/v1",
+            "chat",
+            None,
+            true,
+            1,
+        )
+        .unwrap();
+        let m = |id: &str, label: &str| ListedModel {
+            id: id.into(),
+            label: label.into(),
+            context_window: None,
+            max_output: None,
+        };
+        s.replace_fetched(
+            "9r",
+            &[
+                m("hai-gpt", ""),
+                m("HAI/gpt-6-sol", "GPT Six"),
+                m("HAI/gpt-6.1-sol", ""),
+                m("hai-flash", ""),
+            ],
+        )
+        .unwrap();
+        s.set_pref("default_model", &json!("9r/hai-gpt")).unwrap();
+        s.set_pref(super::super::FALLBACKS, &json!(["9r/hai-flash"]))
+            .unwrap();
+        assert_eq!(find_model(&s, "9r/hai-gpt").as_deref(), Some("9r/hai-gpt"));
+        assert_eq!(
+            find_model(&s, "HAI-GPT").as_deref(),
+            Some("9r/hai-gpt"),
+            "the name without its provider"
+        );
+        assert_eq!(
+            find_model(&s, "gpt six").as_deref(),
+            Some("9r/HAI/gpt-6-sol"),
+            "a label"
+        );
+        assert_eq!(find_model(&s, "gpt"), None);
+        assert_eq!(asked_model(&s, &json!({})), Ok(None));
+        assert_eq!(
+            asked_model(&s, &json!({"model": "hai-gpt"})),
+            Ok(Some("9r/hai-gpt".into()))
+        );
+        let e = asked_model(&s, &json!({"model": "gpt-6"})).unwrap_err();
+        assert!(
+            e.contains("9r/HAI/gpt-6-sol") && e.contains("9r/HAI/gpt-6.1-sol"),
+            "{e}"
+        );
+        assert!(asked_model(&s, &json!({"model": "llama"}))
+            .unwrap_err()
+            .contains("no model"));
+        let t = models_text(&s);
+        assert!(
+            t.contains("default model: 9r/hai-gpt") && t.contains("Fallback models: 9r/hai-flash"),
+            "{t}"
+        );
+        assert!(t.contains("(4, the full list)"), "{t}");
     }
 }
