@@ -70,13 +70,20 @@ async fn h_sub_model(
     if store.session(&id).ok().flatten().is_none() {
         return fail(StatusCode::NOT_FOUND, "chat not found");
     }
+    if let Err(e) = put_sub_model(store, &id, &agent, &model) {
+        return bad(&e);
+    }
+    Json(json!({"ok": true, "agent": agent, "model": model})).into_response()
+}
+
+fn put_sub_model(store: &Store, chat: &str, agent: &str, model: &str) -> Result<(), String> {
     let mut all = prefs(store)
         .get(SUB_MODELS)
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let chat = all.entry(id.clone()).or_insert_with(|| json!({}));
-    if let Some(o) = chat.as_object_mut() {
+    let c = all.entry(chat.to_string()).or_insert_with(|| json!({}));
+    if let Some(o) = c.as_object_mut() {
         if model.is_empty() {
             o.remove(&agent.to_lowercase());
         } else {
@@ -89,10 +96,32 @@ async fn h_sub_model(
     } else {
         Value::Object(all)
     };
-    if let Err(e) = store.set_pref(SUB_MODELS, &v) {
-        return bad(&e);
+    store.set_pref(SUB_MODELS, &v).map_err(|e| e.to_string())
+}
+
+/// Mnemo sets a sub-agent's model (by id or by name as the owner wrote it; empty: back to
+/// the default), the way the owner does on its card.
+pub(crate) fn set_sub_model(
+    st: &AppState,
+    store: &Store,
+    chat: &str,
+    agent: &str,
+    model: &str,
+) -> Result<(), String> {
+    if model.is_empty() {
+        return put_sub_model(store, chat, agent, "");
     }
-    Json(json!({"ok": true, "agent": agent, "model": model})).into_response()
+    let key = asked_model(store, &json!({"model": model}))?.unwrap_or_default();
+    open(st, store, &key)?;
+    put_sub_model(store, chat, agent, &key)
+}
+
+/// A renamed sub-agent keeps the model picked for it.
+pub(crate) fn move_sub_model(store: &Store, chat: &str, from: &str, to: &str) {
+    if let Some(k) = sub_model(store, chat, from) {
+        let _ = put_sub_model(store, chat, from, "");
+        let _ = put_sub_model(store, chat, to, &k);
+    }
 }
 
 /// Ask the owner before sub-agents run (default yes): they spend tokens of their own.
@@ -233,8 +262,12 @@ note to also put it in that note's folder and at the end of the note."
 and answers you. Call it several times in one step to have several work at the same time (say one note or folder \
 each). Give everything it needs in task (paths, what to look for, the form of the answer); it cannot see this \
 chat or ask the owner, but it may ask you a question, which you answer. Send a follow-up (follow_up: true) to \
-talk with the same sub-agent again. The owner may be asked to OK the extra tokens first; when they say yes, call \
-delegate again with the same tasks. Then answer the owner from what they found.\n\
+talk with the same sub-agent again: an idle one is reused this way. The owner may be asked to OK the extra \
+tokens first; when they say yes, call delegate again with the same tasks. Then answer the owner from what they \
+found.\n\
+By default you wait for its answer. With wait: false it works in the background while you go on (your own \
+steps, more sub-agents); steer it with the agents tool (message, edit, stop) and collect its answer with agents \
+action wait. The reply does not end before every sub-agent in the background has answered.\n\
 Name it with a short name of your choosing (Reader, Audit-1, Helper).\n\
 Which model it runs on: leave model out and it runs like a chat does: the owner's default model, then their \
 fallback models. Give model only when the owner asks for a specific one: the exact id from the list below, \
@@ -247,14 +280,19 @@ model when the one asked for is not in the list; tell the owner instead.\n\
                 "type": "object",
                 "properties": {
                     "agent": {"type": "string", "description": "A sub-agent's name, or a short name for a general helper"},
+                    "id": {"type": "string", "description": "To give an existing sub-agent (an idle one, say) a new task: its id from agents list; it keeps its name, instructions and model"},
                     "task": {"type": "string", "description": "The whole task, self-contained"},
                     "model": {"type": "string", "description": "Only when the owner asked for a model: its id from the models available (provider/model), or the model name as the owner wrote it"},
-                    "follow_up": {"type": "boolean", "description": "true: go on with this sub-agent's earlier conversation in this chat (a correction, a next step, an answer to what it said); default false starts fresh"}
+                    "follow_up": {"type": "boolean", "description": "true: go on with this sub-agent's earlier conversation in this chat (a correction, a next step, an answer to what it said); default false starts fresh"},
+                    "wait": {"type": "boolean", "description": "Default true: wait for its answer. false: it works in the background; collect its answer with agents action wait"}
                 },
                 "required": ["agent", "task"],
                 "additionalProperties": false
             }),
         });
+        if !super::tools_off(store, false).contains(DELEGATE) {
+            out.push(super::agents::def());
+        }
     }
     out
 }
@@ -429,9 +467,15 @@ say what you are unsure about.",
     Ok(json!({"model": key, "path": staged["path"], "text": turn.text.trim()}))
 }
 
-/// For a chat model that cannot see: the image model describes the pictures in the history
-/// (the newest few) and each turns into text. How many it described.
+/// For a chat model that cannot see: the image model describes the pictures of the newest
+/// message (older ones only from what it said about them before) and each turns into text.
+/// How many pictures are described.
 pub(crate) fn describe_history(st: &AppState, store: &Store, history: &mut [Msg]) -> usize {
+    // Only the owner's newest message may cost a call to the image model: a picture sent
+    // earlier in the chat never holds up a question about something else.
+    let newest = history
+        .iter()
+        .rposition(|m| matches!(m, Msg::User(_) | Msg::UserImages { .. }));
     let Ok((key, model, ep)) = open_role(st, store, "vision", "read images") else {
         return 0;
     };
@@ -443,10 +487,11 @@ pub(crate) fn describe_history(st: &AppState, store: &Store, history: &mut [Msg]
     };
     let mut left = 4usize;
     let mut done = 0;
-    for m in history.iter_mut().rev() {
+    for (i, m) in history.iter_mut().enumerate().rev() {
         let Msg::UserImages { text, images } = m else {
             continue;
         };
+        let fresh = Some(i) == newest;
         let mut notes = Vec::new();
         let mut seen = 0;
         for img in images.iter() {
@@ -460,7 +505,7 @@ pub(crate) fn describe_history(st: &AppState, store: &Store, history: &mut [Msg]
                 notes.push(format!("(Image {}, as {key} sees it: {d})", img.id));
                 continue;
             }
-            if left == 0 || img.data.is_empty() {
+            if !fresh || left == 0 || img.data.is_empty() {
                 notes.push(format!("(Image {}: not described.)", img.id));
                 continue;
             }
@@ -647,12 +692,14 @@ pub(crate) fn confirm_calls(store: &Store, calls: &[ToolCall], fixed: i64) -> Ve
     out
 }
 
-/// The reply's own model, for a sub-agent's questions to Mnemo.
-pub(crate) struct Main<'a> {
-    pub model: &'a str,
-    pub ep: &'a Endpoint,
-    pub stp: &'a super::Setup,
-    pub key: &'a str,
+/// The reply's own model, for a sub-agent's questions to Mnemo (owned, so a sub-agent in the
+/// background can carry it).
+#[derive(Clone)]
+pub(crate) struct Main {
+    pub model: String,
+    pub ep: Endpoint,
+    pub system: String,
+    pub budget: i64,
 }
 
 /// A sub-agent's conversation per chat, kept while the server runs so Mnemo can follow up
@@ -668,6 +715,22 @@ fn threads() -> &'static Threads {
 pub(crate) fn forget_threads(chat: &str) {
     if let Ok(mut t) = threads().lock() {
         t.retain(|(c, _), _| c != chat);
+    }
+}
+
+/// Forget one sub-agent's conversation (it was removed).
+pub(crate) fn forget_thread(chat: &str, agent: &str) {
+    if let Ok(mut t) = threads().lock() {
+        t.remove(&(chat.to_string(), agent.to_lowercase()));
+    }
+}
+
+/// A renamed sub-agent keeps its conversation.
+pub(crate) fn rename_thread(chat: &str, from: &str, to: &str) {
+    if let Ok(mut t) = threads().lock() {
+        if let Some(h) = t.remove(&(chat.to_string(), from.to_lowercase())) {
+            t.insert((chat.to_string(), to.to_lowercase()), h);
+        }
     }
 }
 
@@ -731,13 +794,64 @@ pub(crate) fn delegate_all(
             return out;
         }
     }
+    // In the background: each runs on its own, and its answer is collected with agents wait.
+    let (bg, mine): (Vec<&ToolCall>, Vec<&ToolCall>) = mine
+        .into_iter()
+        .partition(|c| c.arguments["wait"].as_bool() == Some(false));
+    for c in bg {
+        let name = sub_name(store, id, &c.arguments);
+        if super::agents::is_running(id, &name) {
+            out.insert(
+                c.id.clone(),
+                Err(format!(
+                    "Not started: {name} is running already; message it with the agents tool, wait for it, or use another name."
+                )),
+            );
+            continue;
+        }
+        let Ok(store_s) = super::store(st) else {
+            out.insert(c.id.clone(), Err("the assistant store is not open".into()));
+            continue;
+        };
+        // Marked running before this step ends, so a wait right after it finds it.
+        super::agents::begin(id, &name, &c.id, true);
+        let (st2, id2, who2, call2, tx2, main2) = (
+            st.clone(),
+            id.to_string(),
+            on_behalf.to_string(),
+            (*c).clone(),
+            tx.clone(),
+            main.clone(),
+        );
+        std::thread::spawn(move || {
+            let r = run_sub(
+                &st2, store_s, &id2, &who2, approved, &call2, &tx2, &main2, true,
+            );
+            let (ok, output) = match &r {
+                Ok(v) => (true, v.clone()),
+                Err(e) => (false, json!({"error": e})),
+            };
+            let _ = tx2.send(
+                json!({"type": "sub", "id": call2.id, "phase": "final", "ok": ok, "output": output})
+                    .to_string(),
+            );
+        });
+        out.insert(
+            c.id.clone(),
+            Ok(json!({
+                "agent": name,
+                "background": true,
+                "note": "It works in the background. Go on; steer it with the agents tool and collect its answer with agents action wait."
+            })),
+        );
+    }
     let main = &main;
     std::thread::scope(|sc| {
         let hs: Vec<_> = mine
             .iter()
             .map(|c| {
                 sc.spawn(move || {
-                    let r = run_sub(st, store, id, on_behalf, approved, c, tx, main);
+                    let r = run_sub(st, store, id, on_behalf, approved, c, tx, main, false);
                     (c.id.clone(), r)
                 })
             })
@@ -751,8 +865,25 @@ pub(crate) fn delegate_all(
     out
 }
 
-/// One sub-agent's task: its own short agent loop with the vault tools, answered as text.
-/// Its progress streams as `sub` events under the delegate card.
+/// A sub-agent's name as delegate gives it ("Helper" when none).
+fn sub_name(store: &Store, chat: &str, args: &Value) -> String {
+    // An existing sub-agent picked by its id keeps its own name.
+    if let Some(n) = args["id"]
+        .as_str()
+        .filter(|i| !i.trim().is_empty())
+        .and_then(|i| super::agents::resolve(store, chat, i))
+    {
+        return n;
+    }
+    let name = args["agent"].as_str().unwrap_or("").trim();
+    if name.is_empty() { "Helper" } else { name }
+        .chars()
+        .take(24)
+        .collect()
+}
+
+/// One sub-agent's task, kept in the chat's list of sub-agents: running while it works, then
+/// idle with its answer (or as Mnemo left it: done, removed).
 #[allow(clippy::too_many_arguments)]
 fn run_sub(
     st: &AppState,
@@ -763,18 +894,50 @@ fn run_sub(
     call: &ToolCall,
     tx: &tokio::sync::mpsc::UnboundedSender<String>,
     main: &Main,
+    background: bool,
 ) -> Result<Value, String> {
-    let args = &call.arguments;
-    let gone = || tx.is_closed();
-    let name = args["agent"].as_str().unwrap_or("").trim();
-    let task = args["task"].as_str().unwrap_or("").trim();
+    let name = sub_name(store, id, &call.arguments);
+    let task = call.arguments["task"].as_str().unwrap_or("").trim();
     if task.is_empty() {
         return Err("task is required".into());
     }
-    let agent_name: String = if name.is_empty() { "Helper" } else { name }
-        .chars()
-        .take(24)
-        .collect();
+    super::agents::started(store, id, &name, task);
+    // A background one was marked running before its thread started.
+    let live = if background {
+        super::agents::live(id, &name)
+            .filter(|l| l.call == call.id)
+            .unwrap_or_else(|| super::agents::begin(id, &name, &call.id, true))
+    } else {
+        super::agents::begin(id, &name, &call.id, false)
+    };
+    let r = sub_loop(
+        st, store, id, on_behalf, approved, call, tx, main, &name, &live,
+    );
+    super::agents::finish(store, id, &name, &call.id, &r);
+    r
+}
+
+/// The sub-agent's own short agent loop with the vault tools, answered as text. Its progress
+/// streams as `sub` events under the delegate card. It stops when the reply is cut or Mnemo
+/// stops it, reads Mnemo's messages and instructions at each step.
+#[allow(clippy::too_many_arguments)]
+fn sub_loop(
+    st: &AppState,
+    store: &Store,
+    id: &str,
+    on_behalf: &str,
+    approved: bool,
+    call: &ToolCall,
+    tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    main: &Main,
+    agent_name: &str,
+    live: &super::agents::Live,
+) -> Result<Value, String> {
+    let args = &call.arguments;
+    let halted = || live.stop.load(std::sync::atomic::Ordering::SeqCst);
+    let gone = || tx.is_closed() || halted();
+    let task = args["task"].as_str().unwrap_or("").trim();
+    let agent_name: String = agent_name.to_string();
     // Its model, the way a chat picks one: the owner's switch on the sub-agent's card, else
     // the model asked for in the chat (by id or by name; one that is not here stops it), else
     // the default model, then the fallbacks; when it fails, the next fallback carries on.
@@ -819,7 +982,7 @@ fn run_sub(
     let off = super::tools_off(store, true);
     tools.retain(|t| !off.contains(&t.name));
     tools.push(ask_main_def());
-    let system = format!(
+    let base = format!(
         "You are {agent_name}, a sub-agent of {NAME}, the assistant inside Memora, the owner's notes vault.\n\
 {NAME} gives you tasks. Do each with the tools, then answer {NAME} with what you found or did: complete and \
 concise, with the vault paths of the notes you used or changed. You cannot see {NAME}'s chat and cannot ask the \
@@ -851,13 +1014,57 @@ so.{}",
     };
     let followed = !history.is_empty();
     history.push(Msg::User(task.to_string()));
-    emit(json!({"phase": "start", "follow_up": followed, "window": window}));
+    let aid = super::agents::get(store, id, &agent_name)
+        .and_then(|v| v["id"].as_str().map(str::to_string))
+        .unwrap_or_default();
+    emit(json!({"phase": "start", "follow_up": followed, "window": window, "aid": aid}));
     let (mut tin, mut tout, mut used) = (0u64, 0u64, 0u64);
     let mut log: Vec<Value> = Vec::new();
+    // Its instructions from Mnemo, read again at each step (Mnemo may change them meanwhile).
+    let system_now = || {
+        let ins = super::agents::instructions(store, id, &agent_name);
+        if ins.trim().is_empty() {
+            base.clone()
+        } else {
+            format!("{base}\n\nYour instructions from {NAME}:\n{}", ins.trim())
+        }
+    };
+    let save_thread = |h: &Vec<Msg>| {
+        if let Ok(mut t) = threads().lock() {
+            if t.len() > 200 {
+                t.clear();
+            }
+            t.insert((id.to_string(), agent_name.to_lowercase()), h.clone());
+        }
+    };
     for step in 0..SUB_STEPS {
+        if halted() {
+            // Stopped by Mnemo: what it did so far stays, so it can be given more later.
+            save_thread(&history);
+            emit(json!({"phase": "stopped"}));
+            return Err(format!("{NAME} stopped it"));
+        }
         if gone() {
             return Err("stopped".into());
         }
+        // Messages from Mnemo since its last step.
+        let inbox = super::agents::take_inbox(live);
+        if !inbox.is_empty() {
+            let text = inbox
+                .iter()
+                .map(|m| format!("(Message from {NAME} while you work: {m})"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            match history.last_mut() {
+                Some(Msg::Tool { output, .. }) => {
+                    output.push_str("\n\n");
+                    output.push_str(&text);
+                }
+                _ => history.push(Msg::User(text)),
+            }
+            emit(json!({"phase": "inbox", "count": inbox.len()}));
+        }
+        let system = system_now();
         // Switched on its card meanwhile: the new model takes the next step.
         if let Some(k) = sub_model(store, id, &agent_name).filter(|k| *k != key) {
             if let Ok((m2, e2)) = open(st, store, &k) {
@@ -887,6 +1094,11 @@ so.{}",
             });
             match r {
                 Ok(t) => break t,
+                Err(_) if halted() => {
+                    save_thread(&history);
+                    emit(json!({"phase": "stopped"}));
+                    return Err(format!("{NAME} stopped it"));
+                }
                 Err(e) if e == "stopped" || gone() => return Err("stopped".into()),
                 Err(e) => {
                     // The next fallback model carries on, like in a chat.
@@ -939,12 +1151,8 @@ so.{}",
             raw: None,
         });
         if last {
-            if let Ok(mut t) = threads().lock() {
-                if t.len() > 200 {
-                    t.clear();
-                }
-                t.insert(tkey, history);
-            }
+            let _ = &tkey;
+            save_thread(&history);
             let answer = turn.text.trim().to_string();
             emit(json!({"phase": "done", "steps": step + 1}));
             return Ok(json!({
@@ -1090,7 +1298,7 @@ fn ask_main(
         return Err("question is required".into());
     }
     let (mut history, _) =
-        super::history_within(&store.messages(id).unwrap_or_default(), main.stp.budget / 2);
+        super::history_within(&store.messages(id).unwrap_or_default(), main.budget / 2);
     // Pictures stay out of this side question.
     for m in history.iter_mut() {
         if let Msg::UserImages { text, .. } = m {
@@ -1110,11 +1318,10 @@ assume. Do not use tools."
         think: false,
         effort: None,
     };
-    let _ = main.key;
     let turn = providers::run(
-        main.ep,
-        main.model,
-        &main.stp.system,
+        &main.ep,
+        &main.model,
+        &main.system,
         &history,
         &[],
         &opts,

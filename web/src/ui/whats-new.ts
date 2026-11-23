@@ -28,6 +28,32 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.0.1',
+    title: t('Sub-agents you can steer'),
+    lead: t('Mnemo manages its sub-agents, keeps its plan with the chat, and the chat fits every screen better.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'agents', title: t('Mnemo runs its sub-agents'), text: t('Each has a short id that never changes, so names can change freely. Mnemo sets them up, changes their instructions or model, messages, waits for, stops, finishes and removes them, one or all at once, and can let them work in the background. Each card shows Instruction, Activity and Answer.') },
+          { icon: 'check', title: t('A plan that belongs to the chat'), text: t('Steps are added, edited and checked as Mnemo works. Stop a reply and the plan stays as it was; it closes once every step is done.') },
+          { icon: 'expand', title: t('Panes you can resize'), text: t('On desktop, drag the edge of the chat list or the side panel to make it wider or narrower. Each keeps a minimum and remembers its width.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'sidebar', title: t('A roomier chat list'), text: t('Wider rows, the ⋯ menu always in reach on touch screens, a drawer on tablets and a whole screen on phones.') },
+          { icon: 'chat', title: t('A tidier chat everywhere'), text: t('Messages and the message box line up exactly in every width, the model picker has its own surface, the fleeting chat fits phones, and a question\'s options never slide away as you tap them.') },
+          { icon: 'help', title: t('Clearer questions'), text: t("Mnemo's question sits on its own band, its answers below as rows to tap, as many as the question needs.") },
+          { icon: 'bolt', title: t('Long chats, light'), text: t('Only the latest questions go on the page at first; earlier ones come in as you scroll up or jump to them on the timeline.') },
+          { icon: 'image', title: t('Quiet about pictures'), text: t('Only pictures in your newest message go to the image model, and you hear of it in a short toast.') },
+          { icon: 'send-now', title: t('Stop, then the queue'), text: t('Stopping a reply always sends the next queued message, and Scroll to bottom shows only when you are away from the end.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.0.0',
     title: t('Your language, your rules'),
     lead: t('Memora in your language, Mnemo showing its plan as it works, and you choosing what it may use and see.'),
@@ -432,6 +458,21 @@ const CSS = `
 .wn-ver .pre{padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,.28);color:#cbd5e1}
 .wn-hero h2{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2;height:2.4em;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .wn-hero p{margin:0;max-width:52ch;font-size:14px;line-height:1.6;height:4.8em;color:#a3afc2;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+/* In dark mode the header turns around: a light band on top of the dark dialog, so it stands
+   out the way the dark band does in light mode. */
+:root:not([data-theme=light]) .wn-hero{color:#0f172a;background:linear-gradient(160deg,#ffffff,#e8eef5 70%)}
+:root:not([data-theme=light]) .wn-hero::before{background:radial-gradient(closest-side,rgba(13,148,136,.16),transparent 70%)}
+:root:not([data-theme=light]) .wn-hero p{color:#475569}
+:root:not([data-theme=light]) .wn-ver,:root:not([data-theme=light]) .wn-vlab{color:#64748b}
+:root:not([data-theme=light]) .wn-ver b{color:#0d9488}
+:root:not([data-theme=light]) .wn-ver .pre{border-color:rgba(15,23,42,.18);color:#334155}
+:root:not([data-theme=light]) .wn-x{color:#64748b}
+:root:not([data-theme=light]) .wn-x:hover{color:#0f172a;background:rgba(15,23,42,.07)}
+:root:not([data-theme=light]) .ui-sel.wn-sel{border-color:rgba(15,23,42,.18);background:rgba(255,255,255,.7);color:#0f172a}
+:root:not([data-theme=light]) .ui-sel.wn-sel:hover:not(:disabled){border-color:rgba(15,23,42,.32);background:#fff}
+:root:not([data-theme=light]) .ui-sel.wn-sel .ui-sel-chev{stroke:#475569}
+:root:not([data-theme=light]) .ui-sel.wn-sel .ui-sel-v small{color:#0f766e;background:rgba(13,148,136,.12)}
+:root:not([data-theme=light]) .wn-hero :focus-visible{outline-color:#0d9488}
 /* Releases: a compact dropdown in the top bar, newest first, the latest picked by default. */
 .wn-grow{flex:1}
 .wn-vlab{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8b98ad}

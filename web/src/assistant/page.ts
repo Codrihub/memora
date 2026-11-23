@@ -142,7 +142,8 @@ function build(): void {
       <div class="mnp-panel">
         <div class="mnp-ph"><b>${t('Chats')}</b><small id="mnpCount"></small><span class="mnp-grow"></span>
           <button type="button" class="mnp-manage" id="mnpManage" title="${t('Select or clean up chats')}" aria-label="${t('Select or clean up chats')}">${icon('more')}</button>
-          <button type="button" class="mnp-new" id="mnpNew" title="${t('New chat')}" aria-label="${t('New chat')}">${icon('plus')}</button></div>
+          <button type="button" class="mnp-new" id="mnpNew" title="${t('New chat')}" aria-label="${t('New chat')}">${icon('plus')}</button>
+          <button type="button" class="mnp-sidex" id="mnpSideX" title="${t('Close')}" aria-label="${t('Close')}">${icon('close')}</button></div>
         <label class="mnp-q">${icon('search')}<span class="sr-only">${t('Search chats')}</span><input type="search" id="mnpQ" placeholder="${t('Search')}" autocomplete="off"></label>
         <div class="mnp-chips" id="mnpChips" role="tablist" aria-label="${t('Show')}"></div>
         <div class="mnp-selbar" id="mnpSelBar" hidden></div>
@@ -186,7 +187,10 @@ function build(): void {
         <div class="mnp-selbar mnp-all-bar" id="mnpAllBar" hidden></div>
         <div class="mnp-all-list" id="mnpAllList"></div>
       </div>
-    </section>`;
+    </section>
+    <div class="mnp-grip" data-g="side" role="separator" aria-orientation="vertical" aria-label="${t('Resize the chat list')}" tabindex="0" title="${t('Drag to resize · double-click to reset')}"></div>
+    <div class="mnp-grip" data-g="right" role="separator" aria-orientation="vertical" aria-label="${t('Resize the side panel')}" tabindex="0" title="${t('Drag to resize · double-click to reset')}"></div>`;
+  wireGrips(root);
   chat = new ChatView({
     scope: () => 'global',
     onChange: (s) => {
@@ -254,19 +258,27 @@ function build(): void {
     paintList();
   };
   const side = (open: boolean): void => {
+    const was = root!.classList.contains('side-open');
     root!.classList.toggle('side-open', open);
+    // Tablets and phones: the list is a drawer (a whole screen on phones) over the chat. Focus
+    // goes into it when it opens and back to its button when it closes.
+    if (open && !was && isDrawer()) requestAnimationFrame(() => root?.querySelector<HTMLElement>('#mnpSideX')?.focus({ preventScroll: true }));
+    if (!open && was && root!.contains(document.activeElement) && root!.querySelector('#mnpSide')!.contains(document.activeElement))
+      root!.querySelector<HTMLElement>('#mnpLists')?.focus({ preventScroll: true });
   };
   // Phones: the chat list slides over the chat. Wider screens: it folds away and back.
   root.querySelector<HTMLElement>('#mnpLists')!.onclick = () => {
     // A page open beside the chat hides the list: close the page to get it back.
     if (document.documentElement.classList.contains('mn-pv-split') && !document.documentElement.classList.contains('mn-pv-roomy')) {
       closePreview();
-      setPane('side', true);
+      if (isDrawer()) side(true);
+      else setPane('side', true);
       return;
     }
-    if (isNarrow()) side(true);
+    if (isDrawer()) side(true);
     else setPane('side', root!.classList.contains('side-closed'));
   };
+  root.querySelector<HTMLElement>('#mnpSideX')!.onclick = () => side(false);
   root.querySelector<HTMLElement>('#mnpArtBtn')!.onclick = () => setPane('art', !root!.classList.contains('art-open'));
   root.querySelector<HTMLElement>('#mnpArtX')!.onclick = () => setPane('art', false);
   root.querySelector<HTMLElement>('#mnpAScrim')!.onclick = () => {
@@ -321,9 +333,9 @@ function build(): void {
   });
   // Search opens the list first when it is hidden (the rail alone on desktop, or a phone).
   root.querySelector<HTMLElement>('#mnpSearchBtn')!.onclick = () => {
-    if (root!.classList.contains('side-closed')) setPane('side', true);
-    if (isNarrow()) side(true);
-    requestAnimationFrame(() => root?.querySelector<HTMLInputElement>('#mnpQ')?.focus());
+    if (isDrawer()) side(true);
+    else if (root!.classList.contains('side-closed')) setPane('side', true);
+    requestAnimationFrame(() => requestAnimationFrame(() => root?.querySelector<HTMLInputElement>('#mnpQ')?.focus()));
   };
   root.querySelector<HTMLElement>('#mnpAllBtn')!.onclick = () => {
     side(false);
@@ -620,6 +632,8 @@ function paintPrefs(): void {
 
 const LS_PANES = 'memora.mnemo.panes.v1';
 const isNarrow = (): boolean => window.matchMedia('(max-width: 760px)').matches;
+/** Tablets and phones: the chat list is a drawer over the chat, not a column beside it. */
+const isDrawer = (): boolean => window.matchMedia('(max-width: 1024px)').matches;
 
 function readPanes(): { side: boolean; art: boolean } {
   try {
@@ -676,7 +690,8 @@ const ART_GROUPS: { role: Artifact['role']; label: string }[] = [
 /** The "In this chat" panel: every note, folder, image and the vault this chat touched. */
 /** The pages (HTML and SVG files) in the chat on screen: the latest version of each. */
 function chatPages(): { card: HTMLElement; versions: number }[] {
-  const cards = Array.from(root?.querySelectorAll<HTMLElement>('#mnpChat .mn-log .mn-file') || []);
+  // The whole chat, the older part waiting outside the page included.
+  const cards = chat ? chat.findAll('.mn-file') : [];
   const last = new Map<string, { card: HTMLElement; versions: number }>();
   for (const c of cards) {
     const k = `${c.dataset.art}\u0000${c.dataset.title}`;
@@ -1370,7 +1385,7 @@ function select(start: Set<string> | null): void {
   picked = start;
   root?.classList.toggle('selecting', !!start);
   if (start) {
-    if (isNarrow()) root?.classList.add('side-open');
+    if (isDrawer()) root?.classList.add('side-open');
     else setPane('side', true);
   }
   paintList();
@@ -1507,6 +1522,112 @@ function askDelete(s: A.Session): void {
     } catch (e) {
       fail(e);
     }
+  });
+}
+
+// ---- resizable panes (desktop): the chat list and the side panel (Agents, In this chat) ----
+
+type Grip = 'side' | 'ag' | 'art';
+const GRIP_LS: Record<Grip, string> = { side: 'mn-w-side', ag: 'mn-w-agents', art: 'mn-w-art' };
+const GRIP_VAR: Record<Grip, string> = { side: '--sw-u', ag: '--aw-ag', art: '--aw-art' };
+const GRIP_CLS: Record<Grip, string> = { side: 'sw-set', ag: 'aw-ag', art: 'aw-art' };
+/** Each pane's narrowest and widest; the chat between them keeps at least CHAT_ROOM. */
+const GRIP_MIN: Record<Grip, number> = { side: 260, ag: 320, art: 260 };
+const GRIP_MAX: Record<Grip, number> = { side: 520, ag: 760, art: 560 };
+const CHAT_ROOM = 440;
+
+function gripRead(g: Grip): number {
+  try {
+    return Number(localStorage.getItem(GRIP_LS[g])) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function paneWidth(r: HTMLElement, v: '--sw' | '--aw'): number {
+  return parseFloat(getComputedStyle(r).getPropertyValue(v)) || 0;
+}
+
+/** A width that leaves both the pane and the chat their room. */
+function gripFit(r: HTMLElement, g: Grip, w: number): number {
+  const page = r.getBoundingClientRect().width;
+  const other = g === 'side' ? paneWidth(r, '--aw') : paneWidth(r, '--sw');
+  const max = Math.max(GRIP_MIN[g], Math.min(GRIP_MAX[g], page - CHAT_ROOM - other));
+  return Math.round(Math.min(max, Math.max(GRIP_MIN[g], w)));
+}
+
+function gripSet(r: HTMLElement, g: Grip, w: number | null, save = false): void {
+  if (!w) {
+    r.style.removeProperty(GRIP_VAR[g]);
+    r.classList.remove(GRIP_CLS[g]);
+  } else {
+    r.style.setProperty(GRIP_VAR[g], `${w}px`);
+    r.classList.add(GRIP_CLS[g]);
+  }
+  if (!save) return;
+  try {
+    if (w) localStorage.setItem(GRIP_LS[g], String(w));
+    else localStorage.removeItem(GRIP_LS[g]);
+  } catch {
+    /* lasts until reload */
+  }
+}
+
+/** Drag (or arrow keys on) the edge of the chat list or the side panel to change its width;
+ *  a double-click goes back to the default. Widths are kept per pane on this device. */
+function wireGrips(r: HTMLElement): void {
+  const which = (el: HTMLElement): Grip => (el.dataset.g === 'side' ? 'side' : r.classList.contains('ag-open') ? 'ag' : 'art');
+  const fitAll = (): void => {
+    for (const g of ['side', 'ag', 'art'] as Grip[]) {
+      const w = gripRead(g);
+      if (w) gripSet(r, g, gripFit(r, g, w));
+    }
+  };
+  fitAll();
+  window.addEventListener('resize', () => {
+    if (r.isConnected) fitAll();
+  });
+  r.querySelectorAll<HTMLElement>('.mnp-grip').forEach((grip) => {
+    const rtl = (): boolean => getComputedStyle(r).direction === 'rtl';
+    // The side panel grows toward the chat: leftward in a left-to-right page.
+    const sign = (): number => (grip.dataset.g === 'side' ? 1 : -1) * (rtl() ? -1 : 1);
+    const now = (g: Grip): number => (g === 'side' ? paneWidth(r, '--sw') : paneWidth(r, '--aw'));
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const g = which(grip);
+      const x0 = e.clientX;
+      const w0 = now(g);
+      let w = w0;
+      grip.setPointerCapture(e.pointerId);
+      r.classList.add('resizing');
+      const move = (ev: PointerEvent): void => {
+        w = gripFit(r, g, w0 + (ev.clientX - x0) * sign());
+        gripSet(r, g, w);
+      };
+      const up = (): void => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        r.classList.remove('resizing');
+        if (w !== w0) gripSet(r, g, w, true);
+        window.dispatchEvent(new Event('resize'));
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+    grip.addEventListener('dblclick', () => {
+      gripSet(r, which(grip), null, true);
+      window.dispatchEvent(new Event('resize'));
+    });
+    grip.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const g = which(grip);
+      const d = (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 48 : 16) * (grip.dataset.g === 'side' ? 1 : -1) * (rtl() ? -1 : 1);
+      gripSet(r, g, gripFit(r, g, now(g) + d), true);
+    });
   });
 }
 
@@ -1988,5 +2109,109 @@ button.mnp-g:hover{color:var(--fg)}
   .mnp-side{width:min(360px,92vw);background:var(--side-bg)}
   .mnp-ph{padding-top:14px}
 }
+/* ===== Chat list, 3.0: a roomier list on desktop; a drawer over the chat on tablets and a whole
+   screen on phones, each with its own header (title, New chat, Close). Every row shows its ⋯
+   (faint until pointed at, always there on touch), its time and its unread count. ===== */
+.mnp{--sw:360px}
+@media (min-width:1440px){.mnp{--sw:384px}}
+.mnp-ph{gap:6px;min-height:58px;padding-block:12px 8px;padding-inline:16px 10px}
+.mnp-ph b{font-size:18px}
+.mnp-sidex{display:none;place-items:center;flex:none;width:36px;height:36px;padding:0;border:0;border-radius:10px;background:none;color:var(--text-2,var(--fg));cursor:pointer;transition:background .15s,color .15s}
+.mnp-sidex:hover{background:var(--hover);color:var(--fg)}
+.mnp-sidex .i{width:19px;height:19px;stroke-width:2}
+:is(.mnp-sidex,.mnp-ph .mnp-new,.mnp-ph .mnp-manage):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.mnp-panel .mnp-list{padding-block:0 16px;padding-inline:10px}
+.mnp-panel .mnp-g{margin-block:10px 2px;padding-block:8px 5px;padding-inline:10px;font-size:12px}
+.mnp-panel .mnp-row{gap:10px;min-height:58px;padding-block:8px;padding-inline:10px 4px;border-radius:12px}
+.mnp-panel .mnp-row+.mnp-row{margin-top:1px}
+.mnp-panel .mnp-row-t{gap:3px}
+.mnp-panel .mnp-row-l1 b{font-size:14px}
+.mnp-panel .mnp-kind{width:34px;height:34px;border-radius:10px}
+.mnp-panel .mnp-kind .i{width:17px;height:17px}
+/* The open chat: a tint and an accent bar on its leading edge. */
+.mnp-panel .mnp-row.on::before{display:block;content:"";position:absolute;left:auto;right:auto;inset-inline-start:0;top:14px;bottom:14px;width:3px;border-radius:3px;background:var(--accent)}
+.mnp:not(.selecting) .mnp-panel .mnp-row .mnp-row-ts{display:inline}
+.mnp-panel .mnp-row.unread .mnp-newn{display:inline-grid}
+/* The ⋯ is always in the row: faint at rest, full on the hovered, focused or open row. */
+.mnp-panel .mnp-row .mnp-row-more{display:grid;flex:none;align-self:center;width:30px;height:30px;border-radius:9px;color:var(--muted);opacity:.5;transition:opacity .15s,background .15s,color .15s}
+.mnp-panel .mnp-row:is(:hover,:focus-within,.on) .mnp-row-more{opacity:1}
+.mnp-panel .mnp-row .mnp-row-more:hover{background:color-mix(in srgb,var(--fg) 9%,transparent);color:var(--fg)}
+.mnp-panel .mnp-row .mnp-row-more:focus-visible,.mnp-all .mnp-row .mnp-row-more:focus-visible{opacity:1;outline:2px solid var(--accent);outline-offset:-2px}
+.mnp-panel .mnp-row .mnp-row-more .i{width:17px;height:17px}
+/* Touch: no hover to find it, so the ⋯ is plain to see and a full finger wide. */
+@media (hover:none),(pointer:coarse){
+  .mnp-panel .mnp-row .mnp-row-more,.mnp-all .mnp-row .mnp-row-more{display:grid;width:40px;height:40px;opacity:.85;color:var(--text-2,var(--fg))}
+  .mnp-panel .mnp-row{min-height:62px;padding-inline-end:2px}
+  .mnp-panel .mnp-row-l1 b{font-size:14.5px}
+}
+/* Tablets and phones: the list is a drawer over the chat, opened from the header. */
+@media (max-width:1024px){
+  .mnp,.mnp.side-closed{--sw:0px}
+  .mnp>.mnp-side{position:absolute;top:0;bottom:0;inset-inline-start:0;z-index:9;grid-column:auto;grid-row:auto;width:min(420px,86vw);border-right:0;
+    box-shadow:0 0 0 1px var(--line),0 24px 64px -16px rgba(15,23,42,.4);visibility:visible;transform:none;transition:transform .3s cubic-bezier(.22,.8,.24,1)}
+  .mnp:not(.side-open)>.mnp-side{visibility:hidden;transform:translateX(-104%);transition:transform .3s cubic-bezier(.22,.8,.24,1),visibility 0s linear .3s}
+  [dir=rtl] .mnp:not(.side-open)>.mnp-side{transform:translateX(104%)}
+  .mnp.side-open>.mnp-side{visibility:visible}
+  .mnp-scrim{display:block;position:absolute;inset:0;z-index:8;background:var(--scrim,rgba(15,23,42,.3));opacity:0;pointer-events:none;transition:opacity .2s}
+  .mnp.side-open .mnp-scrim{opacity:1;pointer-events:auto}
+  .mnp:not(.side-closed) .mnp-lists,.mnp.side-closed .mnp-lists{display:inline-grid}
+  .mnp-ph .mnp-sidex{display:grid}
+  .mnp-ph .mnp-new{display:grid!important;width:36px;height:36px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-fg,var(--on-accent,#fff))}
+  .mnp-ph .mnp-new:hover{background:color-mix(in srgb,var(--accent) 88%,var(--fg))}
+  /* The header has New chat and the search field is right there: the rail drops both. */
+  .mnp-rail .mnp-rb-new,.mnp-rail #mnpSearchBtn,.mnp-rail .mnp-fold{display:none}
+}
+/* Phones: the list takes the whole screen; the rail turns into a bar along the bottom. */
+@media (max-width:760px){
+  .mnp>.mnp-side{inset:0;width:100%;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;padding-top:env(safe-area-inset-top,0px);box-shadow:none;background:var(--side-bg)}
+  .mnp-side>.mnp-panel{grid-row:1;grid-column:1}
+  .mnp-side>.mnp-rail{grid-row:2;grid-column:1;flex-direction:row;align-items:center;justify-content:space-around;gap:2px;
+    padding-block:6px calc(6px + env(safe-area-inset-bottom,0px));padding-inline:8px;border-right:0;border-top:1px solid var(--line)}
+  .mnp-side>.mnp-rail .mnp-rail-mark,.mnp-side>.mnp-rail .mnp-grow{display:none}
+  .mnp-side>.mnp-rail .mnp-rb{flex:1 1 0;width:auto;max-width:76px;height:44px}
+  .mnp-ph{min-height:60px;padding-block:10px 8px;padding-inline:18px 8px}
+  .mnp-ph b{font-size:20px}
+  .mnp-ph .mnp-new,.mnp-ph .mnp-sidex,.mnp-ph .mnp-manage{width:40px;height:40px}
+  .mnp-panel .mnp-q{margin-inline:14px;height:42px}
+  .mnp-panel .mnp-chips{margin-inline:14px}
+  .mnp-panel .mnp-list{padding-inline:8px}
+  .mnp-panel .mnp-chip{height:30px}
+}
+@media (prefers-reduced-motion:reduce){.mnp>.mnp-side,.mnp:not(.side-open)>.mnp-side{transition:none}}
+/* Fleeting (the capsule beside the model): its own small surface over the chat. */
+.mn-top .mnp-fleet{width:34px;height:34px;border-radius:50%;border:1px solid var(--line-strong);box-shadow:0 8px 20px -12px rgba(15,23,42,.35)}
+.mn-top .mnp-fleet:not([aria-pressed=true]){background:var(--surface-1,var(--panel))}
+.mn-top .mnp-fleet:not([aria-pressed=true]):hover{background:color-mix(in srgb,var(--fg) 6%,var(--surface-1,var(--panel)))}
+@media (pointer:coarse){.mn-top .mnp-fleet{width:38px;height:38px}}
+/* Phones, fleeting: one dark sheet from edge to edge: a compact header (title, New, More,
+   Close), the model under it, the chat, and the message box above the home indicator. */
+@media (max-width:760px){
+  :root[data-page=assistant] .mnp.fleeting{background:#0d0f13;padding-bottom:0}
+  .mnp.fleeting .mnp-head{color-scheme:dark;--fg:#e6e8ec;--text-2:#c4c8d0;--muted:#8d94a0;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.15);--hover:rgba(255,255,255,.06);
+    --surface-1:#191d23;--accent:#5eead4;--accent-soft:rgba(94,234,212,.14);color:var(--fg);background:#0d0f13;border-bottom-color:var(--line);min-height:52px;gap:2px;padding-block:4px;padding-inline:16px 6px}
+  .mnp.fleeting .mnp-head .mnp-title small{color:var(--muted)}
+  .mnp.fleeting .mnp-lists,.mnp.fleeting .mnp-hsep,.mnp.fleeting .mnp-artbtn:has(.mnp-artn[hidden]){display:none}
+  .mnp.fleeting .mnp-head .mn-ibtn{width:40px;height:40px;border-radius:12px}
+  .mnp.fleeting .mnp-head .mn-ibtn .i{width:19px;height:19px}
+  .mnp.fleeting .mn-comp{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  .mnp.fleeting.kb .mn-comp{padding-bottom:10px}
+}
 
+/* Resizable panes on desktop: a thin handle on the edge of the chat list and of the side
+   panel; each keeps a sensible minimum so nothing gets squashed. */
+.mnp-grip{display:none;position:absolute;top:0;bottom:0;width:10px;z-index:7;cursor:col-resize;touch-action:none;outline:none}
+.mnp-grip::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:44px;translate:-50% -50%;border-radius:99px;background:var(--line-strong);opacity:0;transition:opacity .15s,background .15s,height .15s}
+.mnp-grip:hover::after,.mnp-grip:focus-visible::after,.mnp.resizing .mnp-grip::after{opacity:1;height:64px;background:var(--accent)}
+.mnp.resizing{transition:none;user-select:none;cursor:col-resize}
+.mnp.resizing iframe{pointer-events:none}
+@media (min-width:1025px) and (pointer:fine){
+  :root:not(.mn-pv-split) .mnp.sw-set:not(.side-closed),:root.mn-pv-roomy .mnp.sw-set:not(.side-closed){--sw:var(--sw-u)}
+  .mnp:not(.side-closed):not(.fleeting)>.mnp-grip[data-g=side]{display:block;inset-inline-start:calc(var(--sw) - 5px)}
+  :root.mn-pv-split:not(.mn-pv-roomy) .mnp>.mnp-grip[data-g=side]{display:none}
+}
+@media (min-width:1100px) and (pointer:fine){
+  :root:not(.mn-pv-split) .mnp.ag-open.aw-ag{--aw:var(--aw-ag)}
+  :root:not(.mn-pv-split) .mnp.art-open:not(.ag-open).aw-art{--aw:var(--aw-art)}
+  :root:not(.mn-pv-split) .mnp:is(.ag-open,.art-open)>.mnp-grip[data-g=right]{display:block;inset-inline-end:calc(var(--aw) - 5px)}
+}
 `;

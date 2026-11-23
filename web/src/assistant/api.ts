@@ -197,7 +197,10 @@ export interface SubEvent {
   id: string;
   agent: string;
   model: string;
-  phase: 'start' | 'step' | 'text' | 'tool' | 'tool_end' | 'ask' | 'answer' | 'usage' | 'done' | 'error' | 'fallback' | 'switched' | 'compacting' | 'compacted' | 'notice';
+  phase: 'start' | 'step' | 'text' | 'tool' | 'tool_end' | 'ask' | 'answer' | 'usage' | 'done' | 'error' | 'fallback' | 'switched' | 'compacting' | 'compacted' | 'notice' | 'final' | 'stopped' | 'inbox';
+  output?: unknown;
+  count?: number;
+  aid?: string;
   from?: string;
   to?: string;
   reason?: string;
@@ -220,6 +223,25 @@ export interface SubEvent {
   message?: string;
 }
 
+/** A chat's sub-agents as the server keeps them: state and instructions, and the names
+ *  Mnemo removed from the list. */
+export interface AgentsInfo {
+  agents: { id?: string; agent: string; state: string; instructions?: string }[];
+  removed: string[];
+}
+
+/** Mnemo changed a sub-agent with its agents tool. */
+export interface AgentsEvent {
+  phase: 'meta' | 'state' | 'message';
+  id?: string;
+  agent: string;
+  from?: string;
+  state?: string;
+  instructions?: string;
+  text?: string;
+  call?: string;
+}
+
 /** What a `delegate` call returns (the live card is drawn again from it after a reload). */
 export interface SubResult {
   agent?: string;
@@ -232,6 +254,7 @@ export interface SubResult {
   window?: number | null;
   follow_up?: boolean;
   error?: string;
+  background?: boolean;
   log?: ({ kind: 'tool'; name: string; ok: boolean; summary: string } | { kind: 'ask'; question: string; answer: string })[];
 }
 
@@ -249,12 +272,13 @@ export type ChatEvent =
   | { type: 'compacted'; messages: number; tokens: number; summary?: string }
   | { type: 'compact_text'; delta: string }
   | { type: 'fallback'; from: string; model: string; reason: string; detail?: string }
-  | { type: 'notice'; text: string; action?: NoticeAction }
+  | { type: 'notice'; text: string; action?: NoticeAction; toast?: 'info' | 'err' }
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
   | { type: 'tool_start'; id: string; name: string; args: unknown }
-  | { type: 'tool_end'; id: string; name: string; ok: boolean; summary: string; ms: number; shown?: Shown[]; output?: unknown }
+  | { type: 'tool_end'; id: string; name: string; ok: boolean; summary: string; ms: number; shown?: Shown[]; output?: unknown; plan?: PlanItem[] }
   | ({ type: 'sub' } & SubEvent)
+  | ({ type: 'agents' } & AgentsEvent)
   | { type: 'error'; message: string }
   | { type: 'done'; input_tokens: number; output_tokens: number; title: string | null; context?: ChatContext };
 
@@ -370,8 +394,14 @@ export const searchChats = (q: string): Promise<{ query: string; hits: SearchHit
 export const NOTE_TASK_PREFIX = '@mnemo · ';
 export const compactSession = (id: string): Promise<{ ok: boolean; messages?: number; tokens?: number; summary?: string; reason?: string; context: ChatContext }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/compact`, {});
-export const getSession = (id: string): Promise<{ session: Session; messages: Message[]; context: ChatContext | null; running?: boolean; queue?: QueueState }> =>
+export const getSession = (id: string): Promise<{ session: Session; messages: Message[]; context: ChatContext | null; running?: boolean; queue?: QueueState; plan?: PlanItem[]; agents?: AgentsInfo }> =>
   apiGet(`/api/assistant/sessions/${encodeURIComponent(id)}`);
+/** One step of a chat's plan. */
+export interface PlanItem {
+  text: string;
+  status: string;
+}
+export const clearPlan = (id: string): Promise<{ ok: boolean }> => apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/plan/clear`, {});
 export const updateSession = (id: string, b: { title?: string; model?: string; pinned?: boolean; archived?: boolean }): Promise<{ session: Session }> =>
   apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}`, b);
 /** Delete many chats: the ones picked, the ones untouched for some days, or all. */
@@ -451,6 +481,7 @@ export type WatchEvent =
   | ({ type: 'queue' } & QueueState)
   | { type: 'queue_error'; message: string }
   | { type: 'compacted' }
+  | { type: 'plan'; steps: PlanItem[] }
   | { type: 'reload' };
 
 /** Follow chat `id` until `signal` aborts (resolves when the stream ends). */

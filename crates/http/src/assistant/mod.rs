@@ -7,10 +7,12 @@
 //! `state`, `providers`, `providers/delete`, `models/fetch`, `models`, `models/delete`,
 //! `prefs`, `sessions`, `sessions/{id}`, `sessions/{id}/delete`, `sessions/{id}/chat` (SSE).
 
+pub(crate) mod agents;
 pub mod docs;
 pub mod live;
 pub mod mentions;
 pub mod owner;
+pub(crate) mod plan;
 pub mod providers;
 pub mod roles;
 pub mod uploads;
@@ -179,6 +181,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/assistant/sessions/{id}/rerun", post(h_rerun))
         .route("/api/assistant/sessions/{id}/live", get(h_live))
         .route("/api/assistant/sessions/{id}/stop", post(h_stop))
+        .route(
+            "/api/assistant/sessions/{id}/plan/clear",
+            post(h_plan_clear),
+        )
         .route("/api/assistant/sessions/{id}/steer", post(h_steer))
         .route(
             "/api/assistant/sessions/{id}/queue",
@@ -532,6 +538,8 @@ fn state_json(store: &Store) -> Value {
         ARCHIVED,
         roles::SUB_MODELS,
         BLIND,
+        plan::PLANS,
+        agents::AGENTS,
     ] {
         prefs.remove(k);
     }
@@ -878,6 +886,8 @@ fn drop_chat(st: &AppState, store: &Store, id: &str) -> bool {
     }
     live::queue_clear(id);
     roles::forget_threads(id);
+    plan::clear(store, id);
+    agents::forget_chat(store, id);
     for m in store.messages(id).unwrap_or_default() {
         // Pictures Mnemo opened from the vault were staged copies; the vault keeps its own.
         if m.tool_name.as_deref() == Some(roles::GENERATE_IMAGE) {
@@ -1126,7 +1136,9 @@ async fn h_session(
             let running = live::running(&id);
             let fleeting = fleeting_ids(store).contains(&id);
             let queue = live::queue_json(&id);
-            Json(json!({"session": sess, "messages": messages, "context": context, "running": running, "fleeting": fleeting, "queue": queue}))
+            let plan = plan::get(store, &id);
+            let agents = agents::panel_json(store, &id);
+            Json(json!({"session": sess, "messages": messages, "context": context, "running": running, "fleeting": fleeting, "queue": queue, "plan": plan, "agents": agents}))
                 .into_response()
         }
         _ => fail(StatusCode::NOT_FOUND, "chat not found"),
@@ -1635,8 +1647,8 @@ const ASK_OWNER: &str = "ask_owner";
 fn ask_owner_def() -> ToolDef {
     ToolDef {
         name: ASK_OWNER.into(),
-        description: "Ask the owner a question with 2 to 5 short options to tap (they can also type another \
-answer). Use it when a choice is theirs, when something is unclear, and in Ask first mode before changing notes \
+        description: "Ask the owner a question with short options to tap, as many as the question needs (they can \
+also type another answer). Use it when a choice is theirs, when something is unclear, and in Ask first mode before changing notes \
 (mark the option that approves the change with approve: true). Your reply ends here; their answer is the next \
 message."
             .into(),
@@ -1646,8 +1658,7 @@ message."
                 "question": {"type": "string"},
                 "options": {
                     "type": "array",
-                    "minItems": 2,
-                    "maxItems": 5,
+                    "minItems": 1,
                     "items": {
                         "type": "object",
                         "properties": {
@@ -1687,10 +1698,11 @@ fn ask_check(args: &Value) -> Result<Value, String> {
                 })
             })
         })
-        .take(5)
+        // As many as Mnemo gives (a sane ceiling only, so a runaway list cannot flood the chat).
+        .take(26)
         .collect();
-    if opts.len() < 2 {
-        return Err("give at least two options".into());
+    if opts.is_empty() {
+        return Err("give at least one option".into());
     }
     Ok(json!({
         "question": q.chars().take(500).collect::<String>(),
@@ -1737,67 +1749,7 @@ pub(crate) fn tools_off(store: &Store, sub: bool) -> BTreeSet<String> {
         .collect()
 }
 
-/// Mnemo's plan for a longer task: the steps, each not started, in progress or done. The
-/// owner sees it as a checklist above the message box while Mnemo works.
-pub(crate) const UPDATE_PLAN: &str = "update_plan";
-const PLAN_MAX: usize = 12;
-
-fn update_plan_def() -> ToolDef {
-    ToolDef {
-        name: UPDATE_PLAN.into(),
-        description: format!(
-            "Show the owner your plan as a checklist while you work. Use it for a task of three or more \
-steps (an audit of many notes, a reorganisation, a long edit): call it first with every step (status pending, \
-the first one in_progress), then again with the whole list each time a step is done or starts. At most \
-{PLAN_MAX} steps of a few words each, in the owner's language. Skip it for short tasks."
-        ),
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "steps": {
-                    "type": "array",
-                    "maxItems": PLAN_MAX,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "text": {"type": "string", "description": "The step, a few words"},
-                            "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}
-                        },
-                        "required": ["text", "status"],
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "required": ["steps"],
-            "additionalProperties": false
-        }),
-    }
-}
-
-/// The plan, checked: `{steps: [{text, status}]}` (the reply's stream shows it as it is called).
-fn update_plan(args: &Value) -> Result<Value, String> {
-    let steps = args["steps"].as_array().ok_or("steps is a list")?;
-    if steps.is_empty() || steps.len() > PLAN_MAX {
-        return Err(format!("give 1 to {PLAN_MAX} steps"));
-    }
-    let mut out = Vec::new();
-    for s in steps {
-        let text: String = s["text"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .take(120)
-            .collect();
-        let status = s["status"].as_str().unwrap_or("pending");
-        if text.is_empty() || !["pending", "in_progress", "done"].contains(&status) {
-            return Err("each step needs text and a status: pending, in_progress or done".into());
-        }
-        out.push(json!({"text": text, "status": status}));
-    }
-    let done = out.iter().filter(|s| s["status"] == "done").count();
-    Ok(json!({"ok": true, "steps": out.len(), "done": done}))
-}
+pub(crate) use plan::UPDATE_PLAN;
 
 /// Mnemo's clock: the time now where the owner is (their browser says its zone).
 const CURRENT_TIME: &str = "current_time";
@@ -2609,7 +2561,7 @@ fn tool_defs(st: &AppState) -> Vec<ToolDef> {
     defs.push(view_image_def());
     defs.push(show_items_def());
     defs.push(current_time_def());
-    defs.push(update_plan_def());
+    defs.push(plan::def());
     defs.push(ask_owner_def());
     defs.extend(docs::defs());
     defs
@@ -2828,6 +2780,61 @@ fn fill_images(st: &AppState, history: &mut [Msg]) {
             text.push_str(&notes.join("\n"));
         }
     }
+}
+
+/// Add a note for the model to the owner's newest message (never stored).
+fn with_note(history: &mut [Msg], note: &str) {
+    if let Some(Msg::User(t) | Msg::UserImages { text: t, .. }) = history
+        .iter_mut()
+        .rev()
+        .find(|m| matches!(m, Msg::User(_) | Msg::UserImages { .. }))
+    {
+        t.push_str("\n\n(");
+        t.push_str(note);
+        t.push(')');
+    }
+}
+
+/// Whether the owner's newest message carries pictures.
+fn newest_has_pictures(history: &[Msg]) -> bool {
+    matches!(
+        history
+            .iter()
+            .rev()
+            .find(|m| matches!(m, Msg::User(_) | Msg::UserImages { .. })),
+        Some(Msg::UserImages { .. })
+    )
+}
+
+/// A short toast, never a line in the chat: the pictures could not be read at all.
+fn unread_pictures(store: &Store) -> Value {
+    if roles::role(store, "vision").is_some() {
+        json!({"type": "notice", "toast": "err", "text": "The picture could not be read"})
+    } else {
+        json!({"type": "notice", "toast": "err", "text": "This model cannot read pictures",
+               "action": {"label": "Set an image model", "open": "jobs"}})
+    }
+}
+
+/// The toast after a model turned out not to read pictures: the image model took over, or
+/// nothing could read them. Said only when the owner's newest message has pictures; older ones go quietly.
+fn pictures_note(
+    tx: &tokio::sync::mpsc::UnboundedSender<String>,
+    store: &Store,
+    seen: usize,
+    fresh: bool,
+) {
+    if !fresh {
+        return;
+    }
+    send(
+        tx,
+        if seen > 0 {
+            json!({"type": "notice", "toast": "info", "text": "Pictures read by the image model"})
+        } else {
+            unread_pictures(store)
+        },
+    );
 }
 
 /// Turn every picture into text (for models that cannot take images).
@@ -3406,6 +3413,13 @@ fn send(tx: &tokio::sync::mpsc::UnboundedSender<String>, v: Value) -> bool {
 
 /// A short line about a tool result for the chat's tool card.
 fn summary(v: &Value) -> String {
+    // The agents tool: what it did to how many sub-agents.
+    if let (Some(act), Some(a)) = (v["action"].as_str(), v["agents"].as_array()) {
+        return format!("{act}: {}", a.len());
+    }
+    if let Some(a) = v["agents"].as_array() {
+        return format!("{} sub-agents", a.len());
+    }
     if let Some(a) = v.as_array() {
         return format!("{} result{}", a.len(), if a.len() == 1 { "" } else { "s" });
     }
@@ -4063,8 +4077,10 @@ fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_beh
 /// reply running, `start` sends the first queued message now. `true` when a reply was cut.
 fn interrupt(st: &AppState, store: &'static Store, id: &str, who: String, start: bool) -> bool {
     let Some((text, model)) = live::cut(id) else {
-        if start {
-            kick(st, store, id, who, false, false);
+        // Nothing running (a reply waiting on the owner, or one that just ended): a Stop
+        // still lets the next queued message go out, held or not.
+        if start || live::queued(id) {
+            kick(st, store, id, who, false, !start);
         }
         return false;
     };
@@ -4211,6 +4227,27 @@ async fn h_stop(
     let (st2, id2, who) = (st.clone(), id.clone(), on_behalf(&st, &headers));
     let stopped = crate::blocking(move || interrupt(&st2, store, &id2, who, false)).await;
     Json(json!({"stopped": stopped})).into_response()
+}
+
+/// `POST /api/assistant/sessions/{id}/plan/clear`: the owner puts the chat's plan away.
+async fn h_plan_clear(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    plan::clear(store, &id);
+    Json(json!({"ok": true})).into_response()
 }
 
 /// `GET /api/assistant/sessions/{id}/queue`: the messages waiting for this chat's reply.
@@ -4778,7 +4815,7 @@ answer what should change; Mnemo asks the owner."
     } else if c.name == SHOW_ITEMS {
         show_items(st, &c.arguments)
     } else if c.name == UPDATE_PLAN {
-        update_plan(&c.arguments)
+        plan::run(store, id, &c.arguments)
     } else if c.name == CURRENT_TIME {
         Ok(current_time(store, id))
     } else if c.name == docs::SEARCH || c.name == docs::READ {
@@ -4897,11 +4934,17 @@ fn run_agent(
     if !send(tx, start) {
         return Outcome::Stopped;
     }
+    // The chat's open plan as this reply starts (a stopped reply left it as it was), read
+    // once so every step sends the same words.
+    let plan_note = plan::prompt_text(store, id);
     let mut step = 0;
     while step < steps {
         let stored = store.messages(id).unwrap_or_default();
         let (mut history, trimmed) = history_within(&stored, stp.budget);
         fill_images(st, &mut history);
+        if let Some(note) = &plan_note {
+            with_note(&mut history, note);
+        }
         if trimmed && (step == 0 || full) {
             send(
                 tx,
@@ -4922,21 +4965,14 @@ fn run_agent(
             }
         };
         let (system, tools) = (&stp.system, &stp.tools);
-        // A model that failed on pictures before gets them as text from the start.
+        // A model that failed on pictures before gets them as text from the start, quietly:
+        // the owner only hears of it when a picture they just sent could not be read.
         if blind_in(store, &key) && history.iter().any(|m| matches!(m, Msg::UserImages { .. })) {
+            let fresh = newest_has_pictures(&history);
             let seen = roles::describe_history(st, store, &mut history);
-            if seen == 0 {
-                strip_images(&mut history);
-            }
-            // Said once per reply, so the owner knows why pictures go as text.
-            if step == 0 {
-                let note = if seen > 0 {
-                    json!({"type": "notice", "text": format!("{model} cannot read pictures, so the image model looks at them for it.")})
-                } else {
-                    json!({"type": "notice", "text": format!("{model} cannot read pictures, so it only gets their names. Set a model that reads images, or switch this chat's model."),
-                           "action": {"label": "Set an image model", "open": "jobs"}})
-                };
-                send(tx, note);
+            strip_images(&mut history);
+            if step == 0 && fresh && seen == 0 {
+                send(tx, unread_pictures(store));
             }
         }
         let with_pictures = history
@@ -4958,18 +4994,14 @@ fn run_agent(
                 .any(|m| matches!(m, Msg::UserImages { images, .. } if images.iter().any(|i| !i.data.is_empty())));
             if pictures && e != "stopped" && !got.get() && !tx.is_closed() {
                 let mut plain = history.clone();
+                let plain_before = history.clone();
                 let seen = roles::describe_history(st, store, &mut plain);
-                if seen > 0 || strip_images(&mut plain) {
+                let stripped = strip_images(&mut plain);
+                if seen > 0 || stripped {
                     let again = providers::run(&ep, &model, system, &plain, tools, &opts, &mut on);
                     if again.is_ok() {
                         mark_blind_in(store, &key);
-                        let note = if seen > 0 {
-                            json!({"type": "notice", "text": format!("{model} cannot read pictures, so the image model looked at them for it.")})
-                        } else {
-                            json!({"type": "notice", "text": format!("{model} cannot read pictures, so it only got their names. Set a model that reads images, or switch this chat's model."),
-                                   "action": {"label": "Set an image model", "open": "jobs"}})
-                        };
-                        send(tx, note);
+                        pictures_note(tx, store, seen, newest_has_pictures(&plain_before));
                         history = plain;
                         res = again;
                     }
@@ -5007,16 +5039,12 @@ fn run_agent(
         if let Err(e) = &res {
             if refuses_images(e) {
                 // The image model, when one is set, looks at them and the chat model reads that.
+                let fresh = newest_has_pictures(&history);
                 let seen = roles::describe_history(st, store, &mut history);
-                if seen > 0 || strip_images(&mut history) {
-                    let text = if seen > 0 {
-                        format!(
-                            "{model} cannot look at images; the image model described them for it."
-                        )
-                    } else {
-                        format!("{model} cannot look at images; it got their names instead. Set a model that reads images in Settings to have them seen.")
-                    };
-                    send(tx, json!({"type": "notice", "text": text}));
+                let stripped = strip_images(&mut history);
+                if seen > 0 || stripped {
+                    mark_blind_in(store, &key);
+                    pictures_note(tx, store, seen, fresh);
                     res = providers::run(&ep, &model, system, &history, tools, &opts, &mut on);
                 }
             }
@@ -5066,6 +5094,17 @@ fn run_agent(
             && !tools_off(store, false).contains(roles::DELEGATE)
         {
             turn.calls = roles::confirm_calls(store, &turn.calls, stp.fixed);
+        }
+        // Sub-agents still at work in the background when Mnemo would end: the reply waits
+        // for them (as a call to agents wait), then Mnemo answers from what they found.
+        if turn.calls.is_empty() && !agents::pending(id).is_empty() {
+            turn.calls.push(ToolCall {
+                id: format!("wait_{}", memora_state::now()),
+                name: agents::AGENTS_TOOL.into(),
+                arguments: json!({"action": "wait", "seconds": 900}),
+            });
+            // The provider's own record of this turn has no such call.
+            turn.raw = None;
         }
         let calls_json = (!turn.calls.is_empty()).then(|| {
             json!(turn
@@ -5119,10 +5158,10 @@ fn run_agent(
             &turn.calls,
             tx,
             roles::Main {
-                model: &model,
-                ep: &ep,
-                stp: &stp,
-                key: &key,
+                model: model.clone(),
+                ep: ep.clone(),
+                system: stp.system.clone(),
+                budget: stp.budget,
             },
         );
         if tx.is_closed() {
@@ -5159,6 +5198,11 @@ fn run_agent(
                 }
             } else if let Some(r) = delegated.remove(&c.id) {
                 r
+            } else if c.name == agents::AGENTS_TOOL {
+                agents::run(st, store, id, &c.arguments, &|| tx.is_closed(), &|mut v| {
+                    v["type"] = json!("agents");
+                    send(tx, v);
+                })
             } else {
                 exec_tool(st, store, id, &who, approved, c, None)
             };
@@ -5194,6 +5238,12 @@ fn run_agent(
             // What was streamed so far is in the chat now: a cut keeps nothing of it twice.
             send(tx, json!({"type": "saved"}));
             let mut end = json!({"type": "tool_end", "id": c.id, "name": c.name, "ok": ok, "summary": line, "ms": ms});
+            // The plan as it is now, for the checklist above the message box.
+            if c.name == UPDATE_PLAN {
+                if let Ok(v) = &res {
+                    end["plan"] = v["steps"].clone();
+                }
+            }
             // Cards to show right away (the chat draws them from this).
             if c.name == SHOW_ITEMS {
                 if let Ok(v) = &res {
@@ -5203,6 +5253,7 @@ fn run_agent(
             // Sub-agent answers and images show in their card as soon as they are back.
             if [
                 roles::DELEGATE,
+                agents::AGENTS_TOOL,
                 roles::DESCRIBE_IMAGE,
                 roles::GENERATE_IMAGE,
             ]
@@ -5762,7 +5813,17 @@ mod tests {
             ask_check(&json!({"question": "", "options": [{"label": "a"}, {"label": "b"}]}))
                 .is_err()
         );
-        assert!(ask_check(&json!({"question": "Which?", "options": [{"label": "a"}]})).is_err());
+        assert!(ask_check(&json!({"question": "Which?", "options": []})).is_err());
+        let many: Vec<Value> = (0..8)
+            .map(|i| json!({"label": format!("Option {i}")}))
+            .collect();
+        assert_eq!(
+            ask_check(&json!({"question": "Which?", "options": many})).unwrap()["options"]
+                .as_array()
+                .unwrap()
+                .len(),
+            8
+        );
         let q = ask_check(&json!({"question": "Merge these tags?", "options": [{"label": "Yes, merge", "approve": true}, {"label": "No"}, {"label": "  "}]})).unwrap();
         assert_eq!(
             q["options"].as_array().unwrap().len(),

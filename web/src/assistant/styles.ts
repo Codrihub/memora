@@ -20,9 +20,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 @keyframes mnPulse{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 0 rgba(20,184,166,.35)}50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 0 8px rgba(20,184,166,0)}}
 
 .mn-chat{display:flex;flex-direction:column;min-height:0;height:100%;position:relative}
-.mn-log{--lp:28px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--lp) 24px 12px;display:flex;flex-direction:column;gap:18px;scroll-padding-bottom:24px}
-.mn-log>*{width:100%;max-width:780px;margin-inline:auto}
-.mn-chat.compact .mn-log{--lp:16px;padding:var(--lp) 14px 8px;gap:14px}
+/* One column for the conversation and the message box: the log and the composer share one max
+   width (--mn-col) and one side gutter (--mn-gut), so questions, replies and the box line up on
+   both edges in every width. The log shows no scrollbar, so no gutter tells them apart. */
+.mn-chat{--mn-col:780px;--mn-gut:24px}
+.mn-chat.compact{--mn-gut:14px}
+.mn-log{--lp:28px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--lp) var(--mn-gut) 12px;display:flex;flex-direction:column;gap:18px;scroll-padding-bottom:24px}
+.mn-log>*{width:100%;max-width:var(--mn-col);margin-inline:auto}
+.mn-chat.compact .mn-log{--lp:16px;padding:var(--lp) var(--mn-gut) 8px;gap:14px}
 
 .mn-u{display:flex;flex-direction:column;align-items:flex-end;gap:4px;animation:mnIn .25s var(--ease-out,ease-out) both}
 .mn-ub{max-width:min(82%,620px);padding:10px 15px;border-radius:20px 20px 6px 20px;white-space:pre-wrap;overflow-wrap:anywhere;
@@ -89,8 +94,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-tool-ic{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:8px;color:var(--text-2,var(--muted));background:color-mix(in srgb,var(--fg) 6%,transparent)}
 .mn-tool.w .mn-tool-ic{color:var(--accent);background:var(--accent-soft)}
 .mn-tool-ic .i{width:14px;height:14px;stroke-width:2}
-.mn-tool-t{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
-.mn-tool-t b{flex:none;font-size:calc(var(--mn-fs,14.5px) - 1.5px);font-weight:600}
+.mn-tool-t{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;overflow:hidden}
+.mn-tool-t b{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:calc(var(--mn-fs,14.5px) - 1.5px);font-weight:600}
 .mn-tool-t small{min-width:0;font-size:calc(var(--mn-fs,14.5px) - 2px);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-tool-s{display:inline-flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;max-width:46%;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .mn-tool-s>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -98,6 +103,14 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-tool-t b{white-space:nowrap}
 .mn-tool-s .i{width:14px;height:14px;stroke-width:2.2}
 .mn-tool.ok .mn-tool-s .i{color:var(--ok,#10b981)}.mn-tool.err .mn-tool-s{color:var(--danger)}
+/* A narrow chat: each step takes two lines (what it did, then how it went), never overlapping. */
+@container (max-width:620px){
+  .mn-log .mn-tool summary{display:grid;grid-template-columns:26px minmax(0,1fr) 14px;grid-template-areas:"ic t ch" "ic s ch";column-gap:10px;row-gap:1px;align-items:center}
+  .mn-log .mn-tool-ic{grid-area:ic}
+  .mn-log .mn-tool-t{grid-area:t}
+  .mn-log .mn-tool-s{grid-area:s;max-width:100%;justify-self:start;font-size:11.5px}
+  .mn-log .mn-tool summary>.mn-tool-chev{grid-area:ch}
+}
 .mn-tool-chev{width:14px;height:14px;flex:none;color:var(--muted);transition:transform .18s var(--ease,ease)}
 .mn-tool[open] .mn-tool-chev{transform:rotate(90deg)}
 .mn-tool-b{padding:2px 12px 12px;display:flex;flex-direction:column;gap:6px}
@@ -187,9 +200,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-sk-chip:hover{border-style:solid;border-color:var(--accent)}
 .mn-own-sugs p{margin:0 0 10px;font-size:13px;color:var(--muted);line-height:1.5}
 .mn-own-sugs textarea{width:100%;box-sizing:border-box;resize:vertical;padding:10px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface-0,var(--bg));color:var(--fg);font:inherit;font-size:14px;line-height:1.5}
-.mn-slash{position:absolute;left:24px;right:24px;bottom:calc(100% - 4px);z-index:8;max-width:780px;margin:0 auto;padding:6px;border:1px solid var(--line-strong);border-radius:14px;
+.mn-slash{position:absolute;inset-inline:var(--mn-gut);bottom:calc(100% - 4px);z-index:8;max-width:var(--mn-col);margin:0 auto;padding:6px;border:1px solid var(--line-strong);border-radius:14px;
   background:var(--surface-1,var(--panel));box-shadow:0 18px 40px -18px rgba(15,23,42,.4);animation:mnIn .14s var(--ease-out,ease-out) both;max-height:320px;overflow:auto}
-.mn-chat.compact .mn-slash{left:12px;right:12px}
 .mn-slash-h{display:flex;align-items:center;gap:6px;padding:4px 8px 6px;font-size:12px;font-weight:650;color:var(--muted)}
 .mn-slash-h .i{width:13px;height:13px;color:var(--accent)}
 .mn-slash-h small{font-weight:450;margin-left:auto}
@@ -213,7 +225,10 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-chat.compact.fleeting{border-radius:14px}
 .mn-chat.fleeting .mn-comp-box{background:#14171c}
 .mn-chat.fleeting .mn-send{background:linear-gradient(135deg,#5eead4,#22d3ee);color:#06201d}
-@media (max-width:640px){.mnp.fleeting .mnp-chat{padding:6px}.mn-chat.fleeting{border-radius:14px}}
+/* Phones: the fleeting room is the whole screen (a full-bleed sheet under the page's compact
+   header), not a framed box inside it, so no width is spent on a frame twice. */
+@media (max-width:760px){.mnp.fleeting .mnp-chat{padding:0}.mnp .mn-chat.fleeting{border:0;border-radius:0;box-shadow:none}}
+.mnp .mn-chat.fleeting.cw-narrow{--mn-gut:14px}
 .mn-incog{display:grid;place-items:center;margin-bottom:14px;color:var(--fl-ink)}
 .mn-incog .i{width:44px;height:44px;stroke-width:1.4}
 .mn-chat.fleeting .mn-hello h2{font-weight:600;letter-spacing:-.01em}
@@ -241,7 +256,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-setup>span{color:var(--muted);max-width:380px;line-height:1.5}
 .mn-setup .btn{margin-top:8px}
 
-.mn-comp{flex:none;padding:10px 24px 14px;position:relative}
+.mn-comp{flex:none;padding:10px var(--mn-gut) 14px;position:relative}
 .mn-down{position:absolute;left:50%;bottom:calc(100% + 6px);z-index:6;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 10px 0 14px;white-space:nowrap;
   border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--surface-1,var(--panel)) 92%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px -8px rgba(15,23,42,.35);
@@ -251,7 +266,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-down.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
 .mn-down:hover{background:var(--hover)}
 .mn-down:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.mn-chat.compact .mn-comp{padding:8px 12px 12px}
+.mn-chat.compact .mn-comp{padding:8px var(--mn-gut) 12px}
 /* The one-time "tell Mnemo about you" card on a new chat. */
 .mn-intro{display:flex;flex-direction:column;gap:8px;width:100%;max-width:560px;margin:4px auto 14px;padding:14px 16px;text-align:left;border:1px solid var(--line);border-radius:16px;background:var(--surface-1,var(--panel))}
 .mn-intro>b{font-size:14px;font-weight:620}
@@ -279,6 +294,13 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-plan-h{display:inline-flex;align-items:center;gap:8px;flex:none;margin-inline-start:auto;height:28px;padding:0 6px 0 8px;border:0;border-radius:8px;background:none;
   font:inherit;color:var(--fg);cursor:pointer;transition:background .15s,opacity .2s}
 .mn-plan-h:hover{background:var(--hover)}
+.mn-plan-x{display:none;place-items:center;flex:none;width:28px;height:28px;margin-inline-start:-6px;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.mn-plan-x .i{width:14px;height:14px}
+.mn-plan-x:hover{background:var(--hover);color:var(--fg)}
+.mn-plan-x:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.mn-tray.has-plan.own:not(.busy) .mn-plan-x{display:grid}
+/* No reply at work (it was stopped): the plan stays as it was, its step at work paused. */
+.mn-tray:not(.busy) .mn-ps.in_progress .mn-spin{animation:none;border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
 .mn-plan-h:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .mn-tray:not(.has-plan) :is(.mn-plan-ttl,.mn-plan-h){opacity:0;pointer-events:none}
 .mn-plan-n{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -299,11 +321,16 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-top>*{pointer-events:auto;display:flex;align-items:center;gap:2px;min-width:0}
 .mn-top-l{flex:1 1 auto}
 .mn-top-r{flex:none}
-/* The model name reads as plain text with a chevron: no capsule, no background, just a darker
-   name and a turning chevron when pointed at or open. */
-.mn-top .ui-sel.mn-model{height:32px;max-width:min(360px,62vw);gap:6px;padding:0 2px;border:0;border-radius:6px;background:none !important;box-shadow:none;
-  font-size:15px;font-weight:650;letter-spacing:-.01em;color:var(--text-2,var(--fg))}
-.mn-top .ui-sel.mn-model:hover,.mn-top .ui-sel.mn-model[aria-expanded=true]{color:var(--fg)}
+/* The model sits in a capsule of its own over the conversation: an opaque surface with a
+   hairline and a soft shadow, so messages scrolling under it never show through or blur
+   into its name. The chevron turns when it is open. */
+.mn-top .ui-sel.mn-model{height:34px;max-width:min(360px,62vw);gap:6px;padding-block:0;padding-inline:13px 9px;border:1px solid var(--line-strong);border-radius:999px;
+  background:var(--surface-1,var(--panel)) !important;box-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 20px -12px rgba(15,23,42,.35);
+  font-size:14px;font-weight:620;letter-spacing:-.01em;color:var(--text-2,var(--fg));transition:border-color .15s,box-shadow .15s,color .15s}
+.mn-top .ui-sel.mn-model:hover{color:var(--fg);border-color:color-mix(in srgb,var(--fg) 28%,transparent)}
+.mn-top .ui-sel.mn-model[aria-expanded=true]{color:var(--fg);border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft),0 8px 20px -12px rgba(15,23,42,.35)}
+.mn-top .mn-chip{height:34px;border-color:var(--line-strong);background:var(--surface-1,var(--panel));box-shadow:0 8px 20px -12px rgba(15,23,42,.35)}
+@media (pointer:coarse){.mn-top .ui-sel.mn-model,.mn-top .mn-chip{height:38px}}
 .mn-top .ui-sel.mn-model:hover .mn-model-chev,.mn-top .ui-sel.mn-model[aria-expanded=true] .mn-model-chev{color:var(--fg)}
 .mn-top .ui-sel.mn-model:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mn-top .mn-pin{display:none !important}
@@ -341,6 +368,16 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 /* The model list: wide, grouped, the chosen model marked with an accent bar, each row with its
    context size and a pin that makes it the default for new chats. */
 .ui-sel-pop.mn-model-pop{padding:6px;border-radius:16px;box-shadow:0 24px 60px -24px rgba(15,23,42,.45),0 2px 6px rgba(15,23,42,.06)}
+/* Its own solid surface (no see-through glass over the chat), a clear edge and shadow, above the
+   log, the tray and the page's panels. Phones get the bottom sheet (fits the screen, scrolls). */
+:root .ui-sel-pop.mn-model-pop{z-index:130;background:var(--surface-2);-webkit-backdrop-filter:none;backdrop-filter:none;border:1px solid var(--line-strong);
+  box-shadow:0 28px 64px -24px rgba(0,0,0,.6),0 4px 14px -6px rgba(0,0,0,.35)}
+:root[data-theme=light] .ui-sel-pop.mn-model-pop{background:#fff;box-shadow:0 28px 64px -24px rgba(15,23,42,.42),0 4px 14px -6px rgba(15,23,42,.14)}
+:root .ui-sel-pop.mn-model-pop.sheet{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
+.ui-sel-scrim:has(+.ui-sel-pop.mn-model-pop){z-index:129}
+/* Over a fleeting chat the list wears the chat's dark room, whatever the theme. */
+:root:has(.mn-chat.fleeting) .ui-sel-pop.mn-model-pop{color-scheme:dark;--fg:#e6e8ec;--text-2:#c4c8d0;--muted:#8d94a0;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.15);
+  --hover:rgba(255,255,255,.06);--accent:#5eead4;--accent-soft:rgba(94,234,212,.14);--accent-line:rgba(94,234,212,.45);color:var(--fg);background:#191d23}
 .ui-sel-pop.mn-model-pop .ui-sel-q,.ui-sel-pop.mn-model-pop input[type=search]{border-radius:10px}
 .ui-sel-pop.mn-model-pop .ui-sel-g{padding:10px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .ui-sel-pop.mn-model-pop .ui-sel-o{position:relative;min-height:44px;padding:7px 8px 7px 12px;border-radius:10px;gap:10px}
@@ -396,7 +433,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 @keyframes mnLive{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
 .mn-turn.live:has(.mn-tb:empty){display:none}
 @media (prefers-reduced-motion:reduce){.mn-live>i,.mn-live-t{animation:none}.mn-live-t{color:var(--muted);background:none}}
-.mn-comp-box{max-width:780px;margin:0 auto;border:1px solid var(--line-strong);border-radius:20px;background:var(--surface-0,var(--bg));
+.mn-comp-box{max-width:var(--mn-col);margin:0 auto;border:1px solid var(--line-strong);border-radius:20px;background:var(--surface-0,var(--bg));
   box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -12px rgba(15,23,42,.12);transition:border-color .15s,box-shadow .15s}
 .mn-comp-box:focus-within{border-color:var(--accent-line,var(--accent));box-shadow:0 0 0 3px var(--accent-soft),0 8px 24px -12px rgba(15,23,42,.14)}
 .mn-comp textarea{display:block;width:100%;min-height:46px;max-height:240px;resize:none;border:0;outline:0;background:none;box-shadow:none;
@@ -453,12 +490,12 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-send.queue{background:var(--accent);color:var(--on-accent,#fff)}
 /* Under the prompt: the fine print on the left, the chat's model and its memory ring on the
    right (the prompt itself keeps the thinking level and Send). */
-.mn-under{display:flex;align-items:center;justify-content:flex-start;gap:4px;max-width:780px;min-height:0;margin:6px auto 0;padding:0 4px 0 10px}
+.mn-under{display:flex;align-items:center;justify-content:flex-start;gap:4px;max-width:var(--mn-col);min-height:0;margin:6px auto 0;padding:0 4px 0 10px}
 .mn-fine{flex:1 1 auto;min-width:0;margin:0;font-size:11.5px;color:var(--text-3,var(--muted));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .mn-chat.compact .mn-fine{display:none}
 .mn-chat.compact .mn-under{margin-top:4px;padding-left:4px}
-@media (max-width:640px){.mn-log{--lp:18px;padding:var(--lp) 14px 8px}.mn-comp{padding:8px 12px 10px}.mn-sugs{grid-template-columns:1fr}.mn-under{padding-left:4px;margin-top:4px}}
+.mn-chat.cw-narrow .mn-log{--lp:18px;padding:var(--lp) var(--mn-gut) 8px}.mn-chat.cw-narrow .mn-comp{padding:8px var(--mn-gut) 10px}.mn-chat.cw-narrow .mn-sugs{grid-template-columns:1fr}.mn-chat.cw-narrow .mn-under{padding-left:4px;margin-top:4px}
 @media (prefers-reduced-motion:reduce){.mn-u,.mn-turn,.mn-tool,.mn-sug{animation:none}.mn-hello-mark::before,.mn-mark.pulse,.mn-turn.live .mn-av .mn-mark{animation:none}.mn-think i,.mn-think span,.mn-caret{animation:none}}
 
 /* Composer: + attach, chips that grow the box, the model pill once there is something to send. */
@@ -556,9 +593,12 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-pin.on .i{transform:none;fill:currentColor}
 
 /* Scrolling: the log fades out under its edges, like a timeline. */
-.mn-log{--fa:0px;--fb:0px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%);
-  mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%)}
-.mn-chat.fade-top .mn-log{--fa:0px}
+.mn-log{--fa0:0px;--fa:0px;--fb:0px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent var(--fa0),#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,transparent var(--fa0),#000 var(--fa),#000 calc(100% - var(--fb)),transparent 100%)}
+/* Scrolled down: what passes under the model pill and the top buttons fades away before it
+   reaches them, so the pill never sits on top of text. */
+.mn-chat.fade-top .mn-log{--fa0:40px;--fa:84px}
+@media (pointer:coarse){.mn-chat.fade-top .mn-log{--fa0:44px;--fa:88px}}
 .mn-chat.fade-bot .mn-log{--fb:28px}
 
 /* Timeline rail, right: one bar per question at a fixed spacing; the one in view is longer and darker.
@@ -590,21 +630,21 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   box-shadow:0 10px 28px -12px rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .12s,transform .16s var(--ease-out,ease-out),top .08s linear}
 .mn-rlab b{flex:none;font-size:11px;font-weight:650;color:var(--accent);font-variant-numeric:tabular-nums}
 .mn-rlab.in{opacity:1;transform:translate(0,-50%)}
-.mn-chat.has-rail .mn-log{padding-right:44px}
+/* The timeline needs room on the right: the gutter grows on both sides of the log AND the
+   composer, so their edges still match. */
+.mn-chat.has-rail{--mn-gut:44px}
 /* Phones: no avatar beside Mnemo's replies, so they and the questions use the full width between equal margins;
    the timeline narrows into the right margin instead of taking a column of its own. */
-@media (max-width:640px){
-  .mn-log,.mn-chat.has-rail .mn-log{padding-left:12px;padding-right:12px}
-  .mn-turn{grid-template-columns:minmax(0,1fr);gap:0}
-  .mn-turn>.mn-av{display:none}
-  .mn-ub{max-width:88%}
+/* A narrow chat (a phone, or a desktop chat squeezed by its side panes): the same, by the
+   chat's own width. */
+.mn-chat.cw-narrow:not(.compact),.mn-chat.cw-narrow.has-rail:not(.compact){--mn-gut:12px}
+.mn-chat.cw-narrow .mn-ub{max-width:88%}
   /* The bars stay thin, but the finger gets a wider strip to land on. */
-  .mn-rail{right:0;width:28px}
-  .mn-rb{width:28px;padding:0 5px 0 1px}
-  .mn-rknob{right:0;width:2.5px;height:14px}
-  .mn-rb i{width:calc(var(--w,12px) * .45 * var(--m,1))}
-  .mn-rb.on i{width:10px}
-}
+.mn-chat.cw-narrow .mn-rail{right:0;width:28px}
+.mn-chat.cw-narrow .mn-rb{width:28px;padding:0 5px 0 1px}
+.mn-chat.cw-narrow .mn-rknob{right:0;width:2.5px;height:14px}
+.mn-chat.cw-narrow .mn-rb i{width:calc(var(--w,12px) * .45 * var(--m,1))}
+.mn-chat.cw-narrow .mn-rb.on i{width:10px}
 
 /* Chat memory popover (the ring in the composer). */
 .mn-cx{position:fixed;z-index:120;display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:16px;background:var(--panel,var(--surface-1));-webkit-backdrop-filter:none;backdrop-filter:none;border:1px solid var(--line-strong);
@@ -671,11 +711,16 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-comp textarea.fb{--ta-fb:18px}
 
 /* A question from Mnemo: options to tap, and Other. */
-.mn-ask{margin:10px 0 4px;padding:12px;border:1px solid var(--accent-line,var(--line-strong));border-radius:14px;background:color-mix(in srgb,var(--accent) 5%,var(--panel,var(--surface-1)))}
-.mn-ask-q{display:flex;gap:8px;align-items:flex-start;font-size:calc(var(--mn-fs,14.5px) - .5px);font-weight:600;line-height:1.45;margin-bottom:10px}
-.mn-ask-q .i{width:17px;height:17px;flex:none;margin-top:2px;color:var(--accent)}
-.mn-ask-o{display:flex;flex-direction:column;gap:6px}
-.mn-ask-b{display:flex;align-items:flex-start;gap:10px;width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:11px;background:var(--panel,var(--surface-1));
+/* A question from Mnemo: the question on a tinted band (who asks, then the question in
+   larger type), the answers below on the plain card as separate rows to tap. */
+.mn-ask{margin:10px 0 4px;padding:0;overflow:hidden;border:1px solid var(--line-strong);border-radius:16px;background:var(--surface-0,var(--bg));
+  box-shadow:0 10px 28px -22px rgba(15,23,42,.45)}
+.mn-ask-h{padding:13px 16px 14px;border-bottom:1px solid var(--accent-line,var(--line));background:color-mix(in srgb,var(--accent) 9%,var(--surface-0,var(--bg)))}
+.mn-ask-ey{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11.5px;font-weight:650;letter-spacing:.02em;color:var(--accent)}
+.mn-ask-ey .i{width:15px;height:15px;flex:none}
+.mn-ask-q{margin:0;font-size:calc(var(--mn-fs,14.5px) + 1px);font-weight:600;line-height:1.5;color:var(--fg);overflow-wrap:anywhere;white-space:pre-wrap}
+.mn-ask-o{display:flex;flex-direction:column;gap:6px;padding:10px}
+.mn-ask-b{display:flex;align-items:flex-start;gap:11px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel,var(--surface-1));
   color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,background .15s,transform .12s}
 .mn-ask-b:hover:not(:disabled){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--panel,var(--surface-1)))}
 .mn-ask-b:active:not(:disabled){transform:scale(.99)}
@@ -683,7 +728,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   color:var(--muted);font-size:12px;font-weight:600}
 .mn-ask-n .i{width:13px;height:13px}
 .mn-ask-c{display:flex;flex-direction:column;gap:2px;min-width:0}
-.mn-ask-b b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:600}
+.mn-ask-b b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:550;line-height:1.4;color:var(--text-2,var(--fg))}
+.mn-ask-b:hover:not(:disabled) b{color:var(--fg)}
 .mn-ask-b small{font-size:calc(var(--mn-fs,14.5px) - 2.5px);color:var(--muted);line-height:1.4}
 .mn-ask-b.ok b::before{content:"✓ ";color:var(--accent)}
 .mn-ask-b.other{border-style:dashed}
@@ -692,11 +738,12 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-ask-f[hidden]{display:none}
 .mn-ask-f input{flex:1;min-width:0;height:32px;border:0;outline:0;background:none;color:var(--fg);font:inherit;font-size:14px}
 .mn-ask-f .mn-ibtn{background:var(--accent);color:var(--on-accent,#fff);border-radius:8px}
-.mn-ask-skip{margin-left:auto;flex:none;padding:1px 8px;border-radius:999px;background:var(--surface-2,color-mix(in srgb,var(--fg) 7%,transparent));color:var(--muted);font-size:11.5px;font-style:normal;font-weight:500}
+.mn-ask-skip{margin-inline-start:auto;letter-spacing:0;flex:none;padding:1px 8px;border-radius:999px;background:var(--surface-2,color-mix(in srgb,var(--fg) 7%,transparent));color:var(--muted);font-size:11.5px;font-style:normal;font-weight:500}
 .mn-ask.done .mn-ask-b{cursor:default;opacity:.55}
 .mn-ask.done .mn-ask-b.on{opacity:1;border-color:var(--accent);background:var(--accent-soft)}
-.mn-ask.skipped{background:none;border-color:var(--line)}
-.mn-ask.skipped .mn-ask-q{color:var(--muted)}
+.mn-ask.skipped{border-color:var(--line);box-shadow:none}
+.mn-ask.skipped .mn-ask-h{background:none;border-bottom-color:var(--line)}
+.mn-ask.skipped :is(.mn-ask-q,.mn-ask-ey){color:var(--muted)}
 /* Permission picker in the composer: Ask first (accent), Auto (warm), Read only (neutral). */
 .mn-perm-slot{display:inline-flex;min-width:0}
 .mn-perm-slot[hidden]{display:none}
@@ -847,21 +894,18 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-memline-a{flex:none;padding:2px 4px;border:0;border-radius:6px;background:none;color:var(--accent);font:inherit;font-size:12.5px;cursor:pointer}
 .mn-memline-a:hover{background:var(--accent-soft)}
 
-/* Chat width (per device). Phones always use the full width. */
-@media (min-width:641px){
-  .mn-chat.w-wide:not(.compact) .mn-log>*{max-width:1100px}
-  .mn-chat.w-wide:not(.compact) .mn-ub,.mn-chat.w-wide:not(.compact) .mn-u-att{max-width:70%}
-  .mn-chat.w-wide:not(.compact) :is(.mn-comp-box,.mn-under,.mn-slash,.mn-tray){max-width:1100px}
-  .mn-chat.w-full:not(.compact) .mn-log{padding-left:32px;padding-right:32px}
-  .mn-chat.w-full.has-rail:not(.compact) .mn-log{padding-right:48px}
-  .mn-chat.w-full:not(.compact) .mn-log>*{max-width:none}
-  .mn-chat.w-full:not(.compact) .mn-log>.mn-hello{max-width:620px}
-  .mn-chat.w-full:not(.compact) .mn-ub,.mn-chat.w-full:not(.compact) .mn-u-att{max-width:70%}
-  .mn-chat.w-full:not(.compact) .mn-md>:is(p,ul,ol,blockquote,h1,h2,h3,h4,h5,h6,dl){max-width:90ch}
-  .mn-chat.w-full:not(.compact) .mn-comp{padding-left:32px;padding-right:32px}
-  .mn-chat.w-full:not(.compact) :is(.mn-comp-box,.mn-under,.mn-tray){max-width:none}
-  .mn-chat.w-full:not(.compact) .mn-slash{max-width:none;left:32px;right:32px}
-}
+/* Chat width (per device). Phones always use the full width. Only the shared column variables
+   change, so the log and the composer can never drift apart. */
+  .mn-chat.w-wide:not(.compact):not(.cw-narrow){--mn-col:1100px}
+  .mn-chat.w-wide:not(.compact):not(.cw-narrow) .mn-ub,.mn-chat.w-wide:not(.compact):not(.cw-narrow) .mn-u-att{max-width:70%}
+  .mn-chat.w-wide:not(.compact):not(.cw-narrow) .mn-tray{max-width:1100px}
+  .mn-chat.w-full:not(.compact):not(.cw-narrow){--mn-col:none;--mn-gut:32px}
+  .mn-chat.w-full.has-rail:not(.compact):not(.cw-narrow){--mn-gut:48px}
+  .mn-chat.w-full:not(.compact):not(.cw-narrow) .mn-log>.mn-hello{max-width:620px}
+  .mn-chat.w-full:not(.compact):not(.cw-narrow) .mn-ub,.mn-chat.w-full:not(.compact):not(.cw-narrow) .mn-u-att{max-width:70%}
+  .mn-chat.w-full:not(.compact):not(.cw-narrow) .mn-md>:is(p,ul,ol,blockquote,h1,h2,h3,h4,h5,h6,dl){max-width:90ch}
+  .mn-chat.w-full:not(.compact):not(.cw-narrow) .mn-tray{max-width:none}
+
 
 /* Sub-agents: a reply keeps one line per group; their work shows in the Agents panel. */
 .mn-team-line{display:flex;align-items:center;gap:10px;width:100%;max-width:none;margin:8px 0;padding:8px 8px 8px 10px;border:1px solid var(--line);border-radius:12px;
@@ -924,24 +968,43 @@ details.mn-ag-done{display:block}
 .mn-sub[data-state=done] .mn-sub-chip .i{color:var(--accent)}
 .mn-sub[data-state=err] .mn-sub-chip{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,transparent)}
 .mn-sub-m{display:flex;align-items:center;gap:10px;min-width:0}
+/* Once it has stopped working, the window meter gives way to the token line alone. */
+.mn-sub:not([data-state=run]):not([data-state=ask]) .mn-sub-bar{display:none}
+.mn-sub:not([data-state=run]):not([data-state=ask]) .mn-sub-tok{margin-left:0;margin-inline-start:0}
 .mn-sub-m[hidden]{display:none}
 .mn-sub-bar{flex:1;min-width:40px;height:4px;border-radius:99px;overflow:hidden;background:color-mix(in srgb,var(--fg) 8%,transparent)}
 .mn-sub-bar[hidden]{display:none}
 .mn-sub-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--accent);transition:width .3s var(--ease-out,ease-out)}
 .mn-sub-bar.hi i{background:var(--danger)}
 .mn-sub-tok{flex:none;margin-left:auto;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-.mn-sub-task{display:block;width:100%;padding:0;border:0;background:none;text-align:left;font:inherit;font-size:12.5px;line-height:1.45;color:var(--text-2,var(--fg));cursor:pointer;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mn-sub-task[aria-expanded=true]{white-space:pre-wrap;overflow-wrap:anywhere}
-.mn-sub-act>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg));user-select:none}
-.mn-sub-act>summary::-webkit-details-marker{display:none}
-.mn-sub-act>summary em{font-style:normal;font-weight:500;color:var(--muted)}
-.mn-sub-act>summary em:not(:empty)::before{content:"· "}
-.mn-sub-act[open] .mn-sub-chev{transform:rotate(90deg)}
-.mn-sub:is([data-state=run],[data-state=ask]) .mn-sub-act>summary{display:none}
-.mn-sub-act:has(.mn-sub-log:empty){display:none}
+/* A sub-agent card: Instruction, Activity and Answer, always there whatever it is doing; each
+   opens and folds on its own (Activity opens while it runs, unless the owner folds it). */
+/* The top of a long chat: the older part waits outside the page until it is scrolled to. */
+.mn-more{display:flex;align-items:center;justify-content:center;gap:6px;align-self:center;width:auto!important;max-width:none!important;margin:0 auto 4px;padding:6px 14px;border:1px solid var(--line);border-radius:999px;
+  background:var(--surface-1,var(--panel));color:var(--text-2,var(--fg));font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}
+.mn-more:hover{background:var(--hover);border-color:var(--line-strong)}
+.mn-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-more .i{width:14px;height:14px}
+.mn-sub-id{margin-inline-start:6px;padding:1px 6px;border-radius:6px;font:600 10.5px/1.5 var(--mono,ui-monospace,monospace);color:var(--muted);background:var(--hover);vertical-align:1px}
+.mn-sub-acc{margin:0 -6px}
+.mn-sub-acc+.mn-sub-acc{margin-top:-6px}
+.mn-sub-acc>summary{display:flex;align-items:center;gap:6px;min-height:26px;padding:0 6px;list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg));user-select:none;border-radius:7px;transition:background .15s}
+.mn-sub-acc>summary:hover{background:var(--hover)}
+.mn-sub-acc>summary::-webkit-details-marker{display:none}
+.mn-sub-acc>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mn-sub-acc>summary em{font-style:normal;font-weight:500;color:var(--muted)}
+.mn-sub-acc>summary em:not(:empty)::before{content:"· "}
+.mn-sub-acc[open] .mn-sub-chev{transform:rotate(90deg)}
+.mn-sub-body{padding:2px 6px 8px 25px}
+.mn-sub-task{margin:0;font-size:12.5px;line-height:1.5;color:var(--text-2,var(--fg));white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.mn-sub-rules{margin-top:8px;padding:7px 9px;border-radius:8px;background:var(--hover);font-size:12px;line-height:1.45}
+.mn-sub-rules[hidden]{display:none}
+.mn-sub-rules b{display:block;font-weight:600;color:var(--muted);margin-bottom:2px}
+.mn-sub-rules p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2,var(--fg))}
+.mn-sub-empty{margin:0;font-size:12px;color:var(--muted);font-style:italic}
+.mn-sub-body:has(.mn-sub-log:not(:empty)) > .mn-sub-empty,.mn-sub-body:has(.mn-sub-pre:not([hidden])) > .mn-sub-empty{display:none}
+.mn-sub-act .mn-sub-pre{margin-top:6px}
 .mn-sub-log{display:flex;flex-direction:column;gap:6px;margin:0;padding:0 0 0 12px;border-left:2px solid var(--line);list-style:none}
-.mn-sub:not([data-state=run]):not([data-state=ask]) .mn-sub-log{margin-top:8px}
 .mn-sub-log:empty{display:none}
 /* A sub-agent's activity: newest first in a short window, no scrollbar, fading at the bottom;
    Show all grows it down smoothly and folds it back up. */
@@ -949,7 +1012,7 @@ details.mn-ag-done{display:block}
 .mn-agents .mn-sub-log::-webkit-scrollbar{display:none}
 .mn-agents .mn-sub-log.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 56px),transparent);mask-image:linear-gradient(#000 calc(100% - 56px),transparent)}
 .mn-agents .mn-sub-log.all{overflow:hidden}
-.mn-sub-all{display:block;margin:6px 0 0 12px;padding:3px 8px;border:0;border-radius:8px;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer}
+.mn-sub-all{display:block;margin:6px 0 0 12px;margin-inline-start:12px;padding:3px 8px;border:0;border-radius:8px;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer}
 .mn-sub-all:hover{background:var(--accent-soft)}
 .mn-sub-all[hidden]{display:none}
 @media (prefers-reduced-motion:reduce){.mn-agents .mn-sub-log{transition:none}}
@@ -965,31 +1028,24 @@ details.mn-ag-done{display:block}
 .mn-sub-x>span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mn-sub-pre{font-size:12px;line-height:1.45;color:var(--muted);opacity:.75;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-sub-pre[hidden]{display:none}
-.mn-sub-ans{border-top:1px solid var(--line);padding-top:6px}
-.mn-sub-ans>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2,var(--fg))}
-.mn-sub-ans>summary::-webkit-details-marker{display:none}
 .mn-sub-chev{width:13px;height:13px;color:var(--muted);transition:transform .15s}
-.mn-sub-ans[open] .mn-sub-chev{transform:rotate(90deg)}
-.mn-sub-ans .mn-md{margin-top:6px;max-height:360px;overflow:auto;font-size:13px}
+.mn-sub-ans .mn-md{max-height:360px;overflow:auto;font-size:13px}
 @media (max-width:640px){.mn-sub{padding:9px 10px}.mn-sub-chip{max-width:46%}.mn-agents{padding:10px}}
 @media (prefers-reduced-motion:reduce){.mn-sub-bar i,.mn-sub-chev,.mn-ag-chev{transition:none}.mn-team-line{animation:none}}
 
-/* Mnemo's replies span the same width as the message box (same left and right edge); its mark
-   hangs just outside on the left when there is room for it, else it stays inside as before. */
+/* Mnemo's replies span the same width as the message box (same left and right edge). Its mark
+   hangs just outside on the left when the gutter has room for it; without that room it is left
+   out (as on phones) rather than pushing the reply in from the box's edge. */
 .mn-log{container-type:inline-size}
+.mn-turn{grid-template-columns:minmax(0,1fr);gap:0;position:relative}
+.mn-turn>.mn-av{display:none}
 @container (min-width: 868px){
-  .mn-chat:not(.compact):not(.w-wide):not(.w-full) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
-  .mn-chat:not(.compact):not(.w-wide):not(.w-full) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
+  .mn-chat:not(.compact):not(.w-wide):not(.w-full) .mn-turn>.mn-av{display:block;position:absolute;inset-inline-start:-44px;top:0}
 }
 @container (min-width: 1188px){
-  .mn-chat.w-wide:not(.compact) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
-  .mn-chat.w-wide:not(.compact) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
+  .mn-chat.w-wide:not(.compact) .mn-turn>.mn-av{display:block;position:absolute;inset-inline-start:-44px;top:0}
 }
-/* Full width: the chat, the dock and the message box share one gutter wide enough for the mark. */
-@media (min-width:1100px){
-  .mn-chat.w-full:not(.compact) .mn-log{padding-left:76px;padding-right:76px}
-  .mn-chat.w-full:not(.compact) .mn-comp{padding-left:76px;padding-right:76px}
-  .mn-chat.w-full:not(.compact) .mn-turn{grid-template-columns:minmax(0,1fr);position:relative}
-  .mn-chat.w-full:not(.compact) .mn-turn>.mn-av{position:absolute;left:-44px;top:0}
-}
+/* Full width: the chat and the message box share one gutter wide enough for the mark. */
+.mn-chat.w-full.cw-big:not(.compact),.mn-chat.w-full.cw-big.has-rail:not(.compact){--mn-gut:76px}
+.mn-chat.w-full.cw-big:not(.compact) .mn-turn>.mn-av{display:block;position:absolute;inset-inline-start:-44px;top:0}
 `;

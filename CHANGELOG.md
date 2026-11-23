@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-24
+
+Mnemo steers its sub-agents, its plan belongs to the chat, and the chat fits
+every screen better.
+
+### Added
+
+- Mnemo manages its sub-agents with a new `agents` tool: list them, set one up
+  ahead of its task, change its instructions, model or name, send a running
+  one a message, wait for it, stop it, mark it done or remove it from the list.
+  A running sub-agent takes a new model or instructions from its next step.
+  Every sub-agent has a short id that never changes (a1, a2, …), shown on its
+  card: Mnemo points at it by id, so a name can change freely, and stop, done
+  and remove take several at once (or all). Sub-agents a chat ran before this
+  update are on the list too.
+- Sub-agents in the background: `delegate` with `wait: false` lets a sub-agent
+  work while Mnemo goes on; Mnemo collects its answer with `agents` wait, and
+  the reply never ends before every one has answered.
+- Every sub-agent card shows Instruction, Activity and Answer from the start,
+  whatever it is doing; Activity opens while it works and stays folded if you
+  fold it.
+- Clear the plan: a button on the plan puts away a plan you no longer want
+  (while no reply runs).
+- Resizable panes on desktop: drag the edge of the chat list or of the side
+  panel (Agents, In this chat) to change its width, like the page preview;
+  each keeps a minimum so nothing gets squashed, a double-click resets it, and
+  the width is remembered on the device.
+
+### Changed
+
+- Mnemo's plan belongs to the chat, not to one reply. Mnemo adds, edits,
+  checks and removes single steps as it works, every device sees each change
+  live, a stopped reply leaves the plan as it was (Mnemo sees it again next
+  turn), and it closes the moment every step is done.
+- Long chats open and scroll lightly: only the latest questions go on the page
+  at first; earlier ones come in as you scroll up (or with Show earlier
+  questions), jump to one on the timeline, or open a search hit there.
+- Pictures for a model that cannot see: only the pictures in your newest
+  message go to the image model (earlier ones never hold up another question),
+  and you hear of it in a short toast instead of a line in the chat.
+- The chat list is roomier: wider rows with the time and a preview, the ⋯ menu
+  always in reach (larger on touch screens), a drawer on tablets and a whole
+  screen on phones, with a bottom bar for the rest.
+- Mnemo's questions read more easily: the question sits on its own band (who
+  asks, then the question in larger type), the answers below as separate rows
+  to tap, and Mnemo gives as many options as the question needs.
+- The model picker sits on its own solid surface above the chat, as a pill in
+  the top row, and the chat fades out before it passes under it.
+- In dark mode the What's new header is a light band, so it stands out from
+  the dialog.
+- A fleeting chat on a phone fills the screen, with a compact header and the
+  message box pinned above the keyboard.
+
+### Fixed
+
+- Messages and the message box now share exactly the same edges in compact,
+  wide and full width, with or without the timeline rail.
+- Compact, wide and full width follow the chat's own width, so they keep
+  their look when the side panes are dragged; a squeezed chat gets the narrow
+  layout.
+- Tool steps in a narrow chat take two lines instead of overlapping their
+  result, and Mnemo's sub-agent steps say what they did ("Marked 3 sub-agents
+  done").
+- Scroll to bottom no longer shows when the chat is already at its end; it
+  checks again on resize, the keyboard, new content and loaded pictures, and
+  shows only when you are about half a screen away.
+- Stop always lets the next queued message go out, also when the reply was
+  waiting for your answer.
+- Tapping an option of Mnemo's question (or any button in the chat) while
+  typing no longer misses: the message box folds after the click, not on the
+  press, so nothing slides away under the pointer.
+
 ## [3.0.0] - 2026-11-23
 
 Memora speaks your language, Mnemo shows its plan as it works, and you decide

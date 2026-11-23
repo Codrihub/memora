@@ -4,7 +4,7 @@
 import { attr, el, esc, useStyles } from '../dom';
 import { relTs } from '../format';
 import { hooks } from '../hooks';
-import { toast } from '../toast';
+import { notify, toast } from '../toast';
 import { icon } from '../ui/icons';
 import { createSelect, type Select, type SelectOption } from '../ui/select';
 import { requestSettingsSection } from '../version';
@@ -92,6 +92,7 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
   pin: ['Pinned', true],
   unpin: ['Unpinned', true],
   delegate: ['Asked a sub-agent', false],
+  agents: ['Managed sub-agents', false],
   describe_image: ['Looked at an image', false],
   generate_image: ['Made an image', false],
 };
@@ -100,6 +101,8 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
 const RICH = new Set(['describe_image', 'generate_image']);
 /** A task handed to a sub-agent: drawn as a small live panel in the reply, not a step. */
 const DELEGATE = 'delegate';
+/** Mnemo managing its sub-agents (list, edit, message, wait, stop, done, remove). */
+const AGENTS = 'agents';
 /** Mnemo's plan: a checklist above the message box, not a step. */
 const PLAN = 'update_plan';
 /** Tools that change what Mnemo knows about the owner: a quiet line in the reply, not a step. */
@@ -111,7 +114,36 @@ function argStr(args: unknown, key: string): string {
 }
 
 /** A tool card's title and the line under it. */
+/** Who an agents call is about: one name or id, several, or every one. */
+function agentsWho(args: unknown): string {
+  const list = ((args as { agents?: unknown })?.agents as unknown[] | undefined)?.filter((x): x is string => typeof x === 'string') || [];
+  if (list.some((x) => ['all', '*', 'every', 'everyone'].includes(x.trim().toLowerCase()))) return t('every sub-agent');
+  if (list.length > 1) return t('{n} sub-agents', { n: list.length });
+  return list[0] || argStr(args, 'id') || argStr(args, 'agent') || t('Sub-agent');
+}
+
 function toolTitle(name: string, args: unknown): [string, string] {
+  if (name === 'agents') {
+    const who = agentsWho(args);
+    switch (argStr(args, 'action')) {
+      case 'list':
+        return [t('Listed sub-agents'), ''];
+      case 'create':
+        return [t('Set up {agent}', { agent: who }), argStr(args, 'instructions')];
+      case 'edit':
+        return [t('Changed {agent}', { agent: who }), argStr(args, 'rename') || argStr(args, 'model')];
+      case 'message':
+        return [t('Messaged {agent}', { agent: who }), argStr(args, 'text')];
+      case 'wait':
+        return [t('Waited for sub-agents'), ''];
+      case 'stop':
+        return [t('Stopped {agent}', { agent: who }), ''];
+      case 'done':
+        return [t('Marked {agent} done', { agent: who }), ''];
+      case 'remove':
+        return [t('Removed {agent}', { agent: who }), ''];
+    }
+  }
   if (name === 'delegate') return [argStr(args, 'agent') ? t('Asked {agent}', { agent: argStr(args, 'agent') }) : toolWords(name), argStr(args, 'task')];
   if (name === 'generate_image') return [toolWords(name), argStr(args, 'prompt')];
   if (name === 'describe_image') return [toolWords(name), argStr(args, 'question') || subject(args)];
@@ -368,6 +400,8 @@ const permMode = (p: string | null | undefined): PermMode => (p === 'auto' || p 
 export class ChatView {
   readonly el: HTMLElement;
   private downBtn!: HTMLButtonElement;
+  /** A pending re-check of the scroll-to-bottom button (one per frame). */
+  private downFrame = 0;
   private cur: A.Session | null = null;
   /** The open chat; the element carries its id so the unread count knows it is on screen. */
   get session(): A.Session | null {
@@ -455,6 +489,11 @@ export class ChatView {
   private stuck = true;
   /** The plan came from Mnemo (update_plan), so sub-agents do not replace it. */
   private planOwn = false;
+  /** The chat's plan as the server keeps it: it belongs to the chat, not to a reply, so a
+   *  stopped reply leaves it as it was. */
+  private sessionPlan: PlanStep[] = [];
+  /** The chat's sub-agents as the server keeps them (done, removed, instructions). */
+  private agentsInfo: A.AgentsInfo | undefined;
 
   constructor(private o: ChatOptions) {
     useStyles('mnemo-css', MNEMO_CSS);
@@ -470,6 +509,7 @@ export class ChatView {
             <button type="button" class="mn-live" hidden aria-live="polite"><i aria-hidden="true"></i><span class="mn-live-t"></span><span class="mn-live-s"></span>${icon('chev-right')}</button>
             <b class="mn-plan-ttl"></b>
             <button type="button" class="mn-plan-h" aria-expanded="true"><span class="mn-plan-n"></span><i class="mn-plan-bar" aria-hidden="true"><i></i></i>${icon('chev-down', 'i mn-plan-chev')}</button>
+            <button type="button" class="mn-plan-x" aria-label="${t('Clear the plan')}" title="${t('Clear the plan')}">${icon('close')}</button>
           </div></div></div>
           <div class="mn-col mn-plan-c"><div class="mn-col-in"><div class="mn-plan" role="list" aria-label="${t('Plan')}"></div></div></div>
           <div class="mn-col mn-queue-c"><div class="mn-col-in"><div class="mn-queue"></div></div></div>
@@ -503,6 +543,16 @@ export class ChatView {
     this.modelSlot = this.el.querySelector('.mn-model-slot')!;
     this.pinBtn = this.el.querySelector('.mn-pin')!;
     this.pinBtn.onclick = () => void this.togglePin();
+    // Narrow, normal or wide by the chat's own width (not the window's), so compact, wide
+    // and full keep their look when the side panes are dragged wider or narrower.
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver((es) => {
+        const w = es[es.length - 1]?.contentRect.width || 0;
+        if (!w) return;
+        this.el.classList.toggle('cw-narrow', w <= 640);
+        this.el.classList.toggle('cw-big', w >= 1100);
+      }).observe(this.el);
+    }
     this.agents = new AgentsPanel(() => this.o.onAgents?.());
     this.agents.el.addEventListener('click', (e) => this.onAgentsClick(e));
     this.rail = this.el.querySelector('.mn-rail')!;
@@ -516,6 +566,14 @@ export class ChatView {
       this.planFolded = !this.planFolded;
       this.trayEl.classList.toggle('folded', this.planFolded);
       this.el.querySelector('.mn-plan-h')!.setAttribute('aria-expanded', String(!this.planFolded));
+    };
+    // The owner puts a plan away that is no longer wanted (only while no reply runs).
+    this.el.querySelector<HTMLButtonElement>('.mn-plan-x')!.onclick = () => {
+      const sid = this.session?.id;
+      if (!sid || this.busy) return;
+      this.sessionPlan = [];
+      this.showPlan(null);
+      void A.clearPlan(sid).catch((e: Error) => toast(e.message, 'err'));
     };
     // Coming back to the window or tab puts the cursor in the message box, ready to type
     // (desktop only; a click elsewhere on the page still folds the box away).
@@ -539,6 +597,7 @@ export class ChatView {
     if (typeof ResizeObserver !== 'undefined')
       new ResizeObserver(() => {
         if (this.stuck) this.log.scrollTop = this.log.scrollHeight;
+        this.queueDown();
       }).observe(this.log);
     this.liveEl.onclick = (e) => {
       if (e.detail) this.liveEl.blur();
@@ -558,6 +617,23 @@ export class ChatView {
       if (!this.railFrame) this.railFrame = requestAnimationFrame(() => this.syncRail());
     }, { passive: true });
     this.downBtn = this.el.querySelector('.mn-down')!;
+    // The jump-to-end button follows the real distance to the end, not only scrolling: the
+    // window or on-screen keyboard resizing, turns coming and going (a new chat, another chat
+    // opened), images loading and cards unfolding all re-check it.
+    const recheck = (): void => this.queueDown();
+    window.addEventListener('resize', recheck, { passive: true });
+    window.visualViewport?.addEventListener('resize', recheck, { passive: true });
+    if (typeof MutationObserver !== 'undefined') new MutationObserver(recheck).observe(this.log, { childList: true, subtree: true });
+    this.log.addEventListener('toggle', recheck, true);
+    // An image that loads at the end of a chat that sat at its end keeps it there.
+    this.log.addEventListener(
+      'load',
+      () => {
+        if (this.stuck) this.log.scrollTop = this.log.scrollHeight;
+        this.queueDown();
+      },
+      true,
+    );
     this.downBtn.onclick = () => {
       this.log.scrollTo({ top: this.log.scrollHeight, behavior: 'smooth' });
       this.input.focus({ preventScroll: true });
@@ -604,14 +680,36 @@ export class ChatView {
       window.setTimeout(() => this.scrollEnd(), 320);
       this.paintOpen();
     });
+    // A press outside the box folds it only once that press has become a click (or a moment
+    // later): folding at once would move the chat under the pointer, so a question's option,
+    // a link or a button would slide away before the click lands on it.
+    let pressing = false;
     form.addEventListener('focusout', () => {
       window.setTimeout(() => {
+        if (pressing) return;
         const a = document.activeElement;
         if (a && a !== document.body && away(a)) this.fold();
       }, 0);
     });
     const outside = (e: PointerEvent): void => {
-      if (this.focused && away(e.target)) this.fold();
+      if (!this.focused || !away(e.target)) return;
+      pressing = true;
+      let done = false;
+      const after = (): void => {
+        if (done) return;
+        done = true;
+        document.removeEventListener('click', after, true);
+        window.clearTimeout(late);
+        window.setTimeout(() => {
+          pressing = false;
+          const a = document.activeElement;
+          // Back in the box meanwhile (or a menu it opened): it stays open.
+          if (a && a !== document.body && !away(a)) return;
+          this.fold();
+        }, 0);
+      };
+      const late = window.setTimeout(after, 900);
+      document.addEventListener('click', after, true);
     };
     // A press on the box itself (its padding, the empty bar) counts as the message field: the
     // field keeps focus, so the box does not fold and open again.
@@ -864,7 +962,10 @@ export class ChatView {
 
   /** Bring message `mid` into view and flash it (a search hit). */
   reveal(mid: number): void {
-    const hit = this.log.querySelector<HTMLElement>(`[data-mid="${mid}"]`);
+    const sel = `[data-mid="${mid}"]`;
+    const out = this.findAll(sel)[0];
+    if (out && !out.isConnected) this.unhold(out);
+    const hit = this.log.querySelector<HTMLElement>(sel);
     if (!hit) return;
     hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     hit.classList.remove('mn-flash');
@@ -1048,6 +1149,9 @@ export class ChatView {
       case 'reload':
         if (!this.busy) void this.refresh(sid);
         break;
+      case 'plan':
+        if (this.session?.id === sid) this.setPlan(ev.steps);
+        break;
     }
   }
 
@@ -1088,6 +1192,8 @@ export class ChatView {
       const same = msgs.length === this.messages.length && msgs[msgs.length - 1]?.id === this.messages[this.messages.length - 1]?.id;
       this.session = r.session;
       this.setQueue(r.queue);
+      this.setPlan(r.plan || []);
+      this.agentsInfo = r.agents;
       if (!same) {
         const atEnd = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 80;
         const top = this.log.scrollTop;
@@ -1394,7 +1500,7 @@ export class ChatView {
   private railHold = false;
 
   private paintRail(): void {
-    const us = Array.from(this.log.querySelectorAll<HTMLElement>('.mn-u'));
+    const us = this.users();
     const show = us.length >= 3;
     this.rail.hidden = !show;
     this.el.classList.toggle('has-rail', show);
@@ -1459,7 +1565,7 @@ export class ChatView {
       const lab = this.rail.querySelector<HTMLElement>('.mn-rlab');
       const b = bars()[i];
       if (!lab || !b) return;
-      const u = this.log.querySelectorAll<HTMLElement>('.mn-u')[i];
+      const u = this.users()[i];
       const txt = (u?.querySelector('.mn-ub')?.textContent || '').trim();
       lab.innerHTML = `<b>${i + 1}/${bars().length}</b>${esc(txt.slice(0, 90) || t('Message'))}`;
       const r = b.getBoundingClientRect();
@@ -1468,9 +1574,14 @@ export class ChatView {
       window.clearTimeout(hide);
     };
     const go = (i: number, smooth: boolean): void => {
-      const us = this.log.querySelectorAll<HTMLElement>('.mn-u');
+      let us = this.users();
       const u = us[i];
       if (!u) return;
+      // A question outside the page comes back first (with everything after it).
+      if (!u.isConnected) {
+        this.unhold(u);
+        us = this.users();
+      }
       const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
       // The first bar is the very start of the chat, the last one its very end (the latest reply).
       const top =
@@ -1581,7 +1692,9 @@ export class ChatView {
     this.el.classList.toggle('fade-bot', max - top > 8);
     this.paintDown(max - top);
     if (this.rail.hidden) return;
-    const us = this.log.querySelectorAll<HTMLElement>('.mn-u');
+    const us = this.log.querySelectorAll<HTMLElement>(':scope > .mn-u');
+    // Questions still outside the page come first on the rail.
+    const off = this.heldQ();
     const box = this.log.getBoundingClientRect().top;
     const mid = this.log.clientHeight * 0.35;
     let cur = 0;
@@ -1593,8 +1706,10 @@ export class ChatView {
     let f = cur;
     if (cur < tops.length - 1 && tops[cur] <= mid) f = cur + Math.max(0, Math.min(1, (mid - tops[cur]) / Math.max(1, tops[cur + 1] - tops[cur])));
     // At the very top or bottom the end bars light up, whatever is in the middle.
-    if (top <= 8) cur = f = 0;
-    else if (max - top <= 8) cur = f = us.length - 1;
+    cur += off;
+    f += off;
+    if (top <= 8) cur = f = off;
+    else if (max - top <= 8) cur = f = off + us.length - 1;
     this.rail.querySelectorAll<HTMLElement>('.mn-rb').forEach((b, i) => b.classList.toggle('on', i === cur));
     if (!this.railHold) this.railPlace(f, this.railWin / 2);
     const knob = this.rail.querySelector<HTMLElement>('.mn-rknob');
@@ -1801,6 +1916,7 @@ export class ChatView {
       this.setQueue(undefined);
     }
     this.detach();
+    this.dropHeld();
     this.log.innerHTML = `<div class="mn-loading">${markHTML('lg pulse')}<span>${t('Opening the chat…')}</span></div>`;
     try {
       const r = await A.getSession(id);
@@ -1809,6 +1925,8 @@ export class ChatView {
       const lastU = r.running ? [...r.messages].reverse().find((m) => m.role === 'user')?.id || 0 : 0;
       this.messages = lastU ? r.messages.filter((m) => m.id <= lastU) : r.messages;
       this.model = r.session.model;
+      this.sessionPlan = r.plan || [];
+      this.agentsInfo = r.agents;
       this.attach = [];
       this.paintAtt();
       this.paintModels();
@@ -1824,6 +1942,7 @@ export class ChatView {
         void this.stream((signal, on) => A.streamLive(id, signal, on), lastU, true);
       }
     } catch (e) {
+      this.dropHeld();
       this.log.innerHTML = `<div class="mn-err">${icon('alert')}<span>${esc((e as Error).message)}</span></div>`;
     }
   }
@@ -2098,6 +2217,7 @@ export class ChatView {
     const ready = !!s && A.usableModels(s).length > 0;
     const about =
       kind === 'note' ? t('Ask about {name}, or anything in your vault.', { name: `<b>${esc(A.scopeLabel(sc))}</b>` }) : kind === 'folder' ? t('Ask about the folder {name}, or anything in your vault.', { name: `<b>${esc(A.scopeLabel(sc))}</b>` }) : t('I find, read, write, tag, link and tidy your notes. No web, no shell: only your vault.');
+    this.dropHeld();
     this.log.innerHTML = `<div class="mn-hello">
         ${
           this.fleetingOn
@@ -2148,6 +2268,7 @@ export class ChatView {
       return;
     }
     this.planOwn = own;
+    this.trayEl.classList.toggle('own', own);
     const was = new Map(Array.from(this.planEl.querySelectorAll<HTMLElement>('.mn-ps')).map((r) => [r.dataset.t || '', r.dataset.s || '']));
     const done = steps.filter((s) => s.status === 'done').length;
     this.planEl.innerHTML = steps
@@ -2179,17 +2300,21 @@ export class ChatView {
     this.trayEl.classList.toggle('on', live || plan || queued);
   }
 
-  /** Fold the checklist away a moment after its last step is done (the reply has ended). */
-  private planDone(): void {
-    const allDone = (): boolean => {
-      const rows = [...this.planEl.querySelectorAll<HTMLElement>('.mn-ps')];
-      return this.trayEl.classList.contains('has-plan') && rows.length > 0 && rows.every((r) => r.dataset.s === 'done');
-    };
-    if (!allDone()) return;
-    const gen = this.planGen;
-    window.setTimeout(() => {
-      if (gen === this.planGen && allDone()) this.showPlan(null);
-    }, 1400);
+  /** Answers of sub-agents in the background, collected by an agents wait: into their cards. */
+  private agentResults(output: unknown): void {
+    const o = parseOut(output) as { results?: { call_id?: string; ok?: boolean; answer?: string; model?: string; steps?: number; error?: string }[] } | null;
+    for (const r of o?.results || []) {
+      const c = this.agents.byId(r.call_id || '');
+      if (c) subFinal(c, r, r.ok !== false);
+    }
+  }
+
+  /** The chat's plan changed (Mnemo's update_plan, here or on another device): show it as it
+   *  is now; an empty plan (every step done, or cleared) folds away at once. */
+  private setPlan(steps: PlanStep[]): void {
+    this.sessionPlan = steps;
+    if (steps.length) this.showPlan(steps);
+    else if (this.planOwn || !this.busy) this.showPlan(null);
   }
 
   /** The checklist shows only its header and the step at work. */
@@ -2325,10 +2450,12 @@ export class ChatView {
 
   private renderAll(): void {
     closePreview();
+    this.dropHeld();
     this.log.innerHTML = '';
     this.agents.reset();
-    this.showPlan(null);
     if (!this.messages.length) {
+      this.sessionPlan = [];
+      this.showPlan(null);
       this.paintEmpty();
       return;
     }
@@ -2336,7 +2463,6 @@ export class ChatView {
     let tokens = { in: 0, out: 0, model: '' };
     let lastUser = 0;
     let lastModel = '';
-    let lastPlan: PlanStep[] | null = null;
     const finishTurn = (): void => {
       if (turn) this.finishAct(turn.querySelector<HTMLElement>('.mn-tb')!);
       if (turn) this.footer(turn, tokens.model, tokens.in, tokens.out);
@@ -2350,7 +2476,6 @@ export class ChatView {
       if (m.role === 'user') {
         finishTurn();
         turn = null;
-        lastPlan = null;
         const ub = this.userBubble(m.content, m.created_at, (m.meta?.attach as A.Attach[] | undefined) || []);
         ub.dataset.mid = String(m.id);
         lastUser = m.id;
@@ -2402,12 +2527,17 @@ export class ChatView {
           if (c.name === ASK) body.append(askEl({ id: c.id, ...(askOf(c.arguments) || { question: '', options: [], allow_other: true }) }, answerTo(this.messages, c.id)));
           else if (OWNER_MEMORY.has(c.name)) body.append(memLine(c.id, c.name, c.arguments));
           else if (c.name === DELEGATE) subCard(body, c.id, c.arguments, this.agents);
-          else if (c.name === PLAN) lastPlan = planOf(c.arguments);
           else if (c.name !== SHOW) this.toolCard(body, c.id, c.name, c.arguments);
         }
       } else if (m.role === 'tool' && m.tool_name === DELEGATE) {
         const sc = this.agents.byId(m.tool_call_id || '');
-        if (sc) subFinal(sc, m.content, m.meta?.ok !== false);
+        // One in the background answered later (in an agents wait).
+        if (sc && !(parseOut(m.content) as A.SubResult | null)?.background) subFinal(sc, m.content, m.meta?.ok !== false);
+      } else if (m.role === 'tool' && m.tool_name === AGENTS) {
+        this.agentResults(m.content);
+        const card = body.querySelector<HTMLElement>(`.mn-tool[data-id="${CSS.escape(m.tool_call_id || '')}"]`);
+        const meta = m.meta || {};
+        if (card) this.endTool(card, meta.ok !== false, String(meta.summary || ''), Number(meta.ms || 0), m.content);
       } else if (m.role === 'tool' && m.tool_name && OWNER_MEMORY.has(m.tool_name)) {
         if (m.meta?.ok === false) endMemLine(body, m.tool_call_id || '', false);
       } else if (m.role === 'tool' && m.tool_name === ASK) {
@@ -2426,17 +2556,138 @@ export class ChatView {
       }
     }
     finishTurn();
-    // A plan left unfinished (the reply was stopped) stays until the next message; a finished
-    // one is not brought back.
-    this.showPlan(lastPlan && lastPlan.some((x) => x.status !== 'done') ? lastPlan : null);
+    // The chat's plan as the server keeps it (a stopped reply left it as it was).
+    this.showPlan(this.sessionPlan.length ? this.sessionPlan : null);
     // A stored task with no result: the reply was stopped while it ran.
+    this.agents.apply(this.agentsInfo);
     this.agents.cards().forEach((c) => subStop(c));
     this.shownModel = lastModel;
     // Number the versions of each page across the whole chat.
     mountArt(this.log);
+    // A long chat keeps only its latest questions in the page; the rest wait until needed.
+    this.holdOld();
     this.scrollEnd(true);
     this.paintRail();
     requestAnimationFrame(() => this.log.querySelectorAll<HTMLElement>('.mn-car').forEach(syncCarousel));
+  }
+
+  // ---- long chats: the older part waits outside the page ----
+
+  /** Questions (with their replies) kept in the page when a long chat opens. */
+  private static KEEP_Q = 16;
+  /** Questions brought back at a time when scrolling up. */
+  private static MORE_Q = 12;
+  /** The older part of a long chat, oldest first: drawn already, but not in the page, so
+   *  hundreds of messages never weigh on scrolling and live replies. */
+  private held: HTMLElement[] = [];
+  private moreEl: HTMLElement | null = null;
+  private moreIO: IntersectionObserver | null = null;
+
+  /** Forget the older part (the log is drawn again or cleared). */
+  private dropHeld(): void {
+    this.held = [];
+    this.moreIO?.disconnect();
+    this.moreEl = null;
+  }
+
+  private holdOld(): void {
+    const kids = Array.from(this.log.children) as HTMLElement[];
+    const us = kids.filter((k) => k.classList.contains('mn-u'));
+    // Not worth it for a short chat.
+    if (us.length <= ChatView.KEEP_Q + 6) return;
+    const cut = kids.indexOf(us[us.length - ChatView.KEEP_Q]);
+    this.held = kids.slice(0, cut);
+    this.held.forEach((k) => k.remove());
+    this.paintMore();
+  }
+
+  /** Every question of the chat, in the page or waiting outside it, in order. */
+  private users(): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    for (const h of this.held) if (h.classList.contains('mn-u')) out.push(h);
+    this.log.querySelectorAll<HTMLElement>(':scope > .mn-u').forEach((u) => out.push(u));
+    return out;
+  }
+
+  /** How many questions wait outside the page. */
+  private heldQ(): number {
+    return this.held.filter((h) => h.classList.contains('mn-u')).length;
+  }
+
+  /** Find elements in the whole chat, the part outside the page included. */
+  findAll(sel: string): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    for (const h of this.held) {
+      if (h.matches(sel)) out.push(h);
+      h.querySelectorAll<HTMLElement>(sel).forEach((x) => out.push(x));
+    }
+    this.log.querySelectorAll<HTMLElement>(sel).forEach((x) => out.push(x));
+    return out;
+  }
+
+  /** The line at the top of a long chat: how much is above, and a button to show it; it
+   *  also brings the next part in by itself as it scrolls into view. */
+  private paintMore(): void {
+    const n = this.heldQ();
+    if (!this.held.length) {
+      this.moreEl?.remove();
+      this.moreEl = null;
+      return;
+    }
+    if (!this.moreEl) {
+      this.moreEl = el('button', 'mn-more');
+      this.moreEl.setAttribute('type', 'button');
+      this.moreEl.addEventListener('click', () => this.unhold());
+      if (typeof IntersectionObserver !== 'undefined') {
+        this.moreIO?.disconnect();
+        this.moreIO = new IntersectionObserver(
+          (es) => {
+            if (es.some((e) => e.isIntersecting) && this.held.length && this.log.scrollTop > 0) this.unhold(undefined, true);
+          },
+          { root: this.log, rootMargin: '400px 0px 0px 0px' },
+        );
+      }
+    }
+    this.moreEl.innerHTML = `${icon('chev-up')}<span>${tn(n, 'Show {n} earlier question', 'Show {n} earlier questions')}</span>`;
+    if (this.moreEl.parentElement !== this.log) {
+      this.log.prepend(this.moreEl);
+      this.moreIO?.observe(this.moreEl);
+    }
+  }
+
+  /** Bring the older part back into the page: up to `upTo` (an element in it, or inside one
+   *  of its parts) and everything after it, or the next few questions. The view stays put. */
+  private unhold(upTo?: HTMLElement, auto = false): void {
+    if (!this.held.length) return;
+    let start = this.held.length;
+    if (upTo) {
+      const i = this.held.findIndex((h) => h === upTo || h.contains(upTo));
+      if (i < 0) return;
+      start = i;
+    } else {
+      let n = 0;
+      while (start > 0 && n < ChatView.MORE_Q) {
+        start--;
+        if (this.held[start].classList.contains('mn-u')) n++;
+      }
+      // Take the whole first question with what came before it.
+      if (this.held.slice(0, start).every((h) => !h.classList.contains('mn-u'))) start = 0;
+    }
+    const part = this.held.splice(start);
+    const anchor = this.moreEl ? this.moreEl.nextSibling : this.log.firstChild;
+    const h0 = this.log.scrollHeight;
+    const top = this.log.scrollTop;
+    const frag = document.createDocumentFragment();
+    part.forEach((p) => frag.append(p));
+    this.log.insertBefore(frag, anchor);
+    this.paintMore();
+    this.log.scrollTop = top + (this.log.scrollHeight - h0);
+    this.paintRail();
+    // Scrolling up on its own: still near the top after a short part, bring the next one.
+    if (auto) requestAnimationFrame(() => {
+      if (this.held.length && this.log.scrollTop < 400) this.unhold(undefined, true);
+    });
+    requestAnimationFrame(() => part.forEach((p) => p.querySelectorAll<HTMLElement>('.mn-car').forEach(syncCarousel)));
   }
 
   /** Where older messages were folded into a summary (open it to read the summary). */
@@ -2597,7 +2848,7 @@ export class ChatView {
     const d = el('details', 'mn-tool run' + (changesNotes(name) ? ' w' : ''));
     d.dataset.id = id;
     d.dataset.name = name;
-    const ic = name === 'delegate' ? 'agents' : name === 'describe_image' || name === 'generate_image' ? 'image' : changesNotes(name) ? 'edit' : 'search';
+    const ic = name === 'delegate' || name === 'agents' ? 'agents' : name === 'describe_image' || name === 'generate_image' ? 'image' : changesNotes(name) ? 'edit' : 'search';
     d.innerHTML = `<summary><span class="mn-tool-ic">${icon(ic)}</span><span class="mn-tool-t"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="mn-tool-s"><i class="mn-spin"></i></span>${icon('chev', 'i mn-tool-chev')}</summary>
       <div class="mn-tool-b"><div class="mn-tool-k">${esc(name)}</div><pre>${esc(pretty(args, 1200))}</pre></div>`;
     stack.append(d);
@@ -2700,15 +2951,34 @@ export class ChatView {
 
   private scrollEnd(force = false): void {
     const fromEnd = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight;
-    if (force || fromEnd < 140) this.log.scrollTop = this.log.scrollHeight;
-    else this.paintDown(fromEnd);
+    if (force || fromEnd < 140) {
+      this.log.scrollTop = this.log.scrollHeight;
+      // At the end now: the button goes at once (setting scrollTop to where it already is
+      // fires no scroll event, so this cannot wait for one).
+      this.paintDown(0);
+    } else this.paintDown(fromEnd);
   }
 
-  /** The scroll-to-bottom button: shown while the latest message is out of sight. */
+  /** Re-check the scroll-to-bottom button once per frame, after layout settles. */
+  private queueDown(): void {
+    if (this.downFrame) return;
+    this.downFrame = requestAnimationFrame(() => {
+      this.downFrame = 0;
+      this.paintDown(this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight);
+    });
+  }
+
+  /** The scroll-to-bottom button: shown only while the end is well out of sight, about half a
+   *  screen away (never under 140px), so sub-pixel scroll positions on high-DPI and mobile
+   *  screens, a reply that grows by a line or the keyboard opening never bring it up. */
   private paintDown(fromEnd: number): void {
-    const show = fromEnd > 220;
+    const h = this.log.clientHeight;
+    const show = h > 0 && fromEnd > Math.max(140, Math.min(h * 0.5, 420));
+    if (show === this.downBtn.classList.contains('on')) return;
     this.downBtn.classList.toggle('on', show);
     this.downBtn.tabIndex = show ? 0 : -1;
+    // Hidden while focused (it reached the end): focus goes back to the message box.
+    if (!show && document.activeElement === this.downBtn) this.input.focus({ preventScroll: true });
   }
 
   /** Open the Agents panel (the page's panel, or a dialog in the small chat), at `ids`. */
@@ -2944,6 +3214,7 @@ export class ChatView {
     this.busy = on;
     this.o.onBusy?.(on);
     this.el.classList.toggle('busy', on);
+    this.trayEl.classList.toggle('busy', on);
     this.paintOpen();
     this.paintQueue();
     this.paintSend();
@@ -2986,6 +3257,7 @@ export class ChatView {
         if (!this.model) this.model = this.select?.value || A.fallbackModel(s);
         this.session = (await A.newSession(this.newScope(), this.model, this.fleetingOn)).session;
         this.watch(this.session.id);
+                this.dropHeld();
                 this.log.innerHTML = '';
         this.o.onChange?.(this.session);
       }
@@ -3087,8 +3359,9 @@ export class ChatView {
     /** This reply's sub-agents (delegate call ids) and whether each has finished. */
     const subs = new Map<string, boolean>();
     const subInfo = new Map<string, { agent: string; task: string }>();
-    // A new message of the owner's starts without the last reply's checklist.
-    if (!live) this.showPlan(null);
+    // A new message of the owner's starts without the last reply's sub-agent list; Mnemo's
+    // own plan belongs to the chat and stays.
+    if (!live && !this.planOwn) this.showPlan(null);
     const secs = (ms: number): string => {
       const n = Math.floor(ms / 1000);
       return n < 60 ? `${n}s` : `${Math.floor(n / 60)}m ${String(n % 60).padStart(2, '0')}s`;
@@ -3233,6 +3506,13 @@ export class ChatView {
             break;
           }
           case 'notice': {
+            // Small things (pictures read by the image model, or not at all) are a toast, never
+            // a line in the chat.
+            if (ev.toast) {
+              const open = ev.action?.open;
+              notify(ts(ev.text), ev.toast === 'err' ? 'err' : 'info', 5200, open && ev.action ? { label: ts(ev.action.label), run: () => (open === 'model' ? this.select?.open() : openMnemoSettings('jobs')) } : undefined);
+              break;
+            }
             const go = ev.action && (ev.action.open === 'jobs' || ev.action.open === 'model') && ev.action.label;
             body.insertAdjacentHTML(
               'beforeend',
@@ -3272,7 +3552,6 @@ export class ChatView {
               break;
             }
             if (ev.name === PLAN) {
-              this.showPlan(planOf(ev.args));
               think(true);
               break;
             }
@@ -3295,6 +3574,7 @@ export class ChatView {
               break;
             }
             if (ev.name === PLAN) {
+              if (ev.plan) this.setPlan(ev.plan);
               think(true);
               break;
             }
@@ -3310,21 +3590,26 @@ export class ChatView {
             }
             if (ev.name === DELEGATE) {
               const sc = this.agents.byId(ev.id);
-              if (sc) subFinal(sc, ev.output ?? { error: ev.ok ? '' : ev.summary }, ev.ok);
-              subs.set(ev.id, true);
+              const bg = !!(parseOut(ev.output) as A.SubResult | null)?.background;
+              if (sc && !bg) subFinal(sc, ev.output ?? { error: ev.ok ? '' : ev.summary }, ev.ok);
+              if (!bg) subs.set(ev.id, true);
               think(true);
               break;
             }
+            if (ev.name === AGENTS) this.agentResults(ev.output);
             const card = body.querySelector<HTMLElement>(`.mn-tool[data-id="${CSS.escape(ev.id)}"]`);
             if (card) this.endTool(card, ev.ok, ev.summary, ev.ms, ev.output);
             if (ev.ok && changesNotes(ev.name)) wrote = true;
             think(true);
             break;
           }
+          case 'agents':
+            this.agents.mark(ev);
+            break;
           case 'sub': {
             const sc = this.agents.byId(ev.id);
             if (sc) subEvent(sc, ev);
-            subs.set(ev.id, subs.get(ev.id) || ev.phase === 'done' || ev.phase === 'error');
+            subs.set(ev.id, subs.get(ev.id) || ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'final' || ev.phase === 'stopped');
             tick();
             break;
           }
@@ -3359,8 +3644,6 @@ export class ChatView {
       think(false);
       // Sub-agents left unfinished (the reply was stopped): their checklist goes, no spinners stay.
       if (my === this.run && !this.planOwn && [...subs.values()].some((x) => !x)) this.showPlan(null);
-      // Every step done once the reply ends: the checklist folds away by itself.
-      if (my === this.run) this.planDone();
       // Left for another chat: the reply goes on on the server; nothing here is ours now.
       if (my !== this.run) {
         if (frame) cancelAnimationFrame(frame);
@@ -3421,6 +3704,8 @@ export class ChatView {
             this.session = r.session;
             this.setContext(r.context);
             this.setQueue(r.queue);
+            this.setPlan(r.plan || []);
+            this.agentsInfo = r.agents;
             this.o.onMessages?.();
             // The message sent from here and its turn learn their ids (Try again, Regenerate).
             let prevU = turn.previousElementSibling as HTMLElement | null;
@@ -3560,7 +3845,7 @@ function skipAsk(card: HTMLElement): void {
   card.classList.add('done', 'skipped');
   card.querySelectorAll<HTMLInputElement | HTMLButtonElement>('button,input').forEach((x) => (x.disabled = true));
   card.querySelector('.mn-ask-f')?.setAttribute('hidden', '');
-  card.querySelector('.mn-ask-q')!.insertAdjacentHTML('beforeend', `<em class="mn-ask-skip">${t('Skipped')}</em>`);
+  card.querySelector('.mn-ask-ey')!.insertAdjacentHTML('beforeend', `<em class="mn-ask-skip">${t('Skipped')}</em>`);
 }
 
 /** A question card: the options listed one under another (the chosen one marked once
@@ -3570,7 +3855,11 @@ function askEl(q: A.Ask, answered: string | false | null): HTMLElement {
   const box = el('div', 'mn-ask' + (done ? ' done' : '') + (answered === false ? ' skipped' : ''));
   box.dataset.ask = q.id;
   const dis = done ? ' disabled' : '';
-  box.innerHTML = `<div class="mn-ask-q">${icon('help')}<span>${esc(ts(q.question))}</span>${answered === false ? `<em class="mn-ask-skip">${t('Skipped')}</em>` : ''}</div><div class="mn-ask-o">${q.options
+  // The question on its own band (who asks, then the question, larger), the answers below
+  // as plain cards to tap: easy to tell apart and to read.
+  box.innerHTML = `<div class="mn-ask-h"><div class="mn-ask-ey">${icon('help')}<span>${t('{mnemo} asks', { mnemo: A.MNEMO })}</span>${
+    answered === false ? `<em class="mn-ask-skip">${t('Skipped')}</em>` : ''
+  }</div><p class="mn-ask-q">${esc(ts(q.question))}</p></div><div class="mn-ask-o">${q.options
     .map(
       (o, i) =>
         `<button type="button" class="mn-ask-b${o.approve ? ' ok' : ''}${answered === o.label ? ' on' : ''}" data-ask-opt="1" data-label="${attr(o.label)}" data-approve="${o.approve ? '1' : ''}"${dis}><span class="mn-ask-n">${
@@ -3657,16 +3946,6 @@ interface PlanStep {
   sub?: string;
 }
 
-/** The steps of an update_plan call. */
-function planOf(args: unknown): PlanStep[] | null {
-  const steps = (args as { steps?: unknown } | null)?.steps;
-  if (!Array.isArray(steps)) return null;
-  const out = steps
-    .map((x) => ({ text: String((x as PlanStep)?.text || '').slice(0, 120), status: String((x as PlanStep)?.status || 'pending') }))
-    .filter((x) => x.text);
-  return out.length ? out : null;
-}
-
 const imgUrl = (path: string): string => `/api/vault/file?path=${encodeURIComponent(path)}`;
 
 /** The cards of one show_items call. */
@@ -3737,6 +4016,11 @@ type AgentSec = 'run' | 'idle' | 'done';
 class AgentsPanel {
   readonly el: HTMLElement;
   private seq = 0;
+  /** What Mnemo said of each sub-agent (by lower-case name): done or removed, and its
+   *  instructions. */
+  private marks = new Map<string, string>();
+  private rules = new Map<string, string>();
+  private ids = new Map<string, string>();
 
   constructor(private changed: () => void) {
     this.el = el('div', 'mn-agents');
@@ -3775,6 +4059,9 @@ class AgentsPanel {
   reset(): void {
     this.cards().forEach((c) => c.remove());
     this.seq = 0;
+    this.marks.clear();
+    this.rules.clear();
+    this.ids.clear();
     this.el.querySelector<HTMLDetailsElement>('.mn-ag-done')!.open = false;
     this.paint();
   }
@@ -3782,7 +4069,61 @@ class AgentsPanel {
   add(c: HTMLElement): void {
     c.dataset.seq = String(++this.seq);
     PANEL.set(c, this);
+    // A new task brings a name back that was done or removed.
+    this.marks.delete(subSt(c).agent.toLowerCase());
+    this.paintRules(c);
     this.place(c);
+  }
+
+  /** The chat's sub-agents as the server keeps them (after the cards were drawn). */
+  apply(info: A.AgentsInfo | undefined): void {
+    if (!info) return;
+    for (const a of info.agents || []) {
+      const k = a.agent.toLowerCase();
+      if (a.state === 'done') this.marks.set(k, 'done');
+      if (typeof a.instructions === 'string') this.rules.set(k, a.instructions);
+      if (a.id) this.ids.set(k, a.id);
+    }
+    for (const n of info.removed || []) this.marks.set(n.toLowerCase(), 'removed');
+    this.cards().forEach((c) => {
+      this.paintRules(c);
+      this.place(c);
+    });
+  }
+
+  /** Mnemo changed a sub-agent: its state (done, removed), its instructions or its name. */
+  mark(ev: A.AgentsEvent): void {
+    const k = (ev.agent || '').toLowerCase();
+    if (!k) return;
+    if (ev.phase === 'meta' && ev.from && ev.from.toLowerCase() !== k) {
+      for (const c of this.cards()) {
+        const st = subSt(c);
+        if (st.agent.toLowerCase() !== ev.from.toLowerCase()) continue;
+        st.agent = ev.agent;
+        c.querySelector('.mn-sub-t b')!.textContent = ev.agent;
+        c.querySelector('.mn-sub-av')!.textContent = ev.agent.charAt(0).toUpperCase();
+      }
+    }
+    if (typeof ev.instructions === 'string') this.rules.set(k, ev.instructions);
+    if (ev.id) this.ids.set(k, ev.id);
+    if (ev.phase === 'state' && ev.state) this.marks.set(k, ev.state);
+    if (ev.phase === 'meta' && ev.state && ev.state !== 'done') this.marks.delete(k);
+    this.cards().forEach((c) => {
+      if (subSt(c).agent.toLowerCase() !== k) return;
+      if (ev.phase === 'message' && ev.text && ev.call === c.dataset.id) subNote(c, 'chat', t('{mnemo}: {text}', { mnemo: A.MNEMO, text: ev.text }));
+      this.paintRules(c);
+      this.place(c);
+    });
+  }
+
+  private paintRules(c: HTMLElement): void {
+    const id = this.ids.get(subSt(c).agent.toLowerCase());
+    if (id) subId(c, id);
+    const r = this.rules.get(subSt(c).agent.toLowerCase()) || '';
+    const box = c.querySelector<HTMLElement>('.mn-sub-rules');
+    if (!box) return;
+    box.hidden = !r.trim();
+    box.querySelector('p')!.textContent = r;
   }
 
   /** Put a card in the section its state says. A finished agent is idle while it is the
@@ -3790,6 +4131,18 @@ class AgentsPanel {
   place(c: HTMLElement): void {
     const agent = subSt(c).agent;
     const n = seqOf(c);
+    const mark = this.marks.get(agent.toLowerCase());
+    // Removed from the list: its cards go.
+    if (mark === 'removed' && !subBusy(c)) {
+      c.remove();
+      this.paint();
+      return;
+    }
+    if (mark === 'done' && !subBusy(c)) {
+      this.put(c, 'done');
+      this.paint();
+      return;
+    }
     const same = (sec: AgentSec): HTMLElement[] =>
       Array.from(this.list(sec).children).filter((x): x is HTMLElement => x !== c && x instanceof HTMLElement && subSt(x).agent === agent);
     let sec: AgentSec = 'done';
@@ -3811,7 +4164,11 @@ class AgentsPanel {
     // Live work stays open only while the agent runs; after that it folds to one line.
     const act = c.querySelector<HTMLDetailsElement>('.mn-sub-act');
     if (act) {
-      act.open = sec === 'run';
+      const want = sec === 'run' && c.dataset.folded !== '1';
+      if (act.open !== want) {
+        act.dataset.auto = '1';
+        act.open = want;
+      }
       const k = c.querySelectorAll('.mn-sub-log > .mn-tool').length;
       act.querySelector('em')!.textContent = k ? tn(k, '{n} tool', '{n} tools') : '';
     }
@@ -3877,10 +4234,15 @@ function subCard(body: HTMLElement, id: string, args: unknown, panel: AgentsPane
     agent,
   )}</b><small></small></span><span class="mn-sub-chip"><i class="mn-spin"></i><span>${t('Working')}</span></span></div>
     <div class="mn-sub-m" hidden><span class="mn-sub-bar" title=""><i></i></span><span class="mn-sub-tok"></span></div>
-    ${task ? `<button type="button" class="mn-sub-task" data-subtask aria-expanded="false" title="${t('Show the whole task')}">${esc(task)}</button>` : ''}
-    <details class="mn-sub-act" open><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Activity')}</span><em></em></summary><div class="mn-sub-log mn-tools"></div><button type="button" class="mn-sub-all" data-suball hidden aria-expanded="false">${t('Show all')}</button></details>
-    <div class="mn-sub-pre" hidden></div>`;
+    <details class="mn-sub-acc mn-sub-ins"><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Instruction')}</span></summary><div class="mn-sub-body"><p class="mn-sub-task">${task ? esc(task) : '—'}</p><div class="mn-sub-rules" hidden><b>${t('Instructions from {mnemo}', { mnemo: A.MNEMO })}</b><p></p></div></div></details>
+    <details class="mn-sub-acc mn-sub-act" open><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Activity')}</span><em></em></summary><div class="mn-sub-body"><p class="mn-sub-empty">${t('No activity yet')}</p><div class="mn-sub-log mn-tools"></div><div class="mn-sub-pre" hidden></div><button type="button" class="mn-sub-all" data-suball hidden aria-expanded="false">${t('Show all')}</button></div></details>
+    <details class="mn-sub-acc mn-sub-ans"><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Answer')}</span><em class="mn-sub-ans-s">${t('Still running')}</em></summary><div class="mn-sub-body"><div class="mn-md"><p class="mn-sub-empty">${t('Still running')}</p></div></div></details>`;
   SUBS.set(c, { agent, model: '', text: '', step: 0, window: 0, tin: 0, tout: 0, context: 0 });
+  // Its activity folds when the owner folds it, also while it runs.
+  c.querySelector('.mn-sub-act')!.addEventListener('toggle', (e) => {
+    if ((e.target as HTMLDetailsElement).dataset.auto !== '1') c.dataset.folded = (e.target as HTMLDetailsElement).open ? '' : '1';
+    (e.target as HTMLDetailsElement).dataset.auto = '';
+  });
   CARD_LINE.set(c, line);
   LINE_CARDS.get(line)!.push(c);
   panel.add(c);
@@ -4034,6 +4396,13 @@ function subEvent(c: HTMLElement, ev: A.SubEvent): void {
   switch (ev.phase) {
     case 'start':
       if (ev.window) st.window = ev.window;
+      // Picked by its id: the card takes the sub-agent's own name.
+      if (ev.agent && ev.agent !== st.agent) {
+        st.agent = ev.agent;
+        c.querySelector('.mn-sub-t b')!.textContent = ev.agent;
+        c.querySelector('.mn-sub-av')!.textContent = ev.agent.charAt(0).toUpperCase();
+      }
+      if (ev.aid) subId(c, ev.aid);
       subMeta(c, !!ev.follow_up);
       break;
     case 'step':
@@ -4096,6 +4465,20 @@ function subEvent(c: HTMLElement, ev: A.SubEvent): void {
       if (ev.message) subNote(c, 'alert', ts(ev.message), 'err');
       subChip(c, 'err', t('Failed'));
       break;
+    case 'final':
+      // A sub-agent in the background answered.
+      subFinal(c, ev.output, ev.ok !== false);
+      break;
+    case 'stopped':
+      pre.hidden = true;
+      subNote(c, 'stop', t('{mnemo} stopped it', { mnemo: A.MNEMO }));
+      subAnswer(c, '', t('No answer'));
+      c.dataset.filled = '1';
+      subChip(c, 'stop', t('Stopped'));
+      break;
+    case 'inbox':
+      subNote(c, 'chat', tn(ev.count || 1, 'Read a message from {mnemo}', 'Read {n} messages from {mnemo}', { mnemo: A.MNEMO }));
+      break;
   }
 }
 
@@ -4126,20 +4509,44 @@ function subFinal(c: HTMLElement, output: unknown, ok: boolean): void {
   const err = typeof o.error === 'string' && o.error ? o.error : '';
   if (!ok || err) {
     if (err && !log.querySelector('.mn-sub-li.err')) subNote(c, 'alert', ts(err), 'err');
+    subAnswer(c, '', t('No answer'));
     subChip(c, 'err', t('Failed'));
     return;
   }
   const steps = o.steps ?? st.step;
-  if (o.answer) {
-    c.insertAdjacentHTML('beforeend', `<details class="mn-sub-ans"><summary>${icon('chev', 'i mn-sub-chev')}<span>${t('Answer')}</span></summary><div class="mn-md">${renderReply(o.answer)}</div></details>`);
-  }
+  subAnswer(c, o.answer ? renderReply(o.answer) : '', o.answer ? '' : '—');
   subChip(c, 'done', steps ? tn(steps, 'Done · {n} step', 'Done · {n} steps') : t('Done'));
+}
+
+/** The sub-agent's id (a1, a2, …) beside its name: the owner and Mnemo can point at it by id. */
+function subId(c: HTMLElement, id: string): void {
+  const b = c.querySelector<HTMLElement>('.mn-sub-t b');
+  if (!id || !b) return;
+  c.dataset.aid = id;
+  // Inside the name line (a rename rewrites the name, so it is put back each time).
+  let tag = b.querySelector<HTMLElement>('.mn-sub-id');
+  if (!tag) {
+    tag = el('code', 'mn-sub-id');
+    b.append(tag);
+  }
+  tag.textContent = id;
+  tag.title = t('Sub-agent id');
+}
+
+/** The Answer section: the answer, or a word when there is none. */
+function subAnswer(c: HTMLElement, html: string, none: string): void {
+  const box = c.querySelector<HTMLElement>('.mn-sub-ans .mn-md');
+  const s = c.querySelector<HTMLElement>('.mn-sub-ans-s');
+  if (!box || !s) return;
+  box.innerHTML = html || `<p class="mn-sub-empty">${esc(none)}</p>`;
+  s.textContent = html ? '' : none;
 }
 
 /** A task cut off with the reply. */
 function subStop(c: HTMLElement): void {
   if (c.dataset.filled) return;
   c.dataset.filled = '1';
+  subAnswer(c, '', t('No answer'));
   c.querySelector<HTMLElement>('.mn-sub-pre')!.hidden = true;
   c.querySelectorAll<HTMLElement>('.mn-sub-log > .mn-tool.run').forEach((d) => {
     d.classList.remove('run');

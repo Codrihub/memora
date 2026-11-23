@@ -32,7 +32,8 @@ be set before the first message.
 Besides the chat model you can set, in **Settings → Mnemo → Models for each job**:
 
 - a model that **reads images**: it looks at vault pictures (`describe_image`), and
-  describes pictures you attach when the chat model cannot see them;
+  describes the pictures in your newest message when the chat model cannot see them
+  (quietly; a short toast says so, or that a picture could not be read);
 - a model that **makes images** (`generate_image`), shown in the chat and kept in a note on
   request;
 - a model that **reads replies aloud** (Listen under a reply), with a voice;
@@ -48,8 +49,11 @@ The mic and Listen show only once their model is set.
 - **While it works.** A tray on top of the message box says what Mnemo is doing and for
   how long, with its plan and your queued messages under it; it opens and folds by
   itself. Send a new message to queue it, **Send now** to cut the reply and answer the
-  new one, or **Stop**. A reply keeps running if you close the tab or the server
-  restarts, and the chat follows live on every device.
+  new one, or **Stop** (the next queued message then goes out). A reply keeps running if
+  you close the tab or the server restarts, and the chat follows live on every device.
+- **Long chats.** Only the latest questions go on the page at first; earlier ones come in
+  as you scroll up (or with **Show earlier questions**), jump to them on the timeline, or
+  open a search hit there.
 - **@mnemo in a note.** Write `@mnemo: <request>` in a note and Mnemo does it, with the
   note as context.
 - **Skills.** Reusable instructions kept as notes in the folder `Skills` (one note per
@@ -61,7 +65,11 @@ The mic and Listen show only once their model is set.
 - **The chat list.** Pin, rename, archive, export as Markdown or save as a note, and
   search everything said. **All chats** shows them on one page.
 - **Appearance.** Theme, backdrop, text size and chat width (Compact, Wide, Full), kept
-  per device.
+  per device. The width follows the room the chat has, so it holds when the side panes
+  change.
+- **Resizable panes.** On a desktop, drag the edge of the chat list or of the side panel
+  (Agents, In this chat) to change its width, like the page preview. Each keeps a
+  minimum, a double-click resets it, and the width is remembered on the device.
 
 ## Ask first, Auto or Read only
 
@@ -76,11 +84,14 @@ Pick how freely Mnemo works with the chip in the message box:
 ## Mnemo's plan
 
 For a longer task (an audit of many notes, a reorganisation, a long edit) Mnemo first
-lists its steps. They show as a checklist in the tray on top of the message box, each one not started,
-in progress or done, updated live; fold it to see only the step at work. Without a plan,
-the checklist follows the reply's sub-agents. The checklist belongs to its chat: a new
-chat starts without one, a finished plan folds away by itself, and an unfinished one
-stays until your next message.
+lists its steps. They show as a checklist in the tray on top of the message box, each one
+not started, in progress or done, updated live on every device; fold it to see only the
+step at work. Mnemo adds, edits, checks and removes single steps as it works.
+
+The plan belongs to the chat, not to one reply: **Stop** leaves it as it was, and Mnemo
+sees it again on your next message and carries on, changes it or clears it. It closes the
+moment every step is done, and the **×** on it puts away a plan you no longer want (while
+no reply runs). Without a plan, the checklist follows the reply's sub-agents.
 
 ## Sub-agents
 
@@ -92,9 +103,18 @@ set up: Mnemo names each one as it starts it.
   specific model in the chat by its full id or its short name; Mnemo uses exactly that
   model or tells you it is not there.
 - The reply shows one line ("3 sub-agents · 2 working · 1 done"). **Agents**, at the top
-  right of the chat, opens the Agents panel: every sub-agent, newest first, running (its
-  steps, newest first, its tokens and context), idle or done. Switch a sub-agent's model
-  there.
+  right of the chat, opens the Agents panel: every sub-agent, newest first, running, idle
+  (it answered and can take another task) or done. Each card shows the sub-agent's id,
+  model, tokens and context, and three sections that are always there: **Instruction**
+  (its task and Mnemo's instructions), **Activity** (its steps, live while it works) and
+  **Answer**. Switch a sub-agent's model there.
+- Mnemo manages its sub-agents: it can set one up ahead of its task, change its
+  instructions, model or name, send a running one a message, wait for it, stop it, mark it
+  done or remove it from the list, one at a time or all at once. Every sub-agent has a
+  short id that never changes (a1, a2, …), so it can be renamed freely; ask Mnemo by id
+  or by name ("mark a3 done", "stop all sub-agents").
+- A sub-agent can also work in the background while Mnemo goes on; the reply does not end
+  before every one has answered.
 - A sub-agent can ask Mnemo a question, takes follow-ups, and summarises its own work when
   its context fills up. It cannot see your chat or ask you anything, and in Ask first mode
   it does not change notes.
