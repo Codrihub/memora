@@ -6,12 +6,12 @@ import { attr, el, esc, useStyles } from '../dom';
 import { fmtTs, hashColor, noteName, relTs, stemTitle, wikilinks } from '../format';
 import { hooks } from '../hooks';
 import { t, tn } from '../i18n';
-import { allNotes, noteTitle, state } from '../state';
+import { allNotes, isBoard as isBoardPath, noteTitle, state } from '../state';
 import type { NoteDoc } from '../types';
 import { I } from './icons';
 import { askMoveNotes, copyPath, copyWikilink, deleteNotesToTrash, pinToggle } from './menus';
 import { nav } from './nav';
-import { createNote, onRelocate, relocating, renameNote, saveNote } from './ops';
+import { createNote, onRelocate, relocating, reload, renameNote, saveNote } from './ops';
 import { contentsBody, contentsOpen, markHead, openContentsSheet, setContentsOpen, type ContentsData } from './contents';
 import { closePanel } from './panel';
 import { applyReading, openReadingPanel } from './reading';
@@ -24,6 +24,13 @@ import { IMAGE_ACCEPT, takePendingImage, uploadImage } from './images';
 import { toast } from '../toast';
 import { Modal } from '../modal';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
+import { BOARD_ICON, boardFor, isBoardNote, mountBoard, unmountBoard, type KanbanHost } from '../views/kanban';
+import { boardCardsIn, boardInfos, sweepEmbeds } from '../views/board-card';
+import { boardText, toBoard } from './board-text';
+import { noteFooter } from './note-footer';
+import { pickNote } from './pick-note';
+import { isSelfTarget } from './self-ref';
+import { CHIP_ICONS } from '../ui/chips';
 import {
   askRestoreVersion,
   diffView,
@@ -71,6 +78,8 @@ const hist = {
 };
 let unsub: (() => void) | null = null;
 let mobileBack = false;
+/** The open note is a board (it always reads as one; its Markdown opens from the ⋯ menu). */
+let boardNote = false;
 /** Bumped on every load so a slower, older response never overwrites a newer one. */
 let loadSeq = 0;
 
@@ -208,14 +217,22 @@ function draw(): void {
   const crumbs = folder ? folder.split('/').map((_, i, a) => a.slice(0, i + 1).join('/')) : [];
   const tags = d.tags && d.tags.length ? d.tags : [];
   const backlinks = d.backlinks || [];
-  const outs = Array.from(new Set(wikilinks(d.content)));
+  // A note never lists itself among its links.
+  const outs = Array.from(new Set(wikilinks(d.content))).filter((o) => !isSelfTarget(o, path));
   const words = (d.content || '').replace(/^---[\s\S]*?---/, '').split(/\s+/).filter(Boolean).length;
   const tc = touched.get(path);
   const pinned = isPinned('note', path);
   const prevScroll = c.querySelector<HTMLElement>('.vx-note-scroll')?.scrollTop || 0;
+  // A Kanban note (Obsidian Kanban format) always reads as a board and is edited in place.
+  const isBoard = isBoardNote(d.frontmatter);
+  boardNote = isBoard;
+  const kbOn = isBoard && !state.editing && !hist.v;
+  if (!kbOn) unmountBoard();
+  // Boards embedded in the note are drawn again with it (or not at all while editing).
 
   c.style.setProperty('--fc', folderColor(folder));
   c.innerHTML = '';
+  sweepEmbeds();
 
   const crumbHTML = `<button class="vx-crumb" data-f="">${I.vault}<span>${esc(ROOT_LABEL)}</span></button>${crumbs
     .map(
@@ -234,18 +251,28 @@ function draw(): void {
     ${
       state.editing
         ? ''
-        : `<span class="vx-rgroup"><button class="vx-ct-btn" type="button" data-contents aria-label="${attr(t('Contents'))}" title="${attr(t('Contents: outline and links'))}">${I.toc}<span>${t('Contents')}</span></button>
+        : `<span class="vx-rgroup">${
+            isBoard
+              ? ''
+              : `<button class="vx-ct-btn" type="button" data-contents aria-label="${attr(t('Contents'))}" title="${attr(t('Contents: outline and links'))}">${I.toc}<span>${t('Contents')}</span></button>`
+          }
     <button class="vx-ct-btn vx-hist-btn" type="button" data-hist aria-label="${attr(t('Version history'))}" title="${attr(t('Version history: see and restore earlier versions'))}">${I.history}<span>${t('History')}</span></button>
     <button class="vx-ct-btn vx-mn-btn" type="button" data-mnemo aria-label="${attr(t('Ask Mnemo about this note'))}" title="${attr(t('Ask Mnemo about this note'))}">${I.mnemo}<span>${t('Ask')}</span></button>
-    <button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="${attr(t('Reading settings'))}" title="${attr(t('Reading settings'))}">Aa</button></span><span class="vx-vsep" aria-hidden="true"></span>`
+    ${
+      isBoard
+        ? `<button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="${attr(t('Board view'))}" title="${attr(t('Board view'))}">Aa</button>`
+        : `<button class="vx-icon-btn vx-aa-btn" data-aa aria-haspopup="dialog" aria-expanded="false" aria-label="${attr(t('Reading settings'))}" title="${attr(t('Reading settings'))}">Aa</button>`
+    }</span><span class="vx-vsep" aria-hidden="true"></span>`
     }
     <span class="vx-rgroup">${
       state.editing
         ? `<span class="vx-edit-btns"><button class="btn sm ghost" type="button" data-cancel title="${attr(t('Close the editor (Esc). Asks first when there are unsaved changes.'))}">${t('Close')}</button>
     <button class="btn sm primary" type="button" data-save title="${attr(t('Save and close (Ctrl+S saves and keeps editing)'))}">${I.check}<span>${t('Save')}</span></button></span>`
-        : `<button class="btn sm vx-mode" type="button" data-mode="edit" aria-pressed="false" title="${attr(t('Edit (E)'))}">${I.edit}<span>${t('Edit')}</span></button>`
+        : isBoard
+          ? ''
+          : `<button class="btn sm vx-mode" type="button" data-mode="edit" aria-pressed="false" title="${attr(t('Edit (E)'))}">${I.edit}<span>${t('Edit')}</span></button>`
     }
-    ${state.editing ? '' : `<button class="vx-icon-btn" data-focus aria-label="${attr(t('Hide the toolbar'))}" title="${attr(t('Hide the toolbar for reading (F)'))}">${I.foldUp}</button>`}
+    <button class="vx-icon-btn" data-focus aria-label="${attr(t('Hide the toolbar'))}" title="${attr(state.editing ? t('Hide the toolbar') : t('Hide the toolbar for reading (F)'))}">${I.foldUp}</button>
     <button class="vx-icon-btn" data-more aria-label="${attr(t('More actions'))}" title="${attr(t('More'))}">${I.more}</button></span>`;
   c.appendChild(bar);
   bar.querySelector<HTMLElement>('[data-focus]')?.addEventListener('click', () => setFocus(true));
@@ -264,13 +291,14 @@ function draw(): void {
   requestAnimationFrame(() => (pcrumbs.scrollLeft = pcrumbs.scrollWidth));
 
   const scroller = el('div', 'vx-note-scroll');
-  applyReading(scroller, state.editing);
+  applyReading(scroller, state.editing, path);
   const page = el('div', 'vx-page' + (state.editing ? ' editing' : ''));
   const col = el('div', 'vx-col');
   const head = el('div', 'vx-doc-head');
   const folderBtn = `<button class="vx-meta-folder" data-f="${attr(folder)}"><i></i><span>${esc(folder || ROOT_LABEL)}</span></button>`;
   const updated = `<span title="${attr(fmtTs(d.mtime))}">${esc(relTs(d.mtime))}</span>`;
-  const read = t('{n} min read', { n: Math.max(1, Math.round(words / 220)) });
+  const mins = t('{n} min read', { n: Math.max(1, Math.round(words / 220)) });
+  const read = isBoard ? t('Board') : [t(words === 1 ? '{n} word' : '{n} words', { n: words.toLocaleString() }), words ? mins : ''].filter(Boolean).join(' · ');
   const agent = tc
     ? `<span class="vx-touch" title="${attr(`${tc.actor} · ${tc.action.replace(/_/g, ' ')} · ${relTs(tc.at / 1000)}`)}"><span class="vx-agent sm" style="--ac:${hashColor(
         tc.actor,
@@ -295,8 +323,13 @@ function draw(): void {
   let art: HTMLElement | null = null;
   let pvBar: HTMLElement | null = null;
   const pv = state.editing ? null : hist.v;
-  if (state.editing) col.appendChild(editorEl());
-  else if (pv) {
+  if (state.editing) col.appendChild(editorEl(isBoard));
+  else if (kbOn) {
+    page.classList.add('kb-mode');
+    const kh = el('div', 'kb-host');
+    col.appendChild(kh);
+    mountBoard(kh, path, kbHost);
+  } else if (pv) {
     // The banner sits outside the page, under the reader's bar, so it stays in view.
     pvBar = previewBanner(pv, hist.mode, {
       restore: () => restoreShown(),
@@ -307,6 +340,7 @@ function draw(): void {
     if (hist.mode === 'changes') col.appendChild(diffView(pv, hist.diff));
     else {
       art = el('article', 'vx-prose note-body vh-old');
+      art.dir = 'auto';
       art.innerHTML = hist.html || `<pre>${esc(hist.content)}</pre>`;
       if (!hist.content.trim()) art.innerHTML = `<p class="vx-muted vx-empty-doc">${t('Version {n} of this note was empty.', { n: pv.version })}</p>`;
       col.appendChild(art);
@@ -314,6 +348,7 @@ function draw(): void {
     }
   } else {
     art = el('article', 'vx-prose note-body');
+    art.dir = 'auto';
     art.innerHTML = d.html || `<pre>${esc(d.content || '')}</pre>`;
     if (!(d.content || '').trim())
       art.innerHTML = `<p class="vx-muted vx-empty-doc">${t('This note is empty. {start} or press {key}.', {
@@ -327,37 +362,21 @@ function draw(): void {
   }
 
   const outRefs = outs.map((o) => ({ name: o, path: findNote(o)?.path || null }));
-  const backHTML = backlinks.length
-    ? backlinks
-        .map(
-          (b) =>
-            `<button class="vx-link" data-open="${attr(b.path)}" style="--fc:${attr(folderColor(dirOf(b.path)))}"><i></i><b>${esc(
-              noteTitle(b.path),
-            )}</b><small>${esc(dirOf(b.path) || ROOT_LABEL)}</small></button>`,
-        )
-        .join('')
-    : `<p class="vx-muted">${t('No other note links here yet.')}</p>`;
-  const outHTML = outRefs.length
-    ? outRefs
-        .map((o) =>
-          o.path
-            ? `<button class="vx-link" data-open="${attr(o.path)}" style="--fc:${attr(folderColor(dirOf(o.path)))}"><i></i><b>${esc(
-                noteTitle(o.path),
-              )}</b><small>${esc(dirOf(o.path) || ROOT_LABEL)}</small></button>`
-            : `<button class="vx-link missing" data-create="${attr(o.name)}" title="${attr(t('Create this note'))}"><i></i><b>${esc(
-                o.name,
-              )}</b><small>${t('Not created yet · create')}</small></button>`,
-        )
-        .join('')
-    : `<p class="vx-muted">${t('This note does not link to other notes yet. Type [[ while editing to add a link.')}</p>`;
   const heads = art ? Array.from(art.querySelectorAll<HTMLElement>('h1,h2,h3,h4')).filter((h) => (h.textContent || '').trim()) : [];
   const links = art ? Array.from(art.querySelectorAll<HTMLElement>('a.wl')) : [];
   if (!state.editing && !pv) {
-    const open = mobileBack ? '' : ' open';
-    const foot = el('div', 'vx-rfoot');
-    foot.innerHTML = `<details${open}><summary>${t('Mentioned in')}<span>${backlinks.length}</span></summary><div>${backHTML}</div></details>
-      <details${open}><summary>${t('Links to')}<span>${outRefs.length}</span></summary><div>${outHTML}</div></details>`;
-    col.appendChild(foot);
+    const footAct = { open: (p: string) => nav.openNote(p), create: (name: string, at: HTMLElement) => offerCreate(name, at) };
+    const back = backlinks.map((b) => b.path);
+    if (isBoard) {
+      // A board's foot tells the notes that embed it from those that only link to it.
+      const slot = el('div', 'nf-slot');
+      col.appendChild(slot);
+      void boardInfos().then((list) => {
+        if (!slot.isConnected) return;
+        const b = list.find((x) => x.path === path);
+        slot.replaceWith(noteFooter({ backlinks: back, outs: outRefs, embedded: b?.embedded_in || [] }, footAct));
+      });
+    } else col.appendChild(noteFooter({ backlinks: back, outs: outRefs }, footAct));
   }
   const paper = el('div', 'vx-paper');
   paper.appendChild(col);
@@ -376,7 +395,7 @@ function draw(): void {
       <div class="vx-igroup">${row(t('Updated'), updated)}${
         created ? row(t('Created'), `<span title="${attr(created.full)}">${esc(created.short)}</span>`) : ''
       }</div>
-      <div class="vx-igroup">${row(t('Words'), `<span>${words.toLocaleString()} · ${read}</span>`)}${row(
+      <div class="vx-igroup">${row(t('Words'), `<span>${words.toLocaleString()} · ${mins}</span>`)}${row(
         t('Links'),
         `<span>${outRefs.length}</span>`,
       )}${row(t('Backlinks'), `<span>${backlinks.length}</span>`)}</div>
@@ -398,9 +417,9 @@ function draw(): void {
   if (modeBtn) modeBtn.onclick = () => setMode(true);
   bar.querySelector<HTMLElement>('[data-save]')?.addEventListener('click', () => void saveAndClose());
   bar.querySelector<HTMLElement>('[data-cancel]')?.addEventListener('click', () => cancelEdit());
-  bar.querySelector<HTMLElement>('[data-more]')!.onclick = (e) => moreMenu(path, e.currentTarget as HTMLElement);
+  bar.querySelector<HTMLElement>('[data-more]')!.onclick = (e) => moreMenu(path, e.currentTarget as HTMLElement, isBoard);
   bar.querySelector<HTMLElement>('[data-aa]')?.addEventListener('click', (e) =>
-    openReadingPanel(e.currentTarget as HTMLElement, () => applyReading(scroller, state.editing)),
+    openReadingPanel(e.currentTarget as HTMLElement, () => applyReading(scroller, state.editing, path), { path, board: isBoard }),
   );
   const toc = heads.length ? watchToc(scroller, heads, c) : null;
   const jump = (target: HTMLElement): void => {
@@ -480,8 +499,6 @@ function draw(): void {
     };
   });
   col.querySelector<HTMLElement>('[data-start]')?.addEventListener('click', () => setMode(true));
-  c.querySelectorAll<HTMLElement>('.vx-rfoot [data-open]').forEach((b) => (b.onclick = () => nav.openNote(b.dataset.open || '')));
-  c.querySelectorAll<HTMLElement>('.vx-rfoot [data-create]').forEach((b) => (b.onclick = () => offerCreate(b.dataset.create || '', b)));
   paintSave();
   c.onkeydown = onPaneKey;
 }
@@ -620,6 +637,12 @@ function offerCreate(name: string, at: HTMLElement): void {
         hint: folder ? baseName(folder) : ROOT_LABEL,
         run: () => void createLinked(name),
       },
+      {
+        label: t('Create “{name}” as a board', { name }),
+        icon: I.board,
+        hint: folder ? baseName(folder) : ROOT_LABEL,
+        run: () => void createLinked(name, true),
+      },
     ],
     at,
   );
@@ -689,10 +712,32 @@ function watchToc(scroller: HTMLElement, heads: HTMLElement[], pane: HTMLElement
   };
 }
 
-function moreMenu(path: string, at: HTMLElement): void {
+function moreMenu(path: string, at: HTMLElement, board: boolean): void {
   const pinned = isPinned('note', path);
+  const reading = !state.editing && !hist.v;
   openMenu(
     [
+      ...(reading && board
+        ? [
+            { label: t('Edit Markdown source'), icon: I.code, run: () => setMode(true) },
+            { label: t('Color and icon…'), icon: I.palette, run: () => boardFor(path)?.editStyle() },
+            {
+              label: t('Duplicate board'),
+              icon: I.copy,
+              run: () =>
+                void apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path))
+                  .then((d) => createNote(dirOf(path), t('{name} copy', { name: noteTitle(path) }), d.content || ''))
+                  .then((p) => {
+                    if (p) nav.openNote(p);
+                  })
+                  .catch((e: Error) => undoToast(t('Could not create the note: {error}', { error: e.message }), null, 'err')),
+            },
+            { label: t('Embed in a note…'), icon: I.link, run: () => void pickNote({ title: t('Embed in a note'), boards: false, exclude: [path] }).then((n) => {
+                if (n) void embedInto(n, path);
+              }) },
+            { sep: true, label: '' },
+          ]
+        : []),
       { label: t('Rename'), icon: I.rename, hint: 'F2', run: () => renameTitle() },
       { label: t('Move to…'), icon: I.move, hint: 'M', run: () => askMoveNotes([path]) },
       {
@@ -716,6 +761,15 @@ function moreMenu(path: string, at: HTMLElement): void {
       { label: t('Copy path'), icon: I.copy, run: () => copyPath(path) },
       { label: t('Copy wikilink'), icon: I.wiki, run: () => copyWikilink(path) },
       { label: t('New note in this folder'), icon: I.newNote, run: () => nav.newNote(dirOf(path)) },
+      { label: t('New board in this folder'), icon: I.board, run: () => nav.newBoard(dirOf(path)) },
+      ...(reading && !board
+        ? [
+            { label: t('Embed a board…'), icon: BOARD_ICON, run: () => void pickNote({ title: t('Embed a board'), boards: true, exclude: [path] }).then((b) => {
+                if (b) void embedInto(path, b);
+              }) },
+            { label: t('Turn into board'), icon: BOARD_ICON, run: () => askTurnIntoBoard(path) },
+          ]
+        : []),
       { sep: true, label: '' },
       {
         label: t('Move to Trash'),
@@ -741,8 +795,8 @@ function findNote(name: string): { path: string } | undefined {
   return allNotes().find((x) => x.name.toLowerCase() === n || x.path.toLowerCase() === n + '.md' || x.path.toLowerCase() === n);
 }
 
-async function createLinked(name: string): Promise<void> {
-  const p = await createNote(dirOf(ed.path || ''), name);
+async function createLinked(name: string, board = false): Promise<void> {
+  const p = await createNote(dirOf(ed.path || ''), name, board ? boardText() : undefined);
   if (p) nav.openNote(p);
 }
 
@@ -771,6 +825,11 @@ function wireProse(art: HTMLElement): void {
       a.setAttribute('aria-label', t('{name} (not created yet, create it)', { name: a.textContent || '' }));
     } else if (a.dataset.path) {
       a.title = `${noteTitle(a.dataset.path)} · ${dirOf(a.dataset.path) || ROOT_LABEL}`;
+      // A board in running text carries the board icon (on a line of its own it becomes a card).
+      if (isBoardPath(a.dataset.path)) {
+        a.classList.add('wl-kb');
+        a.insertAdjacentHTML('afterbegin', CHIP_ICONS.board);
+      }
     }
   });
   // "- [ ] item" arrives as plain text: show it as a (read-only) task box.
@@ -787,6 +846,51 @@ function wireProse(art: HTMLElement): void {
     if (box.checked) li.classList.add('done');
   });
   art.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach((x) => (x.disabled = true));
+  boardCardsIn(art, embedHost, !art.classList.contains('vh-old'), ed.path);
+}
+
+/** A plain note becomes a board: headings are lanes, list items are cards. Asks first and says what
+ *  is left out; the note's earlier version stays in its History. */
+function askTurnIntoBoard(path: string): void {
+  const d = ed.doc;
+  if (!d || ed.path !== path) return;
+  const from = d.content || '';
+  const c = toBoard(from, noteTitle(path));
+  const parts = [
+    `${tn(c.lanes, '{n} lane', '{n} lanes')} · ${tn(c.cards, '{n} card', '{n} cards')}`,
+    t('Headings become lanes and list items become cards.'),
+  ];
+  if (c.dropped) parts.push(tn(c.dropped, '{n} line of other text is left out.', '{n} lines of other text are left out.'));
+  parts.push(t('The current version stays in History, so you can restore it.'));
+  Modal.open({
+    title: t('Turn “{name}” into a board?', { name: noteTitle(path) }),
+    body: `<p style="margin:0 0 8px"><b>${parts[0]}</b></p><p style="margin:0">${parts.slice(1).map(esc).join(' ')}</p>`,
+    actions: [
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      {
+        label: t('Turn into board'),
+        cls: 'primary',
+        run: async () => {
+          Modal.close();
+          try {
+            const cur = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path));
+            if ((cur.content || '') !== from) {
+              undoToast(t('The note changed meanwhile. Try again.'), null, 'err');
+              if (host && ed.path === path) await renderNote(host, path, mobileBack, true);
+              return;
+            }
+            await saveNote(path, c.text);
+          } catch (e) {
+            undoToast(t('Could not save the note: {error}', { error: (e as Error).message }), null, 'err');
+            return;
+          }
+          await reload();
+          if (host && ed.path === path) await renderNote(host, path, mobileBack, true);
+          undoToast(t('This note is a board now'), null, 'info', 3000);
+        },
+      },
+    ],
+  });
 }
 
 function renameTitle(): void {
@@ -925,7 +1029,8 @@ let focusOn = ((): boolean => {
 function applyFocus(): void {
   const c = host;
   if (!c) return;
-  const on = focusOn && !state.editing;
+  // One mode for notes, boards and the editor: the bars fold away (on phones the tab bar too).
+  const on = focusOn;
   c.classList.toggle('vx-focus', on);
 }
 
@@ -941,21 +1046,43 @@ function setFocus(on: boolean): void {
   window.setTimeout(() => target?.focus({ preventScroll: true }), 260);
 }
 
+function typingIn(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+}
+
 function onPaneKey(e: KeyboardEvent): void {
   const tag = (e.target as HTMLElement).tagName;
+  // Esc and F leave the hidden-toolbar mode from anywhere, a board included.
+  if (focusOn && !typingIn(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Escape' || e.key === 'f' || e.key === 'F') && !hist.v && !document.querySelector('.vx-sheet,.vx-pop,.vx-menu,#modalHost:not(.hidden)')) {
+    e.preventDefault();
+    setFocus(false);
+    return;
+  }
+  // Keys on a board (the note's own or one embedded in it) are the board's.
+  if ((e.target as HTMLElement).closest?.('.kb')) return;
   const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  // A board is edited in place: its Markdown opens only from the ⋯ menu.
+  const board = boardNote && !state.editing;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
     e.preventDefault();
-    setMode(!state.editing);
+    if (!board) setMode(!state.editing);
     return;
   }
   if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape' && focusOn && !hist.v && !document.querySelector('.vx-sheet,.vx-pop,.vx-menu,#modalHost:not(.hidden)')) {
+    // Esc leaves the hidden-toolbar mode (the editor's own Esc closes the editor first).
+    e.preventDefault();
+    setFocus(false);
+    return;
+  }
   if (e.key === 'Escape' && hist.v && !state.editing && !document.querySelector('.vx-sheet,.vx-pop,#modalHost:not(.hidden)')) {
     e.preventDefault();
     backToLatest();
     return;
   }
   if (e.key === 'e' || e.key === 'E') {
+    if (board) return;
     e.preventDefault();
     setMode(true);
   } else if ((e.key === 'p' || e.key === 'P') && ed.path) {
@@ -987,13 +1114,16 @@ const TOOLS: { k: string; icon: string; label: string; key?: string }[] = [
   { k: 'link', icon: I.link, label: t('Link'), key: 'Ctrl+K' },
   { k: 'wiki', icon: I.wiki, label: t('Wikilink'), key: '[[' },
   { k: 'img', icon: I.image, label: t('Image (or paste or drop one)') },
+  { k: 'board', icon: BOARD_ICON, label: t('Add board') },
 ];
 
-function editorEl(): HTMLElement {
+function editorEl(board: boolean): HTMLElement {
   const wrap = el('div', 'vx-edit');
-  wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="${attr(t('Formatting'))}">${TOOLS.map(
+  // A board's own Markdown gets no "Add board" (a board inside a board is not a thing).
+  const tools = board ? TOOLS.filter((x) => x.k !== 'board') : TOOLS;
+  wrap.innerHTML = `<div class="vx-toolbar" role="toolbar" aria-label="${attr(t('Formatting'))}">${tools.map(
     (x) =>
-      `${x.k === 'ul' || x.k === 'link' || x.k === 'img' ? '<span class="vx-tsep" aria-hidden="true"></span>' : ''}<button data-t="${x.k}" title="${attr(
+      `${x.k === 'ul' || x.k === 'link' || x.k === 'img' || x.k === 'board' ? '<span class="vx-tsep" aria-hidden="true"></span>' : ''}<button data-t="${x.k}" title="${attr(
         x.label + (x.key ? ' (' + x.key + ')' : ''),
       )}" aria-label="${attr(x.label)}">${x.icon}</button>`,
   ).join('')}<span class="vx-grow"></span><span class="vx-edit-hint">${t('{save} save · {close} close', {
@@ -1237,6 +1367,57 @@ function format(ta: HTMLTextAreaElement, k: string): void {
     pick.multiple = true;
     pick.onchange = () => void insertImages(ta, Array.from(pick.files || []));
     pick.click();
+  } else if (k === 'board') addBoard(ta);
+}
+
+/** "Add board" in the editor: name a new board (in this note's folder unless picked otherwise) and
+ *  put a link to it on its own line at the cursor, where reading shows it as a board card. */
+function addBoard(ta: HTMLTextAreaElement): void {
+  const note = ed.path;
+  if (!note) return;
+  const at = { s: ta.selectionStart, e: ta.selectionEnd };
+  const put = (p: string, made: boolean): void => {
+    const now = host?.querySelector<HTMLTextAreaElement>('.vx-editor');
+    if (!now || ed.path !== note) {
+      if (made) undoToast(t('Board created: {name}', { name: noteTitle(p) }), null, 'info', 4000);
+      return;
+    }
+    const v = now.value;
+    const s = Math.min(at.s, v.length);
+    const e = Math.min(Math.max(at.e, s), v.length);
+    const before = v.slice(0, s);
+    const after = v.slice(e);
+    const lead = !before ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const tail = after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+    const line = `${lead}![[${linkTextFor(p, dirOf(note))}]]${tail}`;
+    now.focus();
+    now.setRangeText(line, s, e, 'end');
+    now.dispatchEvent(new Event('input'));
+    undoToast(made ? t('Board created and linked: {name}', { name: noteTitle(p) }) : t('Board embedded: {name}', { name: noteTitle(p) }), null, 'info', 4000);
+  };
+  const btn = host?.querySelector<HTMLElement>('.vx-toolbar [data-t=board]') || ta;
+  openMenu(
+    [
+      { label: t('New board'), icon: BOARD_ICON, run: () => nav.newBoard(dirOf(note), (p) => put(p, true)) },
+      { label: t('Existing board…'), icon: I.link, run: () => void pickNote({ title: t('Embed a board'), boards: true, exclude: [note] }).then((p) => {
+            if (p) put(p, false);
+          }) },
+    ],
+    btn,
+  );
+}
+
+/** Put `![[board]]` at the end of a note (a normal save, so it is in the note's history). */
+async function embedInto(note: string, board: string): Promise<void> {
+  try {
+    const cur = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(note));
+    const text = (cur.content || '').replace(/\s+$/, '');
+    await saveNote(note, `${text}${text ? '\n\n' : ''}![[${linkTextFor(board, dirOf(note))}]]\n`);
+    await reload();
+    if (host && ed.path === note) await renderNote(host, note, mobileBack, true);
+    undoToast(t('{board} is now in {note}', { board: noteTitle(board), note: noteTitle(note) }), () => nav.openNote(note), 'info', 6000);
+  } catch (e) {
+    undoToast(t('Could not save the note: {error}', { error: (e as Error).message }), null, 'err');
   }
 }
 
@@ -1357,6 +1538,7 @@ interface Sug {
   text: string;
   /** `@mnemo:`: replaces the typed `@…` or `/…` instead of filling a link. */
   mention?: boolean;
+  board?: boolean;
 }
 
 /** `@` or `/` (after a space or at a line start) and the first letters of "mnemo". */
@@ -1409,6 +1591,8 @@ function suggest(ta: HTMLTextAreaElement): void {
   const from = dirOf(ed.path || '');
   // Every note, not every name: same-named notes in different folders both show.
   const items: Sug[] = allNotes()
+    // Never offer the note itself.
+    .filter((n) => n.path !== ed.path)
     .filter((n) => n.name.toLowerCase().includes(q) || n.path.toLowerCase().includes(q))
     .sort(
       (a, b) =>
@@ -1417,7 +1601,7 @@ function suggest(ta: HTMLTextAreaElement): void {
         a.path.localeCompare(b.path),
     )
     .slice(0, 8)
-    .map((n) => ({ name: noteTitle(n.path), folder: dirOf(n.path), text: linkTextFor(n.path, from) }));
+    .map((n) => ({ name: noteTitle(n.path), folder: dirOf(n.path), text: linkTextFor(n.path, from), board: isBoardPath(n.path) }));
   if (!items.length) {
     closeSuggest();
     return;
@@ -1444,7 +1628,7 @@ function drawSuggest(ta: HTMLTextAreaElement): void {
   cur.box.innerHTML = cur.items
     .map(
       (n, i) =>
-        `<button role="option" aria-selected="${i === cur.i}" class="${i === cur.i ? 'on' : ''}" data-i="${i}">${n.mention ? I.mnemo : I.note}<span>${esc(n.name)}</span><small style="margin-left:auto;padding-left:10px;color:var(--muted);font-size:11.5px">${esc(n.folder || ROOT_LABEL)}</small></button>`,
+        `<button role="option" aria-selected="${i === cur.i}" class="${i === cur.i ? 'on' : ''}" data-i="${i}">${n.mention ? I.mnemo : n.board ? BOARD_ICON : I.note}<span>${esc(n.name)}</span><small style="margin-left:auto;padding-left:10px;color:var(--muted);font-size:11.5px">${esc(n.folder || ROOT_LABEL)}</small></button>`,
     )
     .join('');
   cur.box.querySelectorAll<HTMLElement>('button').forEach((b) => {
@@ -1567,10 +1751,42 @@ function wireBus(): void {
         .catch(() => {
           /* the next save re-checks for conflicts */
         });
+    } else if (boardFor(cur)) {
+      // The board fetches itself and redraws only what changed (it keeps drags and typing).
+      void boardFor(cur)!.refresh();
     } else {
       void renderNote(host, cur, mobileBack, true).then(() => {
         host?.querySelector('.vx-prose')?.classList.add('vx-flash');
       });
     }
   });
+}
+
+/** What the board needs from the note pane. */
+const kbHost: KanbanHost = {
+  openNote: (p) => nav.openNote(p),
+  createNote: (name, at) => offerCreate(name, at),
+  openTag: (tag) => {
+    state.tags.active = tag || null;
+    void flushEditor().then(() => hooks.go('tags'));
+  },
+  saved: () => void syncDoc(),
+};
+
+/** What a board embedded in a note needs: the same, but its saves are not this note's. */
+const embedHost: KanbanHost = { ...kbHost, saved: () => {} };
+
+/** The board saved the note: refresh the pane's copy of its text (for Edit and History) without redrawing. */
+async function syncDoc(): Promise<void> {
+  const p = ed.path;
+  if (!p) return;
+  try {
+    const d = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(p));
+    if (ed.path !== p || state.editing) return;
+    ed.base = d.content || '';
+    ed.doc = d;
+    invalidateHistory(p);
+  } catch {
+    /* the next open reads it again */
+  }
 }

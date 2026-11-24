@@ -12,7 +12,7 @@ catalog.
 | Auth | API key in `Authorization: Bearer <key>` or `X-API-Key: <key>`, or an OAuth 2.1 access token |
 | Discovery card | `GET /.well-known/mcp.json` (public) |
 | Readable catalog | `GET /tools` (HTML page, public) |
-| Catalog size | 77 tools, plus 5 admin tools for keys with the `admin` scope |
+| Catalog size | 86 tools, plus 5 admin tools for keys with the `admin` scope |
 
 `initialize` answers with the protocol version the client asks for when it is
 one of the three above, and with `2025-06-18` otherwise.
@@ -429,6 +429,56 @@ folder through renames and moves done by Memora (over MCP or HTTP, including not
 a moved folder) and are removed when the item is deleted or moved to the trash; deleting a
 folder removes every pin under it. A key whose privacy rules hide a path neither lists
 nor changes its pin, and `position` counts only the pins the key can see.
+
+### Kanban boards (`kanban`, `kanban_cards`, `kanban_boards`, `kanban_embed`)
+
+Notes in the Obsidian Kanban format (`kanban-plugin` in the frontmatter; see
+[KANBAN.md](KANBAN.md)). The tools come in four categories, so each can be
+switched on or off on its own: `kanban` reads boards (read-only), `kanban_cards`
+changes cards and lanes, `kanban_boards` creates, converts, renames, moves,
+copies, deletes and styles boards, `kanban_embed` embeds boards in notes. All
+are on by default, like the note tools; the three write categories need the
+`write` scope.
+
+Lanes are named by title (case is ignored when no title matches exactly) or by
+their position from 0 written as digits. Cards are named by the `id` from
+`kanban_get_board`, which stays while the card's text stays (moving or ticking
+it off keeps it). Board edits take an optional `version` from
+`kanban_get_board`: when the board changed since, the call fails with `board
+changed: ... read it again` and nothing is written. Each write is one commit
+(`kanban: <what> in <path>`), a `node_updated` event and an Activity entry, and
+touches only the lines it changes; the `%% kanban:settings` block changes only
+when a setting, color or style changes, and then only the member that changed
+(unknown keys and the order of keys stay). A note that is not a board is
+refused. Private paths and notes locked by another agent are refused as by the
+note tools.
+
+Cards have structured fields, written in the board's own syntax and settings
+(`date-trigger`, `time-trigger`, `date-format`, `time-format`): `links`
+(`[[note]]`), `tags` (`#tag`), `date` (`@{YYYY-MM-DD}`), `time` (`@@{HH:mm}`),
+`checklist` (`- [ ] step` lines indented under the card) and `color`. Pieces
+already in the text stay where they are; new ones go at the end of the first
+line. A card's color is kept in the settings under `memora.cards` by the card's
+block id (` ^abc123`, added to its first line when it has none); lane colors
+(`memora.lanes`, by title) and the board's color and icon (`memora.board`) live
+there too. WIP limits are the ` (N)` after a lane title; tag colors are the
+plugin's own `tag-colors`.
+
+One note is one board. For several boards in one note, create a board note per
+board and embed each in the note with `kanban_embed` (a `![[Board name]]` line):
+the web app shows every embedded board live in the note.
+
+| Tool | | Arguments | Purpose |
+|---|---|---|---|
+| `kanban_list_boards` | R | `folder` (string; includes subfolders, `Root` = top level) | Boards the caller may see, most recently changed first: `{count, boards:[{path, title, lanes:[{title, cards}], cards, done, archived, version, mtime}]}`. |
+| `kanban_get_board` | R | `path` (string, required; `.md` optional, or a note name) | `{path, version, lanes:[{index, title, max_items, color, complete, cards}], archive, counts:{lanes, cards, done, archived}, style:{color, icon}, tag_colors:{tag:{color, background}}, settings}`. A card is `{id, text, title, checked, task, tags, links, dates, times, block, color, checklist:[{text, done}], fields:{text, links, tags, date, time}}`; `fields.text` is the free text (without the pieces, the checklist and the block id). `settings` is the whole settings object. |
+| `kanban_add_card` | W | `path`, `lane`, `text` (strings, required), `position` (integer from 0, default the bottom), `checked` (boolean), `links`, `tags` (arrays of strings), `date` (`YYYY-MM-DD`), `time` (`HH:mm`), `checklist` (array of `{text, done}`), `color` (string), `version` (string) | Adds `- [ ] text` (more lines indented under it) with the fields. Returns the board with `card` (the new id), `changed` and the new `version`. |
+| `kanban_move_card` | W | `path`, `card`, `lane` (strings, required), `position` (integer from 0, default the bottom), `version` | Moves the card into the lane (the same lane to reorder). Into a `complete` lane checks it, out of one unchecks it. Returns the board and `card`. |
+| `kanban_update_card` | W | `path`, `card` (strings, required), `text`, `links`, `tags`, `date` (`""` clears), `time` (`""` clears), `checklist` (the whole list; `[]` removes it), `color` (null clears), `checked`, `archived` (boolean), `lane`, `version` | The fields apply over the card's current text: `text` replaces the free text, everything left out stays. `archived: true` moves the card under the board's `## Archive` (made when missing), `archived: false` brings an archived card back into `lane` (default the first lane); `archived` cannot be combined with other changes. Returns the board and `card` (the id after the change). |
+| `kanban_card` | W | `path`, `card`, `action` (required: `duplicate`, `delete`, `restore`), `lane`, `version` | `duplicate` copies the card just below it (with its color, under a new block id); `delete` removes it for good; `restore` brings an archived card back into `lane` (default the first lane). Returns the board and `card`. |
+| `kanban_lane` | W | `path`, `action` (required: `add`, `rename`, `move`, `delete`, `duplicate`, `archive_cards`, `clear`, `color`, `limit`), `lane`, `title`, `position` (integer from 0), `color` (string or null), `max` (integer from 0), `version` | Lanes: add (`title`, `position`), rename (the WIP limit and color stay), move (`position`), delete (an empty lane), duplicate (cards too; optional new `title`), archive every card, delete every card, set or clear the color, set the WIP limit (`max`, 0 removes it). Returns the board. |
+| `kanban_board` | W | `action` (required: `create`, `convert`, `rename`, `move`, `duplicate`, `delete`, `style`, `tag_color`, `settings`), `path`, `folder`, `title`, `lanes` (array of strings), `to`, `color`, `icon`, `tag`, `background`, `settings` (object), `version` | `create`: a board note `title` in `folder` (default `Memory`) with `lanes` (default To do, Doing, Done with Done marked Complete). `convert`: the note `path` becomes a board (headings become lanes, list items cards, other text is dropped and counted in `converted.dropped`; `lanes` names the default lanes); a normal save, so the old text stays in history. `rename` (`to` = new name), `move` (`to` or `folder`), `duplicate`, `delete` (to the Trash) behave exactly like `rename_memory`, `move_memory`, `duplicate_memory` and `soft_delete`. `style`: `color` and `icon` (null clears). `tag_color`: `tag`'s `color` (null removes) and `background`. `settings`: Obsidian Kanban settings `{key: value}` (null removes), such as `date-colors`, `tag-colors`, `lane-width`, `date-format`, `time-format`, `date-trigger`, `time-trigger`, `date-display-format`, `show-checkboxes`, `hide-tags-in-title`, `hide-date-in-title`, `show-relative-date`, `link-date-to-daily-note`, `new-card-insertion-method`, `archive-with-date`, `max-archive-size`; other keys are refused. |
+| `kanban_embed` | W | `note`, `board` (strings, required), `remove` (boolean) | Adds `![[Board]]` (or `![[Folder/Board]]` when the name alone would find another note) at the end of `note` after a blank line; with `remove`, takes out every line that is only an embed of or a link to the board. `board` must be a board and `note` must not be one. A normal save of the note. Returns `{ok, note, board, link, changed}`. |
 
 ### Admin tools (`admin`)
 

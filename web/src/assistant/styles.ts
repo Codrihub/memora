@@ -72,6 +72,15 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-wl{color:var(--fg)!important;text-decoration:none!important;border-bottom:1.5px solid var(--accent-line,var(--accent));font-weight:550;cursor:pointer}
 .mn-wl:hover{background:var(--accent-soft)}
 .mn-wl.code{border-bottom:0}.mn-wl.code code{box-shadow:inset 0 -1.5px 0 var(--accent-line,var(--accent))}
+/* Boards read differently from notes (teal, the accent): a board icon and a violet accent, in
+   links, chips and cards. */
+:root{--mn-kb:#a78bfa}
+:root[data-theme=light]{--mn-kb:#7c3aed}
+:root[data-theme=light] .mn-chat.fleeting{--mn-kb:#a78bfa}
+.mn-chat.fleeting .ch-board{--kb-ac:#a78bfa}
+.mn-wl.is-kb{border-bottom-color:color-mix(in srgb,var(--mn-kb) 75%,transparent)}
+.mn-wl.is-kb:hover{background:color-mix(in srgb,var(--mn-kb) 12%,transparent)}
+.mn-wl-ic{width:.95em;height:.95em;vertical-align:-.12em;margin-inline-end:3px;color:var(--mn-kb);stroke-width:2}
 .mn-wl.missing{border-bottom-style:dashed;border-bottom-color:var(--line-strong);color:var(--text-2,var(--muted))!important;font-weight:inherit;cursor:help}
 .mn-caret{display:inline-block;width:7px;height:1.05em;margin-left:2px;vertical-align:-2px;border-radius:2px;background:var(--accent);animation:mnBlink 1s steps(2) infinite}
 @keyframes mnBlink{50%{opacity:0}}
@@ -218,6 +227,7 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
    picked in Appearance does not apply here. */
 .mn-chat.fleeting{color-scheme:dark;--bg:#0d0f13;--surface-0:#14171c;--surface-1:#191d23;--panel:#191d23;--fg:#e6e8ec;--text-2:#c4c8d0;--muted:#8d94a0;
   --line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.15);--hover:rgba(255,255,255,.06);--accent:#5eead4;--accent-soft:rgba(94,234,212,.14);--ok:#86efac;
+  --surface-2:#20252d;--surface-3:#272d36;--text-3:#6b7380;--accent-line:rgba(94,234,212,.45);--on-accent:#04221e;--warn:#fbbf24;--mn-kb:#a78bfa;
   --fl-ink:#d9dde3;--fl-tint:rgba(45,212,191,.13);--fl-edge:rgba(94,234,212,.28);
   color:var(--fg);background-color:#0d0f13;
   background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1px),radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.05),transparent 60%);
@@ -262,7 +272,8 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
   color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px -8px rgba(15,23,42,.35);
   opacity:0;pointer-events:none;transform:translate(-50%,8px) scale(.96);transition:opacity .2s,transform .25s var(--ease-out,ease-out),background .15s}
 .mn-down .i{width:16px;height:16px;flex:none}
-@media (max-width:640px){.mn-down span{display:none}.mn-down{width:36px;height:36px;padding:0}}
+/* Round and small, so it covers as little of the answer as it can. */
+.mn-down span{display:none}.mn-down{width:36px;height:36px;padding:0}
 .mn-down.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
 .mn-down:hover{background:var(--hover)}
 .mn-down:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -662,7 +673,9 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-cx-a .btn{flex:1;justify-content:center}
 
 /* Cards Mnemo hands over (show_items): notes, folders, images, the vault. */
-.mn-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin:8px 0 2px;animation:mnIn .2s var(--ease-out,ease-out) both}
+/* Everything a reply hands over (notes, boards, images, pages) stacks in one column, each card as
+   wide as the bubble: heights may differ, the edges line up. */
+.mn-cards{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:8px 0 2px;animation:mnIn .2s var(--ease-out,ease-out) both}
 .mn-card{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 10px 9px 9px;border:1px solid var(--line);border-radius:12px;background:var(--panel,var(--surface-1));
   color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}
 .mn-card:hover{border-color:var(--accent-line,var(--line-strong));background:color-mix(in srgb,var(--accent) 5%,var(--panel,var(--surface-1)))}
@@ -678,6 +691,91 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-card-t b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-card-t small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-card-go{width:14px;height:14px;flex:none;color:var(--muted)}
+
+.mn-card-x{margin-top:2px;white-space:normal!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--text-2,var(--muted))!important;line-height:1.35}
+.mn-card-x[hidden]{display:none}
+.mn-att-c.is-kb{border-color:color-mix(in srgb,var(--mn-kb) 40%,var(--line))}
+.mn-att-c.is-kb>.i,.mn-att-c.is-kb.w>.i{color:var(--mn-kb)}
+
+/* A board in the chat: a card with its lanes as bars that opens into the live board. */
+/* Board previews are cards like note cards: a grid of cards, never wider than the bubble. */
+/* Cards keep the neutral border at rest; the board accent shows on hover, keyboard focus and
+   (softly) while a board list is open. */
+@media (hover:hover){.mn-kb:hover,.mn-cw:hover>.mn-card,.mn-cw:hover>.mn-nbd{border-color:color-mix(in srgb,var(--mn-kb) 45%,var(--line))}}
+.mn-kb:has(:focus-visible),.mn-cw:has(:focus-visible)>:is(.mn-card,.mn-nbd){border-color:color-mix(in srgb,var(--mn-kb) 55%,var(--line))}
+.mn-cw:has(>.mn-nbd[open])>:is(.mn-card,.mn-nbd){border-color:color-mix(in srgb,var(--mn-kb) 22%,var(--line))}
+.mn-kbs{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:8px 0 2px;min-width:0}
+.mn-shown>.mn-cards+.mn-kbs{margin-top:8px}
+.mn-shown>.mn-kbs{margin-top:8px}
+.mn-kb{min-width:0;border:1px solid var(--line);border-radius:14px;background:var(--panel,var(--surface-1));
+  overflow:hidden;animation:mnIn .2s var(--ease-out,ease-out) both}
+.mn-kb-h{display:flex;align-items:center;gap:10px;padding:9px 10px 9px 9px;min-width:0}
+.mn-kb-ic{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:9px;color:var(--mn-kb);
+  background:color-mix(in srgb,var(--mn-kb) 13%,transparent)}
+.mn-kb-ic .i{width:18px;height:18px}
+.mn-kb-t{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:2px 4px;border:0;border-radius:8px;
+  background:none;color:var(--fg);font:inherit;text-align:start;cursor:pointer}
+@media (hover:hover){.mn-kb-t:hover{background:var(--hover)}}
+.mn-kb-t:active{background:var(--hover)}
+.mn-kb-t:focus-visible{outline:2px solid var(--mn-kb);outline-offset:1px}
+.mn-kb-n{display:flex;align-items:center;gap:5px;min-width:0;max-width:100%}
+.mn-kb-n b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-kb-sub{font-size:11.5px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.mn-kb-bars{display:flex;align-items:flex-end;gap:3px;height:12px;width:min(260px,100%)}
+.mn-kb-bars:empty{display:none}
+/* One track per lane: a neutral track, filled in proportion to the largest lane (an empty lane stays empty). */
+.mn-kb-bars{align-items:stretch}
+.mn-kb-bars i{position:relative;flex:1 1 0;min-width:0;height:14px;border-radius:3px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
+.mn-kb-bars i::after{content:"";position:absolute;inset:auto 0 0 0;height:var(--h,0%);background:color-mix(in srgb,var(--mn-kb) 55%,transparent);border-radius:3px}
+/* The way in: a chevron like a note card's (the whole header opens the board too). */
+.mn-kb-open{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
+@media (hover:hover){.mn-kb-open:hover{background:var(--hover);color:var(--fg)}}
+.mn-kb-open:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.mn-kb-open .i{width:14px;height:14px}
+/* A glimpse of the first cards per lane: still text, nothing to drag or tick. */
+/* The glimpse: lanes side by side, sliding sideways inside the card (no scrollbar, edges fade). */
+.mn-kb-peek{display:flex;gap:6px;margin:0 10px 10px 52px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain}
+.mn-kb-peek>.mn-kb-pl{flex:0 0 200px;width:200px}
+[dir=rtl] .mn-kb-peek{margin:0 52px 10px 10px}
+@media (max-width:640px){.mn-kb-peek{margin-inline-start:10px}.mn-kb-peek>.mn-kb-pl{flex-basis:min(200px,70vw);width:min(200px,70vw)}}
+.mn-kb-pl>*{min-width:0;max-width:100%}
+.mn-kb-pmore{grid-column:1/-1;font-size:11.5px;color:var(--muted)}
+.mn-kb-peek[hidden]{display:none}
+.mn-kb-pl{display:flex;flex-direction:column;gap:4px;min-width:0;padding:8px;border-radius:10px;background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.mn-kb-plh{display:flex;align-items:center;gap:6px;min-width:0;font-size:11.5px;font-weight:650;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-kb-plh em{font-style:normal;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.mn-kb-pc{font-size:12.5px;line-height:1.35;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 7px;border-radius:7px;
+  background:var(--panel,var(--surface-1));border:1px solid var(--line)}
+.mn-kb-pc.done{color:var(--muted);text-decoration:line-through}
+.mn-kb-pm{font-size:11.5px;color:var(--muted);padding-inline:2px}
+.mn-kb-refs:empty{display:none}
+.mn-kb-refs{padding:0 10px 8px 56px;min-width:0}
+[dir=rtl] .mn-kb-refs{padding:0 56px 8px 10px}
+.mn-kb-refs .kbr{margin:0}
+.mn-kb-refs .kbr>summary{padding-inline:0}
+/* A note that puts boards in: a small board badge, and a folded list of its boards. */
+.mn-nb{display:inline-flex;align-items:center;gap:3px;margin-inline-start:6px;padding:0 6px;height:18px;border-radius:9px;font-style:normal;font-size:11px;font-weight:650;
+  color:var(--mn-kb);background:color-mix(in srgb,var(--mn-kb) 13%,transparent);flex:none;font-variant-numeric:tabular-nums}
+.mn-nb .i{width:11px;height:11px}
+.mn-card-t .mn-nb{margin:2px 0 0;align-self:flex-start}
+/* A note card with boards: the list of its boards folds out right under it, at its width. */
+.mn-cw{display:flex;flex-direction:column;min-width:0}
+.mn-cw>.mn-card:has(+.mn-nbd){border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mn-nbd{border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;background:var(--panel,var(--surface-1));overflow:hidden;min-width:0}
+.mn-nbd>summary{display:flex;align-items:center;gap:8px;min-height:38px;padding:0 12px 0 52px;cursor:pointer;list-style:none;font-size:13px;color:var(--text-2);min-width:0;white-space:nowrap}
+.mn-nbd>summary>span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+[dir=rtl] .mn-nbd>summary{padding:0 52px 0 12px}
+.mn-nbd>summary::-webkit-details-marker{display:none}
+.mn-nbd>summary em{font-style:normal;margin-inline-start:auto;color:var(--mn-kb);font-weight:650}
+.mn-nbr{display:flex;align-items:center;gap:10px;width:100%;min-width:0;min-height:44px;padding:6px 12px;border:0;border-top:1px solid var(--line);background:none;color:var(--fg);font:inherit;text-align:start;cursor:pointer}
+@media (hover:hover){.mn-nbr:hover{background:var(--hover)}}
+.mn-nbr>.i{width:16px;height:16px;color:var(--mn-kb);flex:none}
+.mn-nbr-t{flex:1;min-width:0;display:flex;flex-direction:column}
+.mn-nbr-t b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-nbr-t small{font-size:11.5px;color:var(--muted)}
+.mn-nbr .mn-kb-bars{width:72px;flex:none}
+.mn-nbr{padding-inline-start:52px}
+@media (prefers-reduced-motion:reduce){.mn-kb{animation:none}}
 
 /* Under a reply: what it changed, showed and read. */
 .mn-rel{display:flex;align-items:center;gap:8px;margin-top:10px;min-width:0}

@@ -117,6 +117,9 @@ ${CRITICAL_CSS}
       <button id="sideNewNode" class="side-tool side-new" type="button" aria-label="New note" title="New note" data-tip="New note">
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V12"/><path d="M18.4 3.6a2 2 0 0 1 2.9 2.9L13 14.8l-3.6.8.8-3.6z"/></svg><span class="side-new-label">New note</span>
       </button>
+      <button id="sideNewBoard" class="side-tool side-new side-new-board" type="button" aria-label="New board" title="New board" data-tip="New board">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg><span class="side-new-label">New board</span>
+      </button>
       <button id="sideCollapseTop" class="side-tool side-collapse" type="button" title="Collapse sidebar ([)" aria-label="Collapse sidebar" aria-controls="sidebar">
         <svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg>
       </button>
@@ -166,9 +169,8 @@ ${CRITICAL_CSS}
         <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></svg>
       </button>
       <div id="sideStatsPop" class="side-stats-pop" role="dialog" aria-label="Your notes in numbers" hidden></div>
-      <nav class="side-links" aria-label="Mnemo, trash and settings">
+      <nav class="side-links" aria-label="Trash and settings">
         <button id="sideCollapse" class="nav-item side-collapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-controls="sidebar" aria-expanded="true"><span class="ni-tile"><svg class="i sc-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></span><span class="ni-label sc-label">Collapse sidebar</span></button>
-        <button class="nav-item side-mnemo" type="button" data-page="assistant" data-tip="Mnemo" aria-label="Mnemo, your notes agent"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-8a2.6 2.6 0 0 1 5.2 0v4.2a2.8 2.8 0 0 0 5.6 0V10a2.6 2.6 0 0 1 5.2 0v8"/><path d="M12 2.8v2.6M10.7 4.1h2.6"/></svg></span><span class="ni-label">Mnemo</span><span class="ni-new" aria-hidden="true">New</span></button>
         <button class="nav-item" type="button" data-act="trash" data-page="trash" data-tip="Trash" aria-label="Trash"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 1.8h7a2 2 0 0 0 2-1.8l1-12M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7"/></svg></span><span class="ni-label">Trash</span></button>
         <button class="nav-item" type="button" data-page="settings" data-tip="Settings" aria-label="Settings"><span class="ni-tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span class="ni-label">Settings</span></button>
       </nav>
@@ -237,6 +239,7 @@ ${CRITICAL_CSS}
       <section id="view-docs" class="view hidden" data-page="docs" aria-label="Documentation"></section>
       <section id="view-assistant" class="view hidden" data-page="assistant" aria-label="Mnemo"></section>
       <section id="view-trash" class="view hidden" data-page="trash" aria-label="Trash"></section>
+      <section id="view-boards" class="view hidden" data-page="boards" aria-label="Boards"></section>
     </div>
   </main>
 

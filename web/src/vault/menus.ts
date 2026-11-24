@@ -322,6 +322,7 @@ export function folderMenu(path: string, at: Anchor, rename?: () => void, extra:
   openMenu(
     [
       { label: t('New note here'), icon: I.newNote, hint: 'N', run: () => nav.newNote(path) },
+      { label: t('New board here'), icon: I.board, hint: 'B', run: () => nav.newBoard(path) },
       { label: t('New folder here'), icon: I.newFolder, run: () => nav.newFolder(path) },
       { label: root ? t('Ask Mnemo about the vault') : t('Ask Mnemo about this folder'), icon: I.mnemo, run: () => hooks.askMnemo(root ? 'global' : 'folder:' + path) },
       { sep: true, label: '' },
@@ -414,6 +415,7 @@ export function noteMenu(paths: string[], at: Anchor, rename?: () => void): void
           ]
         : []),
       { label: t('New note in this folder'), icon: I.newNote, run: () => nav.newNote(dirOf(paths[0])) },
+      { label: t('New board in this folder'), icon: I.board, run: () => nav.newBoard(dirOf(paths[0])) },
       { sep: true, label: '' },
       {
         label: paths.length > 1 ? t('Move {n} notes to Trash', { n: paths.length }) : t('Move to Trash'),

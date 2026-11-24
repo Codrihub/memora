@@ -7,6 +7,8 @@ export interface NoteRef {
   mtime: number;
   /** What the note is called on screen (front matter title, first heading or the file name). */
   title?: string;
+  /** A Kanban board note (`kanban-plugin` in its frontmatter). */
+  board?: boolean;
 }
 
 /** Folder name to note list. */

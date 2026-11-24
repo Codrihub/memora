@@ -26,6 +26,10 @@ const CATEGORIES: Record<string, { label: string; desc: string }> = {
   identity: { label: t('Identity'), desc: t('How the agent itself shows up: its display name and colour.') },
   interop: { label: t('Import and export'), desc: t('Bring notes in or take them out as a zip of text files.') },
   ux: { label: t('Tasks, checks and pins'), desc: t('To-dos, follow-ups, checks that a note is well formed, and the pinned notes and folders.') },
+  kanban: { label: t('Boards: read'), desc: t('List and read Kanban boards (Obsidian Kanban format), with their lanes, cards and colours.') },
+  kanban_cards: { label: t('Boards: cards and lanes'), desc: t('Add, edit, move, tick off, archive and delete cards and lanes, with links, dates, tags, checklists and colours.') },
+  kanban_boards: { label: t('Boards: create and manage'), desc: t('Create boards or turn notes into boards; rename, move, copy, delete and colour them.') },
+  kanban_embed: { label: t('Boards in notes'), desc: t('Embed a board in a note, or take it out.') },
 };
 const CAT_ORDER = Object.keys(CATEGORIES);
 
@@ -38,9 +42,9 @@ const RISKS: Record<ToolRisk, { label: string; desc: string }> = {
 };
 
 /** The "Can delete" tier: tools that remove notes or folders, or can overwrite text in many notes. */
-const HIGH = new Set(['delete_memory', 'soft_delete', 'bulk_delete', 'bulk_replace', 'import_memory', 'delete_folder', 'move_folder_contents']);
+const HIGH = new Set(['delete_memory', 'soft_delete', 'bulk_delete', 'bulk_replace', 'import_memory', 'delete_folder', 'move_folder_contents', 'kanban_board']);
 const READ_RE =
-  /^(get|list|read|search|find|query|export)_|^(link_stats|broken_links|diff|presence|healthcheck|folder_stats|stale_detection|validate_memory|follow_ups|suggest_links|digest)$/;
+  /^(get|list|read|search|find|query|export)_|^(kanban_get_board|kanban_list_boards|link_stats|broken_links|diff|presence|healthcheck|folder_stats|stale_detection|validate_memory|follow_ups|suggest_links|digest)$/;
 
 /** What a tool can do to the vault, from its name. */
 export function toolRisk(t: { name: string }): ToolRisk {
@@ -131,6 +135,10 @@ const CAT_ICON: Record<string, string> = {
   identity: 'user',
   interop: 'download',
   ux: 'check',
+  kanban: 'kanban',
+  kanban_cards: 'kanban',
+  kanban_boards: 'kanban',
+  kanban_embed: 'note',
 };
 const catIcon = (c: string): string => icon(CAT_ICON[c] || 'tools');
 

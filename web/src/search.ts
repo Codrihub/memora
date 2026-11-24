@@ -5,7 +5,7 @@ import { $, esc, safeSnip } from './dom';
 import { debounce } from './format';
 import { hooks } from './hooks';
 import { PAGE_META, PAGES } from './router';
-import { allNotes, noteTitle, type Page } from './state';
+import { allNotes, isBoard, noteTitle, type Page } from './state';
 import { icon } from './ui/icons';
 import { fadeScroll } from './ui/scroll-fade';
 import { score, similar, type Near } from './ui/match';
@@ -81,7 +81,7 @@ function noteOption(n: NoteRef, q: string, section: string): Option {
     title: noteTitle(n.path),
     titleHtml: highlight(noteTitle(n.path), q),
     sub: (n.folder || '') + (n.path ? ' · ' + n.path : ''),
-    icon: 'note',
+    icon: isBoard(n.path) ? 'kanban' : 'note',
     run: () => hooks.openNote(n.path),
   };
 }
@@ -172,7 +172,7 @@ function build(raw: string): void {
         title: noteTitle(h.path),
         sub: (h.folder || '') + ' · ' + h.path,
         snip: h.snippet,
-        icon: 'search',
+        icon: isBoard(h.path) ? 'kanban' : 'search',
         run: () => hooks.openNote(h.path),
       });
     }

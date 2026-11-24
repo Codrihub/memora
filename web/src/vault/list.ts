@@ -7,7 +7,7 @@ import { Modal } from '../modal';
 import { noteTitle, state } from '../state';
 import type { NoteRef } from '../types';
 import { excerptOf, keepExcerpts, onExcerpt, wantExcerpt } from './excerpts';
-import { I, folderGlyph } from './icons';
+import { I, folderGlyph, noteIcon } from './icons';
 import { lockMark } from '../ui/privacy';
 import { askMoveNotes, confirmFolderMove, deleteNotesToTrash, folderMenu, noteMenu, pinToggle } from './menus';
 import { drag, endDrag, nav, startDrag } from './nav';
@@ -33,6 +33,7 @@ import {
   type SortKey,
 } from './store';
 import { emptyState, inlineEdit, openMenu } from './ui';
+import { openNewMenu } from './new-menu';
 import { normQuery, score, similar } from '../ui/match';
 import { mountSelect, type SelectOption } from '../ui/select';
 import { folderImages, galleryGrid } from './images';
@@ -159,9 +160,9 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
         <button class="btn ghost" data-new-folder aria-label="${attr(t('New folder'))}" title="${attr(
           folder ? t('New folder in {parent}', { parent: baseName(folder) }) : t('New folder'),
         )}">${I.newFolder}<span>${t('New folder')}</span></button>
-        <button class="btn primary" data-new aria-label="${attr(t('New note'))}" title="${attr(
-          folder ? t('New note in {folder} (N)', { folder: baseName(folder) }) : t('New note (N)'),
-        )}">${I.plus}<span>${t('New note')}</span></button>
+        <button class="btn primary vx-new" data-new-menu aria-haspopup="menu" aria-label="${attr(t('New note or board'))}" title="${attr(
+          t('New note or board'),
+        )}">${I.plus}<span>${t('New')}</span></button>
         <button class="vx-icon-btn vx-round" data-more aria-label="${attr(folder ? t('Folder actions') : t('More'))}" title="${attr(folder ? t('Folder actions') : t('More'))}">${I.more}</button>
       </div>
     </div>`;
@@ -315,15 +316,15 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
               I.folder,
               t('No notes in this folder'),
               t('Its notes are in its folders. You can also start one here.'),
-              `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`,
+              `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button><button class="btn sm" data-new-board>${I.board}${t('New board')}</button>`,
             )
           : folder
-            ? emptyState(I.note, t('This folder is empty'), t('Start the first note in it.'), `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`)
+            ? emptyState(I.note, t('This folder is empty'), t('Start the first note in it.'), `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button><button class="btn sm" data-new-board>${I.board}${t('New board')}</button>`)
             : emptyState(
                 I.note,
                 t('No notes yet'),
                 t('A note is a page of text you and your AI agents can read and add to.'),
-                `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button>`,
+                `<button class="btn sm primary" data-new>${I.plus}${t('New note')}</button><button class="btn sm" data-new-board>${I.board}${t('New board')}</button>`,
               );
   }
   const groups = isDeep && prefs.sort === 'folder' && !cards;
@@ -341,7 +342,9 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
   }
   const add =
     notes.length && !query && prefs.filter === 'all'
-      ? `<button type="button" class="vx-addrow" data-new>${I.plus}<span>${folder ? t('New note in {folder}', { folder: esc(baseName(folder)) }) : t('New note')}</span></button>`
+      ? `<div class="vx-addrows"><button type="button" class="vx-addrow" data-new>${I.plus}<span>${folder ? t('New note in {folder}', { folder: esc(baseName(folder)) }) : t('New note')}</span></button><button type="button" class="vx-addrow" data-new-board>${I.board}<span>${
+          folder ? t('New board in {folder}', { folder: esc(baseName(folder)) }) : t('New board')
+        }</span></button></div>`
       : '';
   rows.appendChild(frag);
   if (add && cards) rows.insertAdjacentHTML('beforeend', add);
@@ -377,6 +380,8 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
       );
   };
   host.querySelectorAll<HTMLElement>('[data-new]').forEach((b) => (b.onclick = () => nav.newNote(folder)));
+  host.querySelectorAll<HTMLElement>('[data-new-board]').forEach((b) => (b.onclick = () => nav.newBoard(folder)));
+  head.querySelector<HTMLElement>('[data-new-menu]')?.addEventListener('click', (e) => openNewMenu(e.currentTarget as HTMLElement, folder));
   head.querySelector<HTMLElement>('[data-new-folder]')!.onclick = () => nav.newFolder(folder);
   host.querySelector<HTMLElement>('[data-filter-all]')?.addEventListener('click', () => {
     prefs.filter = 'all';
@@ -483,6 +488,9 @@ export function renderList(host: HTMLElement, mobile: boolean): void {
     if ((e.key === 'n' || e.key === 'N') && !t.closest('.vx-note')) {
       e.preventDefault();
       nav.newNote(folder);
+    } else if ((e.key === 'b' || e.key === 'B') && !t.closest('.vx-note')) {
+      e.preventDefault();
+      nav.newBoard(folder);
     }
   };
 
@@ -557,7 +565,7 @@ function showKeys(): void {
     title: t('Keyboard shortcuts'),
     body: `<dl class="vx-keys">
       ${k(['↑', '↓'], t('Move in the tree or list'))}${k(['←', '→'], t('Collapse or expand a folder'))}
-      ${k(['Enter'], t('Open'))}${k(['N'], t('New note here'))}${k(['F2'], t('Rename'))}${k(['P'], t('Pin or unpin'))}
+      ${k(['Enter'], t('Open'))}${k(['N'], t('New note here'))}${k(['B'], t('New board here'))}${k(['F2'], t('Rename'))}${k(['P'], t('Pin or unpin'))}
       ${k(['M'], t('Move selected notes'))}${k(['Del'], t('Move to Trash'))}${k(['Ctrl', 'A'], t('Select all notes'))}
       ${k(['Shift', 'F10'], t('Context menu'))}${k(['E'], t('Edit the open note'))}${k(['Ctrl', 'E'], t('Switch read and edit'))}
       ${k(['Esc'], t('Stop editing (asks before dropping changes)'))}${k(['Ctrl', 'S'], t('Save'))}${k(['F6'], t('Next pane'))}</dl>
@@ -628,7 +636,7 @@ function noteRow(n: NoteRef, folder: string, list: NoteRef[], host: HTMLElement,
       )}">${esc(initials(tc.actor))}</span>`
     : '';
   const more = `<button class="vx-row-more" tabindex="-1" aria-label="${attr(t('Note actions'))}" title="${attr(t('Actions'))}">${I.more}</button>`;
-  const lead = `<span class="vx-note-lead" aria-hidden="true">${I.note}<span class="vx-note-thumb"></span></span>`;
+  const lead = `<span class="vx-note-lead" aria-hidden="true">${noteIcon(n.path)}<span class="vx-note-thumb"></span></span>`;
   const place = folderPath(sub, rel);
   if (prefs.view === 'cards') {
     row.classList.add('card');

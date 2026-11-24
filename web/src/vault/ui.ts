@@ -45,7 +45,9 @@ export function openMenu(items: MenuItem[], at: { x: number; y: number } | HTMLE
       'button',
       'vx-menu-item' + (it.danger ? ' danger' : '') + (it.desc ? ' rich' : ''),
       it.desc
-        ? `<span class="vx-menu-tile">${it.icon || ''}</span><span class="vx-menu-txt"><span class="vx-menu-label">${esc(it.label)}</span><small>${esc(it.desc)}</small></span>`
+        ? `<span class="vx-menu-tile">${it.icon || ''}</span><span class="vx-menu-txt"><span class="vx-menu-label">${esc(it.label)}</span><small>${esc(it.desc)}</small></span>${
+            it.hint ? `<kbd>${esc(it.hint)}</kbd>` : ''
+          }`
         : `${it.icon || '<span class="vx-i"></span>'}<span class="vx-menu-label">${esc(it.label)}</span>${it.hint ? `<kbd>${esc(it.hint)}</kbd>` : ''}`,
     );
     b.setAttribute('role', 'menuitem');

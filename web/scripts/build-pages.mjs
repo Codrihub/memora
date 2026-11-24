@@ -129,6 +129,7 @@ const DOCS = [
   ['docs/INSTALL.md', 'install', 'Install'],
   ['docs/CONFIGURATION.md', 'configuration', 'Configuration'],
   ['docs/MCP.md', 'mcp', 'MCP tools'],
+  ['docs/KANBAN.md', 'kanban', 'Kanban boards'],
   ['docs/API.md', 'api', 'HTTP API'],
   ['docs/DEPLOYMENT.md', 'deployment', 'Deployment'],
   ['docs/ARCHITECTURE.md', 'architecture', 'Architecture'],

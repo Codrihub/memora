@@ -60,6 +60,7 @@ const P: Record<string, string> = {
   'arrow-down': '<path d="M12 5v14M6 13l6 6 6-6"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  kanban: '<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="16.5" y="4" width="4" height="7" rx="1.5"/>',
   alert: '<path d="M12 3.5 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2h.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/>',
   x_circle: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',

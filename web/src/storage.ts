@@ -18,6 +18,8 @@ interface UiPrefs {
   collapsed: boolean;
   /** The open sidebar's width in px, when the person dragged it wider. */
   width?: number;
+  /** Sidebar nav groups the person folded (ui/nav-model.ts ids). */
+  navFolded?: string[];
 }
 
 interface TagIndexCache {
@@ -58,6 +60,7 @@ const uiWidth = field(uiRaw, 'width');
 export const ui: UiPrefs = {
   collapsed: field(uiRaw, 'collapsed') === true,
   ...(typeof uiWidth === 'number' && Number.isFinite(uiWidth) ? { width: uiWidth } : {}),
+  navFolded: strings(field(uiRaw, 'navFolded')),
 };
 
 /** Activity toasts: `off` silences every one; `muted` lists API key ids. */

@@ -6,6 +6,7 @@ import installMd from '../../../docs/INSTALL.md?raw';
 import configMd from '../../../docs/CONFIGURATION.md?raw';
 import mcpMd from '../../../docs/MCP.md?raw';
 import mnemoMd from '../../../docs/MNEMO.md?raw';
+import kanbanMd from '../../../docs/KANBAN.md?raw';
 import apiMd from '../../../docs/API.md?raw';
 import deployMd from '../../../docs/DEPLOYMENT.md?raw';
 import archMd from '../../../docs/ARCHITECTURE.md?raw';
@@ -52,6 +53,7 @@ const FILE_SLUG: Record<string, string> = {
   'docs/CONFIGURATION.md': 'configuration',
   'docs/MCP.md': 'mcp',
   'docs/MNEMO.md': 'mnemo',
+  'docs/KANBAN.md': 'kanban',
   'docs/API.md': 'api',
   'docs/DEPLOYMENT.md': 'deployment',
   'docs/ARCHITECTURE.md': 'architecture',
@@ -420,6 +422,7 @@ function shortcuts(c: PageCtx): string {
     c.h2('Notes') +
     rows([
       [keys('N'), 'New note in the open folder'],
+      [keys('B'), 'New board in the open folder'],
       [keys('E'), 'Edit the open note'],
       [keys(mod, 'E'), 'Switch between reading and editing'],
       [keys('P'), 'Pin or unpin the note'],
@@ -512,6 +515,7 @@ export const SECTIONS: DocSection[] = [
   { slug: 'agent-instructions', title: t('Agent instructions'), group: t('Getting started'), lead: t('Ready-made prompts, in several styles, for agents that use Memora as their memory.'), render: agentInstructions, mount: mountAgentInstructions },
   { slug: 'connect', title: t('Connect an agent'), group: t('Getting started'), lead: t('The MCP URL, API keys and ready-made client configs.'), render: connect },
   { slug: 'mnemo', title: 'Mnemo', group: t('Guides'), lead: t('The notes agent built into Memora: setup, chats, plans, sub-agents, what it may use and see.'), source: 'docs/MNEMO.md', render: (c) => c.md(mnemoMd, 'docs/MNEMO.md') },
+  { slug: 'kanban', title: t('Kanban boards'), group: t('Guides'), lead: t('Boards in the Obsidian Kanban format: on their own, inside notes, in the Mnemo chat, and for agents.'), source: 'docs/KANBAN.md', render: (c) => c.md(kanbanMd, 'docs/KANBAN.md') },
   { slug: 'install', title: t('Install'), group: t('Guides'), lead: t('npm, Docker, the native installer, updates, uninstall, reverse proxy and backups.'), source: 'docs/INSTALL.md', render: (c) => c.md(installMd, 'docs/INSTALL.md') },
   {
     slug: 'update',

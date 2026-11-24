@@ -465,6 +465,81 @@ pub fn extra_specs() -> Vec<ToolSpec> {
             json!({"path":{"type":"string"}}),
             &["path"],
         ),
+        // ---- kanban boards (Obsidian Kanban format) ----
+        // Four categories, four permission switches: read boards, change cards and lanes,
+        // create / rename / move / delete boards, embed boards in notes.
+        spec(
+            "kanban_list_boards",
+            "kanban",
+            "Kanban boards in the vault: notes whose frontmatter has `kanban-plugin` (the Obsidian Kanban format). Each is {path, title, lanes:[{title, cards}], cards, done, archived, version, mtime, embedded_in (notes that put it in with ![[...]]), linked_from (notes that only link to it)}, most recently changed first. One note is one board. To start a board use kanban_board action create (or convert an existing list note). Several boards in one note: make one board note per board, then embed each in the note with kanban_embed (a `![[Board name]]` line); the note shows every embedded board live, to work on in place.",
+            "To find the boards before reading or changing one, and when asked for a board, or for several boards in one note.",
+            json!({"folder":{"type":"string","description":"Only boards in this folder and its subfolders ('Root' = top level)"}}),
+            &[],
+        ),
+        spec(
+            "kanban_get_board",
+            "kanban",
+            "Read one board: {path, version, lanes:[{index, title, max_items, color, complete, cards}], archive, counts, style:{color, icon}, tag_colors:{tag:{color, background}}, settings, embedded_in, linked_from}: `embedded_in` lists the notes that put the board in with ![[...]] and `linked_from` those that only link to it (which notes use this board). A card is {id, text, title, checked, task, tags, links, dates, times, block, color, checklist:[{text, done}], fields:{text, links, tags, date, time}}; `fields` is the card read as a form (`text` without the links, tags, date, time, checklist lines and block id). `id` names the card in the other kanban tools (it changes when the card's text changes, not when it moves or is checked). `complete` lanes mark the cards moved into them as done; `max_items` is the lane's WIP limit (0 = none). `settings` is the board's whole Obsidian Kanban settings object. Pass `version` to the write tools so a board changed meanwhile is not overwritten.",
+            "Before adding, moving or changing cards, lanes or the board.",
+            json!({"path":{"type":"string","description":"The board note ('Folder/Board.md', .md optional) or its name"}}),
+            &["path"],
+        ),
+        spec(
+            "kanban_add_card",
+            "kanban_cards",
+            "Add a card to a lane of a board, written as `- [ ] text` (more lines are indented under it, as Obsidian does). Prefer the structured fields over writing the syntax by hand: `links`, `tags`, `date`, `time`, `checklist` and `color` are written in the board's own format (its date trigger and format). Returns the board and `card`, the new card's id. The note is saved as a normal edit (history, activity).",
+            "To put a new task on a board.",
+            json!({"path":{"type":"string","description":"The board note"},"lane":{"type":"string","description":"Lane title (case is ignored when no lane matches exactly), or its position from 0 written as digits"},"text":{"type":"string","description":"Card text; first line is the title"},"position":{"type":"integer","minimum":0,"description":"Card position in the lane, 0 = top; default: the bottom"},"checked":{"type":"boolean","default":false,"description":"Add it as done"},"links":{"type":"array","items":{"type":"string"},"description":"Notes to link, as [[note]] (names or paths)"},"tags":{"type":"array","items":{"type":"string"},"description":"Tags, without #"},"date":{"type":"string","description":"Due date YYYY-MM-DD"},"time":{"type":"string","description":"Due time HH:mm"},"checklist":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"done":{"type":"boolean"}}},"description":"Sub-tasks [{text, done}], written as `- [ ]` lines under the card"},"color":{"type":"string","description":"Card color, e.g. #f59e0b"},"version":{"type":"string","description":"The board's version from kanban_get_board; refused when the board changed since"}}),
+            &["path", "lane", "text"],
+        ),
+        spec(
+            "kanban_move_card",
+            "kanban_cards",
+            "Move a card to another lane (or to another position in the same lane). Moving into a lane marked complete checks the card; moving out of one unchecks it. Only the card's lines move: the rest of the note stays byte for byte. Returns the board and the card's id.",
+            "To change a task's status on a board.",
+            json!({"path":{"type":"string","description":"The board note"},"card":{"type":"string","description":"Card id from kanban_get_board"},"lane":{"type":"string","description":"Target lane title, or its position from 0 written as digits"},"position":{"type":"integer","minimum":0,"description":"Position in the target lane, 0 = top; default: the bottom"},"version":{"type":"string","description":"The board's version from kanban_get_board; refused when the board changed since"}}),
+            &["path", "card", "lane"],
+        ),
+        spec(
+            "kanban_update_card",
+            "kanban_cards",
+            "Change a card through its fields, applied over its current text: `text` replaces the free text (the card's `fields.text`: links, tags, date, time, checklist and block id stay unless you change them too), `links`, `tags`, `date` (\"\" clears), `time` (\"\" clears), `checklist` (the whole list of sub-tasks [{text, done}]; [] removes them), `color` (null clears), `checked`. Fields you leave out stay as they are, and lines nobody changed stay byte for byte. Prefer these fields to editing the syntax by hand. `archived` true moves the card to the board's Archive, false brings an archived card back to `lane` (default the first lane); it is a change of its own. Returns the board and the card's id after the change.",
+            "To edit, tick off or archive a task, or change its links, tags, due date, checklist or color.",
+            json!({"path":{"type":"string","description":"The board note"},"card":{"type":"string","description":"Card id from kanban_get_board"},"text":{"type":"string","description":"The new free text (without links, tags, date, time and checklist)"},"checked":{"type":"boolean"},"links":{"type":"array","items":{"type":"string"},"description":"Linked notes, the whole list"},"tags":{"type":"array","items":{"type":"string"},"description":"Tags without #, the whole list"},"date":{"type":"string","description":"YYYY-MM-DD, or \"\" to clear"},"time":{"type":"string","description":"HH:mm, or \"\" to clear"},"checklist":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"done":{"type":"boolean"}}},"description":"The whole checklist [{text, done}]"},"color":{"type":"string","description":"A color such as #f59e0b, or null to clear"},"archived":{"type":"boolean","description":"true: archive the card; false: restore it from the archive"},"lane":{"type":"string","description":"With archived false: the lane to restore into (title or position as digits)"},"version":{"type":"string","description":"The board's version from kanban_get_board; refused when the board changed since"}}),
+            &["path", "card"],
+        ),
+        spec(
+            "kanban_card",
+            "kanban_cards",
+            "Duplicate a card (the copy goes just below it, with its color), delete it for good, or restore an archived card into `lane` (default the first lane). Returns the board and `card` (the copy's or the restored card's id).",
+            "To copy, remove or bring back a card.",
+            json!({"path":{"type":"string","description":"The board note"},"card":{"type":"string","description":"Card id from kanban_get_board"},"action":{"type":"string","enum":["duplicate","delete","restore"]},"lane":{"type":"string","description":"restore: the lane to restore into"},"version":{"type":"string","description":"The board's version from kanban_get_board; refused when the board changed since"}}),
+            &["path", "card", "action"],
+        ),
+        spec(
+            "kanban_lane",
+            "kanban_cards",
+            "Change the lanes of a board: add (`title`, `position`), rename (`lane`, `title`; the WIP limit and color stay), move (`lane`, `position` from 0), delete (an empty lane), duplicate (`lane`, optional new `title`; cards copied too), archive_cards (archive every card of `lane`), clear (delete every card of `lane`), color (`lane`, `color` or null), limit (`lane`, `max`: the WIP limit written ` (N)` after the title, 0 removes it). Returns the board.",
+            "To organise a board's columns.",
+            json!({"path":{"type":"string","description":"The board note"},"action":{"type":"string","enum":["add","rename","move","delete","duplicate","archive_cards","clear","color","limit"]},"lane":{"type":"string","description":"The lane: its title, or its position from 0 written as digits"},"title":{"type":"string","description":"add / rename / duplicate: the lane's name"},"position":{"type":"integer","minimum":0,"description":"add / move: position among the lanes, 0 = first"},"color":{"type":"string","description":"color: a color such as #22c55e, or null to clear"},"max":{"type":"integer","minimum":0,"description":"limit: most cards in the lane, 0 = no limit"},"version":{"type":"string","description":"The board's version from kanban_get_board; refused when the board changed since"}}),
+            &["path", "action"],
+        ),
+        spec(
+            "kanban_board",
+            "kanban_boards",
+            "Boards as notes. create: a new board note `title` in `folder` with `lanes` (default To do, Doing, Done) in the Obsidian Kanban format. convert: turn the note `path` into a board (headings become lanes, list items cards; other text is dropped and counted; the old text stays in the note's history). rename (`to` = new name), move (`to` or `folder` = destination folder), duplicate, delete (to the Trash): the same as the note tools, links and history follow. style: the board's `color` and `icon` (null clears). tag_color: `tag`'s `color` and `background` (Obsidian Kanban's tag-colors; color null removes it). settings: Obsidian Kanban settings as `settings` {key: value, null removes}: date-colors (array of {isToday?, isBefore?, isAfter?, distance?, unit?, direction?, color?, backgroundColor?}), tag-colors, lane-width, date-format, time-format, date-trigger, time-trigger, date-display-format, show-checkboxes, hide-tags-in-title, hide-date-in-title, show-relative-date, link-date-to-daily-note, new-card-insertion-method, archive-with-date, max-archive-size and the plugin's other display settings. One note is one board: for several boards in one note, create one board per board and embed each with kanban_embed.",
+            "To start, convert, rename, move, copy, delete or style a board.",
+            json!({"action":{"type":"string","enum":["create","convert","rename","move","duplicate","delete","style","tag_color","settings"]},"path":{"type":"string","description":"The board (or for convert, the note)"},"folder":{"type":"string","description":"create: the folder (default Memory; 'Root' = top level); move: the destination folder"},"title":{"type":"string","description":"create: the board's name"},"lanes":{"type":"array","items":{"type":"string"},"description":"create: the lane names; convert: names for the default To do / Doing / Done lanes"},"to":{"type":"string","description":"rename: the new name; move: the destination folder"},"color":{"type":"string","description":"style / tag_color: a color, or null to clear"},"icon":{"type":"string","description":"style: an emoji, or null to clear"},"tag":{"type":"string","description":"tag_color: the tag, e.g. #urgent"},"background":{"type":"string","description":"tag_color: the tag's background color"},"settings":{"type":"object","description":"settings: {key: value}; null removes a key"},"version":{"type":"string","description":"style / tag_color / settings: the board's version from kanban_get_board"}}),
+            &["action"],
+        ),
+        spec(
+            "kanban_embed",
+            "kanban_embed",
+            "Embed a board in a note: adds a line `![[Board name]]` at the end of `note` (after a blank line), which shows the board live there. With `remove` true, takes out every line that is only an embed of or a link to that board. `board` must be a board; a note can embed several boards (one board per board note). A normal save of the note.",
+            "To show one or more boards inside a note, or to take one out.",
+            json!({"note":{"type":"string","description":"The note to change (path or name)"},"board":{"type":"string","description":"The board to embed (path or name)"},"remove":{"type":"boolean","default":false,"description":"true: remove the board's embed lines instead"}}),
+            &["note", "board"],
+        ),
         // ---- pins (handled in `McpServer::call_pins`: they live in the state database) ----
         spec(
             "list_pins",
@@ -928,6 +1003,28 @@ pub fn call_extra(
             "follow_ups" => store.follow_ups_impl(i("limit", 50)),
             "validate_memory" => store.validate_memory_impl(&s("path"))?,
 
+            // ---------------- kanban ----------------
+            "kanban_list_boards" => {
+                let boards = store.kanban_list_impl(opt("folder").as_deref())?;
+                json!({"count": boards.len(), "boards": boards})
+            }
+            "kanban_get_board" => store.kanban_get_impl(&s("path"), false)?,
+            "kanban_add_card" | "kanban_move_card" | "kanban_update_card" | "kanban_card"
+            | "kanban_lane" => {
+                let op = kanban_op(name, args)?;
+                kanban_apply(store, actor, &s("path"), opt("version").as_deref(), &op)?
+            }
+            "kanban_board" => kanban_board(store, actor, args)?,
+            "kanban_embed" => {
+                let v = store.kanban_embed_impl(&s("note"), &s("board"), b("remove", false))?;
+                if v["changed"] == json!(true) {
+                    if let Some(rel) = v["note"].as_str() {
+                        crate::publish_node("node_updated", actor, store, rel);
+                    }
+                }
+                v
+            }
+
             // ---------------- misc ----------------
             "delete_folder" => folder_changed(
                 actor,
@@ -953,6 +1050,265 @@ pub fn call_extra(
     })();
 
     Some(out)
+}
+
+/// Apply a board edit and tell open browsers when the note changed.
+fn kanban_apply(
+    store: &MemoryStore,
+    actor: &str,
+    path: &str,
+    version: Option<&str>,
+    op: &memora_core::vault::kanban::Op,
+) -> anyhow::Result<Value> {
+    let v = store.kanban_apply_impl(path, version, op, false)?;
+    if v["changed"] == json!(true) {
+        if let Some(rel) = v["path"].as_str() {
+            crate::publish_node("node_updated", actor, store, rel);
+        }
+    }
+    Ok(v)
+}
+
+/// `kanban_board`: boards as notes (create, convert, rename, move, duplicate, delete) and
+/// their look (style, tag colors, settings).
+fn kanban_board(store: &MemoryStore, actor: &str, args: &Value) -> anyhow::Result<Value> {
+    use memora_core::vault::kanban::Op;
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let lanes: Option<Vec<String>> = args.get("lanes").and_then(|v| v.as_array()).map(|a| {
+        a.iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect()
+    });
+    let need = |k: &str, what: &str| {
+        let v = s(k);
+        if v.is_empty() {
+            anyhow::bail!("{k} is required for this action: {what}");
+        }
+        Ok(v)
+    };
+    let action = s("action");
+    let path = || need("path", "the board");
+    let version = args.get("version").and_then(|v| v.as_str());
+    let apply = |op: Op| -> anyhow::Result<Value> {
+        let p = path()?;
+        kanban_apply(store, actor, &p, version, &op)
+    };
+    Ok(match action.as_str() {
+        "create" => {
+            let title = need("title", "the board's name")?;
+            let folder = match s("folder") {
+                f if f.is_empty() => "Memory".to_string(),
+                f => f,
+            };
+            let rel = store.kanban_create_impl(&folder, &title, lanes.as_deref())?;
+            crate::publish_node("node_created", actor, store, &rel);
+            let mut v = store.kanban_get_impl(&rel, false)?;
+            v["ok"] = json!(true);
+            v["created"] = json!(true);
+            crate::with_title_notice(v, &title, &rel)
+        }
+        "convert" => {
+            let r = store.kanban_convert_impl(&path()?, lanes.as_deref())?;
+            let rel = r["path"].as_str().unwrap_or_default().to_string();
+            crate::publish_node("node_updated", actor, store, &rel);
+            let mut v = store.kanban_get_impl(&rel, false)?;
+            v["ok"] = json!(true);
+            v["converted"] =
+                json!({"lanes": r["lanes"], "cards": r["cards"], "dropped": r["dropped"]});
+            v
+        }
+        "rename" => {
+            let from = store.kanban_board_path(&path()?)?;
+            let (to, links) = store.rename_note(&from, &need("to", "the new name")?)?;
+            memora_core::events::hub().publish(json!({
+                "type": "node_renamed", "actor": actor,
+                "old_path": from, "node": store.node_payload(&to),
+            }));
+            json!({"ok": true, "from": from, "path": to, "links_updated": links})
+        }
+        "move" => {
+            let from = store.kanban_board_path(&path()?)?;
+            let folder = match s("to") {
+                t if t.is_empty() => need("folder", "the destination folder ('Root' = top level)")?,
+                t => t,
+            };
+            let (to, links) = store.move_note(&from, &folder)?;
+            memora_core::events::hub().publish(json!({
+                "type": "node_renamed", "actor": actor,
+                "old_path": from, "node": store.node_payload(&to),
+            }));
+            json!({"ok": true, "from": from, "to": to, "path": to, "links_updated": links})
+        }
+        "duplicate" => {
+            let from = store.kanban_board_path(&path()?)?;
+            let to = store.duplicate_memory_impl(&from)?;
+            crate::publish_node("node_created", actor, store, &to);
+            json!({"ok": true, "from": from, "path": to})
+        }
+        "delete" => {
+            let p = store.kanban_board_path(&path()?)?;
+            let r = store.soft_delete_impl(&p)?;
+            let id = std::path::Path::new(&p)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            memora_core::events::hub().publish(json!({
+                "type": "node_deleted", "actor": actor, "id": id, "path": p,
+                "trashed": true, "to": r["to"],
+            }));
+            json!({"ok": true, "path": p, "trashed": true, "to": r["to"]})
+        }
+        "style" => {
+            let mut o = json!({"type": "set_board_style"});
+            for k in ["color", "icon"] {
+                if let Some(v) = args.get(k) {
+                    o[k] = v.clone();
+                }
+            }
+            apply(Op::from_json(&o)?)?
+        }
+        "tag_color" => {
+            let mut o = json!({"type": "set_tag_color", "tag": need("tag", "the tag, e.g. #urgent")?,
+                "color": args.get("color").cloned().unwrap_or(Value::Null)});
+            if let Some(b) = args.get("background") {
+                o["background"] = b.clone();
+            }
+            apply(Op::from_json(&o)?)?
+        }
+        "settings" => {
+            let Some(set) = args.get("settings").filter(|v| v.is_object()) else {
+                anyhow::bail!("settings is required for this action: an object of setting keys and values (null removes one)");
+            };
+            apply(Op::from_json(
+                &json!({"type": "set_settings", "settings": set}),
+            )?)?
+        }
+        "" => anyhow::bail!("action is required"),
+        other => anyhow::bail!("unknown action {other:?}"),
+    })
+}
+
+/// The board edit a kanban card or lane tool asks for.
+fn kanban_op(name: &str, args: &Value) -> anyhow::Result<memora_core::vault::kanban::Op> {
+    use memora_core::vault::kanban::{CardEdit, LaneRef, Op};
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let lane = |k: &str| args.get(k).and_then(LaneRef::from_json);
+    let position = args
+        .get("position")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize);
+    let need_lane = || {
+        lane("lane")
+            .ok_or_else(|| anyhow::anyhow!("lane is required: a lane title or its position"))
+    };
+    let color = || -> anyhow::Result<Option<String>> {
+        match args.get("color") {
+            None => anyhow::bail!("color is required: a color such as #22c55e, or null to clear"),
+            Some(c) => Ok(memora_core::vault::kanban::card::clean_color(c)?),
+        }
+    };
+    Ok(match name {
+        "kanban_add_card" => {
+            let edit = CardEdit::from_json(args, false)?;
+            Op::AddCard {
+                lane: need_lane()?,
+                text: s("text"),
+                position,
+                checked: args
+                    .get("checked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                edit: (!edit.is_empty()).then(|| Box::new(edit)),
+            }
+        }
+        "kanban_move_card" => Op::MoveCard {
+            card: s("card"),
+            lane: need_lane()?,
+            position,
+        },
+        "kanban_card" => match s("action").as_str() {
+            "duplicate" => Op::DuplicateCard { card: s("card") },
+            "delete" => Op::DeleteCard { card: s("card") },
+            "restore" => Op::RestoreCard {
+                card: s("card"),
+                lane: lane("lane"),
+            },
+            other => anyhow::bail!("unknown action {other:?}: use duplicate, delete or restore"),
+        },
+        "kanban_lane" => {
+            let title = || -> anyhow::Result<String> {
+                let t = s("title");
+                if t.trim().is_empty() {
+                    anyhow::bail!("title is required for this action: the lane's name");
+                }
+                Ok(t)
+            };
+            match s("action").as_str() {
+                "add" => Op::AddLane {
+                    title: title()?,
+                    position,
+                },
+                "rename" => Op::RenameLane {
+                    lane: need_lane()?,
+                    title: title()?,
+                },
+                "move" => Op::MoveLane {
+                    lane: need_lane()?,
+                    position: position.ok_or_else(|| {
+                        anyhow::anyhow!("position is required to move a lane (0 = first)")
+                    })?,
+                },
+                "delete" => Op::DeleteLane { lane: need_lane()? },
+                "duplicate" => Op::DuplicateLane {
+                    lane: need_lane()?,
+                    title: Some(s("title")).filter(|t| !t.trim().is_empty()),
+                },
+                "archive_cards" => Op::ArchiveLaneCards { lane: need_lane()? },
+                "clear" => Op::ClearLane { lane: need_lane()? },
+                "color" => Op::SetLaneColor {
+                    lane: need_lane()?,
+                    color: color()?,
+                },
+                "limit" => Op::SetLaneLimit {
+                    lane: need_lane()?,
+                    max: args.get("max").and_then(|v| v.as_u64()).ok_or_else(|| {
+                        anyhow::anyhow!("max is required: the most cards in the lane, 0 = no limit")
+                    })?,
+                },
+                other => anyhow::bail!(
+                    "unknown action {other:?}: use add, rename, move, delete, duplicate, archive_cards, clear, color or limit"
+                ),
+            }
+        }
+        _ => {
+            let edit = CardEdit::from_json(args, true)?;
+            match args.get("archived").and_then(|v| v.as_bool()) {
+                Some(true) if edit.is_empty() => Op::ArchiveCard { card: s("card") },
+                Some(false) if edit.is_empty() => Op::RestoreCard {
+                    card: s("card"),
+                    lane: lane("lane"),
+                },
+                Some(_) => anyhow::bail!(
+                    "archived is a change of its own: call kanban_update_card once for the card's fields, then again for archived"
+                ),
+                None => Op::EditCard {
+                    card: s("card"),
+                    edit: Box::new(edit),
+                },
+            }
+        }
+    })
 }
 
 /// Tell browsers the folder tree changed (they reload it), then pass `v` through.

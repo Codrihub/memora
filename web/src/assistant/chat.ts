@@ -10,7 +10,8 @@ import { createSelect, type Select, type SelectOption } from '../ui/select';
 import { requestSettingsSection } from '../version';
 import { openDocs } from '../router';
 import { Modal } from '../modal';
-import { allNotes, noteTitle } from '../state';
+import { allNotes, isBoard, noteTitle } from '../state';
+import { excerptOf, onExcerpt, wantExcerpt } from '../vault/excerpts';
 import { pickFolderDialog } from '../vault/folder-picker';
 import { pickerFolders } from '../vault/store';
 import { VAULT_CSS } from '../vault/styles';
@@ -19,6 +20,7 @@ import { nav } from '../vault/nav';
 import { openLightbox } from '../ui/lightbox';
 import * as A from './api';
 import { renderReply, resolveNote } from './md';
+import { boardCardHTML, boardPaths, boardsHTML, markNoteBoards, wireBoards } from './boards';
 import { closePreview, mountArt } from './art';
 import { markSeen } from './unread';
 import { MNEMO_CSS, markHTML } from './styles';
@@ -66,6 +68,15 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
   validate_memory: ['Checked a note', false],
   list_pins: ['Listed pins', false],
   list_images: ['Listed images', false],
+  kanban_list_boards: ['Looked at boards', false],
+  kanban_get_board: ['Read a board', false],
+  kanban_add_card: ['Added a card', true],
+  kanban_move_card: ['Moved a card', true],
+  kanban_update_card: ['Changed a card', true],
+  kanban_card: ['Changed a card', true],
+  kanban_lane: ['Changed lanes', true],
+  kanban_board: ['Changed a board', true],
+  kanban_embed: ['Put a board in a note', true],
   stale_detection: ['Found stale notes', false],
   digest: ['Made a digest', false],
   create_memory: ['Created a note', true],
@@ -341,7 +352,7 @@ function touchedPaths(args: unknown): string[] {
   if (!args || typeof args !== 'object') return [];
   const a = args as Record<string, unknown>;
   const out: string[] = [];
-  for (const k of ['path', 'from', 'source', 'target', 'into_path', 'note']) {
+  for (const k of ['path', 'from', 'source', 'target', 'into_path', 'note', 'board']) {
     const v = a[k];
     if (typeof v === 'string' && /\.md$/i.test(v)) out.push(v);
   }
@@ -584,6 +595,7 @@ export class ChatView {
       // Focus coming back from an embedded preview is not a return to the window.
       if (a instanceof HTMLIFrameElement) return;
       if (a && a !== document.body && a !== this.input && a.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (a?.closest?.('.kb')) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"], .modal-backdrop, .wl-tour')) return;
       this.input.focus({ preventScroll: true });
     };
@@ -2545,7 +2557,10 @@ export class ChatView {
       } else if (m.role === 'tool' && m.tool_name === SHOW) {
         try {
           const shown = (JSON.parse(m.content) as { shown?: A.Shown[] }).shown || [];
-          if (shown.length) body.append(cardsEl(shown));
+          if (shown.length) {
+            body.append(cardsEl(shown));
+            wireBoards(body);
+          }
         } catch {
           /* an old or failed call: nothing to show */
         }
@@ -2564,6 +2579,8 @@ export class ChatView {
     this.shownModel = lastModel;
     // Number the versions of each page across the whole chat.
     mountArt(this.log);
+    // Notes in the chat that put boards in get a small board badge (questions' chips included).
+    markNoteBoards(this.log);
     // A long chat keeps only its latest questions in the page; the rest wait until needed.
     this.holdOld();
     this.scrollEnd(true);
@@ -2680,6 +2697,13 @@ export class ChatView {
     const frag = document.createDocumentFragment();
     part.forEach((p) => frag.append(p));
     this.log.insertBefore(frag, anchor);
+    // Boards left open in that part come back live, and note cards get their line of text,
+    // before the scroll position is set again.
+    part.forEach((p) => {
+      wireBoards(p);
+      fillExcerpts(p);
+      markNoteBoards(p);
+    });
     this.paintMore();
     this.log.scrollTop = top + (this.log.scrollHeight - h0);
     this.paintRail();
@@ -2728,8 +2752,8 @@ export class ChatView {
                 ? `<button type="button" class="mn-u-img" data-img="${attr(a.path)}" title="${attr(a.title)}" aria-label="${attr(t('Image {name}', { name: a.title }))}"><img alt="" loading="lazy" src="/api/assistant/uploads/${attr(
                     a.path,
                   )}" onerror="this.parentElement.classList.add('gone')"><span>${esc(a.title)}</span></button>`
-                : `<span class="mn-att-c sm"${a.kind === 'note' ? ` data-note="${attr(a.path)}" role="button" tabindex="0"` : ''} title="${attr(a.path || t('All notes'))}">${icon(
-                    a.kind === 'note' ? 'note' : 'folder',
+                : `<span class="mn-att-c sm${a.kind === 'note' && isBoard(a.path) ? ' is-kb' : ''}"${a.kind === 'note' ? ` data-note="${attr(a.path)}" role="button" tabindex="0"` : ''} title="${attr(a.path || t('All notes'))}">${icon(
+                    a.kind === 'note' ? noteIc(a.path) : 'folder',
                   )}<span>${esc(a.title)}</span></span>`,
             )
             .join(''),
@@ -2802,7 +2826,8 @@ export class ChatView {
     a.classList.toggle('bad', st.failed > 0);
     const chip = (p: string, w: boolean): string => {
       const path = resolveNote(p) || p;
-      return `<span class="mn-att-c sm${w ? ' w' : ''}" data-note="${attr(path)}" role="button" tabindex="0" title="${attr(path)}">${icon(w ? 'edit' : 'note')}<span>${esc(
+      const kb = isBoard(path);
+      return `<span class="mn-att-c sm${w ? ' w' : ''}${kb ? ' is-kb' : ''}" data-note="${attr(path)}" role="button" tabindex="0" title="${attr(path)}">${icon(kb ? 'kanban' : w ? 'edit' : 'note')}<span>${esc(
         noteTitle(path) || path.split('/').pop()!.replace(/\.md$/i, ''),
       )}</span></span>`;
     };
@@ -2903,6 +2928,28 @@ export class ChatView {
     b.insertAdjacentHTML('beforeend', `<div class="mn-tool-k">${t('Result')}</div><pre>${esc(pretty(output))}</pre>`);
   }
 
+  /** Boards the turn names (mentioned in its question, linked in the reply, used by a kanban
+   *  tool) as board cards under the reply; boards Mnemo handed over as cards already show. */
+  private turnBoards(turn: HTMLElement): void {
+    const body = turn.querySelector<HTMLElement>('.mn-tb')!;
+    const old = body.querySelector<HTMLElement>(':scope > .mn-kbs');
+    old?.remove();
+    let u = turn.previousElementSibling as HTMLElement | null;
+    while (u && !u.classList.contains('mn-u') && !u.classList.contains('mn-turn')) u = u.previousElementSibling as HTMLElement | null;
+    const asked = u?.classList.contains('mn-u') ? Array.from(u.querySelectorAll<HTMLElement>('.mn-u-att [data-note]')).map((c) => c.dataset.note || '') : [];
+    const linked = Array.from(body.querySelectorAll<HTMLElement>('.mn-md .mn-wl[data-note]')).map((a) => a.dataset.note || '');
+    const a = body.querySelector<HTMLElement>(':scope > .mn-act');
+    const st = a ? ACTS.get(a) : undefined;
+    const used = [...(st?.changed || []), ...(st?.read || [])].map((p) => resolveNote(p) || p);
+    const shown = new Set(Array.from(body.querySelectorAll<HTMLElement>('.mn-kb[data-kb]')).map((c) => c.dataset.kb || ''));
+    const paths = boardPaths([...asked, ...linked, ...used], shown).slice(0, 4);
+    if (!paths.length) return;
+    const at = body.querySelector(':scope > .mn-rel, :scope > .mn-foot');
+    if (at) at.insertAdjacentHTML('beforebegin', boardsHTML(paths));
+    else body.insertAdjacentHTML('beforeend', boardsHTML(paths));
+    wireBoards(body.querySelector<HTMLElement>(':scope > .mn-kbs')!);
+  }
+
   /** Results that came after the live reply (answers, pictures) from the stored chat. */
   private fillResults(messages: A.Message[]): void {
     for (const m of messages) {
@@ -2921,11 +2968,13 @@ export class ChatView {
     const body = turn.querySelector<HTMLElement>('.mn-tb')!;
     body.querySelector('.mn-foot')?.remove();
     body.querySelector(':scope > .mn-rel')?.remove();
+    this.turnBoards(turn);
     const rel = relatedHTML(body);
     if (rel) {
       body.insertAdjacentHTML('beforeend', rel);
       requestAnimationFrame(() => body.querySelectorAll<HTMLElement>(':scope > .mn-rel .mn-car').forEach(syncCarousel));
     }
+    markNoteBoards(body);
     const raw = Array.from(body.querySelectorAll<HTMLElement>('.mn-md'))
       .map((x) => x.dataset.raw || '')
       .join('\n\n')
@@ -3579,7 +3628,10 @@ export class ChatView {
               break;
             }
             if (ev.name === SHOW) {
-              if (ev.shown?.length) body.append(cardsEl(ev.shown));
+              if (ev.shown?.length) {
+                body.append(cardsEl(ev.shown));
+                wireBoards(body);
+              }
               this.scrollEnd();
               break;
             }
@@ -3622,6 +3674,7 @@ export class ChatView {
             think(false);
             closeText();
             this.footer(turn, model, ev.input_tokens, ev.output_tokens);
+            this.scrollEnd();
             this.setContext(ev.context);
             if (this.session && ev.title) this.session = { ...this.session, title: ev.title, updated_at: Date.now() / 1000 };
             break;
@@ -3690,7 +3743,13 @@ export class ChatView {
         this.session = { ...this.session, messages: this.session.messages + 1 };
         this.o.onChange?.(this.session);
       }
-      if (wrote) void hooks.loadCore();
+      // A board Mnemo just made is known as a board once the tree is loaded again.
+      if (wrote)
+        void hooks.loadCore().then(() => {
+          if (turn.isConnected && !turn.querySelector('.mn-kbs')) {
+            this.turnBoards(turn);
+          }
+        });
       // The next queued message goes out on the server by itself; its reply shows here
       // through the chat's watch. Keep the stored transcript in step meanwhile.
       const runAfter = this.runAfter;
@@ -3798,12 +3857,18 @@ function relatedHTML(body: HTMLElement): string {
     items.push({ kind, path, title, ic, cls });
   };
   const nm = (p: string): string => noteTitle(p) || p.split('/').pop()!.replace(/\.md$/i, '');
-  for (const p of st?.changed || []) push('note', resolveNote(p) || p, nm(resolveNote(p) || p), 'edit', ' w');
+  const noteItem = (p: string, changed: boolean): void => {
+    const path = resolveNote(p) || p;
+    const kb = isBoard(path);
+    push('note', path, nm(path), kb ? 'kanban' : changed ? 'edit' : 'note', (changed ? ' w' : '') + (kb ? ' is-kb' : ''));
+  };
+  for (const p of st?.changed || []) noteItem(p, true);
+  body.querySelectorAll<HTMLElement>('.mn-kb[data-kb]').forEach((c) => noteItem(c.dataset.kb || '', false));
   body.querySelectorAll<HTMLElement>('.mn-cards [data-card]').forEach((c) => {
     const kind = c.dataset.card || 'note';
     push(kind, c.dataset.path || '', c.querySelector('b')?.textContent || '', kind === 'image' ? 'image' : kind === 'folder' ? 'folder' : kind === 'vault' ? 'vault' : 'note', '');
   });
-  for (const p of st?.read || []) push('note', resolveNote(p) || p, nm(resolveNote(p) || p), 'note', '');
+  for (const p of st?.read || []) noteItem(p, false);
   if (!items.length) return '';
   const cap = 12;
   const chips = items
@@ -3948,10 +4013,20 @@ interface PlanStep {
 
 const imgUrl = (path: string): string => `/api/vault/file?path=${encodeURIComponent(path)}`;
 
-/** The cards of one show_items call. */
+/** The note or board icon for a vault path. */
+function noteIc(path: string): string {
+  return isBoard(path) ? 'kanban' : 'note';
+}
+
+/** The cards of one show_items call: notes with a line of their text, folders, images, the
+ *  vault; boards as board cards that open into the live board. */
 function cardsEl(items: A.Shown[]): HTMLElement {
+  const wrap = el('div', 'mn-shown');
+  const boards = items.filter((it) => it.kind === 'note' && isBoard(it.path));
+  const rest = items.filter((it) => !boards.includes(it));
+  const notes = new Map(allNotes().map((n) => [n.path, n]));
   const box = el('div', 'mn-cards');
-  box.innerHTML = items
+  box.innerHTML = rest
     .map((it) => {
       const dir = it.path.includes('/') ? it.path.slice(0, it.path.lastIndexOf('/')) : '';
       const sub = it.kind === 'vault' ? t('Every note') : it.kind === 'folder' ? (it.path && dir ? t('Folder in {dir}', { dir }) : t('Folder')) : dir || t('Top level');
@@ -3960,13 +4035,46 @@ function cardsEl(items: A.Shown[]): HTMLElement {
         it.kind === 'image'
           ? `<span class="mn-card-img"><img alt="" loading="lazy" src="${attr(imgUrl(it.path))}" onerror="this.parentElement.classList.add('broken')"></span>`
           : `<span class="mn-card-ic">${icon(it.kind === 'note' ? 'note' : it.kind === 'folder' ? 'folder' : 'vault')}</span>`;
+      let x = '';
+      if (it.kind === 'note') {
+        const n = notes.get(it.path);
+        const e = n ? excerptOf(it.path, n.mtime) : undefined;
+        if (n && !e) wantExcerpt(it.path, n.mtime);
+        x = `<small class="mn-card-x" data-x="${attr(it.path)}"${e?.text ? '' : ' hidden'}>${esc(e?.text || '')}</small>`;
+      }
       return `<button type="button" class="mn-card k-${it.kind}" data-card="${attr(it.kind)}" data-path="${attr(it.path)}" title="${attr(
         it.kind === 'vault' ? t('Open your notes') : t('Open {name}', { name: it.path || t('All notes') }),
-      )}">${lead}<span class="mn-card-t"><b>${esc(title)}</b><small>${esc(sub)}</small></span>${icon('chev', 'i mn-card-go')}</button>`;
+      )}">${lead}<span class="mn-card-t"><b>${esc(title)}</b><small>${esc(sub)}</small>${x}</span>${icon('chev', 'i mn-card-go')}</button>`;
     })
     .join('');
-  return box;
+  if (rest.length) wrap.append(box);
+  if (boards.length) wrap.insertAdjacentHTML('beforeend', `<div class="mn-kbs">${boards.map((b) => boardCardHTML(b.path)).join('')}</div>`);
+  return wrap;
 }
+
+/** Note cards under `root` whose line of text came while they were out of the page. */
+function fillExcerpts(root: ParentNode): void {
+  const notes = new Map(allNotes().map((n) => [n.path, n]));
+  root.querySelectorAll<HTMLElement>('.mn-card-x[hidden]').forEach((x) => {
+    const n = notes.get(x.dataset.x || '');
+    const e = n ? excerptOf(n.path, n.mtime) : undefined;
+    if (e?.text) {
+      x.textContent = e.text;
+      x.hidden = false;
+    }
+  });
+}
+
+// A note card's line of text arrives after the card is drawn.
+onExcerpt((path) => {
+  const n = allNotes().find((x) => x.path === path);
+  const e = n ? excerptOf(path, n.mtime) : undefined;
+  if (!e?.text) return;
+  document.querySelectorAll<HTMLElement>(`.mn-card-x[data-x="${CSS.escape(path)}"]`).forEach((x) => {
+    x.textContent = e.text;
+    x.hidden = false;
+  });
+});
 
 /** Settings, Mnemo; `part` 'memory' scrolls to what Mnemo knows about the owner, 'jobs' to
  *  the models for each job. */

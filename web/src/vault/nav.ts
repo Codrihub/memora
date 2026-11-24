@@ -9,6 +9,9 @@ export const nav = {
   openNote: (_path: string): void => {},
   /** Start a new note in a folder (inline title prompt). */
   newNote: (_folder: string): void => {},
+  /** Start a new Kanban board in a folder (name and place prompt). `made` gets the new board instead
+   *  of it being opened (the editor links to it). */
+  newBoard: (_folder: string, _made?: (path: string) => void): void => {},
   /** Start a new sub folder (inline name prompt). */
   newFolder: (_parent: string): void => {},
   /** Open the Trash page. */

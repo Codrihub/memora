@@ -146,8 +146,13 @@ export const Modal = {
     };
     document.addEventListener('keydown', keyHandler, true);
 
-    const firstField = $('input,select,textarea,button.btn.primary,button', box);
-    if (firstField) setTimeout(() => firstField.focus(), 40);
+    // A field in the body first (not the close button in the header), and never over a focus
+    // that onOpen already gave.
+    const firstField = box.querySelector<HTMLElement>('.modal-body :is(input,select,textarea)') || $('button.btn.primary,button', box);
+    if (firstField)
+      setTimeout(() => {
+        if (!box.contains(document.activeElement)) firstField.focus();
+      }, 40);
     if (opts.onOpen) opts.onOpen(bodyEl);
   },
 

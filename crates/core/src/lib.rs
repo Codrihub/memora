@@ -74,6 +74,10 @@ pub struct NoteRef {
     /// filled by [`MemoryStore::titled_tree`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
+    /// A Kanban board (`kanban-plugin` in its frontmatter); only filled by
+    /// [`MemoryStore::titled_tree`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub board: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -534,6 +538,9 @@ impl MemoryStore {
                     .unwrap_or_else(|| crate::vault::stem_title(name)),
                 None => String::new(),
             };
+            let board = metas
+                .and_then(|m| m.get(i))
+                .is_some_and(|m| m.fm.get(crate::vault::kanban::BOARD_KEY).is_some());
             let fld = folder_of(rel);
             t.entry(fld.clone()).or_default().push(NoteRef {
                 path: rel.clone(),
@@ -541,6 +548,7 @@ impl MemoryStore {
                 folder: fld,
                 mtime,
                 title,
+                board,
             });
         }
         for v in t.values_mut() {

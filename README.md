@@ -49,9 +49,18 @@ Screenshots use a demo vault.
   `[[wikilinks]]`. Edit it with any tool; nothing is locked in a database.
 - **Git history.** Changes are committed, so any revision can be listed, diffed
   and restored (`get_history`, `diff`, `restore_memory`).
-- **MCP for agents.** 77 tools for notes, folders, search, tags, graph traversal,
-  history, locks, activity, pins and import/export, plus admin tools, over the
-  streamable HTTP transport.
+- **MCP for agents.** 86 tools for notes, folders, search, tags, graph traversal,
+  history, locks, activity, pins, Kanban boards and import/export, plus admin
+  tools, over the streamable HTTP transport.
+- **Kanban boards.** A note in the Obsidian Kanban format opens as a board:
+  drag cards and lanes with a mouse or a finger, edit a card in a form (linked
+  notes, due date, tags, lane) that writes plain Obsidian Kanban text, while
+  agents and Mnemo add and move cards over MCP. The Boards page lists them all, with their progress;
+  a note embeds as many boards as it likes (`![[Board]]`, live in place), Add
+  board in the editor makes one and embeds it, and Turn into board makes a
+  list note a board. In the Mnemo chat a board it names shows as a preview that opens the board. Changes show live,
+  land in the note's history, and touch only the lines they change, so the
+  board still opens the same in Obsidian.
 - **Mnemo, a built-in notes agent.** Chat with your notes in the browser or the
   console using your own OpenAI, Anthropic or OpenAI-compatible API key. Mnemo
   finds, writes, tags, links, moves and tidies notes with Memora's own tools,
@@ -342,6 +351,7 @@ Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every setting and where it lives |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment and hardening |
 | [docs/MCP.md](docs/MCP.md) | Connecting agents, OAuth, tool reference |
+| [docs/KANBAN.md](docs/KANBAN.md) | Kanban boards: format, board view, MCP tools |
 | [docs/API.md](docs/API.md) | HTTP API |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crates, request flow, vault files |
 | [docs/DATABASE.md](docs/DATABASE.md) | State database schema |

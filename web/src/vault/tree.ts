@@ -7,7 +7,7 @@ import { noteTitle, state } from '../state';
 import { stemTitle } from '../format';
 
 import type { NoteRef } from '../types';
-import { I, folderGlyph } from './icons';
+import { I, folderGlyph, noteIcon } from './icons';
 import { lockMark } from '../ui/privacy';
 import { confirmDeleteFolder, confirmUnpin, deleteNotesToTrash, folderMenu, noteMenu, pinToggle } from './menus';
 import { drag, endDrag, nav, type DragPayload } from './nav';
@@ -548,7 +548,7 @@ export class TreeView {
         ? ''
         : `<span class="vx-pin-sub">${esc(dirOf(it.key) || '')}</span>`;
     row.innerHTML = `<span class="vx-pin-ico" style="color:${attr(color)}">${
-      isNote ? I.note : folderGlyph(folderIcon(it.key), false)
+      isNote ? noteIcon(it.key) : folderGlyph(folderIcon(it.key), false)
     }</span><span class="vx-pin-name" title="${attr(missing ? t('{path} (not found)', { path: it.key }) : it.key)}">${esc(label)}</span>${sub}<button class="vx-pin-x" aria-label="${attr(
       missing ? t('Remove pin {name}', { name: label }) : t('Unpin {name}', { name: label }),
     )}" title="${attr(missing ? t('Remove pin') : t('Unpin'))}">${I.close}</button>`;
@@ -599,11 +599,13 @@ export class TreeView {
     sec.innerHTML = `<header class="vx-sec-head vx-fold"><span class="vx-sec-title">${I.folder}<span>${t('Folders')}</span></span>
       <span class="vx-sec-acts">
         <button class="vx-icon-btn" data-act="note" title="${attr(t('New note'))}" aria-label="${attr(t('New note'))}">${I.newNote}</button>
+        <button class="vx-icon-btn" data-act="board" title="${attr(t('New board'))}" aria-label="${attr(t('New board'))}">${I.board}</button>
         <button class="vx-icon-btn" data-act="folder" title="${attr(t('New folder'))}" aria-label="${attr(t('New folder'))}">${I.newFolder}</button>
         <button class="vx-icon-btn" data-act="collapse" title="${attr(t('Close all subfolders'))}" aria-label="${attr(t('Close all subfolders'))}">${FOLD_ALL}</button>
       </span><span class="vx-fold-caret">${I.caret}</span></header>`;
     // Section-wide buttons: start at the root, not at the last folder opened.
     sec.querySelector<HTMLElement>('[data-act=note]')!.onclick = () => nav.newNote('');
+    sec.querySelector<HTMLElement>('[data-act=board]')!.onclick = () => nav.newBoard('');
     sec.querySelector<HTMLElement>('[data-act=folder]')!.onclick = () => nav.newFolder('');
     sec.querySelector<HTMLElement>('[data-act=collapse]')!.onclick = () => this.collapseAll();
     foldable(sec.querySelector('header')!, secOpen.folders, () => setSections({ folders: !secOpen.folders }));
@@ -774,7 +776,7 @@ export class TreeView {
     row.classList.toggle('active', isActive);
     row.classList.toggle('sel', selection.has(n.path));
     row.setAttribute('aria-selected', String(isActive || selection.has(n.path)));
-    row.innerHTML = `<span class="vx-twist none"></span>${depthBadge(depth)}<span class="vx-nico">${I.note}</span><span class="vx-fname" title="${attr(
+    row.innerHTML = `<span class="vx-twist none"></span>${depthBadge(depth)}<span class="vx-nico">${noteIcon(n.path)}</span><span class="vx-fname" title="${attr(
       n.path,
     )}">${esc(noteTitle(n.path))}</span>${lockMark('node', n.path)}${coinsHTML(agentsAt(n.path), true)}<span class="vx-end">${moreBtn(noteTitle(n.path))}</span>`;
     row.onclick = (e) => {
@@ -825,12 +827,12 @@ export class TreeView {
     } else if (row.dataset.path) {
       const p = row.dataset.path;
       payload = { kind: 'notes', paths: selection.has(p) && selection.size > 1 ? Array.from(selection) : [p] };
-      icon = I.note;
+      icon = noteIcon(p);
     } else {
       const it = pinnedItems()[Number(row.dataset.pin)];
       if (!it || it.missing) return null;
       payload = { kind: 'pin', id: row.dataset.key || '', item: { kind: it.kind, key: it.key } };
-      icon = it.kind === 'note' ? I.note : folderGlyph(folderIcon(it.key), false);
+      icon = it.kind === 'note' ? noteIcon(it.key) : folderGlyph(folderIcon(it.key), false);
     }
     this.dragKeys =
       payload.kind === 'notes' ? payload.paths.map((p) => 'n:' + p) : [row.dataset.key || ''];
@@ -1144,6 +1146,12 @@ export class TreeView {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         e.preventDefault();
         nav.newNote(folder ?? dirOf(path || ''));
+        return;
+      case 'b':
+      case 'B':
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        e.preventDefault();
+        nav.newBoard(folder ?? dirOf(path || ''));
         return;
       case 'ContextMenu':
         e.preventDefault();

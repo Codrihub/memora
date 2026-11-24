@@ -2,7 +2,7 @@
 
 import { attr, esc } from '../dom';
 import { renderMarkdown } from '../docs/markdown';
-import { allNotes, noteTitle } from '../state';
+import { allNotes, isBoard, noteTitle } from '../state';
 import { icon } from '../ui/icons';
 import { t, tn } from '../i18n';
 
@@ -39,6 +39,9 @@ export function resolveNote(target: string): string | null {
 function linkFor(target: string): string {
   const shown = (target.split('|')[1] ?? target.split('|')[0]).trim();
   const path = resolveNote(target);
+  // A board reads as one: its icon and its own colour (Mnemo shows it as a board card too).
+  if (path && isBoard(path))
+    return `<a href="#" class="mn-wl is-kb" data-note="${attr(path)}" title="${attr(t('Board: {name}', { name: path }))}">${icon('kanban', 'i mn-wl-ic')}${esc(shown)}</a>`;
   return path
     ? `<a href="#" class="mn-wl" data-note="${attr(path)}" title="${attr(path)}">${esc(shown)}</a>`
     : `<span class="mn-wl missing" title="${t('No note with this name')}">${esc(shown)}</span>`;
@@ -75,7 +78,8 @@ export function renderReply(src: string, live = false): string {
     .map((p, i) =>
       i % 2 === 1
         ? p
-        : p.replace(/\[\[([^[\]\n]{1,200})\]\]/g, (_m, t: string) => {
+        : // An embed (`![[Board]]`) reads as its link; a board shows as a board card under the reply.
+          p.replace(/!?\[\[([^[\]\n]{1,200})\]\]/g, (_m, t: string) => {
             links.push(t);
             return `${TOKEN}${links.length - 1}X`;
           }),
@@ -91,6 +95,7 @@ export function renderReply(src: string, live = false): string {
     const raw = inner.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
     if (!/\.md$/i.test(raw)) return m;
     const path = resolveNote(raw);
+    if (path && isBoard(path)) return `<a href="#" class="mn-wl code is-kb" data-note="${attr(path)}">${icon('kanban', 'i mn-wl-ic')}<code>${inner}</code></a>`;
     return path ? `<a href="#" class="mn-wl code" data-note="${attr(path)}"><code>${inner}</code></a>` : m;
   });
   if (!live)

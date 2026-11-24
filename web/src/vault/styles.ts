@@ -31,7 +31,7 @@ export const VAULT_CSS = `
 .vx-icon-btn.on{color:var(--warn)}
 .vx-icon-btn.vx-round{border-radius:50%}
 .vx-icon-btn:focus-visible,.vx-row:focus-visible,.vx-note:focus-visible,.vx-pin:focus-visible,.vx-tile:focus-visible,
-.vx-crumb:focus-visible,.vx-link:focus-visible,.vx-tag:focus-visible,.vx-meta-folder:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.vx-crumb:focus-visible,.vx-tag:focus-visible,.vx-meta-folder:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .vx-crumbs{display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden;flex:0 1 auto}
 .vx-crumb{display:inline-flex;align-items:center;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;
   height:28px;padding:0 6px;border-radius:var(--r-xs);cursor:pointer;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -314,6 +314,12 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-bulk{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 20px;font-size:13px;flex-wrap:wrap;
   background:color-mix(in srgb,var(--fg) 5%,transparent);border-top:1px solid var(--line)}
 .vx-bulk .vx-i{width:14px;height:14px}
+/* "New": a "+ New" pill where there is room, a round "+" like the ⋯ beside it on phones. */
+.vx-bacts .vx-new{padding-inline:12px 16px}
+@media (max-width:760px){.vx-bacts .vx-new{width:38px;padding:0;border-radius:50%;justify-content:center}.vx-bacts .vx-new>span{display:none}}
+.vx-addrows{display:flex;gap:0}
+.vx-addrows>.vx-addrow{flex:1 1 0;min-width:0}
+.vx-rows.cards>.vx-addrows{display:contents}
 .vx-addrow{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 24px);height:44px;margin:4px 12px 12px;border:0;border-radius:10px;
   background:color-mix(in srgb,var(--fg) 4%,transparent);color:var(--text-2);font:inherit;font-size:13.5px;font-weight:550;cursor:pointer;transition:background .15s,color .15s}
 .vx-addrow .vx-i{width:15px;height:15px}
@@ -383,7 +389,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-props dd{margin:0;display:flex;align-items:center;justify-content:flex-end;gap:7px;min-width:0;color:var(--text-2);text-align:right;line-height:34px;height:34px}
 .vx-props dd.vx-note-tags{gap:10px}
 .vx-props .vx-note-mf,.vx-props .vx-note-folder{font-size:13px}
-.vx-rows.cards>.vx-addrow{width:auto;height:auto;min-height:140px;margin:0;border-radius:14px;flex-direction:row}
+.vx-rows.cards .vx-addrow{width:auto;height:auto;min-height:140px;margin:0;border-radius:14px;flex-direction:row}
 .vx-group{display:flex;align-items:center;gap:8px;padding:18px 20px 8px;font-size:12.5px;font-weight:600;color:var(--text-2);border-top:1px solid var(--line)}
 .vx-group:first-child{border-top:0}
 .vx-group i{width:7px;height:7px;border-radius:50%;background:var(--fc)}
@@ -426,7 +432,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-rbar,.vx-pcrumbs{transition:height .28s cubic-bezier(.2,.8,.2,1),opacity .2s,border-color .2s}
 .vx-focus :is(.vx-rbar,.vx-pcrumbs){height:0 !important;opacity:0;overflow:hidden;border-bottom-color:transparent;visibility:hidden;
   transition:height .28s cubic-bezier(.2,.8,.2,1),opacity .15s,border-color .2s,visibility 0s .28s}
-#main:has(.view:not(.hidden) .vx-focus) #topbar{height:0;min-height:0;padding-top:0;padding-bottom:0;opacity:0;overflow:hidden;visibility:hidden;border-color:transparent;
+#main:has(.view:not(.hidden) [data-pane=note] .vx-focus) #topbar{height:0;min-height:0;padding-top:0;padding-bottom:0;opacity:0;overflow:hidden;visibility:hidden;border-color:transparent;
   transition:height .28s cubic-bezier(.2,.8,.2,1),opacity .15s,visibility 0s .28s}
 #topbar{transition:height .28s cubic-bezier(.2,.8,.2,1),opacity .2s}
 .vx-unfocus{position:absolute;z-index:5;top:10px;left:50%;translate:-50% -10px;display:flex;align-items:center;gap:6px;height:30px;padding:0 12px 0 9px;
@@ -434,6 +440,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   opacity:0;visibility:hidden;transition:opacity .2s,translate .3s cubic-bezier(.2,.8,.2,1),visibility 0s .3s,color .15s}
 .vx-unfocus .vx-i{width:15px;height:15px}
 .vx-focus .vx-unfocus{opacity:.55;visibility:visible;translate:-50% 0;transition:opacity .25s .1s,translate .3s cubic-bezier(.2,.8,.2,1) .1s,visibility 0s,color .15s}
+.vx-focus .vx-page.editing .vx-toolbar{top:48px}
 .vx-focus .vx-unfocus:is(:hover,:focus-visible){opacity:1;color:var(--fg)}
 .vx-unfocus:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:760px){.vx-focus .vx-note-scroll{padding-top:34px}}
@@ -449,20 +456,21 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-mode .vx-i{width:15px;height:15px}
 .vx-sk{display:flex;flex-direction:column;height:100%}
 .vx-sk .vx-icard{display:flex;flex-direction:column}
-.vx-note-scroll{--paper:var(--surface-1);flex:1;overflow:auto;outline:none;background:var(--bg);color:var(--fg);transition:background .2s,color .2s}
-.vx-note-scroll[data-rtone]{--paper:var(--bg);background:color-mix(in srgb,var(--bg) 96%,var(--fg))}
-.vx-save{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);margin-right:6px;white-space:nowrap}
+.vx-note-scroll{--paper:var(--surface-1);--vx-gut:40px;--vx-px:64px;--vx-pt:56px;--rw:calc(var(--rsize,16px) * 40);flex:1;overflow:auto;outline:none;background:var(--bg);color:var(--fg);transition:background .2s,color .2s}
+.vx-note-scroll[data-rtone]{--paper:var(--bg);--surface-1:var(--panel);--surface-2:var(--panel-2,var(--hover));background:color-mix(in srgb,var(--bg) 96%,var(--fg))}
+.vx-save{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);margin-inline-end:6px;white-space:nowrap}
 .vx-save i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .vx-save[data-state=dirty] i{background:var(--warn)}
 .vx-save[data-state=saving] i{background:var(--accent-2);animation:vxPulse 1s infinite}
 .vx-save[data-state=error] i,.vx-save[data-state=conflict] i{background:var(--danger)}
 .vx-save[data-state=error],.vx-save[data-state=conflict]{color:var(--danger);font-weight:600}
-.vx-page{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;gap:20px;padding:32px 32px 120px}
-.vx-paper{box-sizing:border-box;width:100%;max-width:calc(var(--rw,760px) + 128px);background:var(--paper);border:1px solid var(--line);
-  border-radius:16px;padding:56px 64px 48px;min-width:0}
+.vx-page{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;gap:20px;padding:32px var(--vx-gut) 120px}
+/* One reading column (the measure follows the text size), the same gutters and rhythm on every screen. */
+.vx-paper{box-sizing:border-box;width:100%;max-width:calc(var(--rw) + 2 * var(--vx-px));background:var(--paper);border:1px solid var(--line);
+  border-radius:16px;padding:var(--vx-pt) var(--vx-px) 48px;min-width:0}
 .vx-col{min-width:0}
-.vx-doc-title{font-size:34px;line-height:1.18;font-weight:650;letter-spacing:-.025em;margin:0 0 12px;cursor:text;word-break:break-word}
-.vx-doc-title .vx-rename{font-size:30px;font-weight:650}
+.vx-doc-title{font-size:max(var(--vx-h,34px),calc(var(--rsize,16px) * 1.9));line-height:1.18;font-weight:650;letter-spacing:-.025em;margin:0 0 12px;cursor:text;word-break:break-word}
+.vx-doc-title .vx-rename{font-size:inherit;font-weight:650;letter-spacing:inherit}
 .vx-doc-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;font-size:13px;color:var(--muted);line-height:22px}
 .vx-doc-meta>*{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-width:0;max-width:100%}
 .vx-doc-meta .vx-meta-folder span{overflow:hidden;text-overflow:ellipsis}
@@ -503,8 +511,8 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 [data-rlead=relaxed] .vx-prose{line-height:1.88}
 .vx-prose>:first-child{margin-top:0}
 .vx-prose p{margin:0 0 1.05em;text-wrap:pretty}
-.vx-prose ul,.vx-prose ol{margin:0 0 1.15em;padding-left:1.35em}
-.vx-prose li{margin:.4em 0;padding-left:.2em;text-wrap:pretty}
+.vx-prose ul,.vx-prose ol{margin:0 0 1.15em;padding-inline-start:1.35em}
+.vx-prose li{margin:.4em 0;padding-inline-start:.2em;text-wrap:pretty}
 .vx-prose li>:is(ul,ol){margin:.35em 0 .5em}
 .vx-prose li::marker{color:var(--text-3)}
 .vx-prose ol>li::marker{font-variant-numeric:tabular-nums;font-size:.92em}
@@ -515,16 +523,18 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-prose h4{font-size:.8em;margin:1.6em 0 .5em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
 .vx-prose :is(h1,h2,h3,h4)+:is(h2,h3,h4){margin-top:.4em}
 .vx-prose :is(h1,h2,h3,h4){scroll-margin-top:24px}
-.vx-prose a{color:var(--accent-2);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent-2) 40%,transparent);text-underline-offset:3px}
+.vx-prose a:not(.ch){color:var(--accent-2);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent-2) 40%,transparent);text-underline-offset:3px}
 /* Wikilinks. The position…opacity reset keeps the welcome tour's own ".wl" class off links. */
-.vx-prose a.wl{position:static;inset:auto;z-index:auto;display:inline;opacity:1;background:none;
+.vx-prose a.wl:not(.ch){position:static;inset:auto;z-index:auto;display:inline;opacity:1;background:none;
   color:var(--fg);font-weight:500;cursor:pointer;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:.24em;
   text-decoration-color:color-mix(in srgb,var(--accent) 55%,transparent);border-radius:4px;-webkit-box-decoration-break:clone;box-decoration-break:clone;
   transition:background .15s,text-decoration-color .15s,color .15s;overflow-wrap:break-word}
-.vx-prose a.wl:hover{color:var(--fg);text-decoration-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
-.vx-prose a.wl.broken{color:var(--text-2);font-weight:500;text-decoration-style:dashed;text-decoration-thickness:1px;
+.vx-prose a.wl:not(.ch):hover{color:var(--fg);text-decoration-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.vx-prose a.wl.broken:not(.ch){color:var(--text-2);font-weight:500;text-decoration-style:dashed;text-decoration-thickness:1px;
   text-decoration-color:color-mix(in srgb,var(--muted) 80%,transparent)}
-.vx-prose a.wl.broken:hover{color:var(--fg);text-decoration-color:var(--fg);background:var(--hover)}
+.vx-prose a.wl.broken:not(.ch):hover{color:var(--fg);text-decoration-color:var(--fg);background:var(--hover)}
+.vx-prose a.wl.wl-kb .ch-ic{width:.92em;height:.92em;vertical-align:-.12em;margin-inline-end:.28em;color:#a78bfa}
+:root[data-theme=light] .vx-prose a.wl.wl-kb .ch-ic{color:#7c3aed}
 .vx-prose a.wl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .vx-prose :is(h1,h2,h3,h4) a.wl{font-weight:inherit}
 .vx-hit{animation:vxHit 1.6s var(--ease)}
@@ -532,7 +542,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 @media (prefers-reduced-motion:reduce){.vx-hit{animation:none;outline:2px solid var(--accent)}}
 .vx-prose strong{font-weight:650;color:var(--fg)}
 .vx-prose em{font-style:italic}
-.vx-prose blockquote{margin:1.3em 0;padding:.15em 0 .15em 1.05em;border-left:2px solid var(--accent-line,var(--line-strong));border-radius:0;background:none;color:var(--text-2)}
+.vx-prose blockquote{margin:1.3em 0;padding-block:.15em;padding-inline:1.05em 0;border:0;border-inline-start:2px solid var(--accent-line,var(--line-strong));border-radius:0;background:none;color:var(--text-2)}
 .vx-prose blockquote p:last-child{margin-bottom:0}
 .vx-prose code{font-family:var(--mono);font-size:.84em;padding:.14em .38em;border-radius:5px;background:color-mix(in srgb,var(--fg) 6%,transparent);
   color:var(--fg);border:0;overflow-wrap:anywhere}
@@ -540,13 +550,13 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   background:color-mix(in srgb,var(--fg) 3.5%,transparent)}
 .vx-prose pre code{font-size:13px;padding:0;background:none;border-radius:0;line-height:inherit;overflow-wrap:normal}
 .vx-prose table{display:block;max-width:100%;overflow-x:auto;margin:1.2em 0;font-size:.9em;border-collapse:collapse;border-spacing:0}
-.vx-prose th,.vx-prose td{min-width:0;border:0;border-bottom:1px solid var(--line);padding:9px 20px 9px 0;text-align:left;vertical-align:top}
+.vx-prose th,.vx-prose td{min-width:0;border:0;border-bottom:1px solid var(--line);padding-block:9px;padding-inline:0 20px;text-align:start;vertical-align:top}
 .vx-prose th{font-size:.86em;font-weight:600;color:var(--muted);background:none;border-bottom-color:var(--line-strong);white-space:nowrap}
 .vx-prose tr:last-child td{border-bottom:0}
 .vx-prose hr{border:0;height:1px;background:var(--line);margin:2.2em 0}
 .vx-prose img{max-width:100%;height:auto;max-height:min(480px,60vh);object-fit:contain;border-radius:10px}
-.vx-prose .task,.vx-prose li:has(>input[type=checkbox]){list-style:none;position:relative;margin-left:-1.35em;padding-left:1.75em}
-.vx-prose input[type=checkbox]{appearance:none;-webkit-appearance:none;position:absolute;left:0;top:calc(.5lh - 8px);width:16px;height:16px;margin:0;
+.vx-prose .task,.vx-prose li:has(>input[type=checkbox]){list-style:none;position:relative;margin-inline-start:-1.35em;padding-inline-start:1.75em}
+.vx-prose input[type=checkbox]{appearance:none;-webkit-appearance:none;position:absolute;inset-inline-start:0;top:calc(.5lh - 8px);width:16px;height:16px;margin:0;
   border:1.5px solid var(--line-strong);border-radius:5px;background:transparent;opacity:1;cursor:default}
 .vx-prose input[type=checkbox]:checked{border-color:var(--accent);background:var(--accent) no-repeat center/11px
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.6l4.5-5'/%3E%3C/svg%3E")}
@@ -557,7 +567,7 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-flash{animation:vxFlash 1.4s var(--ease)}
 @keyframes vxFlash{0%{background:color-mix(in srgb,var(--accent-2) 14%,transparent)}100%{background:transparent}}
 
-.vx-insp{display:flex;flex-direction:column;gap:16px;min-width:0;width:100%;max-width:calc(var(--rw,760px) + 128px)}
+.vx-insp{display:flex;flex-direction:column;gap:16px;min-width:0;width:100%;max-width:calc(var(--rw) + 128px)}
 .vx-icard{background:var(--paper,var(--surface-1));border:1px solid var(--line);border-radius:14px;padding:18px 20px}
 .vx-icard h3{display:flex;align-items:baseline;gap:8px;margin:0 0 6px;font-size:15px;font-weight:600;color:var(--fg)}
 .vx-info{margin:0;font-size:13px}
@@ -577,46 +587,23 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-toc-head .vx-icon-btn{width:28px;height:28px;border-radius:7px}
 .vx-toc-head .vx-icon-btn .vx-i{width:14px;height:14px}
 .vx-toc .vx-ct-list{max-height:min(54vh,480px);margin:10px -6px 0 0;padding:0 6px 0 0}
-.vx-link{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:0 10px;width:calc(100% + 16px);text-align:left;border:0;
-  background:none;color:var(--fg);font:inherit;padding:8px;margin:0 -8px;border-radius:9px;cursor:pointer}
-.vx-link i{width:7px;height:7px;border-radius:50%;background:var(--fc,var(--muted))}
-.vx-link b{font-size:13.5px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vx-link small{grid-column:2;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vx-link:hover{background:var(--hover)}
-.vx-link.missing b{color:var(--muted);font-weight:500}
-.vx-link.missing i{background:none;box-shadow:inset 0 0 0 1px var(--muted)}
-.vx-rfoot{margin-top:56px;border-top:1px solid var(--line)}
-.vx-rfoot details{border-bottom:1px solid var(--line)}
-.vx-rfoot summary{display:flex;align-items:center;gap:8px;height:52px;cursor:pointer;font-size:14px;font-weight:600;list-style:none;border-radius:var(--r-xs)}
-.vx-rfoot summary::-webkit-details-marker{display:none}
-.vx-rfoot summary span{color:var(--muted);font-weight:500}
-.vx-rfoot summary::after{content:"";margin:0 6px 4px auto;width:7px;height:7px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);
-  transform:rotate(45deg);transition:transform .2s}
-.vx-rfoot details[open] summary::after{transform:rotate(-135deg);margin-bottom:-2px}
-.vx-rfoot details>div{padding:0 8px 16px}
-.vx-rfoot .vx-link{padding:10px 8px}
 /* Wide: Contents as a sticky column on the left, the paper centred in the rest. */
 @container vxnote (min-width:820px){
-  .vx-page.toc-open:not(.editing){grid-template-columns:300px minmax(0,1fr);align-items:start;justify-items:stretch;gap:24px;padding:32px 32px 120px}
+  .vx-page.toc-open:not(.editing){grid-template-columns:300px minmax(0,1fr);align-items:start;justify-items:stretch;gap:24px;padding:32px var(--vx-gut) 120px}
   .vx-page:not(.toc-open) .vx-insp,.vx-page.editing .vx-insp{display:none}
   .vx-paper{justify-self:center}
   .vx-insp{position:sticky;top:24px;max-height:calc(100vh - 140px);overflow:auto;scrollbar-width:none}
   .vx-insp::-webkit-scrollbar{display:none}
   .vx-toc .vx-ct-list{max-height:calc(100vh - 290px)}
-  .vx-rfoot{display:grid;grid-template-columns:1fr 1fr;gap:0 40px;border-top:0}
-  .vx-rfoot details{border-bottom:0;border-top:1px solid var(--line)}
-  .vx-rfoot summary{pointer-events:none;height:48px;font-size:13px;font-weight:600;color:var(--text-2)}
-  .vx-rfoot summary::after{display:none}
-  .vx-rfoot details>div{padding:0 0 8px}
-  .vx-rfoot .vx-link{padding:8px}
 }
 /* Narrow: the outline is in Contents. */
 @container vxnote (max-width:819px){
   .vx-insp{display:none}
 }
 /* Medium panes: a slimmer column, so the page keeps a comfortable width. */
-@container vxnote (min-width:820px) and (max-width:1079px){
-  .vx-page.toc-open:not(.editing){grid-template-columns:256px minmax(0,1fr);gap:20px;padding:24px 24px 120px}
+@container vxnote (min-width:820px) and (max-width:1099px){
+  .vx-page.toc-open .vx-paper{--vx-px:32px}
+  .vx-page.toc-open:not(.editing){grid-template-columns:256px minmax(0,1fr);gap:20px;padding:24px var(--vx-gut) 120px}
   .vx-toc{padding:10px 8px 8px 12px}
   .vx-toc .vx-ct-seg button{padding:0 2px;font-size:11px}
 }
@@ -964,24 +951,30 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-seg{height:44px}
   .vx-seg button{width:38px;height:38px}
   .vx-rows.cards{grid-template-columns:1fr;gap:10px}
-  .vx-rows.cards>.vx-addrow{min-height:52px}
+  .vx-rows.cards .vx-addrow{min-height:52px}
   .vx-tiles{grid-template-columns:1fr;gap:8px}
   .vx-tile{height:64px;padding:0 12px;gap:12px}
   .vx-tile-ico{width:36px;height:36px}
 }
-@container vxnote (max-width:900px){
-  .vx-page{padding:24px 24px 120px;gap:16px}
-  .vx-paper{padding:40px 40px 36px}
+/* One page frame for every detail view (a note, a board, a version, the editor): the gutters,
+   the paper padding and the title size step down from desktop (wider than 1099px) to tablet and phone. */
+@container vxnote (max-width:1099px){
+  .vx-note-scroll{--vx-gut:24px;--vx-px:44px;--vx-pt:44px;--vx-h:30px}
+  .vx-page{padding-top:24px;gap:16px}
 }
-@container vxnote (max-width:640px){
+@container vxnote (max-width:760px){
   .vx-rbar .vx-crumbs{display:none}
   .vx-pcrumbs{display:flex}
   .vx-ct-btn{width:40px;padding:0;justify-content:center}
   .vx-ct-btn span{display:none}
   .vx-mode span{display:none}
   .vx-note-scroll{background:var(--paper)}
-  .vx-page,.vx-page.editing{padding:0 0 120px;gap:12px}
-  .vx-paper{border:0;border-radius:0;padding:24px 16px 28px}
+  .vx-note-scroll{--vx-gut:0px;--vx-px:18px;--vx-pt:22px;--vx-h:26px}
+  .vx-page{padding:0 0 120px;gap:12px}
+  .vx-page.editing{padding:0 0 12px;gap:12px}
+  .vx-paper{border:0;border-radius:0}
+  .vx-prose{margin-top:24px}
+  .vx-prose h1{font-size:1.4em}
   .vx-insp{padding:0 16px;box-sizing:border-box;grid-template-columns:1fr}
   .vx-icard{padding:16px}
   /* One row of tools that scrolls sideways rather than a stray second line. */
@@ -989,13 +982,13 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-toolbar::-webkit-scrollbar{display:none}
   .vx-toolbar button{flex:none;width:36px;height:36px}
   .vx-tsep{margin:0 2px}
-  .vx-doc-title{font-size:28px;letter-spacing:-.5px}
+  .vx-doc-title{letter-spacing:-.5px}
   .vx-edit-hint{display:none}
   .vx-editor.note-editor{padding:16px 0}
   .vx-toolbar{top:8px}
   /* Phones: Save and Cancel move to a bar pinned to the bottom of the screen. */
   .vx-edit-btns{display:none}
-  .vx-edit-foot{position:sticky;bottom:0;z-index:4;background:var(--paper);margin:0 -16px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  .vx-edit-foot{position:sticky;bottom:0;z-index:4;background:var(--paper);margin:0 calc(-1 * var(--vx-px));padding:10px 12px calc(10px + env(safe-area-inset-bottom));
     border-top:1px solid var(--line2, var(--line));box-shadow:none}
   .vx-edit-foot .vx-wc{display:none}
   .vx-edit-foot .vx-grow{display:none}
@@ -1003,6 +996,14 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   .vx-edit-acts .btn{flex:1;height:46px;justify-content:center;font-size:15px;font-weight:650;border-radius:12px}
   .vx-edit-acts .btn.primary{flex:1.6}
 }
+@media (hover:none){.vx-tags .vx-tag{height:32px}.vx-meta-folder{padding-block:5px;margin-block:-5px}}
+/* Phones, writing with the keyboard up: the editor gets the whole visible screen. The app bar,
+   the reader bar and the breadcrumb fold away (Close and Save stay in the bar pinned above the
+   keyboard), and the caret is kept clear of the sticky toolbar and that bar. */
+:root.kb-open #main:has(.vx-page.editing) #topbar,
+:root.kb-open .vx-pane-note:has(.vx-page.editing) :is(.vx-rbar,.vx-pcrumbs){display:none}
+:root.kb-open .vx-note-scroll:has(.vx-page.editing){scroll-padding-block:64px 84px}
+:root.kb-open .vx-page.editing .vx-editor.note-editor{min-height:40vh}
 @media (max-width:760px){
   .vx-row,.vx-pin{height:40px;min-height:40px}
   .vx-row-more,.vx-pin-x{opacity:1}

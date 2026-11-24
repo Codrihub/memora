@@ -9,6 +9,8 @@ import { PWA } from './pwa';
 import { activeAgents } from './realtime';
 import { icon } from './ui/icons';
 import { state, type Page } from './state';
+import { PAGE_META } from './router';
+import { NAV_GROUPS, SIDEBAR_FOOT, SIDEBAR_GROUPS, TAB_PAGES } from './ui/nav-model';
 import { Modal } from './modal';
 import { BRAND_DESC, BRAND_MOTTO, BRAND_NAME, BRAND_ONCE, markSvg } from './brand';
 import { openWelcome } from './views/welcome';
@@ -261,15 +263,34 @@ export function openProfileMenu(anchor: HTMLElement): void {
   const mnemoToggle = `<button class="pm-item" role="menuitem" type="button" data-act="mnemofab">${icon(fabShown ? 'eye-off' : 'eye')}<span class="pm-label">${
       fabShown ? t('Hide the Mnemo button') : t('Show the Mnemo button')
     }</span></button>`;
-  const mnemo = item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + mnemoToggle;
   const group = (id: string, label: string, body: string): string =>
     `<div class="pm-group" role="group" aria-labelledby="pmg-${id}"><div class="pm-glabel" id="pmg-${id}">${label}</div>${body}</div>`;
-  // On phones this sheet is the tab bar's "More": it also lists the pages the bar has no room for.
-  // On wider screens the everyday pages are in the sidebar; the menu keeps the workspace ones.
+  /** One page as a menu row, named and drawn as in the sidebar (ui/nav-model.ts). */
+  const pageItem = (p: Page): string => {
+    const m = PAGE_META[p];
+    const label = p === 'keys' ? t('Agents & API keys') : m.label;
+    const extra =
+      p === 'assistant'
+        ? '<span class="pm-new">AI</span>'
+        : p === 'logs'
+          ? live
+            ? `<span class="pm-live"><i></i>${t('{n} live', { n: live })}</span>`
+            : keys(7)
+          : p === 'keys'
+            ? keys(8)
+            : p === 'tools'
+              ? keys(9)
+              : '';
+    return item(p, label, m.icon, extra);
+  };
+  // Phones: this sheet is the tab bar's More, so it holds every page the bar has no room for, in the
+  // sidebar's groups. Wider screens: the sidebar holds the pages; the menu keeps what it does not.
   const sheet = window.matchMedia(SHEET_QUERY).matches;
-  const pages = sheet
-    ? group('pages', t('Pages'), item('assistant', 'Mnemo', 'mnemo', '<span class="pm-new">AI</span>') + item('tags', t('Tags'), 'tags') + item('trash', t('Trash'), 'trash'))
-    : '';
+  const shown = new Set<Page>(sheet ? TAB_PAGES : [...NAV_GROUPS.filter((g) => SIDEBAR_GROUPS.includes(g.id)).flatMap((g) => g.pages), ...SIDEBAR_FOOT]);
+  const navGroups = NAV_GROUPS.map((g) => {
+    const rows = g.pages.filter((p) => !shown.has(p)).map(pageItem).join('') + (g.id === 'agents' || (!sheet && g.id === 'system') ? mnemoToggle : '');
+    return rows ? group(g.id, g.label, rows) : '';
+  }).join('');
   menu.innerHTML = `
     <div class="pm-top">
     <div class="pm-grab" aria-hidden="true"></div>
@@ -280,19 +301,7 @@ export function openProfileMenu(anchor: HTMLElement): void {
     </div>
     <div class="pm-theme" role="group" aria-labelledby="pmg-theme"><div class="pm-glabel" id="pmg-theme">${t('Appearance')}</div><span id="pmTheme"></span></div>
     </div>
-    ${pages}
-    ${
-      sheet
-        ? group(
-            'agents',
-            t('Agents'),
-            mnemoToggle +
-              item('logs', t('Activity'), 'activity', live ? `<span class="pm-live"><i></i>${t('{n} live', { n: live })}</span>` : keys(7)) +
-              item('keys', t('Agents & API keys'), 'key', keys(8)) +
-              item('tools', t('Tools'), 'tools', keys(9)),
-          ) + group('system', t('System'), item('access', t('Access rules'), 'shield') + item('settings', t('Settings'), 'settings'))
-        : group('system', t('Workspace'), mnemo + item('tools', t('Tools'), 'tools') + item('access', t('Access rules'), 'shield'))
-    }
+    ${navGroups}
     ${group(
       'help',
       t('Help'),
@@ -300,12 +309,16 @@ export function openProfileMenu(anchor: HTMLElement): void {
         `<button class="pm-item" role="menuitem" type="button" data-act="guide">${icon('help')}<span class="pm-label">${t('Help & shortcuts')}</span><span class="pm-keys" aria-hidden="true"><kbd>?</kbd></span></button>
       <button class="pm-item" role="menuitem" type="button" data-act="whatsnew">${icon('bolt')}<span class="pm-label">${t("What's new")}</span></button>
       <button class="pm-item" role="menuitem" type="button" data-act="welcome">${icon('sparkle')}<span class="pm-label">${t('Welcome to Memora')}</span></button>
-      <button class="pm-item" role="menuitem" type="button" data-act="share">${icon('star')}<span class="pm-label">${t('Share Memora')}</span></button>` +
-        (canInstall()
-          ? `<button class="pm-item" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">${t('Install app')}</span></button>`
-          : ''),
+      <button class="pm-item" role="menuitem" type="button" data-act="share">${icon('star')}<span class="pm-label">${t('Share Memora')}</span></button>`,
     )}
     <div class="pm-sep" role="separator"></div>
+    ${
+      canInstall()
+        ? `<button class="pm-item pm-install" role="menuitem" type="button" data-act="install">${icon('download')}<span class="pm-label">${t('Install app')}</span><small class="pm-hint">${t(
+            'Open Memora like an app, full screen',
+          )}</small></button>`
+        : ''
+    }
     <button class="pm-item danger" role="menuitem" type="button" data-act="signout">${icon('logout')}<span class="pm-label">${t('Sign out')}</span></button>`;
   repaintUnread();
 

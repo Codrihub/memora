@@ -28,6 +28,8 @@ macro_rules! static_re {
     }};
 }
 
+pub mod kanban;
+
 /// An expected, user-facing error (not a bug).
 #[derive(Debug)]
 pub struct MemoryErr(pub String);
@@ -2880,6 +2882,8 @@ impl MemoryStore {
                 backlinks.push(json!({"path": rel2, "name": name2}));
             }
         }
+        // The boards this note puts in (`![[Board]]`), so readers and agents know them.
+        let boards = self.boards_in(path, &content, &files, &metas);
         let size = fs::metadata(&ap).map(|m| m.len()).unwrap_or(0);
         let mtime = fs::metadata(&ap)
             .and_then(|m| m.modified())
@@ -2891,7 +2895,7 @@ impl MemoryStore {
             .unwrap_or(0.0);
         Ok(json!({
             "path": path, "name": name, "content": content, "html": html,
-            "tags": tags, "frontmatter": fm, "backlinks": backlinks,
+            "tags": tags, "frontmatter": fm, "backlinks": backlinks, "boards": boards,
             "size": size, "mtime": mtime,
         }))
     }

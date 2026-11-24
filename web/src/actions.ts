@@ -6,6 +6,10 @@ export function openNewNote(): void {
   nav.newNote('');
 }
 
+export function openNewBoard(): void {
+  nav.newBoard('');
+}
+
 export function openNewFolder(): void {
   nav.newFolder('');
 }

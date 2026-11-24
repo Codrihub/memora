@@ -28,6 +28,38 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.1.0',
+    title: t('Boards for your tasks'),
+    lead: t('Kanban boards that you and your agents work on together, notes that read better on every screen, and tidier menus.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'kanban', title: t('Kanban boards'), text: t('Notes in the Obsidian Kanban format open as boards. Drag cards and lanes with a mouse or a finger, and every change lands in the note’s history.') },
+          { icon: 'edit', title: t('A form for every card'), text: t('Add or edit a card with its text, a checklist, linked notes, a due date, tags, a colour, done and its lane. It is saved as plain Obsidian Kanban text.') },
+          { icon: 'plus', title: t('Boards inside notes'), text: t('Embed new or existing boards in a note and work on each right there, or put a board into any note from its ⋯ menu; a plain link reads as a small card.') },
+          { icon: 'palette', title: t('Boards your way'), text: t('Colour boards, lanes and cards, give a board an icon, set lane limits, and duplicate, archive or clear lanes and cards from their menus.') },
+          { icon: 'mnemo', title: t('Boards in the Mnemo chat'), text: t('A board you mention, Mnemo links or an agent changes shows under the reply as a live preview of its progress and first cards; a tap opens the board.') },
+          { icon: 'agents', title: t('Agents work the board'), text: t('Mnemo and agents can do on a board everything you can, over MCP, behind four Kanban permission switches that follow Ask first, Auto and Read only.') },
+          { icon: 'overview', title: t('A Boards page'), text: t('Every board with its lanes and progress. New board sits wherever New note does: the sidebar, Overview, folders, menus, search and the B key.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'check', title: t('Your file stays your file'), text: t('A change rewrites only the lines it touches, so the board opens the same in Obsidian. Its Markdown is in the ⋯ menu, and Turn into board makes a list note a board.') },
+          { icon: 'book', title: t('Your way to read'), text: t('Aa opens a new panel with more page colours, fonts, spacing, headings, links and code, for every note or just one, and a Board view with spacing, card style and colours.') },
+          { icon: 'book', title: t('Calmer reading'), text: t('Notes and boards share one page frame with the same spacing on phones, tablets and desktops, and the links at the foot of a note share one tidy look that folds away.') },
+          { icon: 'note', title: t('Notes and boards, connected'), text: t('A board shows which notes it is in, and in Mnemo\'s replies a note that holds boards says so. Both stay folded until you open them.') },
+          { icon: 'kanban', title: t('Boards that flow'), text: t('Lanes fade at the edge while there is more to see, snap one at a time on phones with dots to jump between them, and links, tags and mentions on cards show as chips.') },
+          { icon: 'note', title: t('Boards stand out'), text: t('Board notes carry a board icon in the tree, the note lists and search. In Mnemo\'s replies a board has its own icon and colour, and a note card shows a line of the note.') },
+          { icon: 'sidebar', title: t('Menus, tidied'), text: t('The sidebar groups its pages into Workspace and Agents, each folds like an accordion, and the Library heading stays at the top while you scroll. The menu under your name keeps account, system and help.') },
+          { icon: 'menu', title: t('More on phones'), text: t('The bottom bar keeps Overview, Notes, Brain and Activity and steps aside while you type or hide the toolbar; More opens every other page, and the side menu opens full width.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.0.1',
     title: t('Sub-agents you can steer'),
     lead: t('Mnemo manages its sub-agents, keeps its plan with the chat, and the chat fits every screen better.'),

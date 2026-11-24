@@ -15,8 +15,13 @@ switches and per-key tool lists from older installs (`state/tools.json` and the
 ## Tool catalog
 
 The switchable catalog is `memora_mcp::catalog()`: every tool with its `name`,
-`category`, `description`, when to use it, and input schema (74 tools; see
-[../MCP.md](../MCP.md#tools)). At startup the server mirrors the catalog into
+`category`, `description`, when to use it, and input schema (86 tools; see
+[../MCP.md](../MCP.md#tools)). The Kanban tools come in four categories with
+one switch group each: `kanban` (read boards: `kanban_list_boards`,
+`kanban_get_board`), `kanban_cards` (`kanban_add_card`, `kanban_move_card`,
+`kanban_update_card`, `kanban_card`, `kanban_lane`), `kanban_boards`
+(`kanban_board`) and `kanban_embed` (`kanban_embed`); only the read tools
+work without the `write` scope. At startup the server mirrors the catalog into
 the `tool` table, so switches and per-key grants can refer to tools by name.
 A tool that leaves the catalog is marked retired, not deleted: its switch and
 grants are kept but have no effect, and they apply again if the tool returns.

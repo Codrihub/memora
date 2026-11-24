@@ -20,6 +20,7 @@ interface Hooks {
   openFolderColor: (folder: string) => void;
   confirmDeleteFolder: (folder: string) => void;
   openNewNote: () => void;
+  openNewBoard: () => void;
   openNewFolder: () => void;
   /** Show the Trash on the Notes page. */
   openTrash: () => void;
@@ -47,6 +48,7 @@ export const hooks: Hooks = {
   openFolderColor: () => {},
   confirmDeleteFolder: () => {},
   openNewNote: () => {},
+  openNewBoard: () => {},
   openNewFolder: () => {},
   openTrash: () => {},
   vaultChanged: () => {},

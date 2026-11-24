@@ -93,8 +93,9 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
 
   const box = el('div', 'fp');
   box.innerHTML = `<div class="fp-search">${I.search}<input class="fp-q" type="search" placeholder="${attr(t('Search folders by name or path'))}" aria-label="${attr(t('Search folders'))}" autocomplete="off" spellcheck="false" aria-controls="${id}-tree"></div>
+<div class="fp-chosen" aria-live="polite"></div>
 <div class="fp-tree" id="${id}-tree" role="tree" tabindex="0" aria-label="${attr(opts.label || t('Folders'))}"></div>
-<div class="fp-foot"><span class="fp-status" aria-live="polite"></span><span class="fp-chosen"></span></div>`;
+<div class="fp-foot"><span class="fp-status" aria-live="polite"></span></div>`;
   const q = box.querySelector<HTMLInputElement>('.fp-q')!;
   const list = box.querySelector<HTMLElement>('.fp-tree')!;
   fadeScroll(list);
@@ -136,6 +137,8 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
     }${n.depth > INDENT_CAP ? `<span class="fp-deep" aria-hidden="true">${n.depth}</span>` : ''}${
       root ? '' : `<span class="fp-twist${kids ? '' : ' none'}" aria-hidden="true">${I.caret}</span>`
     }<span class="fp-ico" aria-hidden="true">${ico}</span><span class="fp-text"><span class="fp-name">${name}</span>${sub}</span>${tags}${
+      sel ? '<svg class="fp-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : ''
+    }${
       count ? `<span class="fp-count">${count}</span>` : ''
     }</div>`;
   };
@@ -171,8 +174,21 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
     paintChosen();
   };
 
-  const scrollToActive = (): void => {
-    list.querySelector<HTMLElement>(`#${id}-r${active}`)?.scrollIntoView({ block: 'nearest' });
+  /** Bring the active row into view, clear of the faded edges: in the middle of the list when the
+   *  list opens or is searched (`center`), otherwise just far enough. */
+  const scrollToActive = (center = false): void => {
+    const row = list.querySelector<HTMLElement>(`#${id}-r${active}`);
+    if (!row) return;
+    const fade = 28;
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientTop + list.scrollTop;
+    const max = list.scrollHeight - list.clientHeight;
+    if (center) {
+      list.scrollTop = Math.max(0, Math.min(max, top - (list.clientHeight - row.offsetHeight) / 2));
+      return;
+    }
+    if (top - fade < list.scrollTop) list.scrollTop = Math.max(0, top - fade);
+    else if (top + row.offsetHeight + fade > list.scrollTop + list.clientHeight)
+      list.scrollTop = Math.min(max, top + row.offsetHeight + fade - list.clientHeight);
   };
   const setActive = (i: number, select = true): void => {
     if (!rows.length) return;
@@ -224,7 +240,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
       active = Math.max(0, visibleRows(tree, expanded).findIndex((r) => r.node.path === value));
     }
     draw(false);
-    scrollToActive();
+    scrollToActive(true);
   };
   q.addEventListener('input', search);
   q.addEventListener('keydown', (e) => {
@@ -341,7 +357,7 @@ export function createFolderPicker(opts: FolderPickerOptions): FolderPicker {
   rows = visibleRows(tree, expanded);
   active = Math.max(0, rows.findIndex((r) => r.node.path === value));
   draw(false);
-  requestAnimationFrame(() => scrollToActive());
+  requestAnimationFrame(() => scrollToActive(true));
 
   return {
     el: box,
@@ -418,7 +434,7 @@ const FP_CSS = `
 .fp .fp-search input.fp-q{width:100%;box-sizing:border-box;height:38px;padding:0 12px 0 34px;border-radius:8px;
   border:1px solid var(--line-strong,var(--line));background:var(--surface-0,var(--bg));color:var(--fg);font:inherit;font-size:13.5px;outline:none}
 .fp .fp-search input.fp-q:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
-.fp-tree{--step:14px;--pad:6px;max-height:min(46vh,340px);min-height:120px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+.fp-tree{--step:14px;--pad:6px;--fade:28px;scroll-padding-block:28px;max-height:min(46vh,340px);min-height:120px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   scrollbar-width:none;border:1px solid var(--line);border-radius:8px;padding:4px;outline:none;font-size:13px;
   background:var(--surface-1,var(--panel))}
 .fp-tree::-webkit-scrollbar{display:none}
@@ -428,8 +444,10 @@ const FP_CSS = `
 .fp-row.two{padding-top:4px;padding-bottom:4px}
 .fp-row:hover{background:var(--panel-2)}
 .fp-tree:focus-visible .fp-row.kb,.fp-tree:focus .fp-row.kb{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 70%,transparent)}
-.fp-row.sel{background:color-mix(in srgb,var(--accent) 15%,transparent)}
-.fp-row.sel .fp-name{font-weight:640}
+.fp-row.sel{background:color-mix(in srgb,var(--accent) 22%,var(--surface-1,var(--panel)));box-shadow:inset 3px 0 0 var(--accent)}
+[dir=rtl] .fp-row.sel{box-shadow:inset -3px 0 0 var(--accent)}
+.fp-row.sel .fp-name{font-weight:700}
+.fp-check{flex:none;width:16px;height:16px;color:var(--accent)}
 .fp-row.off{cursor:not-allowed}
 .fp-row.off .fp-text,.fp-row.off .fp-ico{opacity:.45}
 .fp-row.anc .fp-name{color:var(--muted)}
@@ -459,7 +477,7 @@ const FP_CSS = `
 .fp-empty{margin:14px 10px;font-size:12.5px;color:var(--muted)}
 .fp-foot{display:flex;align-items:baseline;gap:10px;font-size:12px;color:var(--muted);min-width:0}
 .fp-status{flex:none}
-.fp-chosen{flex:1;min-width:0;display:flex;justify-content:flex-end;gap:5px;white-space:nowrap;color:var(--fg)}
+.fp-chosen{display:flex;align-items:baseline;gap:6px;min-width:0;white-space:nowrap;color:var(--fg);font-size:13px;padding:0 2px}
 .fp-chosen-l{flex:none;color:var(--muted)}
 .fp-chosen-p{min-width:0;overflow:hidden;text-overflow:ellipsis;direction:ltr}
 .fp-chosen b{flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;font-weight:600}

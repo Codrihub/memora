@@ -375,7 +375,7 @@ export class NodeCard {
         ${
           this.host.onlyFolder
             ? `<button type="button" class="nc-act" data-a="only" title="${t('Hide every other folder')}">${ICON.only}${t('Only this')}</button>`
-            : `<button type="button" class="nc-act" data-a="new" title="${t('New note in this folder')}">${ICON.plus}${t('New note')}</button>`
+            : `<button type="button" class="nc-act" data-a="new" title="${t('New note in this folder')}">${ICON.plus}${t('New note')}</button><button type="button" class="nc-act" data-a="newboard" title="${t('New board in this folder')}">${ICON.plus}${t('New board')}</button>`
         }
       </div>
       <div class="nc-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">${t('Notes')}<span>${n}</span></button></div>
@@ -396,6 +396,7 @@ export class NodeCard {
       this.collapse();
     });
     this.on('new', () => nav.newNote(root ? '' : folder));
+    this.on('newboard', () => nav.newBoard(root ? '' : folder));
     this.on('menu', (b) => folderMenu(folder, b));
     this.el.classList.add('open');
   }

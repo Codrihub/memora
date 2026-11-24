@@ -10,6 +10,9 @@ const CSS = `
 .cpk-sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .cpk-sw[aria-checked=true]{box-shadow:0 0 0 2px var(--surface-1,#0b0e14),0 0 0 4px var(--c)}
 .cpk-sw.auto{background:conic-gradient(#2dd4bf,#60a5fa,#a78bfa,#f472b6,#fb923c,#facc15,#4ade80,#2dd4bf)}
+.cpk-sw.none{background:var(--surface-2,#222);box-shadow:inset 0 0 0 1px var(--line-strong,rgba(255,255,255,.3))}
+.cpk-sw.none::after{content:"";position:absolute;left:4px;right:4px;top:50%;height:2px;margin-top:-1px;background:var(--muted,#888);transform:rotate(-45deg);border-radius:1px}
+.cpk-sw.none[aria-checked=true]{box-shadow:0 0 0 2px var(--surface-1,#0b0e14),0 0 0 4px var(--accent)}
 .cpk-sw.auto::after{content:"A";position:absolute;inset:0;display:grid;place-items:center;font:800 10px/1 system-ui;color:#0b0e14}
 .cpk-box{position:relative;width:26px;height:26px;border-radius:8px;overflow:hidden;cursor:pointer;
   background:conic-gradient(red,#ff0,lime,cyan,blue,#f0f,red);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
@@ -28,13 +31,14 @@ function normHex(v: string): string | null {
   return null;
 }
 
-export function colorPickHTML(id: string, value: string, opts: { auto?: boolean; presets?: readonly string[] } = {}): string {
+export function colorPickHTML(id: string, value: string, opts: { auto?: boolean; none?: boolean; presets?: readonly string[] } = {}): string {
   useStyles('cpk-css', CSS);
   const presets = opts.presets || AGENT_PALETTE;
   const v = normHex(value) || '';
   const custom = v && !presets.includes(v);
   return `<div class="cpk" id="${attr(id)}" role="radiogroup" data-value="${attr(v)}">
     ${opts.auto ? `<button type="button" class="cpk-sw auto" role="radio" data-v="" aria-checked="${!v}" title="${t('Automatic (from the name)')}" aria-label="${t('Automatic color')}"></button>` : ''}
+    ${opts.none ? `<button type="button" class="cpk-sw none" role="radio" data-v="" aria-checked="${!v}" title="${t('No color')}" aria-label="${t('No color')}"></button>` : ''}
     ${presets
       .map(
         (c) =>
@@ -70,7 +74,7 @@ export function wireColorPick(root: ParentNode, id: string, onChange?: (v: strin
   box.querySelectorAll<HTMLElement>('.cpk-sw').forEach((s) => (s.onclick = () => set(s.dataset.v || '')));
   native.oninput = () => set(native.value.toLowerCase());
   hex.oninput = () => {
-    if (!hex.value.trim() && box.querySelector('.cpk-sw.auto')) return set('', true);
+    if (!hex.value.trim() && box.querySelector('.cpk-sw.auto,.cpk-sw.none')) return set('', true);
     const v = normHex(hex.value);
     if (v) set(v, true);
     else hex.classList.add('bad');

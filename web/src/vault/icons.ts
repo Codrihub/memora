@@ -1,12 +1,20 @@
 // Inline SVG icons for the vault UI. Stroke icons inherit currentColor.
 
+import { isBoard } from '../state';
+
 const svg = (d: string, cls = 'vx-i'): string =>
   `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+
+/** A note's icon: the board glyph for Kanban boards. */
+export function noteIcon(path: string): string {
+  return isBoard(path) ? I.board : I.note;
+}
 
 export const I = {
   caret: svg('<path d="M9 6l6 6-6 6"/>', 'vx-i vx-caret'),
   folder: svg('<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>'),
   folderOpen: svg('<path d="M3 17.5v-10A2.5 2.5 0 0 1 5.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5V10"/><path d="M3 17.5 5.6 11.6A2 2 0 0 1 7.4 10.4H21l-2.8 7.4a2.5 2.5 0 0 1-2.3 1.7H5.5"/>'),
+  board: svg('<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/>'),
   note: svg('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),
   vault: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7M12 17v-1.8M15.2 12H17M7 12h1.8"/>'),
   pin: svg('<path d="M12 17v5M8.5 3h7l-1 6 3 3v2H6.5v-2l3-3z"/>'),

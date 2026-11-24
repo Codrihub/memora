@@ -735,10 +735,11 @@ export class ViewChrome {
     const c = EMPTY[this.o.page];
     const mark = PAGES.find((p) => p[0] === this.o.page)?.[2] || '';
     box.innerHTML = `<div class="vc-ec-card" role="status"><span class="vc-ec-ic" aria-hidden="true">${mark}</span><h3>${esc(c.title)}</h3><p>${esc(c.text)}</p>
-      <div class="vc-ec-acts"><button type="button" class="btn primary" data-ec="setup">${t('Open the guide')}</button><button type="button" class="btn" data-ec="new">${I.plus}${t('New note')}</button></div></div>`;
+      <div class="vc-ec-acts"><button type="button" class="btn primary" data-ec="setup">${t('Open the guide')}</button><button type="button" class="btn" data-ec="new">${I.plus}${t('New note')}</button><button type="button" class="btn" data-ec="board">${icon('kanban')}${t('New board')}</button></div></div>`;
     // The setup guide lives on the Overview while the vault is empty.
     box.querySelector<HTMLElement>('[data-ec=setup]')!.onclick = () => hooks.go('home');
     box.querySelector<HTMLElement>('[data-ec=new]')!.onclick = () => hooks.openNewNote();
+    box.querySelector<HTMLElement>('[data-ec=board]')!.onclick = () => hooks.openNewBoard();
   }
 
   /** Graph and Canvas live for the session. */

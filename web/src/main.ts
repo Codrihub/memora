@@ -15,6 +15,7 @@ import {
   openMoveNote,
   openNewFolder,
   openNewNote,
+  openNewBoard,
 } from './actions';
 import { closeProfileMenu, openAccount, openGuide, openProfileMenu, paintAccountChip, signOut } from './account';
 import { $, useStyles } from './dom';
@@ -44,10 +45,12 @@ import { closePalette, openPalette, registerCommands, wireSearch } from './searc
 import { state } from './state';
 import { clearPeek, openPeek } from './peek';
 import { initLightbox } from './ui/lightbox';
+import { watchKeyboard } from './ui/keyboard';
 import { initVault, mountTree, openNote, renderTrash, renderVault } from './vault/index';
 import { renderHome } from './views/home';
 import { renderGraph } from './views/graph';
 import { renderTags } from './views/tags';
+import { renderBoards } from './views/boards';
 import { renderLogs } from './views/logs';
 import { connectOnLoad, renderKeys } from './views/keys';
 import { renderTools } from './views/tools';
@@ -110,6 +113,7 @@ let booted = false;
 function wireShell(): void {
   initToasts();
   initLightbox();
+  watchKeyboard();
   initSidebar({ openSearch: () => openPalette(), openProfile: (a) => openProfileMenu(a) });
   wireSearch();
 
@@ -134,6 +138,8 @@ function wireShell(): void {
   registerCommands([
     { id: 'new-note', title: t('New note'), hint: t('Write a new note'), icon: 'plus', keywords: 'create add write note', run: () => hooks.openNewNote() },
     { id: 'open-brain', title: t('Open brain'), hint: t('Your memory as a living brain'), icon: 'brain', keywords: 'home 3d', kbd: 'Alt 2', run: () => go('brain') },
+    { id: 'new-board', title: t('New board'), hint: t('Start a Kanban board of cards in lanes'), icon: 'kanban', keywords: 'create add kanban board task todo cards lanes', run: () => hooks.openNewBoard() },
+    { id: 'open-boards', title: t('Open boards'), hint: t('Every Kanban board in your notes'), icon: 'kanban', keywords: 'kanban board tasks todo', run: () => go('boards') },
     { id: 'new-folder', title: t('New folder'), hint: t('Create a folder'), icon: 'folder-plus', keywords: 'create add directory', run: () => hooks.openNewFolder() },
     { id: 'mnemo', title: t('Ask Mnemo'), hint: t('Chat with your notes agent'), icon: 'mnemo', keywords: 'ai agent chat assistant gpt claude llm', kbd: 'Ctrl J', run: () => hooks.askMnemo('global') },
     { id: 'mnemo-fab', title: t('Show or hide the Mnemo button'), hint: t('The floating button in the corner, on this device'), icon: 'eye', keywords: 'ai agent floating launcher bubble', run: () => void hooks.mnemoButton(!hooks.mnemoButton()) },
@@ -282,6 +288,7 @@ async function boot(): Promise<void> {
   registerView('docs', renderDocs);
   registerView('assistant', renderAssistant);
   registerView('trash', renderTrash);
+  registerView('boards', renderBoards);
   watchUnread();
   watchScrollbars();
 
@@ -294,6 +301,7 @@ async function boot(): Promise<void> {
   hooks.refreshPage = () => refreshPage();
   hooks.refreshLogs = () => void renderLogs();
   hooks.openNewNote = openNewNote;
+  hooks.openNewBoard = openNewBoard;
   hooks.openNewFolder = openNewFolder;
   hooks.openMoveNote = openMoveNote;
   hooks.openMoveFolder = openMoveFolder;
@@ -310,7 +318,7 @@ async function boot(): Promise<void> {
 
   initVault();
   mountSidebarTree((host) => mountTree(host, { showNotes: true, showPins: true }));
-  for (const k of ['openNewNote', 'openNewFolder'] as const) {
+  for (const k of ['openNewNote', 'openNewBoard', 'openNewFolder'] as const) {
     const inner = hooks[k];
     hooks[k] = () => {
       closePalette(false);

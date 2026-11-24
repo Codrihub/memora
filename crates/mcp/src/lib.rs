@@ -238,7 +238,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "read_memory",
             category: "note",
-            description: "Read one note: markdown body, frontmatter, tags, and backlinks.",
+            description: "Read one note: markdown body, frontmatter, tags, backlinks, and `boards` (the Kanban boards it puts in with ![[...]]).",
             when: "After search or list gives you a path.",
             input_schema: obj(
                 j!({"path": {"type":"string","description":"Relative path, e.g. 'Tech/foo.md'"}}),
@@ -1758,6 +1758,10 @@ fn lock_conflict(store: &MemoryStore, name: &str, args: &Value, caller: &Caller)
     if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
         paths.extend(arr.iter().filter_map(|v| v.as_str()).map(str::to_string));
     }
+    // The note kanban_embed writes.
+    if name == "kanban_embed" {
+        paths.extend(str_of("note").filter(|p| !p.trim().is_empty()));
+    }
     let mut folders: Vec<String> = Vec::new();
     match name {
         "delete_folder" | "rename_folder" | "move_folder" | "move_folder_contents" => {
@@ -1806,6 +1810,8 @@ fn activity_label<'a>(name: &str, args: &'a Value) -> &'a str {
             pick(args, &["folder", "name"])
         }
         "set_my_name" => pick(args, &["name"]),
+        "kanban_embed" => pick(args, &["note", "board"]),
+        "kanban_board" => pick(args, &["path", "title", "folder"]),
         "mention_agent" => pick(args, &["agent", "message"]),
         "get_events" | "get_logs" | "digest" => pick(args, &["range", "q", "folder"]),
         _ => pick(

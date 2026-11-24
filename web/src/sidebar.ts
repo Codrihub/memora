@@ -17,6 +17,7 @@ import { icon } from './ui/icons';
 import { fadeScroll } from './ui/scroll-fade';
 import type { NoteRef } from './types';
 import { t, tn } from './i18n';
+import { SIDEBAR_GROUPS, TAB_PAGES, groupOf, navPage } from './ui/nav-model';
 
 const MOBILE = '(max-width: 760px)';
 
@@ -29,37 +30,65 @@ function shortcutOf(page: Page): number {
   return PAGES.indexOf(page) + 1;
 }
 
-// System pages live in the profile menu; Graph and Canvas are views inside Brain.
-const NAV: Page[] = ['home', 'brain', 'vault', 'tags', 'logs', 'keys'];
-
 function buildNav(): void {
   const nav = $('#nav');
   nav.innerHTML = '';
-  for (const p of NAV) {
-    const m = PAGE_META[p];
-    const n = shortcutOf(p);
-    const b = el(
-      'button',
-      'nav-item',
-      `<span class="ni-tile">${icon(m.icon)}</span><span class="ni-label">${esc(m.label)}</span>${
-        p === 'logs' ? '<span class="ni-badge" data-live-badge></span>' : ''
-      }${n <= 9 ? `<span class="ni-kbd" aria-hidden="true">Alt ${n}</span>` : ''}`,
-    );
-    b.type = 'button';
-    b.dataset.page = p;
-    b.dataset.tip = m.label;
-    b.dataset.hint = m.hint;
-    if (n <= 9) b.dataset.kbd = 'Alt ' + n;
-    b.setAttribute('aria-label', m.label);
-    b.onclick = () => {
-      // "Notes" in the nav always opens All notes, never the last folder or note.
-      if (p === 'vault') {
-        closeDrawer();
-        vaultNav.allNotes();
-      } else hooks.go(p);
+  // Grouped as in every other menu (ui/nav-model.ts); Graph and Canvas are views inside Brain.
+  for (const gid of SIDEBAR_GROUPS) {
+    const g = groupOf(gid);
+    const box = el('div', 'nav-group');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-labelledby', 'navg-' + g.id);
+    // The label folds its group like an accordion; a folded group still shows the page that is open.
+    const head = el('button', 'nav-glabel', `<span>${esc(g.label)}</span>${CARET}`);
+    head.type = 'button';
+    head.id = 'navg-' + g.id;
+    const folded = (): boolean => (ui.navFolded || []).includes(g.id);
+    const paint = (): void => {
+      box.classList.toggle('folded', folded());
+      head.setAttribute('aria-expanded', String(!folded()));
     };
-    nav.appendChild(b);
+    head.onclick = () => {
+      const set = new Set(ui.navFolded || []);
+      if (set.has(g.id)) set.delete(g.id);
+      else set.add(g.id);
+      ui.navFolded = [...set];
+      saveUI();
+      paint();
+    };
+    box.appendChild(head);
+    for (const p of g.pages) box.appendChild(navButton(p));
+    paint();
+    nav.appendChild(box);
   }
+}
+
+function navButton(p: Page): HTMLElement {
+  const m = PAGE_META[p];
+  const n = shortcutOf(p);
+  const b = el(
+    'button',
+    'nav-item',
+    `<span class="ni-tile">${icon(m.icon)}</span><span class="ni-label">${esc(m.label)}</span>${
+      p === 'logs' ? '<span class="ni-badge" data-live-badge></span>' : ''
+    }${n <= 9 ? `<span class="ni-kbd" aria-hidden="true">Alt ${n}</span>` : ''}`,
+  );
+  b.type = 'button';
+  // Mnemo's item carries its unread count (assistant/unread.ts).
+  if (p === 'assistant') b.classList.add('side-mnemo');
+  b.dataset.page = p;
+  b.dataset.tip = m.label;
+  b.dataset.hint = m.hint;
+  if (n <= 9) b.dataset.kbd = 'Alt ' + n;
+  b.setAttribute('aria-label', m.label);
+  b.onclick = () => {
+    // "Notes" in the nav always opens All notes, never the last folder or note.
+    if (p === 'vault') {
+      closeDrawer();
+      vaultNav.allNotes();
+    } else hooks.go(p);
+  };
+  return b;
 }
 
 function wireSideLinks(): void {
@@ -84,8 +113,25 @@ function wireLibrary(): void {
   box.classList.remove('collapsed');
   box.querySelector<HTMLElement>('.sec-inner')?.removeAttribute('inert');
   const fold = document.getElementById('libFold');
+  const row = head.closest<HTMLElement>('.sec-row');
+  const scroller = box.closest<HTMLElement>('.side-scroll');
+  // The Library row sticks to the top only once the list scrolls under it, so it can still be folded.
+  const stuck = (): boolean =>
+    !!row && !!scroller && box.getBoundingClientRect().top < scroller.getBoundingClientRect().top - 0.5;
+  const paintStuck = (): void => {
+    const on = stuck();
+    row?.classList.toggle('stuck', on);
+    scroller?.classList.toggle('lib-stuck', on);
+  };
+  scroller?.addEventListener('scroll', paintStuck, { passive: true });
   const toggle = (): void => {
+    const was = stuck();
     window.dispatchEvent(new Event('memora:sections-toggle'));
+    // Folding from the stuck row keeps the row in view instead of leaving the list scrolled past it.
+    if (was && scroller) requestAnimationFrame(() => {
+      scroller.scrollTop += box.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      paintStuck();
+    });
   };
   head.title = t('Fold or unfold Pinned and Folders');
   head.onclick = toggle;
@@ -361,12 +407,9 @@ interface TabDef {
 
 function buildTabbar(openProfile: (anchor: HTMLElement) => void): void {
   const bar = $('#tabbar');
-  // "More" opens the account sheet with every other page.
+  // "More" opens the account sheet with every other page, grouped as in the sidebar.
   const tabs: TabDef[] = [
-    { id: 'home', label: t('Overview'), icon: 'overview', page: 'home' },
-    { id: 'nodes', label: t('Notes'), icon: 'note', page: 'vault' },
-    { id: 'brain', label: t('Brain'), icon: 'brain', page: 'brain' },
-    { id: 'logs', label: t('Activity'), icon: 'activity', page: 'logs' },
+    ...TAB_PAGES.map((p) => ({ id: p, label: PAGE_META[p].label, icon: PAGE_META[p].icon, page: p })),
     { id: 'profile', label: t('More'), icon: 'more' },
   ];
   bar.innerHTML = '';
@@ -397,8 +440,7 @@ function buildTabbar(openProfile: (anchor: HTMLElement) => void): void {
     dock.appendChild(b);
   }
   onNavigate((page) => {
-    $('[data-tab="profile"]', bar).classList.toggle('active', !['home', 'vault', 'brain', 'graph', 'canvas', 'logs'].includes(page));
-    $('[data-page="brain"]', bar).classList.toggle('active', ['brain', 'graph', 'canvas'].includes(page));
+    $('[data-tab="profile"]', bar).classList.toggle('active', !TAB_PAGES.includes(navPage(page)));
   });
 }
 
@@ -457,6 +499,7 @@ export function initSidebar(deps: SidebarDeps): void {
   $('#sideClose').onclick = () => closeDrawer();
   $('#sideScrim').onclick = () => closeDrawer();
   $('#sideNewNode').onclick = () => hooks.openNewNote();
+  $('#sideNewBoard').onclick = () => hooks.openNewBoard();
   const find = $('#sideSearchBtn');
   find.dataset.kbd = MOD_LABEL;
   find.onclick = () => {

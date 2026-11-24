@@ -7,6 +7,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-24
+
+Kanban boards that people and agents work on together, in the Obsidian Kanban
+format: on their own page and embedded in notes, with a preview in the Mnemo
+chat. Notes and
+boards share one page frame that reads well on phones, tablets and desktops,
+and the navigation is one system on every screen.
+
+### Added
+
+- Kanban boards. A note whose frontmatter has `kanban-plugin` (the format of
+  the Obsidian Kanban plugin) always opens as a board: every `## heading` is a
+  lane, every `- [ ]` / `- [x]` item a card. Boards made in Obsidian Kanban
+  open as they are. A lane title ending in ` (3)` shows its card limit, a lane
+  with the `**Complete**` marker ticks off the cards moved into it, and
+  overdue dates are marked. Drag cards and lanes with a mouse or a finger (a
+  long press on touch screens), tick off, archive, restore and delete cards,
+  and add, rename, move and delete lanes. Keyboard: arrows move between cards,
+  Alt+arrows move the card, Enter edits, Space ticks off, Delete archives.
+  Light and dark, left to right and right to left.
+- A card form for adding and editing a card: its text, a checklist (add,
+  tick, reorder with Alt+arrows, remove; the card shows done of all and a thin
+  bar), a colour, the lane (a picker of the board's lanes), done, a due date from a small calendar (Today, Tomorrow,
+  Next week, No date) with an optional time, linked notes (a search over the
+  vault, each a chip) and tags (the vault's tags with their counts, a new one
+  last), plus Archive (with Undo) and Delete. A dialog on wider screens and a
+  bottom sheet on phones that never runs wider than the screen, its lists
+  opening inside it; Enter saves, Esc closes the open list, then the form.
+  It is written back into the card's own line exactly as Obsidian Kanban
+  writes it: `[[Note]]`, `#tag`, `@{2026-01-31}` and `@@{10:30}`,
+  following the board's `date-trigger`, `time-trigger`, `date-format` and
+  `time-format` settings. Pieces stay where they were in the text, new ones
+  join the end of the first line, and text the form does not know stays as it
+  is.
+- The folder picker of New note, New board and Move shows the chosen folder
+  above the list, marks it clearly (filled, ticked, bold) and opens with it in
+  the middle of the list, never under a faded edge.
+- Boards managed like folders: a board's ⋯ menu changes its colour and icon,
+  duplicates it and puts it into a note (Embed in a note…); a lane's menu
+  duplicates it, sets its colour and its card limit (Obsidian's ` (N)`),
+  archives or deletes all its cards and deletes it with Undo; a card's menu
+  duplicates it, sets its colour and deletes it with Undo. Colours live in the
+  board's own settings block (under `memora`, with tag colours in Obsidian's
+  `tag-colors`), and a coloured card gets a block id (`^abc123`), so the file
+  stays a valid Obsidian Kanban board.
+- Board notes in the Notes page: the toolbar keeps History and Ask (the
+  reading controls of other notes are not needed), and Edit Markdown source in
+  the ⋯ menu opens the raw text; Save or Close go back to the board.
+- Several boards in one note: `![[Board name]]` on a line of its own shows
+  that board live in the note (drag, tick off and add cards, live updates, an
+  Open button), one independent board per embed, each its own Obsidian Kanban
+  file. A plain `[[Board name]]` line shows a compact card with the board's
+  lanes and progress, and a version from the history shows embeds as cards.
+  Add board in the note editor creates a board (in the note's folder unless
+  another is picked) or picks an existing one (Existing board…) and embeds it
+  at the cursor, and Embed a board… in a note's ⋯ menu adds one at its end; Turn into board in a note's
+  ⋯ menu makes a list note a board (headings become lanes, list items cards,
+  after a check that shows what you get; the earlier version stays in the
+  note's history).
+- Where a board shows up: the foot of a board's page has one Mentioned in list
+  of every note that mentions it, those that show it (`![[...]]`) first, each
+  with a small marker (a board icon, "Shows this board", or a link icon,
+  "Links here"), and Links to only when its cards link out; its preview in
+  the Mnemo chat folds out the same list as "In 3 notes"; in Mnemo's replies a note that embeds boards
+  carries a small board badge, and its card folds out a list of those boards
+  with their progress. Agents see the same: `kanban_list_boards` and
+  `kanban_get_board` return `embedded_in` and `linked_from`, and a note read
+  (`read_memory`, `/api/note`) returns the `boards` it embeds. All of it comes
+  from the note cache, so nothing is scanned per view.
+- A Boards page (`/boards`, in the sidebar next to Notes): every board as a
+  card with its folder, lanes, progress and last change, a filter and live
+  updates. New board sits wherever New note does: the sidebar, Overview and
+  the folder view header (one New button: Note or Board, a menu by the button
+  or a bottom sheet on phones), its empty states and add row, folder and
+  note menus, folder cards in the brain, search, and the `B` key next to `N`;
+  a missing `[[link]]` offers Create as a board too. It creates the lanes To
+  do, Doing and Done in the interface language, the last one marked Complete,
+  and opens the board. Board notes carry a board icon in
+  the folder tree, note lists, pins and search (`board: true` on `/api/tree`
+  entries).
+- Boards in the Mnemo chat: a board mentioned in a question, linked in a
+  reply, handed over by Mnemo or used by a kanban tool shows under the reply
+  as a board preview: its name, folder, how many cards are done, its lanes as
+  bars and the first cards of each lane, kept up to date as agents change the
+  board. A tap opens the board. Everything a reply hands over (notes, boards,
+  pictures) stacks in one column as wide as the reply. In Mnemo's replies boards and notes look different:
+  links, chips and cards of a board carry the board icon and a violet accent,
+  and a note card shows a line of the note.
+- Kanban tools for agents and Mnemo, everything a person can do on a board, in
+  four permission groups (each a switch for Mnemo, its sub-agents and every
+  API key, following scopes, privacy rules, note locks, and Ask first, Auto
+  and Read only): Boards: read (`kanban_list_boards`, `kanban_get_board`, with
+  colours, checklists and card fields), Boards: cards and lanes
+  (`kanban_add_card`, `kanban_move_card`, `kanban_update_card` with linked
+  notes, tags, date, time, checklist and colour, `kanban_card` to duplicate,
+  delete or restore, `kanban_lane` to add, rename, move, duplicate, colour,
+  limit, archive, clear or delete), Boards: create and manage (`kanban_board`
+  to create, turn a note into a board, rename, move, duplicate, delete, colour
+  and icon, tag colours and Obsidian Kanban settings such as `date-colors`)
+  and Boards in notes (`kanban_embed` to put a board into a note or take it
+  out). 86 tools in all. Their descriptions tell agents how to put several
+  boards in one note: one board note per board, each embedded.
+- `GET /api/kanban`, `GET /api/kanban/boards` and `POST /api/kanban` for the
+  web app, and a Kanban boards page in the Docs.
+
+### Changed
+
+- Reading settings (Aa), rebuilt: a popover on wider screens and a bottom
+  sheet on phones with a live preview, sixteen page colours and an accent,
+  nine fonts, size, line and paragraph spacing, alignment, hyphenation, width,
+  pictures, headings, link colour and underline and code theme, each for every
+  note or for this note only, with Reset per section. On a board, Aa opens
+  Board view: spacing, lane width, card style, background, whether done cards,
+  empty lanes, dates, tags and links show, and colouring cards by their own
+  colour, their tag or their due date.
+- One page frame for every note view (a note, a board, a version from the
+  history, the editor): the same gutters, paper padding, title size and place
+  per screen size (phone up to 760px, tablet up to 1099px, desktop), so moving
+  between a note and a board never shifts the page. Notes read in one column
+  whose width follows the text size (about 70 characters a line) with a calm
+  meta row (folder, last change, words). A board runs the full width, its
+  first lane in line with the title and its scroll area reaching the edge.
+- The foot of a note is one component everywhere: Mentioned in and Links to,
+  each with a count, the same chips for a note, a board and a link not
+  created yet, wrapping on phones, folding away (remembered) and showing a
+  long list in part.
+- One board in two sizes (its own page, embedded in a note):
+  lanes scroll sideways on their own, with no scrollbars: an edge fades on a
+  side only while there is more that way (left and right for the lanes, top
+  and bottom inside a tall lane, never while a card is dragged), snap one lane at
+  a time on narrow screens with dots to jump between lanes, keep their header
+  in view and say so when they are empty. On cards, `[[links]]`, `#tags`,
+  `@mentions`, dates and `- [ ]` steps show as chips and boxes, cut cleanly
+  when long.
+- Navigation, one system everywhere: the sidebar groups its pages into
+  Workspace (Overview, Notes, Boards, Tags, Brain) and Agents (Mnemo, Activity,
+  Agents), with Trash and Settings in its footer; each group folds like an
+  accordion (remembered) and the Library heading sticks to the top while you
+  scroll. The menu under your name keeps your account, appearance, system
+  pages (Tools, Access rules), help and sign out. On phones the bottom bar
+  keeps Overview, Notes, Brain, Activity and More (every other page, Boards
+  included, in the same groups), slides away while the keyboard is open (so it
+  never covers the field you type in) and while the toolbar is hidden (F, now
+  also on boards and in the editor; Esc or F brings it back), and the side menu opens at the full
+  width of the screen; bottom sheets sit above the keyboard. Alt+1…9 follow the sidebar's order.
+- Saving a board rewrites only the lines of the cards and lanes that changed:
+  the `%% kanban:settings %%` block, the archive, unknown settings and any
+  other text keep every byte, so the board still opens the same in Obsidian.
+  Every change is a normal save of the note: one commit in its version history
+  (`kanban: move card to Doing in Work/Board.md`), an entry in Activity and a
+  live update on every open board. Edits carry the board's version, so a board
+  changed meanwhile is never overwritten: the web board applies the edit again
+  on the newest version, and an agent is told to read the board again.
+
 ## [3.0.1] - 2026-11-24
 
 Mnemo steers its sub-agents, its plan belongs to the chat, and the chat fits

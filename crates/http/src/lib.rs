@@ -1624,6 +1624,7 @@ pub fn build_router(st: AppState) -> Router {
         .route("/nodes", get(h_app_route))
         .route("/graph", get(h_app_route))
         .route("/canvas", get(h_app_route))
+        .route("/boards", get(h_app_route))
         .route("/tags", get(h_app_route))
         .route("/activity", get(h_app_route))
         .route("/agents", get(h_app_route))

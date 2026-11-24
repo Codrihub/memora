@@ -6,6 +6,7 @@ import { on } from '../bus';
 import { $, attr, esc, useStyles } from '../dom';
 import { fmtTs, noteName, relTs } from '../format';
 import { hooks } from '../hooks';
+import { openNewMenu } from '../vault/new-menu';
 import { state, allNotes, colorOfFolder } from '../state';
 import { agentColor, avatarHTML, setAgentColors } from '../control/agents';
 import { connectOnLoad } from './keys';
@@ -400,7 +401,7 @@ export async function renderHome(): Promise<void> {
       `<button type="button" class="icon-btn round" id="${id}" aria-label="${attr(what)}" title="${attr(what)}">${ICO.open}</button>`;
     host.innerHTML = `<div class="cc ov ov-loading">
       <header class="ov-head"><div class="t"><p class="ov-date">${esc(today())}</p><h1>${esc(greeting())}${user ? ', ' + esc(user) : ''}</h1><p id="ovSub">&nbsp;</p></div>
-        <div class="ov-acts"><button type="button" class="btn" id="ovNew" aria-label="${t('New note')}">${ICO.plus}<span class="lbl">${t('New note')}</span></button>
+        <div class="ov-acts"><button type="button" class="btn" id="ovNew" aria-haspopup="menu" aria-label="${t('New note or board')}">${ICO.plus}<span class="lbl">${t('New')}</span></button>
           <button type="button" class="btn primary" id="ovBrain">${t('Open the brain')} ${ICO.arrow}</button></div></header>
       <section class="ov-welcome" id="ovWelcome" aria-labelledby="ovWelcomeT" hidden></section>
       <section class="ov-kpis" aria-label="${t('Your notes in numbers')}">
@@ -438,7 +439,7 @@ export async function renderHome(): Promise<void> {
       </div>
     </div>`;
     $('#ovBrain').onclick = () => hooks.go('brain');
-    $('#ovNew').onclick = () => hooks.openNewNote();
+    $('#ovNew').onclick = (e) => openNewMenu(e.currentTarget as HTMLElement, '');
     $('#ovNodes').onclick = () => hooks.go('vault');
     $('#ovRecentAll').onclick = () => hooks.go('vault');
     $('#ovKeys').onclick = () => hooks.go('keys');

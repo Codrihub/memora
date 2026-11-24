@@ -28,6 +28,7 @@ import { TreeView, refreshTrees } from './tree';
 import { emptyState, promptName } from './ui';
 import { fadeScroll } from '../ui/scroll-fade';
 import { createFolderPicker, type FolderPicker } from './folder-picker';
+import { boardText } from './board-text';
 import { Modal } from '../modal';
 import { setToTopScroller } from '../ui/totop';
 import { VAULT_CSS } from './styles';
@@ -323,7 +324,10 @@ function showAllNotes(): void {
 nav.selectFolder = selectFolder;
 nav.allNotes = showAllNotes;
 nav.openNote = (p) => void openNote(p);
-nav.newNote = (folder) => {
+nav.newNote = (folder) => askNew(folder, false);
+nav.newBoard = (folder, made) => askNew(folder, true, made);
+
+function askNew(folder: string, board: boolean, made?: (path: string) => void): void {
   const folders = pickerFolders();
   const start = folder && folder !== 'Root' && folders.includes(folder) ? folder : '';
   let picker: FolderPicker | null = null;
@@ -336,14 +340,19 @@ nav.newNote = (folder) => {
     }
     const where = picker?.value ?? '';
     Modal.close();
-    const p = await createNote(where, title);
+    const p = await createNote(where, title, board ? boardText() : undefined);
     if (!p) return;
-    await openInPane(p, true);
+    if (made) {
+      made(p);
+      return;
+    }
+    if (board && state.page !== 'vault') hooks.go('vault');
+    await openInPane(p, !board);
   };
   Modal.open({
-    title: t('New note'),
+    title: board ? t('New board') : t('New note'),
     body:
-      Modal.field(t('Title'), 'vxName', { value: '' }) +
+      Modal.field(board ? t('Board name') : t('Title'), 'vxName', { value: '', ph: board ? t('For example: Product launch') : '' }) +
       `<div class="field"><label id="vxWhereL">${t('Location')}</label><div id="vxWhere"></div></div>`,
     actions: [
       { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
@@ -368,7 +377,7 @@ nav.newNote = (folder) => {
         };
     },
   });
-};
+}
 
 nav.newFolder = (parent) => {
   promptName(parent ? t('New folder in {parent}', { parent }) : t('New folder'), t('Folder name'), '', async (name) => {

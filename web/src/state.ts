@@ -16,7 +16,8 @@ export type Page =
   | 'settings'
   | 'docs'
   | 'assistant'
-  | 'trash';
+  | 'trash'
+  | 'boards';
 
 interface GraphState {
   nodes: GraphNode[];
@@ -80,6 +81,19 @@ export const state: AppState = {
 };
 
 /** Every note in the tree, with its folder filled in. */
+let boardTree: unknown = null;
+let boardSet = new Set<string>();
+
+/** Whether the note at `path` is a Kanban board (`board` on its tree entry). */
+export function isBoard(path: string): boolean {
+  if (boardTree !== state.tree) {
+    boardTree = state.tree;
+    boardSet = new Set();
+    for (const f of Object.keys(state.tree)) for (const n of state.tree[f] || []) if (n.board) boardSet.add(n.path);
+  }
+  return boardSet.has(path);
+}
+
 export function allNotes(): NoteRef[] {
   const out: NoteRef[] = [];
   for (const f of Object.keys(state.tree)) {

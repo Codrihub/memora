@@ -61,6 +61,8 @@ const READ_ONLY: &[&str] = &[
     "follow_ups",
     "validate_memory",
     "list_pins",
+    "kanban_list_boards",
+    "kanban_get_board",
     "admin_list_tools",
     "privacy_list",
 ];
@@ -92,6 +94,7 @@ const NO_RESULT_PATHS: &[&str] = &[
     "follow_ups",
     "export_memory",
     "list_pins",
+    "kanban_list_boards",
     "admin_list_tools",
     "admin_set_tool",
 ];
@@ -147,6 +150,9 @@ pub fn arg_paths(tool: &str, args: &Value) -> Paths {
     match tool {
         "find_path" => keys.extend(["source", "target"]),
         "merge_memory" => keys.push("into"),
+        "kanban_embed" => keys.extend(["note", "board"]),
+        // `to` is a new name or a folder there, not a note.
+        "kanban_board" => keys.retain(|k| *k != "to"),
         _ => {}
     }
     for k in keys {

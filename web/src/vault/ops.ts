@@ -223,12 +223,14 @@ export async function renameFolder(path: string, name: string): Promise<boolean>
   return relocateFolder(path, dest, 'Renamed');
 }
 
-export async function createNote(folder: string, title: string): Promise<string | null> {
+export async function createNote(folder: string, title: string, content?: string): Promise<string | null> {
   // The server makes the file name; the title stays as typed for the note's heading.
   const clean = title.replace(/[\\/]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean) return null;
   try {
-    const r = await apiPost<OkResult>('/api/create', { title: clean, folder: apiFolder(folder) });
+    const body: Record<string, string> = { title: clean, folder: apiFolder(folder) };
+    if (content != null) body.content = content;
+    const r = await apiPost<OkResult>('/api/create', body);
     await reload();
     return (r && r.path) || null;
   } catch (e) {

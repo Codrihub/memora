@@ -905,6 +905,80 @@ async fn h_api_save(
     }
 }
 
+/// `GET /api/kanban?path=X` -> the board note as `{path, version, lanes, archive, counts,
+/// settings}`, each card with its rendered `html` (see `memora_core::vault::kanban`).
+async fn h_api_kanban(State(st): State<AppState>, req: Request) -> Response {
+    let path = super::query_value(req.uri(), "path").unwrap_or_default();
+    if path.trim().is_empty() {
+        return bad("no path");
+    }
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let read =
+        crate::blocking(move || crate::snapshot_as(&st, key.as_ref()).kanban_get_impl(&path, true));
+    match read.await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => mem_err(e),
+    }
+}
+
+/// `GET /api/kanban/boards?folder=` -> `{count, boards}` as MCP `kanban_list_boards`.
+async fn h_api_kanban_boards(State(st): State<AppState>, req: Request) -> Response {
+    let folder = super::query_value(req.uri(), "folder");
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let read = crate::blocking(move || {
+        crate::snapshot_as(&st, key.as_ref()).kanban_list_impl(folder.as_deref())
+    });
+    match read.await {
+        Ok(boards) => Json(json!({"count": boards.len(), "boards": boards})).into_response(),
+        Err(e) => mem_err(e),
+    }
+}
+
+/// `POST /api/kanban` `{path, version, op:{type, ...}}` -> the board after the edit, with
+/// `card` and `changed`. The edit is a normal note save (history, `node_updated` for
+/// other browsers). A stale `version` answers 409 `{error, board}` with the current board.
+async fn h_api_kanban_edit(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    Json(b): Json<Value>,
+) -> Response {
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let Some(path) = body_str(&b, "path") else {
+        return bad("path is required");
+    };
+    let op = match memora_core::vault::kanban::Op::from_json(b.get("op").unwrap_or(&Value::Null)) {
+        Ok(op) => op,
+        Err(e) => return mem_err(e),
+    };
+    let version = body_str(&b, "version");
+    let _author = web_author(&st, key.as_deref());
+    let store = crate::store_as(&st, key.as_deref());
+    match store.kanban_apply_impl(&path, version.as_deref(), &op, true) {
+        Ok(v) => {
+            if v["changed"] == json!(true) {
+                let rel = v["path"].as_str().unwrap_or(&path).to_string();
+                let actor = actor_name(&st, &headers, &key).unwrap_or_default();
+                memora_core::events::hub().publish(json!({
+                    "type": "node_updated", "actor": actor, "node": store.node_payload(&rel),
+                }));
+            }
+            Json(v).into_response()
+        }
+        Err(e) if e.0.starts_with("board changed") => {
+            let board = store.kanban_get_impl(&path, true).ok();
+            (
+                StatusCode::CONFLICT,
+                Json(json!({"error": e.0, "board": board})),
+            )
+                .into_response()
+        }
+        Err(e) => mem_err(e),
+    }
+}
+
 /// `POST /api/create` `{title,folder}` -> `{ok:true,path}`
 async fn h_api_create(
     State(st): State<AppState>,
@@ -2942,6 +3016,8 @@ pub fn api_router() -> Router<AppState> {
         )
         // Vault
         .route("/api/save", post(h_api_save))
+        .route("/api/kanban", get(h_api_kanban).post(h_api_kanban_edit))
+        .route("/api/kanban/boards", get(h_api_kanban_boards))
         .route("/api/create", post(h_api_create))
         .route("/api/rename", post(h_api_rename))
         .route("/api/move", post(h_api_move))

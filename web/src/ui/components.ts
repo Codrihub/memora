@@ -147,7 +147,8 @@ export const COMPONENTS_CSS = `
 .modal-foot .grow{flex:1}
 @media (pointer:coarse){.modal-x{width:44px;height:44px;margin-right:-6px}}
 @media (max-width:760px){
-  .modal-host{place-items:end stretch;padding:0}
+  .modal-host{place-items:end stretch;padding:0 0 var(--kb-h,0px)}
+  :root.kb-open .modal,:root.kb-open .modal.wide{max-height:calc(100dvh - var(--kb-h,0px) - 24px);padding-bottom:0}
   .modal,.modal.wide{width:100%;max-width:100%;max-height:88dvh;border-radius:var(--r) var(--r) 0 0;border-bottom:0;
     animation:ds-sheet var(--dur-3) var(--ease-out);padding-bottom:var(--safe-b)}
   .modal-grab{display:block;flex:none;height:16px;touch-action:none;cursor:grab}

@@ -90,8 +90,30 @@ export const SHELL_CSS = `
 .nav-item:hover .ni-kbd{opacity:1}
 
 #sidebar .nav{margin:0 12px;padding:0 0 16px;border-bottom:1px solid var(--line)}
+/* Nav groups (ui/nav-model.ts): a quiet label in the open sidebar, a hairline between groups in the rail. */
+.nav-group{display:flex;flex-direction:column;gap:2px}
+.nav-group+.nav-group{margin-top:10px}
+.nav-glabel{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 10px;border:0;border-radius:8px;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--text-3);letter-spacing:.01em;text-align:left;cursor:pointer;user-select:none}
+.nav-glabel:hover,.nav-glabel:focus-visible{color:var(--fg);background:var(--hover)}
+.nav-glabel .caret{flex:none;width:16px;height:16px;margin-left:auto;stroke-width:2.2;color:var(--text-2);opacity:.85;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.nav-glabel:hover .caret{opacity:1}
+.nav-group.folded .nav-glabel .caret{transform:rotate(-90deg)}
+/* Folding slides each item shut (the open page stays), instead of popping them away. */
+#nav .nav-group{gap:0}
+#nav .nav-group .nav-item{margin-top:2px;
+  transition:height .3s cubic-bezier(.2,.8,.2,1),margin .3s cubic-bezier(.2,.8,.2,1),opacity .22s ease .06s,visibility 0s}
+#nav .nav-group.folded .nav-item:not(.active){height:0;margin-top:0;opacity:0;visibility:hidden;overflow:hidden;
+  transition:height .3s cubic-bezier(.2,.8,.2,1),margin .3s cubic-bezier(.2,.8,.2,1),opacity .14s ease,visibility 0s linear .3s}
+.nav-group:first-child .nav-glabel{height:28px}
 #sidebar .side-vault{margin-top:16px}
-#sidebar .side-vault .sec-row{padding-bottom:2px}
+#sidebar .side-vault .sec-row{padding-bottom:2px;position:sticky;top:0;z-index:3;background:var(--side-bg);
+  transition:box-shadow var(--dur-1)}
+#sidebar .side-vault .sec-row.stuck{box-shadow:0 1px 0 var(--line)}
+/* While the Library row is stuck the top edge fade would veil it; keep only the bottom fade. */
+#sidebar .side-scroll.lib-stuck.can-up{-webkit-mask-image:none;mask-image:none}
+#sidebar .side-scroll.lib-stuck.can-up.can-down{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - var(--fade)),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - var(--fade)),transparent)}
 #sidebar .sec-head{color:var(--muted)}
 #sidebar .sec-title{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--text-2)}
 #sidebar .vx-sec-head{font-size:12px;font-weight:500;letter-spacing:0;text-transform:none}
@@ -245,11 +267,13 @@ export const SHELL_CSS = `
 .pm-live i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pm-live 1.6s ease-in-out infinite}
 @keyframes pm-live{50%{opacity:.35}}
 .pm-sep{height:1px;background:var(--line);margin:6px 0}
+.pm-hint{flex:none;max-width:45%;font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:300px){.pm-hint{display:none}}
 .pm-item.danger{color:var(--danger)}
 .pm-item.danger .i{color:var(--danger)}
 .pm-item.danger:hover,.pm-item.danger:focus-visible{color:var(--danger);background:var(--danger-soft)}
 .pm-item.danger:focus-visible{outline-color:color-mix(in srgb,var(--danger) 45%,transparent)}
-.pmenu.sheet{left:0;right:0;bottom:0;margin:0 auto;width:min(560px,100%);max-height:88dvh;
+.pmenu.sheet{left:0;right:0;bottom:var(--kb-h,0px);margin:0 auto;width:min(560px,100%);max-height:88dvh;
   padding:0 12px max(12px,var(--safe-b));border-bottom:0;border-radius:var(--r) var(--r) 0 0;opacity:1;transform:translateY(100%);
   box-shadow:none;transition:transform .3s var(--ease-out)}
 .pmenu.sheet.pm-open{transform:none}
@@ -305,6 +329,11 @@ export const SHELL_CSS = `
   #app.side-collapsed #sidebar .nav-item.active{color:#f1f5f9;font-weight:600;background:linear-gradient(180deg,#1b2433,#0d121b);box-shadow:inset 0 0 0 1px rgba(94,234,212,.22)}
   #app.side-collapsed #sidebar .nav-item.active .ni-tile{color:#5eead4}
   #app.side-collapsed .nav-item .ni-kbd{display:none}
+  #app.side-collapsed .nav-glabel{display:none}
+  #app.side-collapsed #sidebar .nav-group .nav-item{margin-top:0;opacity:1;visibility:visible}
+  #app.side-collapsed #sidebar .nav-group{align-items:center;gap:4px;width:100%}
+  #app.side-collapsed #sidebar .nav-group+.nav-group{margin-top:6px;padding-top:8px;border-top:1px solid var(--line)}
+  #app.side-collapsed #sidebar .nav-item{height:54px}
   #app.side-collapsed #sidebar .nav-item .ni-badge{position:absolute;top:9px;right:15px;margin:0;gap:0;font-size:0}
   #app.side-collapsed #sidebar .nav-item .ni-badge::before{width:8px;height:8px;box-shadow:0 0 0 2px var(--side-bg)}
   #app.side-collapsed .side-sec{display:none}
@@ -530,8 +559,8 @@ export const SHELL_CSS = `
   #main{padding-bottom:calc(var(--tabbar) + var(--tb-pad) + var(--tb-gap))}
   #app:has(.vx-page.editing) .tabbar{display:none}
   #main:has(.vx-page.editing){padding-bottom:0}
-  #sidebar{position:fixed;top:0;bottom:0;left:0;width:min(320px,88vw);z-index:60;transform:translateX(-104%);
-    border-radius:0 var(--r) var(--r) 0;border-right:1px solid var(--line-strong);box-shadow:none;
+  #sidebar{position:fixed;top:0;bottom:0;left:0;width:100vw;width:100dvw;max-width:none;z-index:60;transform:translateX(-104%);
+    border-radius:0;border-right:0;box-shadow:none;
     transition:transform var(--dur-3) var(--ease-out),visibility 0s linear var(--dur-3);visibility:hidden;
     padding-top:var(--safe-t);background:var(--side-bg)}
   #app.side-open #sidebar{transform:none;visibility:visible;transition:transform var(--dur-3) var(--ease-out)}
@@ -584,6 +613,13 @@ export const SHELL_CSS = `
   .tab-item .ti-badge.on{display:grid}
   @media (max-width:340px){.tab-item.active>span:last-child{display:none}.tab-item.active{flex-grow:1.4}}
   @media (prefers-reduced-motion:reduce){.tab-item,.tab-item>span:last-child,.tab-item .ti-ico{transition:none}}
+  /* The keyboard is up: the bar slides away and gives its room back, so the field sits right above the keyboard. */
+  .tabbar{transition:transform .24s var(--ease-out),opacity .18s}
+  :root.kb-open .tabbar,#app:has(.view:not(.hidden) [data-pane=note] .vx-focus) .tabbar{transform:translateY(calc(100% + var(--tb-gap) + var(--tb-pad) + 8px));opacity:0;pointer-events:none}
+  :root.kb-open,:root:has(#app .view:not(.hidden) [data-pane=note] .vx-focus){--dock-space:0px}
+  /* Where the browser does not shrink the page for the keyboard (iOS Safari), the app does:
+     everything pinned to its bottom sits right above the keyboard. */
+  :root.kb-open #app{height:calc(100dvh - var(--kb-h,0px))}
   @media (prefers-reduced-motion:reduce){.tabbar{transition:none}}
 
   .palette{padding:0;align-items:stretch;background:var(--surface-1);-webkit-backdrop-filter:none;backdrop-filter:none}

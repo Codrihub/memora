@@ -1,14 +1,13 @@
-# Weekly update pull requests for dependencies, one grouped pull request per
-# ecosystem for minor and patch versions. Major versions are left for a
-# planned upgrade. Security updates are opened as soon as an advisory is
-# published, independent of this schedule.
+# Version-update pull requests are off (open-pull-requests-limit: 0): dependency
+# upgrades land with releases, and CI audits dependencies on every push.
+# Security updates still open when an advisory is published.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       cargo:
         update-types: [minor, patch]
@@ -20,7 +19,7 @@ updates:
     directory: /web
     schedule:
       interval: weekly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       web:
         update-types: [minor, patch]
@@ -34,7 +33,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       actions:
         patterns: ["*"]
@@ -43,10 +42,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
 
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0

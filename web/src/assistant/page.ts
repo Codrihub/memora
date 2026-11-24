@@ -353,6 +353,12 @@ function build(): void {
   root.querySelector<HTMLElement>('#mnpClose')!.onclick = () => leave(false);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || state.page !== 'assistant' || e.defaultPrevented) return;
+    // Esc on a board in the chat only leaves the board.
+    const on = document.activeElement as HTMLElement | null;
+    if (on?.closest?.('.kb')) {
+      on.blur();
+      return;
+    }
     // Esc first closes whatever is open on top (a menu, a picker, a dialog, the chat list).
     if (document.querySelector('.ui-sel-pop,.vx-menu') || !$('#modalHost').classList.contains('hidden')) return;
     if (root!.classList.contains('all-open')) {

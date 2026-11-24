@@ -54,6 +54,19 @@ The mic and Listen show only once their model is set.
 - **Long chats.** Only the latest questions go on the page at first; earlier ones come in
   as you scroll up (or with **Show earlier questions**), jump to them on the timeline, or
   open a search hit there.
+- **Boards in the chat.** A Kanban board you mention, Mnemo links or hands over, or a
+  kanban tool works on shows under the reply as a board preview: how many cards are done,
+  its lanes and their first cards, kept up to date while Mnemo and other agents change the
+  board. Tap it to open the board itself. In replies a board looks
+  different from a note: a board icon and a violet accent. Ask for several boards in one
+  note and Mnemo makes a board note per board and embeds each (`![[Board]]`).
+- **Boards, all of it.** Mnemo can do on a board everything you can: create, turn a note
+  into a board, rename, move, duplicate, colour and delete boards; add, rename, reorder,
+  colour, limit, archive and delete lanes; add, edit, move, tick, archive, colour and
+  delete cards with linked notes, due dates, tags and checklists; and put boards into
+  notes. Four switches in **What Mnemo can use** (Boards: read, cards and lanes, create
+  and manage, in notes) decide which of that it may do, and Ask first, Auto and Read
+  only apply as for notes.
 - **@mnemo in a note.** Write `@mnemo: <request>` in a note and Mnemo does it, with the
   note as context.
 - **Skills.** Reusable instructions kept as notes in the folder `Skills` (one note per

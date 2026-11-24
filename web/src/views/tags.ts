@@ -145,6 +145,12 @@ async function buildTagIndex(force: boolean, onProgress: (done: number, total: n
   return map;
 }
 
+/** Every tag in the vault with how many notes carry it (the Tags page's index, one request at most). */
+export async function vaultTagCounts(): Promise<Map<string, number>> {
+  const idx = await buildTagIndex(false, () => {});
+  return new Map([...idx.entries()].map(([tag, list]) => [tag, list.length]));
+}
+
 /** Forget the index (and the links) so the next draw reads the vault again. */
 function dropIndex(): void {
   clearTagIndex();

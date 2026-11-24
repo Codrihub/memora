@@ -38,6 +38,13 @@ const KIND_OF: Record<string, Kind> = {
   set_folder_meta: 'edited',
   restore_memory: 'edited',
   mention_agent: 'edited',
+  kanban_add_card: 'edited',
+  kanban_move_card: 'edited',
+  kanban_update_card: 'edited',
+  kanban_card: 'edited',
+  kanban_lane: 'edited',
+  kanban_board: 'edited',
+  kanban_embed: 'edited',
   node_updated: 'edited',
   move_memory: 'moved',
   rename_memory: 'moved',
@@ -69,7 +76,7 @@ const KIND_OF: Record<string, Kind> = {
 
 /** Tools that only look: everything else an agent calls changes something. */
 const READ_RE =
-  /^(get_|list_|read_|link_stats|folder_stats|broken_links|diff|digest|healthcheck|stale_detection|validate_|presence|follow_ups|export_|admin_list|privacy_list)/;
+  /^(get_|list_|read_|kanban_get_|kanban_list_|link_stats|folder_stats|broken_links|diff|digest|healthcheck|stale_detection|validate_|presence|follow_ups|export_|admin_list|privacy_list)/;
 
 /** People and processes that are not AI apps: the server, the console, the sign-in gate. */
 const SYSTEM_ACTORS = /^(gateway|memora|memora-cli|system|server)$/i;
@@ -194,6 +201,12 @@ function done(it: ActivityItem): string {
     }
     case 'edited':
       if (a === 'add_tags' || a === 'remove_tags' || a === 'set_tags') return p ? t('changed the tags of {note}', { note: n }) : t('changed some tags');
+      if (a === 'kanban_add_card') return p ? t('added a card to the board {note}', { note: n }) : t('added a card to a board');
+      if (a === 'kanban_move_card') return p ? t('moved a card on the board {note}', { note: n }) : t('moved a card on a board');
+      if (a === 'kanban_update_card' || a === 'kanban_card') return p ? t('changed a card on the board {note}', { note: n }) : t('changed a card on a board');
+      if (a === 'kanban_lane') return p ? t('changed the lanes of the board {note}', { note: n }) : t('changed the lanes of a board');
+      if (a === 'kanban_board') return p ? t('changed the board {note}', { note: n }) : t('changed a board');
+      if (a === 'kanban_embed') return p ? t('put a board in {note}', { note: n }) : t('put a board in a note');
       if (a === 'bulk_replace') return it.paths.length ? tn(it.paths.length, 'replaced text in {n} note', 'replaced text in {n} notes') : t('replaced text in your notes');
       if (a === 'merge_memory') return p ? t('merged notes into {note}', { note: n }) : t('merged notes');
       if (a === 'rename_tag' || a === 'merge_tag') return lbl ? t('renamed the tag {tag}', { tag: em(lbl) }) : t('renamed a tag');
@@ -272,6 +285,8 @@ function done(it: ActivityItem): string {
 
 function readLine(it: ActivityItem, n: string, lbl: string): string {
   const a = it.action;
+  if (a === 'kanban_list_boards') return t('looked at your boards');
+  if (a === 'kanban_get_board') return it.paths[0] ? t('read the board {note}', { note: n }) : t('read a board');
   const where = lbl && !/\.md$/i.test(lbl) && lbl.length < 80 ? em(folderName(lbl)) : '';
   if (a === 'read_memory') return n ? t('read {note}', { note: n }) : t('read a note');
   if (a === 'export_memory') return n ? t('exported {note}', { note: n }) : t('exported notes');
@@ -481,7 +496,21 @@ export function spanText(secs: number): string {
 }
 
 /** Tools whose success always leaves a note event behind (same actor, a few seconds later). */
-const LEAVES_NODE_EVENT = new Set(['create_memory', 'save_memory', 'patch_memory', 'delete_memory', 'move_memory', 'rename_memory']);
+const LEAVES_NODE_EVENT = new Set([
+  'create_memory',
+  'save_memory',
+  'patch_memory',
+  'delete_memory',
+  'move_memory',
+  'rename_memory',
+  'kanban_add_card',
+  'kanban_move_card',
+  'kanban_update_card',
+  'kanban_card',
+  'kanban_lane',
+  'kanban_board',
+  'kanban_embed',
+]);
 const ECHO_SECS = 15;
 /** Paths compare without `.md`: tool arguments may leave it out. */
 const bare = (p: string): string => p.replace(/\.md$/i, '');
