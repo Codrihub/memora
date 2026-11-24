@@ -168,9 +168,11 @@ go back to the board.
   all**. Each card says where it came from and when it was archived, when
   Memora archived it (kept in the board's settings, so it travels with the
   file).
-- On phones and tablets a row of lane dots stays pinned at the bottom of the
-  visible board, so a long lane never pushes it out of reach; a desktop with a
-  mouse does without it.
+- The board's bar has **+** (Add lane) and, while the lanes do not all fit, a
+  lane pager at the top right: back, the lane in view as `2/9` (click it for a
+  list of lanes to jump to) and forward, the same on every screen. The end of
+  the board has a lane-sized **Add lane** card, and a mouse wheel over the
+  board scrolls the lanes sideways.
 - Keyboard (click a card or tab to it first): the arrow keys move between cards
   and lanes (up from the first card, or into an empty lane, focuses the lane),
   Enter opens the card form, Space ticks off, Alt/Option with the arrows moves
@@ -180,7 +182,7 @@ go back to the board.
 
 Lanes scroll sideways and a tall lane scrolls its cards, with no scrollbars: a
 soft fade at an edge shows there is more that way. On a narrow board (a phone, a narrow chat) the board shows one
-lane at a time and snaps from lane to lane, and a row of dots under the lanes
+lane at a time and snaps from lane to lane; the lane pager in the board's bar
 jumps to any lane. On cards, links, tags, mentions (`@name`), dates and
 `- [ ]` steps show as small chips and boxes; a link or tag opens on a click.
 
