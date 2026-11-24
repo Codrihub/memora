@@ -24,9 +24,9 @@ import { IMAGE_ACCEPT, takePendingImage, uploadImage } from './images';
 import { toast } from '../toast';
 import { Modal } from '../modal';
 import { LOCK_ICON, openPrivacy } from '../ui/privacy';
-import { BOARD_ICON, boardFor, isBoardNote, mountBoard, unmountBoard, type KanbanHost } from '../views/kanban';
+import { BOARD_ICON, boardFor, IC, isBoardNote, mountBoard, unmountBoard, type KanbanHost } from '../views/kanban';
 import { boardCardsIn, boardInfos, sweepEmbeds } from '../views/board-card';
-import { boardText, toBoard } from './board-text';
+import { boardText } from './board-text';
 import { noteFooter } from './note-footer';
 import { pickNote } from './pick-note';
 import { isSelfTarget } from './self-ref';
@@ -721,6 +721,9 @@ function moreMenu(path: string, at: HTMLElement, board: boolean): void {
         ? [
             { label: t('Edit Markdown source'), icon: I.code, run: () => setMode(true) },
             { label: t('Color and icon…'), icon: I.palette, run: () => boardFor(path)?.editStyle() },
+            ...((boardFor(path)?.archivedCount || 0) > 0
+              ? [{ label: t('Archived ({n})', { n: boardFor(path)?.archivedCount || 0 }), icon: IC.archive, run: () => boardFor(path)?.openArchive() }]
+              : []),
             {
               label: t('Duplicate board'),
               icon: I.copy,
@@ -754,14 +757,13 @@ function moreMenu(path: string, at: HTMLElement, board: boolean): void {
       },
       { label: t('Copy path'), icon: I.copy, run: () => copyPath(path) },
       { label: t('Copy wikilink'), icon: I.wiki, run: () => copyWikilink(path) },
-      { label: t('New note in this folder'), icon: I.newNote, run: () => nav.newNote(dirOf(path)) },
-      { label: t('New board in this folder'), icon: I.board, run: () => nav.newBoard(dirOf(path)) },
+      // A note puts boards in; a board goes into notes (its own item above). New notes and boards
+      // belong to folders (the folder view and menus, the sidebar, Overview, New), not here.
       ...(reading && !board
         ? [
             { label: t('Embed a board…'), icon: BOARD_ICON, run: () => void pickNote({ title: t('Embed a board'), boards: true, exclude: [path] }).then((b) => {
                 if (b) void embedInto(path, b);
               }) },
-            { label: t('Turn into board'), icon: BOARD_ICON, run: () => askTurnIntoBoard(path) },
           ]
         : []),
       { sep: true, label: '' },
@@ -841,50 +843,6 @@ function wireProse(art: HTMLElement): void {
   });
   art.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach((x) => (x.disabled = true));
   boardCardsIn(art, embedHost, !art.classList.contains('vh-old'), ed.path);
-}
-
-/** A plain note becomes a board: headings are lanes, list items are cards. Asks first and says what
- *  is left out; the note's earlier version stays in its History. */
-function askTurnIntoBoard(path: string): void {
-  const d = ed.doc;
-  if (!d || ed.path !== path) return;
-  const from = d.content || '';
-  const c = toBoard(from, noteTitle(path));
-  const parts = [
-    `${tn(c.lanes, '{n} lane', '{n} lanes')} · ${tn(c.cards, '{n} card', '{n} cards')}`,
-    t('Headings become lanes and list items become cards.'),
-  ];
-  if (c.dropped) parts.push(tn(c.dropped, '{n} line of other text is left out.', '{n} lines of other text are left out.'));
-  parts.push(t('The current version stays in History, so you can restore it.'));
-  Modal.open({
-    title: t('Turn “{name}” into a board?', { name: noteTitle(path) }),
-    body: `<p style="margin:0 0 8px"><b>${parts[0]}</b></p><p style="margin:0">${parts.slice(1).map(esc).join(' ')}</p>`,
-    actions: [
-      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
-      {
-        label: t('Turn into board'),
-        cls: 'primary',
-        run: async () => {
-          Modal.close();
-          try {
-            const cur = await apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path));
-            if ((cur.content || '') !== from) {
-              undoToast(t('The note changed meanwhile. Try again.'), null, 'err');
-              if (host && ed.path === path) await renderNote(host, path, mobileBack, true);
-              return;
-            }
-            await saveNote(path, c.text);
-          } catch (e) {
-            undoToast(t('Could not save the note: {error}', { error: (e as Error).message }), null, 'err');
-            return;
-          }
-          await reload();
-          if (host && ed.path === path) await renderNote(host, path, mobileBack, true);
-          undoToast(t('This note is a board now'), null, 'info', 3000);
-        },
-      },
-    ],
-  });
 }
 
 function renameTitle(): void {

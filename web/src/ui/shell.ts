@@ -563,7 +563,7 @@ export const SHELL_CSS = `
   #main{grid-column:1}
   #sideScrim{display:block}
   /* The safe area is added under the bar, not inside it. */
-  :root{--tabbar:60px;--tb-pad:var(--safe-b);--tb-gap:10px}
+  :root{--tabbar:54px;--tb-pad:var(--safe-b);--tb-gap:12px}
   #main{padding-bottom:calc(var(--tabbar) + var(--tb-pad) + var(--tb-gap))}
   #app:has(.vx-page.editing) .tabbar{display:none}
   #main:has(.vx-page.editing){padding-bottom:0}
@@ -600,27 +600,32 @@ export const SHELL_CSS = `
   .view{padding:16px 16px 32px}
   .peek{right:8px;left:8px;top:calc(62px + var(--safe-t));bottom:8px;width:auto}
 
-  .tabbar{display:flex;justify-content:center;position:fixed;left:12px;right:12px;bottom:calc(var(--tb-gap) + var(--tb-pad));z-index:50;
+  /* Bottom bar: a compact floating capsule of icons (names stay as labels for screen readers and
+     tooltips). The current tab is a solid accent circle; the rest are quiet icons. Solid surface,
+     hairline border, nothing glassy. */
+  .tabbar{display:flex;justify-content:center;position:fixed;left:16px;right:16px;bottom:calc(var(--tb-gap) + var(--tb-pad));z-index:50;
     height:var(--tabbar);pointer-events:none}
-  .tb-dock{display:flex;align-items:center;gap:2px;width:100%;max-width:420px;height:100%;padding:6px;pointer-events:auto;border-radius:999px;
-    background:color-mix(in srgb,var(--side-bg) 90%,transparent);-webkit-backdrop-filter:var(--ovl-filter);backdrop-filter:var(--ovl-filter);
-    border:1px solid var(--line-strong)}
-  .tab-item{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;
-    color:var(--text-2);font-size:13px;font-weight:600;white-space:nowrap;-webkit-tap-highlight-color:transparent;
-    transition:flex-grow .32s var(--ease-out),background .25s,color .2s}
-  .tab-item>span:last-child{max-width:0;overflow:hidden;opacity:0;transition:max-width .32s var(--ease-out),opacity .2s}
-  .tab-item .ti-ico{position:relative;display:grid;place-items:center;flex:none;transition:transform .15s}
-  .tab-item .i{width:22px;height:22px;stroke-width:1.7}
-  .tab-item:active .ti-ico{transform:scale(.9)}
-  .tab-item.active{flex-grow:2.4;color:#f1f5f9;background:linear-gradient(180deg,#1b2433,#0d121b);box-shadow:inset 0 0 0 1px rgba(94,234,212,.22)}
-  .tab-item.active .ti-ico{color:#5eead4}
+  .tb-dock{display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;max-width:300px;height:100%;padding:0 7px;pointer-events:auto;
+    border-radius:999px;background:var(--surface-3);border:1.5px solid rgba(255,255,255,.14);box-shadow:0 8px 22px -10px rgba(0,0,0,.55)}
+  /* Light theme: an ink capsule, so it stands apart from white pages. */
+  :root[data-theme=light] .tb-dock{background:#111827;border-color:#111827;box-shadow:0 8px 22px -10px rgba(15,23,42,.45)}
+  :root[data-theme=light] .tab-item{color:rgba(255,255,255,.62)}
+  :root[data-theme=light] .tab-item .ti-badge{border-color:#111827}
+  .tab-item{position:relative;flex:none;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;
+    color:var(--text-2);-webkit-tap-highlight-color:transparent;transition:background .2s,color .2s}
+  .tab-item>span:last-child{display:none}
+  .tab-item .ti-ico{position:relative;display:grid;place-items:center}
+  .tab-item .i{width:21px;height:21px;stroke-width:1.8}
+  .tab-item:active{transform:scale(.94)}
+  .tab-item.active{background:var(--accent);color:var(--on-accent)}
+  .tab-item:focus-visible{border-radius:50%}
+  @media (hover:none){.tab-item:focus-visible{box-shadow:none}}
   .tab-item.active .i{stroke-width:2}
-  .tab-item.active>span:last-child{max-width:96px;opacity:1}
-  .tab-item .ti-badge{position:absolute;top:-6px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;
-    background:#5eead4;color:#04221e;font-size:9.5px;font-weight:700;display:none;place-items:center;border:2px solid var(--side-bg)}
+  .tab-item .ti-badge{position:absolute;top:-6px;right:-8px;min-width:15px;height:15px;padding:0 4px;border-radius:99px;
+    background:var(--accent);color:var(--on-accent);font-size:9px;font-weight:700;display:none;place-items:center;border:2px solid var(--surface-3)}
+  .tab-item.active .ti-badge{background:var(--on-accent);color:var(--accent)}
   .tab-item .ti-badge.on{display:grid}
-  @media (max-width:340px){.tab-item.active>span:last-child{display:none}.tab-item.active{flex-grow:1.4}}
-  @media (prefers-reduced-motion:reduce){.tab-item,.tab-item>span:last-child,.tab-item .ti-ico{transition:none}}
+  @media (prefers-reduced-motion:reduce){.tab-item{transition:none}}
   /* The keyboard is up: the bar slides away and gives its room back, so the field sits right above the keyboard. */
   .tabbar{transition:transform .24s var(--ease-out),opacity .18s}
   :root.kb-open .tabbar,#app:has(.view:not(.hidden) [data-pane=note] .vx-focus) .tabbar{transform:translateY(calc(100% + var(--tb-gap) + var(--tb-pad) + 8px));opacity:0;pointer-events:none}
@@ -660,16 +665,6 @@ export const SHELL_CSS = `
   #app .brain-foot{bottom:calc(18px + var(--dock-space))}
   #app .vc-drawer{bottom:calc(var(--vc-gap,10px) + var(--dock-space))}
   #app:has(.vc-sheet-open,.nc.open) .tabbar{display:none}
-  .tb-dock{position:relative;isolation:isolate;background:rgba(18,23,33,.66);
-    -webkit-backdrop-filter:blur(18px) saturate(2) brightness(1.1);backdrop-filter:blur(18px) saturate(2) brightness(1.1);border:1px solid rgba(255,255,255,.14);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(255,255,255,.05),0 14px 34px -12px rgba(0,0,0,.6)}
-  .tb-dock::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;
-    background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,0) 45%),radial-gradient(120% 140% at 50% 120%,rgba(94,234,212,.10),transparent 60%)}
-  :root[data-theme=light] .tb-dock{background:rgba(255,255,255,.74);border-color:rgba(255,255,255,.85);
-    -webkit-backdrop-filter:blur(18px) saturate(1.8);backdrop-filter:blur(18px) saturate(1.8);
-    box-shadow:0 0 0 1px rgba(15,23,42,.07),inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(255,255,255,.4),0 14px 32px -12px rgba(15,23,42,.30)}
-  :root[data-theme=light] .tb-dock::before{background:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,0) 50%),radial-gradient(120% 140% at 50% 120%,rgba(13,148,136,.08),transparent 60%)}
-  @media (prefers-reduced-transparency:reduce){.tb-dock,:root[data-theme=light] .tb-dock{background:var(--surface-1);-webkit-backdrop-filter:none;backdrop-filter:none}}
 }
 @media (max-width:380px){
   .crumb{font-size:15.5px}

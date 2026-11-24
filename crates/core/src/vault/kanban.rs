@@ -1109,6 +1109,42 @@ impl Board {
         Ok(())
     }
 
+    /// A lane's title without its card limit.
+    fn lane_name(&self, li: usize) -> String {
+        split_limit(&self.lanes[li].title_full()).0
+    }
+
+    /// Remember where archived cards came from and when (`memora.archived[id] = {lane, at}`), so
+    /// the archive can say so and put a card back there; entries of cards no longer in the archive
+    /// go. Nothing is written when nothing changed.
+    fn note_archived(&mut self, add: &[(String, String)]) -> MResult<()> {
+        let live: HashSet<String> = self
+            .card_ids()
+            .into_iter()
+            .filter(|(l, _, _)| self.lanes[*l].archive)
+            .map(|(_, _, id)| id)
+            .collect();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        self.memora_edit(|m| {
+            let mut sec = m
+                .get("archived")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            sec.retain(|k, _| live.contains(k));
+            for (id, lane) in add {
+                if !id.is_empty() {
+                    sec.insert(id.clone(), json!({"lane": lane, "at": today}));
+                }
+            }
+            if sec.is_empty() {
+                m.remove("archived");
+            } else {
+                m.insert("archived".into(), Value::Object(sec));
+            }
+        })
+    }
+
     /// Change our `memora` settings with `f`; nothing is written when nothing changed.
     fn memora_edit(&mut self, f: impl FnOnce(&mut Map<String, Value>)) -> MResult<()> {
         let before = self.memora();
@@ -1226,7 +1262,10 @@ impl Board {
                 if self.lanes[li].archive {
                     return err("the card is already archived");
                 }
+                let from = self.lane_name(li);
                 let (ai, at) = self.archive_at(li, si)?;
+                let id = self.id_at(ai, at).unwrap_or_default();
+                self.note_archived(&[(id, from)])?;
                 Ok(Applied {
                     card: self.id_at(ai, at),
                     summary: "archive card".into(),
@@ -1248,6 +1287,7 @@ impl Board {
                     raw.push_str(nl);
                 }
                 let at = self.insert_card(to, None, raw);
+                self.note_archived(&[])?;
                 Ok(Applied {
                     card: self.id_at(to, at),
                     summary: format!("restore card to {}", self.lanes[to].title()),
@@ -1257,6 +1297,7 @@ impl Board {
                 let (li, si) = self.find_card(card)?;
                 let gone = self.lanes[li].segs.remove(si);
                 self.drop_card_colors(&[gone])?;
+                self.note_archived(&[])?;
                 Ok(Applied {
                     card: None,
                     summary: format!("delete card from {}", self.lanes[li].title()),
@@ -1446,15 +1487,25 @@ impl Board {
             Op::ArchiveLaneCards { lane } => {
                 let li = self.lane_at(lane)?;
                 let title = self.lanes[li].title();
+                let from = self.lane_name(li);
                 let mut n = 0;
+                let mut ids = Vec::new();
                 while let Some(si) = self.lanes[li]
                     .segs
                     .iter()
                     .position(|s| matches!(s, Seg::Card(_)))
                 {
-                    self.archive_at(li, si)?;
+                    let (ai, at) = self.archive_at(li, si)?;
+                    ids.push((ai, at));
                     n += 1;
                 }
+                // Ids are read once every card is in: a later card can shift an earlier one's.
+                let ids: Vec<(String, String)> = ids
+                    .into_iter()
+                    .filter_map(|(ai, at)| self.id_at(ai, at))
+                    .map(|id| (id, from.clone()))
+                    .collect();
+                self.note_archived(&ids)?;
                 Ok(Applied {
                     card: None,
                     summary: format!("archive {n} cards of {title}"),
@@ -1609,7 +1660,14 @@ impl Board {
                 })
                 .collect();
             if l.archive {
-                archive.extend(list);
+                // Where each came from and when, when Memora archived it.
+                let seen = memora.get("archived").and_then(|v| v.as_object());
+                archive.extend(list.into_iter().map(|mut v| {
+                    let at = v["id"].as_str().and_then(|id| seen.and_then(|s| s.get(id)));
+                    v["archived_from"] = at.map_or(Value::Null, |a| a["lane"].clone());
+                    v["archived_at"] = at.map_or(Value::Null, |a| a["at"].clone());
+                    v
+                }));
                 continue;
             }
             cards += list.len();
@@ -3201,13 +3259,44 @@ mod tests {
         let id = id_of(&b, "two");
         b.apply(&Op::ArchiveCard { card: id }).unwrap();
         let out = b.render();
+        // Memora notes where the card came from and when, in its own settings key.
+        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let archived_id = json_of(&b)["archive"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert_eq!(
             out,
-            "---\nkanban-plugin: basic\n---\n\n## A\n\n- [ ] one\n\n\n\n\n***\n\n## Archive\n\n- [ ] two\n\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"basic\"}\n```\n%%"
+            format!("---\nkanban-plugin: basic\n---\n\n## A\n\n- [ ] one\n\n\n\n\n***\n\n## Archive\n\n- [ ] two\n\n\n%% kanban:settings\n```\n{{\"kanban-plugin\":\"basic\",\"memora\":{{\"archived\":{{\"{archived_id}\":{{\"at\":\"{day}\",\"lane\":\"A\"}}}}}}}}\n```\n%%")
         );
         let again = Board::parse(&out);
         assert_eq!(json_of(&again)["archive"][0]["text"], "two");
+        assert_eq!(json_of(&again)["archive"][0]["archived_from"], "A");
+        assert_eq!(json_of(&again)["archive"][0]["archived_at"], json!(day));
         assert_eq!(again.render(), out);
+        // Putting it back forgets it: the settings are as they were.
+        let mut back = again;
+        back.apply(&Op::RestoreCard {
+            card: archived_id,
+            lane: None,
+        })
+        .unwrap();
+        assert!(back
+            .render()
+            .ends_with("%% kanban:settings\n```\n{\"kanban-plugin\":\"basic\"}\n```\n%%"));
+        // A whole lane: every card notes its lane.
+        let mut lane = Board::parse(src);
+        lane.apply(&Op::ArchiveLaneCards {
+            lane: LaneRef::Title("A".into()),
+        })
+        .unwrap();
+        let j = json_of(&lane);
+        assert_eq!(j["archive"].as_array().unwrap().len(), 2);
+        assert!(j["archive"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["archived_from"] == "A"));
     }
 
     #[test]

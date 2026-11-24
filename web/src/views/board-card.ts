@@ -63,10 +63,11 @@ const CSS = `
 .kbc-name small{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .kbc-lanes{display:flex;align-items:flex-end;gap:4px;height:22px}
 .kbc-lanes{align-items:stretch}
-.kbc-lanes i{position:relative;flex:1 1 0;min-width:0;border-radius:4px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
-.kbc-lanes i::after{content:"";position:absolute;inset:auto 0 0 0;height:var(--h,0%);border-radius:4px;background:color-mix(in srgb,var(--fc,var(--accent)) 45%,transparent)}
-.kbc-meter{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden}
-.kbc-meter i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.kbc-lanes i{position:relative;flex:1 1 0;min-width:0;border-bottom:1px solid var(--line)}
+.kbc-lanes i::after{content:"";position:absolute;inset:auto 0 0 0;height:max(3px,var(--h,0%));border-radius:3px 3px 1px 1px;
+  background:color-mix(in srgb,var(--fc,var(--accent)) 52%,var(--surface-1))}
+.kbc-meter{height:4px;background:linear-gradient(transparent 1.5px,var(--line) 1.5px,var(--line) 2.5px,transparent 2.5px)}
+.kbc-meter i{display:block;height:100%;border-radius:99px;background:color-mix(in srgb,var(--fc,var(--accent)) 60%,var(--surface-1))}
 .kbc-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kbc-open{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px}
 .kbc.wait .kbc-lanes i,.kbc.wait .kbc-meter{opacity:.45}

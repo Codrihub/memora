@@ -33,15 +33,16 @@ function panelOpenFor(anchor: HTMLElement): boolean {
   return !!cur && cur.anchor === anchor;
 }
 
-/** Show `body` in a panel for `anchor` (toggles); `sheet` forces the bottom sheet on any screen. */
-export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement, cls = '', sheet = false): HTMLElement {
+/** Show `body` in a panel for `anchor` (toggles); `sheet` forces the bottom sheet on any screen;
+ *  `side` makes it a panel along the right edge on wider screens (the page stays in view beside it). */
+export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement, cls = '', sheet = false, side = false): HTMLElement {
   if (panelOpenFor(anchor)) {
     closePanel();
     return body;
   }
   closePanel();
   const phone = sheet || window.matchMedia(PHONE).matches;
-  const root = el('div', (phone ? 'vx-sheet' : 'vx-pop') + (cls ? ' ' + cls : ''));
+  const root = el('div', (phone ? 'vx-sheet' : side ? 'vx-pop vx-side' : 'vx-pop') + (cls ? ' ' + cls : ''));
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', title);
   const card = el('div', 'vx-pop-card');
@@ -59,6 +60,10 @@ export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement,
   if (phone) {
     requestAnimationFrame(() => root.classList.add('in'));
     wireSwipe(card);
+  } else if (side) {
+    // Along the right edge, from just under the top bar to the bottom of the window.
+    const top = Math.round((document.getElementById('topbar')?.getBoundingClientRect().bottom || 0) + 8);
+    card.style.top = top + 'px';
   } else {
     // Under the button, right edges aligned, kept on screen.
     const r = anchor.getBoundingClientRect();
@@ -78,11 +83,16 @@ export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement,
   };
   const onDown = (e: Event): void => {
     const t = e.target as Node;
-    if (!card.contains(t) && !anchor.contains(t)) closePanel();
+    if (card.contains(t) || anchor.contains(t)) return;
+    // A side panel stays while the page beside it is read, scrolled or touched; going somewhere
+    // (the sidebar, top bar, tab bar, or a link or button on the page) closes it.
+    if (side && !(t instanceof Element && t.closest('#sidebar,#topbar,#tabbar,a,button,[role=button],[data-open]'))) return;
+    closePanel();
   };
   document.addEventListener('keydown', onKey, true);
   setTimeout(() => document.addEventListener('pointerdown', onDown, true), 0);
   window.addEventListener('resize', closePanel);
+  window.addEventListener('popstate', closePanel);
   card.querySelector<HTMLElement>('[data-close]')!.onclick = () => closePanel();
   cur = {
     anchor,
@@ -91,6 +101,7 @@ export function openPanel(anchor: HTMLElement, title: string, body: HTMLElement,
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('resize', closePanel);
+      window.removeEventListener('popstate', closePanel);
     },
   };
   (body.querySelector<HTMLElement>('[aria-pressed=true],[aria-selected=true],button') || card).focus({ preventScroll: true });

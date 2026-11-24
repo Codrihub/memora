@@ -52,7 +52,7 @@ most 2048 bytes).
 | `MEMORA_ASSETS` | the `crates/http/assets` folder of the build tree | Directory of the web UI assets. |
 | `MEMORA_INSTALL` | set by the npm launcher (`npm`) and the Docker image (`docker`) | How this copy was installed: `npm`, `docker`, `native`, `zip` or `source`. `memora-cli update`, `start`, `stop`, `restart` and `uninstall` use it to pick the right steps; when unset they work it out from the program's path. |
 | `MEMORA_SETUP_HINT` | `memora-cli setup (run on the server)` | Hint returned by `GET /api/auth/state` and shown on the login screen. |
-| `MEMORA_UPDATE_CHECK` | `true` | Release check: shortly after start and then every 6 hours the server asks GitHub (`api.github.com/repos/Codrihub/memora/releases/latest`) for the newest release and the web UI shows when an update is available. The same check reads the repository's star count (`api.github.com/repos/Codrihub/memora`), shown in What's new. `false` (also `0`, `no`, `off`) turns both off; no network call is made. |
+| `MEMORA_UPDATE_CHECK` | `true` | Release check: shortly after start and then every 6 hours the server asks GitHub (`api.github.com/repos/Codrihub/memora/releases/latest`) for the newest release and the web UI shows when an update is available (Settings › Version, a card on Overview, and once per version a small card at the top of the page that waits for a calm moment and steps aside by itself). The same check reads the repository's star count (`api.github.com/repos/Codrihub/memora`), shown in What's new. `false` (also `0`, `no`, `off`) turns both off; no network call is made. |
 
 The two secrets can never be stored in `server_config` (the schema rejects
 them). The `_FILE` variants read the value from a file, for example a Docker

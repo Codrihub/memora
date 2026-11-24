@@ -18,6 +18,8 @@ export interface MenuItem {
   disabled?: boolean;
   run?: () => void;
   sep?: boolean;
+  /** A row of colour swatches (with "none" first and "Custom…" last) instead of a button. */
+  swatch?: { value: string; pick: (color: string) => void; custom?: () => void };
 }
 
 let menuEl: HTMLElement | null = null;
@@ -39,6 +41,38 @@ export function openMenu(items: MenuItem[], at: { x: number; y: number } | HTMLE
   for (const it of items) {
     if (it.sep) {
       m.appendChild(el('div', 'vx-menu-sep'));
+      continue;
+    }
+    if (it.swatch) {
+      const sw = it.swatch;
+      const cur = (sw.value || '').toLowerCase();
+      const row = el('div', 'vx-menu-sw');
+      row.setAttribute('role', 'group');
+      row.setAttribute('aria-label', it.label);
+      const colors = ['', ...SWATCH_COLORS];
+      row.innerHTML = `<span class="vx-menu-sw-l">${it.icon || ''}<span>${esc(it.label)}</span></span><span class="vx-menu-sw-row">${colors
+        .map(
+          (c) =>
+            `<button type="button" class="vx-sw${c ? '' : ' none'}" role="menuitemradio" aria-checked="${c.toLowerCase() === cur}" data-c="${attr(c)}" aria-label="${attr(
+              c ? c : t('No color'),
+            )}" title="${attr(c ? c : t('No color'))}"${c ? ` style="--c:${attr(c)}"` : ''}></button>`,
+        )
+        .join('')}${
+        sw.custom
+          ? `<button type="button" class="vx-sw more${cur && !colors.includes(cur) ? ' on' : ''}" role="menuitem" data-more aria-label="${attr(t('Custom color…'))}" title="${attr(
+              t('Custom color…'),
+            )}"${cur && !colors.includes(cur) ? ` style="--c:${attr(cur)}"` : ''}></button>`
+          : ''
+      }</span>`;
+      row.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          closeMenu();
+          if (b.dataset.more != null) sw.custom?.();
+          else sw.pick(b.dataset.c || '');
+        };
+      });
+      m.appendChild(row);
       continue;
     }
     const b = el(

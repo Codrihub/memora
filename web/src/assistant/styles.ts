@@ -721,12 +721,10 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-kb-n{display:flex;align-items:center;gap:5px;min-width:0;max-width:100%}
 .mn-kb-n b{font-size:calc(var(--mn-fs,14.5px) - 1px);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mn-kb-sub{font-size:11.5px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
-.mn-kb-bars{display:flex;align-items:flex-end;gap:3px;height:12px;width:min(260px,100%)}
+.mn-kb-bars{display:block;height:4px;width:min(220px,100%);border-radius:99px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
 .mn-kb-bars:empty{display:none}
 /* One track per lane: a neutral track, filled in proportion to the largest lane (an empty lane stays empty). */
-.mn-kb-bars{align-items:stretch}
-.mn-kb-bars i{position:relative;flex:1 1 0;min-width:0;height:14px;border-radius:3px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
-.mn-kb-bars i::after{content:"";position:absolute;inset:auto 0 0 0;height:var(--h,0%);background:color-mix(in srgb,var(--mn-kb) 55%,transparent);border-radius:3px}
+.mn-kb-bars i{display:block;height:100%;border-radius:inherit;background:color-mix(in srgb,var(--mn-kb) 65%,transparent)}
 /* The way in: a chevron like a note card's (the whole header opens the board too). */
 .mn-kb-open{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);cursor:pointer}
 @media (hover:hover){.mn-kb-open:hover{background:var(--hover);color:var(--fg)}}

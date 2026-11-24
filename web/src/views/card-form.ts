@@ -122,7 +122,10 @@ const CSS = `
 .cf-tm.on{border-color:var(--accent);background:var(--accent-soft)}
 .cf-steps{display:flex;flex-direction:column;gap:4px;min-width:0}
 .cf-step{display:flex;align-items:center;gap:8px;min-width:0;min-height:40px;padding:2px 4px 2px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface-1)}
-.cf-step input[type=checkbox]{flex:none;width:18px;height:18px;margin:0;accent-color:var(--accent)}
+.cf-step input[type=checkbox]{flex:none;width:18px;height:18px;margin:0;cursor:pointer;accent-color:var(--accent)}
+.cf-tick{flex:none;display:grid;place-items:center;width:34px;height:36px;margin:-2px -6px -2px -6px;border-radius:8px;cursor:pointer}
+.cf-tick:hover{background:var(--hover)}
+@media (hover:none){.cf-tick{width:42px;height:40px}}
 .cf-step input[type=text]{flex:1 1 auto;min-width:0;height:32px;border:0;background:none;color:var(--fg);font:inherit;font-size:14.5px;outline:none;padding:0 2px}
 .cf-step.done input[type=text]{color:var(--muted);text-decoration:line-through}
 .cf-step:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -616,9 +619,9 @@ export function openCardForm(o: CardFormOpts): void {
     q<HTMLElement>('.cf-prog').textContent = steps.length ? `${done}/${steps.length}` : '';
     stepsBox.innerHTML = steps
       .map(
-        (x, i) => `<div class="cf-step${x.done ? ' done' : ''}" role="listitem" data-s="${i}"><input type="checkbox"${x.done ? ' checked' : ''} aria-label="${attr(
+        (x, i) => `<div class="cf-step${x.done ? ' done' : ''}" role="listitem" data-s="${i}"><label class="cf-tick"><input type="checkbox"${x.done ? ' checked' : ''} aria-label="${attr(
           x.done ? t('Mark as not done') : t('Mark as done'),
-        )}"><input type="text" value="${attr(x.text)}" dir="auto" aria-label="${attr(t('Step {n}', { n: i + 1 }))}"><button type="button" class="cf-x" aria-label="${attr(
+        )}"></label><input type="text" value="${attr(x.text)}" dir="auto" aria-label="${attr(t('Step {n}', { n: i + 1 }))}"><button type="button" class="cf-x" aria-label="${attr(
           t('Remove {name}', { name: x.text }),
         )}">${IC.x}</button></div>`,
       )

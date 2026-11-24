@@ -210,8 +210,8 @@ button.ax-kpi:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ax-bempty{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:8px 0}
 .ax-bempty.ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .ax-cols{display:flex;align-items:flex-end;gap:3px;height:150px}
-.ax-col{flex:1;height:100%;display:flex;align-items:flex-end;min-width:0;border-radius:3px;background:color-mix(in srgb,var(--fg) 3%,transparent)}
-.ax-col i{display:flex;flex-direction:column;justify-content:flex-start;width:100%;background:var(--bar,var(--accent));border-radius:3px 3px 0 0;overflow:hidden;min-height:0}
+.ax-col{flex:1;height:100%;display:flex;align-items:flex-end;min-width:0;border-bottom:1px solid var(--line)}
+.ax-col i{display:flex;flex-direction:column;justify-content:flex-start;width:100%;background:color-mix(in srgb,var(--bar,var(--accent)) 72%,var(--surface-1));border-radius:4px 4px 1px 1px;overflow:hidden;min-height:0}
 .ax-col i b{display:block;width:100%;background:var(--danger)}
 .ax-col:hover i{filter:brightness(1.12)}
 .ax-ticks{display:flex;justify-content:space-between;margin-top:8px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}

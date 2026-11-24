@@ -135,6 +135,15 @@ export const COMPONENTS_CSS = `
   background:var(--surface-1);
   border:1px solid var(--line-strong);border-top-color:var(--ovl-edge);border-radius:var(--r);box-shadow:none;animation:ds-pop var(--dur-3) var(--ease-out)}
 .modal.wide{width:min(760px,100%)}
+@keyframes ds-side{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@keyframes ds-side-rtl{from{opacity:0;transform:translateX(-24px)}to{opacity:1;transform:none}}
+@media (min-width:761px){
+  .modal-host.side{place-items:stretch end;padding:0}
+  .modal.side{width:min(440px,100vw);height:100dvh;max-height:none;border-radius:0;border-start-start-radius:var(--r);border-end-start-radius:var(--r);
+    border-inline-end:0;animation:ds-side var(--dur-3) var(--ease-out)}
+  [dir=rtl] .modal.side{animation-name:ds-side-rtl}
+  .modal.side .modal-body{flex:1 1 auto}
+}
 .modal-grab{display:none}
 .modal-head{display:flex;align-items:center;gap:8px;min-height:56px;padding:10px 12px 10px 20px;border-bottom:1px solid var(--line)}
 .modal-title{font-size:16px;font-weight:650;margin:0;letter-spacing:-.01em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

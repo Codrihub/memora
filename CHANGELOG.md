@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-11-24
+
+A polish release for boards: menus that fit where you are, a tidier lane menu,
+calmer progress and due-date visuals, an archive panel, and checklist steps you
+can tick right on the card.
+
+### Added
+
+- **Archive panel:** **Archived (N)**, a quiet link after the lanes and an item
+  in the board's ⋯ menu, opens a side panel (a bottom sheet on phones) to find
+  archived cards, restore one to a lane of your choice (the lane it came from by
+  default), delete one for good after a second confirm, or restore all. Cards
+  archived by Memora show the lane they left and the day.
+- Checklist steps can be ticked right on the card with a click or a tap; the
+  change is a normal save, with history and live sync.
+- A quiet heads-up when a newer version is out: a small card slides down from
+  the top (under the top bar) once per version per browser, at a calm moment
+  (never during the welcome tour, a dialog, typing or with the phone keyboard
+  open), stays about 12 s (paused while hovered or touched) and goes with ×,
+  Later or a swipe up. "See what's new" opens Settings › Version. No backdrop,
+  nothing is blocked, and nothing shows when the release check is off
+  (`MEMORA_UPDATE_CHECK=false`). It replaces the warning toast shown at sign-in;
+  the Overview card and Settings › Version stay.
+
+### Changed
+
+- Menus fit their place: a board's ⋯ menu no longer offers New note, New board,
+  Turn into board or Embed a board; a note's ⋯ menu keeps Embed a board but no
+  longer offers New note, New board or Turn into board. New notes and boards
+  are made from folders, the sidebar, Overview and New.
+- **Embed in a note…** searches first: a few recent notes, then the vault's
+  search once two letters are typed, so opening it costs nothing.
+- The lane menu is grouped (add a card; rename, colour as a row of swatches,
+  card limit; move and duplicate; archive all with Undo, clear all with a
+  confirm; delete lane at the bottom, archiving its cards first), and the card
+  menu uses the same swatch row for its colour.
+- Overdue cards get a warning stroke along their start edge and cards due
+  today a softer one; the date chip stays neutral.
+- Progress reads calmer: the lane bars on the Boards page and in board cards
+  are flat (one solid fill on a baseline, no contrasting track), the done meter
+  is a soft line, Mnemo's board previews use one thin bar, and card and lane
+  shadows are softer. The Activity chart's bars got the same flat look.
+- A lane's colour now tints the whole lane softly, with an accent along its
+  header, in light and dark.
+- Lane dots are gone. Every board's bar has **+** (Add lane) and a lane pager
+  (‹ 2/9 ›, tap the number for a list of lanes) at the top right, on every
+  screen; the end of the board has a lane-sized **Add lane** card; a mouse
+  wheel over the board scrolls the lanes sideways. Long lane titles end in "…"
+  and show in full on hover or a tap.
+- **Aa (reading settings):** a side panel on wider screens (the page stays in
+  view beside it) and a bottom sheet on phones; sections fold, one open at a
+  time, and their heads show what is set; roomier spacing; choices never break
+  words. **Reset all** now resets everything (notes and boards, the global
+  settings and every note's or board's own), with Undo.
+- The phone bottom bar is a clean floating capsule of icons (names as tooltips
+  and for screen readers), the current page a solid accent circle.
+- The archive toggle above the board is gone (see the Archive panel).
+- The checklist boxes in the card form have a bigger target.
+
+### Fixed
+
+- Checklist steps on a card could not be ticked with a mouse or a finger.
+
 ## [3.2.0] - 2026-11-24
 
 Boards you can run from anywhere: what is due across every board on Overview,

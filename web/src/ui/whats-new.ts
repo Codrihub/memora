@@ -28,6 +28,31 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.2.1',
+    title: t('Calmer boards'),
+    lead: t('Menus that fit where you are, an archive you can search, softer progress and due dates, and steps you can tick on the card.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'archive', title: t('An archive panel'), text: t('Archived (N) opens a panel to find archived cards, restore them to any lane, restore all or delete for good. It shows where each card came from.') },
+          { icon: 'check', title: t('Tick steps on the card'), text: t('Checklist steps tick right on the card with a click or a tap, saved with history and live on every screen.') },
+          { icon: 'bell', title: t('A quiet heads-up when a newer version is out'), text: t('A small card at the top says so once, at a calm moment, and steps aside by itself. Update when it suits you.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'more', title: t('Menus that fit'), text: t('Board and note menus offer only what belongs there, the lane menu is grouped with a colour row, and Embed in a note searches as you type.') },
+          { icon: 'kanban', title: t('Easier on the eyes'), text: t('Flat lane bars with no harsh track, softer shadows, lane colours across the whole lane, and overdue shown as a stroke.') },
+          { icon: 'sidebar', title: t('Move across lanes with ease'), text: t('Add lane and a lane pager (‹ 2/9 ›) sit at the top right of every board, the end of the board has a lane-sized Add lane card, and a mouse wheel scrolls the lanes.') },
+          { icon: 'book', title: t('A friendlier Aa panel'), text: t('A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.') },
+          { icon: 'menu', title: t('A new bottom bar on phones'), text: t('A clean floating bar of icons, with the page you are on in the accent colour.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.2.0',
     title: t('Boards that keep you on time'),
     lead: t('See what is due across every board, sort and filter your boards, and work a board from the keyboard, with Mnemo keeping track too.'),

@@ -59,8 +59,7 @@ Screenshots use a demo vault.
   sorted and filtered as you like; Overview shows what is due across every board, with optional
   due date reminders; a board works from the keyboard too;
   a note embeds as many boards as it likes (`![[Board]]`, live in place), Add
-  board in the editor makes one and embeds it, and Turn into board makes a
-  list note a board. In the Mnemo chat a board it names shows as a preview that opens the board. Changes show live,
+  board in the editor makes one and embeds it. In the Mnemo chat a board it names shows as a preview that opens the board. Changes show live,
   land in the note's history, and touch only the lines they change, so the
   board still opens the same in Obsidian.
 - **Mnemo, a built-in notes agent.** Chat with your notes in the browser or the

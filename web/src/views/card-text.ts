@@ -294,3 +294,17 @@ export function writeCard(parsed: ParsedCard, edited: CardFields, settings: Card
   }
   return out;
 }
+
+/** The card's text with its `i`-th checklist step (a `- [ ]` line under the first line) ticked or
+ *  unticked; only that one character changes. Null when there is no such step. */
+export function toggleStep(text: string, i: number, done: boolean): string | null {
+  const lines = text.split('\n');
+  let n = -1;
+  for (let k = 1; k < lines.length; k++) {
+    const m = /^(\s*[-*+] \[)([ xX])(\]\s)/.exec(lines[k]);
+    if (!m || ++n !== i) continue;
+    lines[k] = m[1] + (done ? 'x' : ' ') + lines[k].slice(m[1].length + 1);
+    return lines.join('\n');
+  }
+  return null;
+}

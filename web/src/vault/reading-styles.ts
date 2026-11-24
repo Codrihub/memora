@@ -84,8 +84,12 @@ const NOTE_CSS = `
 
 /** The panel. */
 const PANEL_CSS = `
-.vx-pop.vx-pop-rs .vx-pop-card{width:392px}
-.vx-sheet.vx-pop-rs .vx-pop-card{max-height:92dvh}
+.vx-pop.vx-pop-rs:not(.vx-side) .vx-pop-card{width:392px}
+.vx-side.vx-pop-rs .rs-prev.vx-note-scroll{height:128px}
+.vx-side.vx-pop-rs .rs-kb-wrap{height:140px}
+.vx-sheet.vx-pop-rs .vx-pop-card{max-height:86dvh}
+/* phones: the head scrolls with the rest (a sticky preview would leave too little room) */
+.vx-sheet.vx-pop-rs .rs-top{position:static}
 .vx-pop-rs .vx-pop-body{padding:0}
 .rs{display:flex;flex-direction:column;font-size:13px;color:var(--fg)}
 .rs-top{position:sticky;top:0;z-index:3;display:flex;flex-direction:column;gap:10px;padding:2px 16px 12px;background:var(--panel);
@@ -103,12 +107,17 @@ const PANEL_CSS = `
 .rs button{font:inherit;color:inherit}
 .rs [hidden]{display:none!important}
 .rs :is(button,input,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* tiles and choices: the focus ring sits on the border, never a second ring around it */
+.rs :is(.rs-tile,.rs-seg>button):focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* segmented controls: tabs, scope and every one-of choice */
 .rs-seg{display:flex;gap:2px;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--fg) 6%,transparent);min-width:0}
 .rs-seg>button{flex:1 1 0;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:auto;min-height:32px;padding:4px 6px;
   border:0;border-radius:8px;background:none;color:var(--muted);font-size:12.5px;font-weight:550;cursor:pointer;white-space:normal;line-height:1.2;
-  text-align:center;overflow-wrap:anywhere;transition:background .15s,color .15s,box-shadow .15s}
+  text-align:center;overflow-wrap:normal;word-break:normal;hyphens:none;transition:background .15s,color .15s,box-shadow .15s}
+/* a choice with a little picture: picture above, name below, so names never break mid-word */
+.rs-seg>button:has(.rs-pic){flex-direction:column;gap:4px;padding:6px 4px;font-size:11.5px}
+.rs-seg>button>span{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rs-seg>button:hover{color:var(--fg)}
 .rs-seg>button:is([aria-checked=true],[aria-selected=true]){background:var(--panel);color:var(--fg);box-shadow:0 0 0 1px var(--line-strong),0 1px 2px rgba(0,0,0,.08)}
 .rs-seg>button .vx-i{width:15px;height:15px}
@@ -139,10 +148,24 @@ const PANEL_CSS = `
 
 /* sections */
 .rs-body{display:flex;flex-direction:column}
-.rs-sec{display:flex;flex-direction:column;gap:12px;padding:16px 16px 14px;border-bottom:1px solid var(--line)}
+.rs-sec{border-bottom:1px solid var(--line)}
 .rs-sec:last-child{border-bottom:0}
-.rs-sec-h{display:flex;align-items:center;gap:8px;min-height:24px}
-.rs-sec-h h3{flex:1;margin:0;font-size:13px;font-weight:650;letter-spacing:.005em}
+.rs-sec-b{display:flex;flex-direction:column;gap:12px;padding:2px 16px 16px}
+.rs-sec-b{overflow:hidden}
+.rs-sec.closing .rs-chev{transform:rotate(45deg) translateY(-2px)}
+.rs-sec-h{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 12px 0 16px;cursor:pointer;list-style:none;user-select:none}
+.rs-sec-h::-webkit-details-marker{display:none}
+.rs-sec-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;padding-block:9px}
+.rs-sec-t h3{margin:0}
+.rs-sum{display:block;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-sum.set{color:var(--accent)}
+.rs-sec[open] .rs-sum:not(.set){color:var(--text-3)}
+.rs-sec-h:hover{background:var(--hover)}
+.rs-sec-h:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.rs-chev{flex:none;width:7px;height:7px;margin-inline:6px 4px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+.rs-sec[open] .rs-chev{transform:rotate(-135deg) translate(-1px,-1px)}
+.rs-sec:not([open]) .rs-reset:disabled{visibility:hidden}
+.rs-sec-h h3{margin:0;font-size:13px;font-weight:650;letter-spacing:.005em}
 .rs-sec-h h3 i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-inline-start:6px;vertical-align:2px}
 .rs-sec-h h3 i[hidden]{display:none}
 .rs-reset{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;border:0;border-radius:7px;background:none;color:var(--muted);
@@ -210,9 +233,42 @@ const PANEL_CSS = `
 .rs-accent .cpk-sw,.rs-accent .cpk-box{width:24px;height:24px}
 .rs-accent .cpk-hex{width:84px;height:28px}
 
-.rs-foot{display:flex;align-items:center;gap:8px;padding:12px 16px 14px;border-top:1px solid var(--line)}
+.rs-foot{position:sticky;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:12px 16px 14px;border-top:1px solid var(--line);background:var(--panel)}
 .rs-foot span{flex:1;font-size:11.5px;color:var(--muted)}
 .rs-foot .rs-reset{border:1px solid var(--line);height:30px;padding:0 10px}
+
+/* Spacing: one rhythm for the whole panel (20px edges, 18px between rows, 8px inside a row). */
+.vx-side.vx-pop-rs .vx-pop-card{width:404px}
+.vx-pop.vx-pop-rs:not(.vx-side) .vx-pop-card{width:404px}
+.vx-pop-rs .vx-pop-head{padding:10px 10px 6px 20px}
+.rs-top{gap:12px;padding:4px 20px 16px}
+.rs-sec-h{min-height:58px;padding:0 14px 0 20px}
+.rs-sec-t{padding-block:11px;gap:3px}
+.rs-sec-b{gap:18px;padding:6px 20px 22px}
+.rs-row{gap:9px}
+.rs-lab{font-size:12.5px;font-weight:600}
+.rs-sub{margin:6px 0 0;font-size:11.5px}
+.rs-row>.rs-sub:first-of-type{margin-top:0}
+.rs-grid{gap:8px}
+.rs-grid+.rs-sub{margin-top:12px}
+.rs-tile{min-height:74px;padding:10px 6px;gap:7px;border-radius:12px;font-size:12px}
+.rs .rs-sw.vx-note-scroll{height:32px;max-width:64px;border-radius:8px}
+.rs-seg{gap:4px;padding:4px;border-radius:12px}
+.rs-seg>button{min-height:38px;padding:6px 8px;border-radius:9px}
+.rs-seg>button:has(.rs-pic){min-height:52px;padding:8px 4px}
+.rs-seg.wrap{row-gap:4px}
+.rs-size{gap:10px}
+.rs-size button{width:40px;height:38px;border-radius:10px}
+.rs-switch{min-height:42px}
+.rs-switch+.rs-switch{border-top:1px solid var(--line)}
+.rs-own{padding:9px 12px;border-radius:10px}
+.rs-accent .cpk{gap:8px}
+.rs-foot{padding:14px 20px 16px}
+.vx-sheet.vx-pop-rs .rs-top,.vx-sheet.vx-pop-rs .rs-sec-b{padding-inline:18px}
+.vx-sheet.vx-pop-rs .rs-sec-h{padding-inline:18px 12px;min-height:60px}
+.vx-sheet .rs-seg>button{min-height:42px}
+.vx-sheet .rs-tile{min-height:78px}
+.vx-sheet .rs-switch{min-height:48px}
 
 @media (prefers-reduced-motion:reduce){.rs *{transition:none!important}}
 /* phones: bigger targets */
@@ -220,6 +276,7 @@ const PANEL_CSS = `
 .vx-sheet .rs-tile{min-height:68px}
 .vx-sheet .rs-reset{height:32px}
 .vx-sheet .rs-switch{min-height:44px}
+.vx-sheet .rs-sec-h{min-height:52px}
 .vx-sheet .rs-size button{width:44px;height:40px}
 `;
 

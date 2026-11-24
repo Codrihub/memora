@@ -14,7 +14,6 @@
 //   .kb-card   --card-c (its custom colour), --tag-c (colour of its first tag),
 //              data-due="late|soon|later" (absent without a date)
 //   .kb-lane   --lane-c (its custom colour); .kb-keep keeps a just-added empty lane in view
-//   .kb-dot    data-empty on the dot of a lane without cards
 //   .kb        data-kbpath (the board's note path) and its lane width as
 //              `--kb-lane-w: calc(<base>px * var(--kbl-lane-k, 1))` (the S/M/L choice is a factor)
 //
@@ -141,6 +140,30 @@ export class PrefStore<T extends object> {
     this.save();
   }
 
+  /** Everything back to the defaults: the global choices and every path's own. */
+  resetEverything(): void {
+    this.global = { ...this.defaults };
+    this.per = {};
+    this.save();
+  }
+
+  /** A copy of the whole store, for undo. */
+  snapshot(): { global: T; per: Record<string, Partial<T>> } {
+    return { global: { ...this.global }, per: JSON.parse(JSON.stringify(this.per)) as Record<string, Partial<T>> };
+  }
+
+  /** Put back a snapshot. */
+  restore(s: { global: T; per: Record<string, Partial<T>> }): void {
+    this.global = { ...s.global };
+    this.per = JSON.parse(JSON.stringify(s.per)) as Record<string, Partial<T>>;
+    this.save();
+  }
+
+  /** True when nothing at all differs from the defaults (no global change, no path of its own). */
+  allClean(): boolean {
+    return this.isClean(null) && !Object.keys(this.per).length;
+  }
+
   /** Nothing to reset: the defaults (globally) or no override of these keys (for a path). */
   isClean(path: string | null, keys?: (keyof T)[]): boolean {
     const ks = keys || (Object.keys(this.defaults) as (keyof T)[]);
@@ -194,8 +217,8 @@ const VAR_MAP: { [K in keyof BoardLook]: { vars: string[]; on: (v: BoardLook[K])
           ? {
               '--kbl-bd': '.35',
               '--kbl-bdh': '.5',
-              '--kbl-card-shadow': '0 1px 2px rgba(0,0,0,.12),0 2px 8px rgba(0,0,0,.08)',
-              '--kbl-card-shadow-h': '0 2px 4px rgba(0,0,0,.14),0 6px 16px rgba(0,0,0,.1)',
+              '--kbl-card-shadow': '0 1px 2px rgba(0,0,0,.06),0 2px 6px rgba(0,0,0,.04)',
+              '--kbl-card-shadow-h': '0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.06)',
             }
           : {},
   },
@@ -294,10 +317,11 @@ export const BOARD_LOOK_CSS = `
 .kb .kb-card:not(.kb-ghost){border-color:color-mix(in srgb,var(--line) calc(var(--kbl-bd,1) * 100%),transparent);box-shadow:var(--kbl-card-shadow,none)}
 .kb .kb-card:not(.kb-ghost):hover{border-color:color-mix(in srgb,var(--line-strong) calc(var(--kbl-bdh,1) * 100%),transparent);
   box-shadow:var(--kbl-card-shadow-h,var(--kbl-card-shadow,none))}
-.kb .kb-card.kb-armed:not(.kb-ghost){box-shadow:0 6px 20px rgba(0,0,0,.18)}
+.kb .kb-card.kb-armed:not(.kb-ghost){box-shadow:0 4px 14px rgba(0,0,0,.12)}
 /* a late card: its 3px start border is the one stripe (amber; red in "Due date" mode), the colour
    stripe gives way to it and only the colour's tint stays */
-.kb .kb-card.late:not(.done):not(.kb-ghost){border-inline-start-color:var(--kbl-late)}
+.kb .kb-card.late:not(.done):not(.kb-ghost){border-inline-start-color:var(--due-s,var(--kbl-late))}
+.kb .kb-card.today:not(.done):not(.kb-ghost){border-inline-start-color:var(--due-s,color-mix(in srgb,var(--kbl-late) 45%,var(--line)))}
 
 /* board background: behind the lanes */
 .kb .kb-lanes{border-radius:16px;background-color:color-mix(in srgb,var(--accent) calc(var(--kbl-tint,0) * 6%),transparent);
@@ -308,7 +332,6 @@ export const BOARD_LOOK_CSS = `
 /* what shows */
 .kb .kb-cards>.kb-card.done{display:var(--kbl-done-d,flex)}
 .kb .kb-lanes>.kb-lane:not(.kb-keep):has(>.kb-cards>.kb-none){display:var(--kbl-empty-d,flex)}
-.kb .kb-dot[data-empty]{display:var(--kbl-empty-d,grid)}
 .kb .kb-body :is(.kb-chip.kb-date,.kb-chip.kb-time){display:var(--kbl-date-d,inline-flex)}
 .kb .kb-body .ch.ch-tag{display:var(--kbl-tag-d,inline-flex)}
 .kb .kb-body :is(.ch.ch-note,.ch.ch-board,.ch.ch-miss){display:var(--kbl-link-d,inline-flex)}
@@ -324,12 +347,14 @@ export const BOARD_LOOK_CSS = `
     linear-gradient(color-mix(in srgb,var(--kbl-c) 7%,transparent),color-mix(in srgb,var(--kbl-c) 7%,transparent))}
 .kb .kb-card[data-due=late]{--kbl-due:var(--danger)}
 .kb .kb-card{--kbl-late:color-mix(in srgb,var(--danger) calc(var(--kbl-wd,0) * 100%),var(--warn))}
-.kb .kb-card.late:not(.done):not(.kb-ghost){background-image:linear-gradient(color-mix(in srgb,var(--kbl-c) 7%,transparent),color-mix(in srgb,var(--kbl-c) 7%,transparent))}
-.kb .kb-card .kb-chip.late{background:color-mix(in srgb,var(--kbl-late) 16%,transparent);color:var(--kbl-late)}
-.kb .kb-card .kb-chip.today{background:color-mix(in srgb,var(--kbl-late) 8%,transparent);color:color-mix(in srgb,var(--kbl-late) 70%,var(--fg))}
+.kb .kb-card:is(.late,.today):not(.done):not(.kb-ghost){background-image:linear-gradient(color-mix(in srgb,var(--kbl-c) 7%,transparent),color-mix(in srgb,var(--kbl-c) 7%,transparent))}
 .kb .kb-card[data-due=soon]{--kbl-due:var(--warn)}
 .kb .kb-card[data-due=later]{--kbl-due:var(--ok)}
-.kb .kb-lane{--kbl-lc:color-mix(in srgb,var(--lane-c,transparent) calc(var(--kbl-wl,1) * 100%),transparent)}
+.kb .kb-lane{--kbl-lc:color-mix(in srgb,var(--lane-c,transparent) calc(var(--kbl-wl,1) * 100%),transparent);
+  background:linear-gradient(color-mix(in srgb,var(--kbl-lc) 7%,transparent),color-mix(in srgb,var(--kbl-lc) 7%,transparent)) var(--surface-2);
+  border-color:color-mix(in srgb,var(--kbl-lc) 24%,var(--line))}
+:root:not([data-theme=light]) .kb .kb-lane{background:linear-gradient(color-mix(in srgb,var(--kbl-lc) 9%,transparent),color-mix(in srgb,var(--kbl-lc) 9%,transparent)) var(--surface-2)}
+.kb .kb-lane.kb-over{border-color:var(--accent-line)}
 .kb .kb-lane-head{background:linear-gradient(color-mix(in srgb,var(--kbl-lc) 12%,transparent),color-mix(in srgb,var(--kbl-lc) 12%,transparent)) var(--surface-2);
   box-shadow:inset 0 3px 0 var(--kbl-lc)}
 `;

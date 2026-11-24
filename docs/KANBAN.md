@@ -62,8 +62,8 @@ kanban-plugin: basic
 - The `%% kanban:settings %%` block keeps the plugin's settings. Memora reads
   `lane-width` and keeps every other setting as it is, known or not.
 
-To start a board, use **New board** (below), add `kanban-plugin: basic` to an
-existing note, or use **Turn into board** on a note.
+To start a board, use **New board** (below) or add `kanban-plugin: basic` to an
+existing note.
 
 ## Your file stays your file
 
@@ -133,22 +133,44 @@ go back to the board.
   end of the first line, and anything else in the card stays as you wrote it.
 - The form also holds a **Checklist** (steps written as `- [ ] step` lines
   under the card: add, tick, reorder with Alt+arrows, remove; the card shows
-  `2/5` and a thin bar) and a **Color**.
+  `2/5` and a thin bar) and a **Color**. The steps can be ticked right on the
+  card too: a click or tap on a step's box saves it like any other change.
 - The box at a card's left ticks it off. The card's ⋯ menu edits it, moves it
-  to another lane, duplicates it, sets its colour, archives it, copies its text
-  or deletes it (with Undo).
-- Double click a lane title to rename it. The lane's ⋯ menu adds a card,
-  renames, moves or duplicates the lane, adds a lane after it, sets its colour
-  and its card limit (Obsidian's ` (N)` after the title), archives or deletes
-  all its cards, and deletes it once it is empty (with Undo).
+  to another lane, duplicates it, sets its colour (a row of swatches), archives
+  it, copies its text or deletes it (with Undo).
+- Double click a lane title to rename it; a title too long for the lane ends in
+  "…" and shows in full on hover (or a tap on a touch screen). The lane's ⋯ menu
+  is grouped: **Add a card**; **Rename**, **Color** (a row of swatches, plus a
+  custom colour) and **Card limit…** (Obsidian's ` (N)` after the title); moving
+  and duplicating the lane or adding one after it; **Archive all cards** (with
+  Undo) and **Clear all cards…** (asks first); and **Delete lane…** at the
+  bottom: an empty lane goes at once with Undo, a lane with cards asks and
+  moves its cards to the Archive first. A lane's colour tints the whole lane
+  softly, with an accent along its header.
+- A card that is overdue gets a warning stroke along its start edge, a card due
+  today a softer one (the board's own date colours win when it sets them); the
+  date chip itself stays neutral.
 - The board's ⋯ menu (in the reader bar) has **Color and icon…**,
-  **Duplicate board**, **Embed in a note…** and **Edit Markdown source**, next
-  to rename, move and delete as for any note. **Aa** opens **Board view**:
+  **Archived (N)**, **Duplicate board**, **Embed in a note…** and **Edit
+  Markdown source**, next to rename, move and delete as for any note. **Embed
+  in a note…** searches: it shows a few recent notes and looks further once
+  you type two letters. A plain note's ⋯ menu has **Embed a board…**; new
+  notes and boards are made from folders (the folder view and menus, the
+  sidebar, Overview and **New**). **Aa** opens **Board view**:
   spacing, lane width, card style, background, whether done cards, empty
   lanes, dates, tags and linked notes show, and whether cards are coloured by
   their own colour, their first tag or their due date; for every board or for
   this one only, kept on the device.
-- **Archive** above the board shows the archived cards, to put back or delete.
+- **Archived (N)**, a quiet link after the lanes and an item in the board's ⋯
+  menu, opens the archive in a side panel (a bottom sheet on phones): find a
+  card, **Restore** it to a lane (the lane it came from when Memora archived
+  it, else the first), **Delete forever** (asks once more), or **Restore
+  all**. Each card says where it came from and when it was archived, when
+  Memora archived it (kept in the board's settings, so it travels with the
+  file).
+- On phones and tablets a row of lane dots stays pinned at the bottom of the
+  visible board, so a long lane never pushes it out of reach; a desktop with a
+  mouse does without it.
 - Keyboard (click a card or tab to it first): the arrow keys move between cards
   and lanes (up from the first card, or into an empty lane, focuses the lane),
   Enter opens the card form, Space ticks off, Alt/Option with the arrows moves
@@ -197,7 +219,7 @@ browser, and never repeat for the same card and day.
 When a turn names a board (you mention it with `@` or `[[`, Mnemo links it in
 its reply or hands it over as a card, or a kanban tool works on it), the board
 shows under the reply as a board preview: its name and folder, how many cards
-are done, its lanes as bars, and the first cards of each lane. It is a preview
+are done (one thin progress line), and the first cards of each lane. It is a preview
 to read, kept up to date as agents change the board; tap it
 to open the board itself and work on it there.
 
@@ -235,17 +257,12 @@ by embedding them:
   again for another board in the same note. **Embed a board…** in a note's ⋯
   menu adds one at the end of the note.
 - A plain link to a board on a line of its own, `[[Board name]]`, shows as a
-  small card: the board's name, its lanes as bars, how many cards are done, and
+  small card: the board's name, how many cards are done (one thin progress line), and
   **Open**. A link inside a sentence stays a link.
 - Ask Mnemo for several boards in one note and it does the same: one board note
   per board, each embedded in the note.
-- **Turn into board** in a note's ⋯ menu makes a plain note a board: each
-  heading becomes a lane and each list item a card (`- [x]` items stay ticked
-  off; indented lines stay with their card). Items before the first heading go
-  to To do; a note with no headings gets To do, Doing and Done, with ticked
-  items in Done. It shows how many lanes and cards you get and how many lines
-  of other text are left out, and asks first. The note's earlier version stays
-  in its version history, so you can restore it.
+- Agents can still turn a plain note into a board (`kanban_board` action
+  `convert`): each heading becomes a lane and each list item a card.
 
 ## Edits that cross
 

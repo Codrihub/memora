@@ -29,7 +29,8 @@ import { inlineEdit, openMenu, undoToast, type MenuItem } from '../vault/ui';
 import { openCardForm } from './card-form';
 import type { CardSettings } from './card-text';
 import { KANBAN_CSS } from './kanban-styles';
-import { dateColorFor, dayOf, dueState } from './due';
+import { dateColorFor } from './due';
+import { toggleStep } from './card-text';
 import { applyBoardLookTo, boardPrefs, ensureBoardLook, KBL_VARS } from './board-look';
 
 export interface KbCard {
@@ -49,6 +50,9 @@ export interface KbCard {
   color?: string | null;
   /** `- [ ] step` lines under it. */
   checklist?: { text: string; done: boolean }[];
+  /** Archived cards: the lane it was archived from and the day, when Memora archived it. */
+  archived_from?: string | null;
+  archived_at?: string | null;
 }
 
 export interface KbLane {
@@ -123,6 +127,7 @@ try {
 /** A plain check mark and an archive box for the cards. */
 export const IC = {
   dot: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/></svg>',
+  clear: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="m9.5 10 5 5M14.5 10l-5 5"/></svg>',
   limit: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M4 12h10M4 17h6"/><path d="M18 5v14"/></svg>',
   check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   archive: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1.5"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4"/></svg>',
@@ -163,6 +168,26 @@ function fmtDate(iso: string): string {
     return iso;
   }
 }
+
+const ARCH_CSS = `
+.ka{display:flex;flex-direction:column;gap:10px;min-width:0}
+.ka-top{display:flex;align-items:center;gap:8px}
+.ka-q{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:38px;padding:0 10px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface-1);color:var(--muted)}
+.ka-q:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.ka-q svg{width:15px;height:15px;flex:none}
+.ka-q input{flex:1;min-width:0;border:0;background:none;color:var(--fg);font:inherit;font-size:14px;outline:none;padding:0}
+.ka-note{margin:0;font-size:12.5px;color:var(--muted)}
+.ka-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ka-row{padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-1);min-width:0}
+.ka-t{font-size:14px;font-weight:550;line-height:1.4;overflow-wrap:anywhere}
+.ka-m{margin-top:2px;font-size:12px;color:var(--muted)}
+.ka-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ka-lane select{height:32px;max-width:160px;padding:0 8px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface-1);color:var(--fg);font:inherit;font-size:13px}
+.ka-del{margin-inline-start:auto}
+.ka-del.danger{color:var(--danger)}
+.ka-none{padding:24px 8px;text-align:center;color:var(--muted);font-size:13.5px}
+@media (max-width:760px){.ka-q{height:44px}.ka-q input,.ka-lane select{font-size:16px}.ka-lane select{height:40px}.ka-acts .btn{min-height:40px}}
+`;
 
 /** Say `msg` to screen readers (a polite live region shared by every board). */
 function announce(msg: string): void {
@@ -224,7 +249,8 @@ export class KanbanView {
   private stale = false;
   /** The board changed while a card was being edited: drawn once that ends. */
   private needDraw = false;
-  private archiveOpen = false;
+  private archivePaint: (() => void) | null = null;
+  private lastPtr = 'mouse';
   /** The lane whose "add a card" box is open, and what was typed. */
   private seen = new Set<string>();
   private firstDraw = true;
@@ -235,6 +261,8 @@ export class KanbanView {
   /** A lane's name is being typed: a redraw would take the box away. */
   private renaming = false;
   private fadeRaf = 0;
+  /** Index (among the shown lanes) of the lane in view, kept by syncScroll. */
+  private curLane = 0;
 
   constructor(
     readonly path: string,
@@ -260,6 +288,7 @@ export class KanbanView {
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.el.addEventListener('dblclick', (e) => this.onDblClick(e));
     this.el.addEventListener('keydown', (e) => this.onKey(e));
+    this.el.addEventListener('change', (e) => this.onStep(e));
     this.el.addEventListener('contextmenu', (e) => {
       if (this.drag) e.preventDefault();
     });
@@ -317,6 +346,118 @@ export class KanbanView {
     this.version = b.version;
     this.render();
     this.takeReveal();
+    this.archivePaint?.();
+  }
+
+  /** How many cards are in the archive. */
+  get archivedCount(): number {
+    return this.board?.archive.length || 0;
+  }
+
+  /** The archive in a panel (a side sheet; a bottom sheet on phones): find, restore to a lane, delete
+   *  for good, or restore all. It follows the board while open. */
+  openArchive(): void {
+    if (!this.board) return;
+    useStyles('kb-arch-css', ARCH_CSS);
+    const box = el('div', 'ka');
+    box.innerHTML = `<div class="ka-top"><label class="ka-q">${I.search}<input type="search" placeholder="${attr(t('Find an archived card'))}" aria-label="${attr(
+      t('Find an archived card'),
+    )}" autocomplete="off" spellcheck="false"></label><button type="button" class="btn sm ka-all" data-all>${esc(t('Restore all'))}</button></div>
+      <p class="ka-note">${esc(t('Archived cards stay in the note, under its Archive heading.'))}</p><ul class="ka-list" role="list"></ul>`;
+    const q = box.querySelector<HTMLInputElement>('input')!;
+    const list = box.querySelector<HTMLElement>('.ka-list')!;
+    const laneOf = (c: KbCard): number => {
+      const lanes = this.board?.lanes || [];
+      const i = c.archived_from ? lanes.findIndex((l) => l.title === c.archived_from) : -1;
+      return i >= 0 ? i : 0;
+    };
+    const paint = (): void => {
+      const b = this.board;
+      if (!b || !box.isConnected) {
+        this.archivePaint = null;
+        return;
+      }
+      const s = q.value.trim().toLowerCase();
+      const cards = b.archive.filter((c) => !s || c.text.toLowerCase().includes(s));
+      box.querySelector<HTMLButtonElement>('[data-all]')!.disabled = !b.archive.length || !b.lanes.length;
+      const sub = document.querySelector('#modalHost .modal-sub');
+      if (sub) sub.textContent = tn(b.archive.length, '{n} card', '{n} cards');
+      list.innerHTML = cards.length
+        ? cards
+            .map((c) => {
+              const meta = [
+                c.archived_from ? t('From {lane}', { lane: c.archived_from }) : '',
+                c.archived_at ? t('Archived {date}', { date: fmtDate(c.archived_at) }) : '',
+              ].filter(Boolean);
+              const to = laneOf(c);
+              return `<li class="ka-row" data-id="${attr(c.id)}"><div class="ka-t" dir="auto">${esc(c.title || c.text.split('\n')[0])}</div>${
+                meta.length ? `<div class="ka-m">${esc(meta.join(' · '))}</div>` : ''
+              }<div class="ka-acts"><label class="ka-lane"><span class="sr-only">${esc(t('Restore to'))}</span><select aria-label="${attr(t('Restore to'))}">${b.lanes
+                .map((l, i) => `<option value="${i}"${i === to ? ' selected' : ''}>${esc(l.title)}</option>`)
+                .join('')}</select></label><button type="button" class="btn sm primary" data-restore${b.lanes.length ? '' : ' disabled'}>${esc(t('Restore'))}</button>
+                <button type="button" class="btn sm ghost ka-del" data-del>${esc(t('Delete forever'))}</button></div></li>`;
+            })
+            .join('')
+        : `<li class="ka-none">${esc(b.archive.length ? t('No archived card matches.') : t('The archive is empty.'))}</li>`;
+    };
+    this.archivePaint = paint;
+    q.addEventListener('input', paint);
+    list.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      const row = btn?.closest<HTMLElement>('.ka-row');
+      if (!btn || !row) return;
+      const id = row.dataset.id || '';
+      if (btn.dataset.restore != null) {
+        const lane = Number(row.querySelector<HTMLSelectElement>('select')?.value || 0);
+        btn.disabled = true;
+        void this.send({ type: 'restore_card', card: id, lane }, false).then((nb) => {
+          if (nb) announce(t('Restored to {lane}', { lane: nb.lanes[lane]?.title || '' }));
+          paint();
+        });
+      } else if (btn.dataset.del != null) {
+        // Two steps: the button asks once more, then deletes.
+        if (btn.dataset.sure !== '1') {
+          btn.dataset.sure = '1';
+          btn.classList.add('danger');
+          btn.textContent = t('Delete for good?');
+          setTimeout(() => {
+            if (!btn.isConnected) return;
+            btn.dataset.sure = '';
+            btn.classList.remove('danger');
+            btn.textContent = t('Delete forever');
+          }, 4000);
+          return;
+        }
+        btn.disabled = true;
+        void this.send({ type: 'delete_card', card: id }, false).then(() => {
+          announce(t('Card deleted. Its text stays in the note history.'));
+          paint();
+        });
+      }
+    });
+    box.querySelector<HTMLElement>('[data-all]')!.addEventListener('click', async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      btn.disabled = true;
+      // One at a time, each to its own lane; ids are read again after every change.
+      for (let guard = 0; guard < 500; guard++) {
+        const c = this.board?.archive[0];
+        if (!c) break;
+        const nb = await this.send({ type: 'restore_card', card: c.id, lane: laneOf(c) }, false);
+        if (!nb) break;
+      }
+      paint();
+      announce(t('Every archived card is back on the board'));
+    });
+    Modal.open({
+      title: t('Archive'),
+      sub: tn(this.board.archive.length, '{n} card', '{n} cards'),
+      body: box,
+      side: true,
+      onOpen: () => {
+        paint();
+        q.focus();
+      },
+    });
   }
 
   /** A card asked for from elsewhere (Overview's Due list, a reminder): scroll to it, focus it and
@@ -384,7 +525,7 @@ export class KanbanView {
     this.el.style.setProperty('--kb-lane-w', `calc(${this.laneWidth()}px * var(--kbl-lane-k, 1))`);
     const c = b.counts;
     const stats = c.cards
-      ? `${tn(c.cards, '{n} card', '{n} cards')}<span aria-hidden="true">·</span>${t('{n} done', { n: c.done })}`
+      ? `<span>${tn(c.cards, '{n} card', '{n} cards')}</span><span class="kb-stats-d" aria-hidden="true">·</span><span class="kb-stats-d">${t('{n} done', { n: c.done })}</span>`
       : b.lanes.length
         ? '' // each empty lane says so itself
         : t('No cards yet');
@@ -395,35 +536,60 @@ export class KanbanView {
     const st = b.style || {};
     this.el.style.setProperty('--board-c', st.color || '');
     // A bar with nothing in it is not drawn (no stray line above the lanes).
-    const barEmpty = !stats && !(st.color || st.icon) && !b.archive.length && b.lanes.length > 0;
+    const canAdd = this.density !== 'chat';
+    const many = b.lanes.length > 1;
+    const barEmpty = !stats && !(st.color || st.icon) && !(b.lanes.length && canAdd) && !many;
+    // Lane navigation in the bar (shown while the lanes do not all fit): back, the lane in view (a
+    // list of all lanes to jump to), forward. The same on every device; no dots to aim at.
+    const laneNav = many
+      ? `<span class="kb-nav" role="group" aria-label="${attr(t('Go to a lane'))}">
+          <button type="button" class="vx-icon-btn kb-nav-b" data-act="lane-prev" aria-label="${attr(t('Previous lane'))}" title="${attr(t('Previous lane'))}">${icon('chev-left')}</button>
+          <button type="button" class="kb-jump" data-act="lane-jump" aria-haspopup="menu" title="${attr(t('Go to a lane'))}"><span class="kb-jump-n"></span></button>
+          <button type="button" class="vx-icon-btn kb-nav-b" data-act="lane-next" aria-label="${attr(t('Next lane'))}" title="${attr(t('Next lane'))}">${icon('chev-right')}</button>
+        </span>`
+      : '';
     this.el.innerHTML = `<div class="kb-bar"${barEmpty ? ' hidden' : ''}>
         ${st.color || st.icon ? `<span class="kb-mark" aria-hidden="true">${boardIcon(st.icon || 'kanban')}</span>` : ''}
         <span class="kb-stats">${stats}</span><span class="vx-grow"></span>
-        ${b.archive.length ? `<button type="button" class="vx-ct-btn" data-act="archive" aria-expanded="${this.archiveOpen}">${IC.archive}<span>${t('Archive')}</span><span class="kb-pill">${b.archive.length}</span></button>` : ''}
-        ${b.lanes.length ? '' : `<button type="button" class="vx-ct-btn" data-act="add-lane">${I.plus}<span>${t('Add lane')}</span></button>`}
+        ${canAdd ? `<button type="button" class="vx-icon-btn kb-bar-add" data-act="add-lane" aria-label="${attr(t('Add lane'))}" title="${attr(t('Add lane'))}">${I.plus}</button>` : ''}
+        ${laneNav}
       </div>
       ${empty}
       <div class="kb-scroll"><div class="kb-lanes" role="list" aria-label="${attr(t('Lanes'))}">${lanes}${
         b.lanes.length ? `<button type="button" class="kb-add-lane" data-act="add-lane">${I.plus}<span>${t('Add lane')}</span></button>` : ''
       }</div></div>
       ${
-        b.lanes.length > 1
-          ? `<nav class="kb-dots" aria-label="${attr(t('Go to a lane'))}">${b.lanes
-              .map(
-                (l, i) =>
-                  `<button type="button" class="kb-dot" data-act="to-lane" data-to="${i}"${l.cards.length ? '' : ' data-empty'} aria-label="${attr(`${l.title}: ${tn(l.cards.length, '{n} card', '{n} cards')}`)}" title="${attr(
-                    l.title,
-                  )}"><i></i></button>`,
-              )
-              .join('')}</nav>`
+        // The archive: a quiet link after the lanes (and in the board's ⋯ menu), opening a panel.
+        b.archive.length && this.density !== 'chat'
+          ? `<div class="kb-foot"><button type="button" class="kb-arch-link" data-act="archive" aria-haspopup="dialog">${IC.archive}<span>${esc(
+              t('Archived ({n})', { n: b.archive.length }),
+            )}</span></button></div>`
           : ''
       }
-      ${this.archiveOpen && b.archive.length ? this.archiveHTML() : ''}`;
+`;
     this.decorate();
     const lanesEl = this.el.querySelector<HTMLElement>('.kb-lanes');
     if (lanesEl) {
       lanesEl.scrollLeft = scrollX;
       lanesEl.addEventListener('scroll', () => this.syncScroll(), { passive: true });
+      // A mouse wheel over the space between and under lanes moves the lanes sideways; over a card
+      // list that can still scroll, the list scrolls as usual.
+      lanesEl.addEventListener(
+        'wheel',
+        (e) => {
+          if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || lanesEl.scrollWidth <= lanesEl.clientWidth) return;
+          const list = (e.target as HTMLElement).closest<HTMLElement>('.kb-cards');
+          if (list && list.scrollHeight > list.clientHeight + 1) {
+            const atEnd = e.deltaY > 0 ? list.scrollTop + list.clientHeight >= list.scrollHeight - 1 : list.scrollTop <= 0;
+            if (!atEnd) return;
+          }
+          if ((e.target as HTMLElement).closest('.kb-card, .kb-lane-head, .kb-add')) return;
+          e.preventDefault();
+          const rtl = getComputedStyle(lanesEl).direction === 'rtl';
+          lanesEl.scrollLeft += rtl ? -e.deltaY : e.deltaY;
+        },
+        { passive: false },
+      );
       // No scrollbars on a board: the edges fade while there is more that way.
       fadeScroll(lanesEl, 'x');
     }
@@ -452,8 +618,8 @@ export class KanbanView {
       const left = lanes.scrollWidth - lanes.clientWidth - from;
       const over = lanes.scrollWidth - lanes.clientWidth > 4;
       this.el.classList.toggle('kb-over', over);
-      const dots = this.el.querySelectorAll<HTMLElement>('.kb-dot');
-      if (!dots.length) return;
+      const jump = this.el.querySelector<HTMLElement>('.kb-jump');
+      if (!jump) return;
       const r = lanes.getBoundingClientRect();
       const rtl = getComputedStyle(lanes).direction === 'rtl';
       // Lanes the board look hides (empty ones) take no part.
@@ -467,9 +633,35 @@ export class KanbanView {
           const seen = rtl ? r.right - lr.right : lr.left - r.left;
           if (seen < lr.width / 2) cur = i;
         });
-      const curLane = all[cur]?.dataset.lane;
-      dots.forEach((d) => d.setAttribute('aria-current', String(d.dataset.to === curLane)));
+      this.curLane = cur;
+      const title = all[cur]?.getAttribute('aria-label') || '';
+      jump.querySelector('.kb-jump-n')!.textContent = `${cur + 1}/${all.length}`;
+      jump.title = title;
+      jump.setAttribute('aria-label', t('Lane {n} of {total}: {lane}. Go to a lane', { n: cur + 1, total: all.length, lane: title }));
+      const prev = this.el.querySelector<HTMLButtonElement>('[data-act=lane-prev]');
+      const next = this.el.querySelector<HTMLButtonElement>('[data-act=lane-next]');
+      if (prev) prev.disabled = from <= 4;
+      if (next) next.disabled = left <= 4;
     });
+  }
+
+  /** The lanes on screen (the board look can hide empty ones). */
+  private shownLanes(): HTMLElement[] {
+    return [...this.el.querySelectorAll<HTMLElement>('.kb-lanes > .kb-lane')].filter(shown);
+  }
+
+  /** Scroll the lanes (never the page around the board) so shown lane `i` starts at the edge. */
+  private goLane(i: number): void {
+    const all = this.shownLanes();
+    const l = all[Math.max(0, Math.min(all.length - 1, i))];
+    const lanes = this.el.querySelector<HTMLElement>('.kb-lanes');
+    if (!l || !lanes) return;
+    const cs = getComputedStyle(lanes);
+    const pad = parseFloat(cs.scrollPaddingInlineStart) || 0;
+    const r = lanes.getBoundingClientRect();
+    const lr = l.getBoundingClientRect();
+    const dx = cs.direction === 'rtl' ? lr.right - (r.right - pad) : lr.left - (r.left + pad);
+    lanes.scrollBy({ left: dx, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }
 
   private laneHTML(l: KbLane, fresh: Set<string>): string {
@@ -480,7 +672,7 @@ export class KanbanView {
       l.color ? ` style="--lane-c:${attr(l.color)}"` : ''
     }>
       <header class="kb-lane-head" title="${attr(t('Drag to move the lane. Double click the name to rename it.'))}">
-        <h3 class="kb-lane-title" dir="auto">${esc(l.title)}</h3>
+        <h3 class="kb-lane-title" dir="auto" title="${attr(l.title)}">${esc(l.title)}</h3>
         ${l.complete ? `<span class="kb-done-mark" title="${attr(t('Cards moved here are marked done'))}">${IC.check}</span>` : ''}
         <span class="kb-count${over ? ' over' : ''}" title="${attr(over ? t('More cards than the limit of {n}', { n: l.max_items }) : tn(n, '{n} card', '{n} cards'))}">${count}</span>
         <button type="button" class="vx-icon-btn kb-lane-more" data-act="lane-menu" aria-label="${attr(t('Lane actions'))}" title="${attr(t('Lane actions'))}">${I.more}</button>
@@ -505,12 +697,16 @@ export class KanbanView {
     soon.setDate(soon.getDate() + 3);
     const dueTag = !due || c.checked ? '' : due < today() ? 'late' : due <= `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}` ? 'soon' : 'later';
     const late = dueTag === 'late';
+    const dueToday = !!due && !c.checked && due === today();
+    // The board's own date colours (Obsidian Kanban's date-colors) colour the stroke when set.
+    const rule = due && (late || dueToday) ? dateColorFor(due, this.board?.settings?.['date-colors']) : null;
+    const dueStroke = rule ? rule.background || rule.color || '' : '';
     const tag = c.tags[0];
     const tagC = tag ? this.board?.tag_colors?.[tag]?.color || hashColor(tag) : '';
-    const vars = [c.color ? `--card-c:${c.color}` : '', tagC ? `--tag-c:${tagC}` : ''].filter(Boolean).join(';');
+    const vars = [c.color ? `--card-c:${c.color}` : '', tagC ? `--tag-c:${tagC}` : '', dueStroke ? `--due-s:${dueStroke}` : ''].filter(Boolean).join(';');
     const steps = c.checklist || [];
     const stepsDone = steps.filter((x) => x.done).length;
-    return `<article class="kb-card${c.checked ? ' done' : ''}${flash ? ' kb-flash' : ''}${late ? ' late' : ''}${c.color ? ' colored' : ''}" data-id="${attr(c.id)}" tabindex="0" role="listitem"
+    return `<article class="kb-card${c.checked ? ' done' : ''}${flash ? ' kb-flash' : ''}${late ? ' late' : dueToday ? ' today' : ''}${c.color ? ' colored' : ''}" data-id="${attr(c.id)}" tabindex="0" role="listitem"
         aria-label="${attr(c.title || c.text)}"${dueTag ? ` data-due="${dueTag}"` : ''}${vars ? ` style="${attr(vars)}"` : ''}>
       ${
         steps.length && !archived
@@ -536,13 +732,6 @@ export class KanbanView {
     </article>`;
   }
 
-  private archiveHTML(): string {
-    const b = this.board!;
-    return `<section class="kb-archive" aria-label="${attr(t('Archive'))}">
-      <header><b>${t('Archive')}</b><small>${t('Archived cards stay in the note, under its Archive heading.')}</small></header>
-      <div class="kb-archive-list">${b.archive.map((c) => this.cardHTML(c, false, true)).join('')}</div>
-    </section>`;
-  }
 
   /** Links open notes, tags open the tag page, dates read as dates; Obsidian block ids are hidden. */
   private decorate(): void {
@@ -567,17 +756,8 @@ export class KanbanView {
             frag.append(time);
           } else if (m[2] != null) {
             const d = m[2];
-            // Past: a warning tint; today: a softer one; done cards: neither. The board's own date
-            // colours (Obsidian Kanban's date-colors) win when they are set.
-            const day = dayOf(d);
-            const rule = day ? dateColorFor(day, this.board?.settings?.['date-colors']) : null;
-            const st = day && !rule && !body.closest('.kb-card.done') ? dueState(day) : '';
-            const chip = el('time', 'kb-chip kb-date' + (st === 'late' ? ' late' : st === 'today' ? ' today' : ''), `${IC.cal}<span>${esc(fmtDate(d))}</span>`);
-            if (rule) {
-              chip.classList.add('dc');
-              if (rule.color) chip.style.color = rule.color;
-              if (rule.background) chip.style.background = rule.background;
-            }
+            // A neutral chip: how close the date is shows as the card's stroke, not here.
+            const chip = el('time', 'kb-chip kb-date', `${IC.cal}<span>${esc(fmtDate(d))}</span>`);
             chip.setAttribute('datetime', d);
             chip.title = d;
             frag.append(chip);
@@ -603,7 +783,9 @@ export class KanbanView {
         a.tabIndex = 0;
         chipLink(a);
       });
-      // "- [ ] step" lines inside a card: a read-only box, as in notes.
+      // "- [ ] step" lines inside a card: a box to tick right on the card (archived cards: read only).
+      const archived = !!body.closest('.kb-archive');
+      let step = 0;
       body.querySelectorAll<HTMLElement>('li').forEach((li) => {
         const tx = li.firstChild;
         const m = tx && tx.nodeType === Node.TEXT_NODE ? /^\s*\[([ xX])\]\s/.exec(tx.textContent || '') : null;
@@ -611,9 +793,16 @@ export class KanbanView {
         tx.textContent = (tx.textContent || '').slice(m[0].length);
         const box = document.createElement('input');
         box.type = 'checkbox';
-        box.disabled = true;
+        box.className = 'kb-step';
         box.checked = m[1] !== ' ';
-        li.prepend(box);
+        box.disabled = archived;
+        box.dataset.step = String(step++);
+        box.setAttribute('aria-label', `${box.checked ? t('Mark as not done') : t('Mark as done')}: ${(li.textContent || '').trim()}`);
+        // The whole line is the target (a finger can hit it), not only the small box.
+        const hit = document.createElement('label');
+        hit.className = 'kb-step-hit';
+        hit.append(box);
+        li.prepend(hit);
         li.classList.add('kb-sub', ...(box.checked ? ['done'] : []));
       });
       body.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
@@ -764,8 +953,39 @@ export class KanbanView {
 
   // ── clicks and keys ──────────────────────────────────────────────────────────────────────────
 
+  /** A checklist step ticked on the card: one character of the card's text changes (a normal save:
+   *  history, live update everywhere). */
+  private onStep(e: Event): void {
+    const box = e.target as HTMLInputElement;
+    if (!box.matches?.('input.kb-step')) return;
+    e.stopPropagation();
+    const id = box.closest<HTMLElement>('.kb-card')?.dataset.id || '';
+    const f = this.cardOf(id);
+    const text = f ? toggleStep(f.card.text, Number(box.dataset.step), box.checked) : null;
+    if (!f || text == null) {
+      box.checked = !box.checked;
+      return;
+    }
+    box.closest('li')?.classList.toggle('done', box.checked);
+    announce(box.checked ? t('Marked as done') : t('Marked as not done'));
+    // The box already shows the change: no optimistic redraw (it would show the raw text for a moment).
+    void this.send({ type: 'update_card', card: id, text }, false);
+  }
+
   private onClick(e: MouseEvent): void {
     const target = e.target as HTMLElement;
+    // A cut-off lane title on a touch screen: a tap shows it in full for a moment.
+    const title = target.closest<HTMLElement>('.kb-lane-title');
+    if (title && this.lastPtr !== 'mouse' && title.scrollWidth > title.clientWidth + 1) {
+      const head = title.closest<HTMLElement>('.kb-lane-head');
+      if (head && !head.querySelector('.kb-tip')) {
+        const tip = el('div', 'kb-tip', esc(title.textContent || ''));
+        tip.setAttribute('role', 'status');
+        head.appendChild(tip);
+        setTimeout(() => tip.remove(), 2600);
+      }
+      return;
+    }
     const link = target.closest<HTMLElement>('a.wl');
     if (link && this.el.contains(link)) {
       e.preventDefault();
@@ -788,17 +1008,22 @@ export class KanbanView {
         e.stopPropagation();
         this.host.openNote(btn.dataset.open || '');
         break;
-      case 'to-lane': {
-        const l = this.el.querySelectorAll<HTMLElement>('.kb-lanes > .kb-lane')[Number(btn.dataset.to)];
-        const lanes = this.el.querySelector<HTMLElement>('.kb-lanes');
-        if (!l || !lanes) break;
-        // Only the lanes scroll, never the note around the board.
-        const cs = getComputedStyle(lanes);
-        const pad = parseFloat(cs.scrollPaddingInlineStart) || 0;
-        const r = lanes.getBoundingClientRect();
-        const lr = l.getBoundingClientRect();
-        const dx = cs.direction === 'rtl' ? lr.right - (r.right - pad) : lr.left - (r.left + pad);
-        lanes.scrollBy({ left: dx, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      case 'lane-prev':
+        this.goLane(this.curLane - 1);
+        break;
+      case 'lane-next':
+        this.goLane(this.curLane + 1);
+        break;
+      case 'lane-jump': {
+        const all = this.shownLanes();
+        openMenu(
+          all.map((l, i) => ({
+            label: `${l.getAttribute('aria-label') || ''}  ·  ${l.querySelectorAll('.kb-card').length}`,
+            icon: i === this.curLane ? IC.check : IC.lane,
+            run: () => this.goLane(i),
+          })),
+          btn,
+        );
         break;
       }
       case 'toggle': {
@@ -819,9 +1044,7 @@ export class KanbanView {
         this.askLane();
         break;
       case 'archive':
-        this.archiveOpen = !this.archiveOpen;
-        this.render();
-        if (this.archiveOpen) this.el.querySelector('.kb-archive')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        this.openArchive();
         break;
       case 'restore':
         void this.send({ type: 'restore_card', card: id, lane: 0 });
@@ -989,7 +1212,15 @@ export class KanbanView {
     }
     items.push({ sep: true, label: '' });
     items.push({ label: t('Duplicate'), icon: I.copy, run: () => void this.send({ type: 'duplicate_card', card: id }, false) });
-    items.push({ label: t('Color…'), icon: IC.dot, run: () => this.pickColor(t('Card color'), f.card.color || '', (c) => void this.send({ type: 'set_card_color', card: id, color: c || null }, false)) });
+    items.push({
+      label: t('Color'),
+      icon: IC.dot,
+      swatch: {
+        value: f.card.color || '',
+        pick: (c) => void this.send({ type: 'set_card_color', card: id, color: c || null }, false),
+        custom: () => this.pickColor(t('Card color'), f.card.color || '', (c) => void this.send({ type: 'set_card_color', card: id, color: c || null }, false)),
+      },
+    });
     items.push({ label: t('Copy text'), icon: I.copy, run: () => void navigator.clipboard?.writeText(f.card.text).then(() => toast(t('Copied'), 'ok', 1600)) });
     items.push({ label: t('Archive'), icon: IC.archive, hint: 'Del', run: () => void this.send({ type: 'archive_card', card: id }) });
     items.push({
@@ -1015,9 +1246,15 @@ export class KanbanView {
     const l = b?.lanes[i];
     if (!b || !l) return;
     const rtl = getComputedStyle(this.el).direction === 'rtl';
+    const n = l.cards.length;
+    const setColor = (c: string): void => void this.send({ type: 'set_lane_color', lane: i, color: c || null }, false);
+    // Grouped: the lane itself (name, colour, limit), where it sits, its cards, then deleting it.
     const items: MenuItem[] = [
-      { label: t('Add a card'), icon: I.plus, run: () => this.cardForm(null, i) },
+      { label: t('Add a card'), icon: I.plus, hint: 'N', run: () => this.cardForm(null, i) },
+      { sep: true, label: '' },
       { label: t('Rename'), icon: I.rename, run: () => this.renameLane(i) },
+      { label: t('Color'), icon: IC.dot, swatch: { value: l.color || '', pick: setColor, custom: () => this.pickColor(t('Lane color'), l.color || '', setColor) } },
+      { label: t('Card limit…'), icon: IC.limit, hint: l.max_items ? String(l.max_items) : '', run: () => this.askLimit(i) },
       { sep: true, label: '' },
       {
         label: rtl ? t('Move right') : t('Move left'),
@@ -1034,48 +1271,90 @@ export class KanbanView {
       { label: t('Add lane after this one'), icon: IC.lane, run: () => this.askLane(i + 1) },
       { label: t('Duplicate lane'), icon: I.copy, run: () => void this.send({ type: 'duplicate_lane', lane: i, title: t('{name} copy', { name: l.title }) }, false) },
       { sep: true, label: '' },
-      { label: t('Color…'), icon: IC.dot, run: () => this.pickColor(t('Lane color'), l.color || '', (c) => void this.send({ type: 'set_lane_color', lane: i, color: c || null }, false)) },
-      { label: t('Card limit…'), icon: IC.limit, hint: l.max_items ? String(l.max_items) : '', run: () => this.askLimit(i) },
-      { sep: true, label: '' },
       {
         label: t('Archive all cards'),
         icon: IC.archive,
-        disabled: !l.cards.length,
-        run: () =>
-          void this.send({ type: 'archive_lane_cards', lane: i }, false).then(() =>
-            undoToast(tn(l.cards.length, '{n} card archived', '{n} cards archived'), null, 'info', 4000),
-          ),
+        disabled: !n,
+        run: () => void this.archiveLane(i),
       },
       {
-        label: t('Delete all cards'),
-        icon: I.trash,
-        danger: true,
-        disabled: !l.cards.length,
+        label: t('Clear all cards…'),
+        icon: IC.clear,
+        disabled: !n,
         run: () => this.confirmClear(i),
       },
+      { sep: true, label: '' },
       {
-        label: l.cards.length ? t('Delete lane (move or archive its cards first)') : t('Delete lane'),
+        label: t('Delete lane…'),
         icon: I.trash,
         danger: true,
-        disabled: l.cards.length > 0,
-        run: () => {
-          const { title, color, max_items, complete } = l;
-          void this.send({ type: 'delete_lane', lane: i }).then((nb) => {
-            if (!nb) return;
-            // A Complete lane cannot be made again from here: no Undo for it (History has it).
-            const undo = complete
-              ? null
-              : async (): Promise<void> => {
-                  const back = await this.send({ type: 'add_lane', title, position: i }, false);
-                  if (back && color) await this.send({ type: 'set_lane_color', lane: i, color }, false);
-                  if (back && max_items) await this.send({ type: 'set_lane_limit', lane: i, max: max_items }, false);
-                };
-            undoToast(t('Lane deleted'), undo ? () => void undo() : null, 'info', 6000);
-          });
-        },
+        run: () => this.confirmDeleteLane(i),
       },
     ];
     openMenu(items, at);
+  }
+
+  /** Every card of a lane into the archive, with Undo (each goes back to this lane). */
+  private async archiveLane(i: number): Promise<void> {
+    const b = this.board;
+    const l = b?.lanes[i];
+    if (!b || !l) return;
+    const before = new Set(b.archive.map((c) => c.id));
+    const n = l.cards.length;
+    const nb = await this.send({ type: 'archive_lane_cards', lane: i }, false);
+    if (!nb) return;
+    const moved = nb.archive.filter((c) => !before.has(c.id)).map((c) => c.text);
+    undoToast(
+      tn(n, '{n} card archived', '{n} cards archived'),
+      async () => {
+        for (const text of moved) {
+          const c = this.board?.archive.find((x) => x.text === text);
+          if (c) await this.send({ type: 'restore_card', card: c.id, lane: i }, false);
+        }
+      },
+      'info',
+      6000,
+    );
+  }
+
+  /** Delete a lane. An empty one goes at once (with Undo); one with cards asks first and archives
+   *  its cards, so nothing is lost. */
+  private confirmDeleteLane(i: number): void {
+    const b = this.board;
+    const l = b?.lanes[i];
+    if (!b || !l) return;
+    const { title, color, max_items, complete } = l;
+    const drop = async (): Promise<void> => {
+      const nb = await this.send({ type: 'delete_lane', lane: i });
+      if (!nb) return;
+      // A Complete lane cannot be made again from here: no Undo for it (History has it).
+      const undo = complete
+        ? null
+        : async (): Promise<void> => {
+            const back = await this.send({ type: 'add_lane', title, position: i }, false);
+            if (back && color) await this.send({ type: 'set_lane_color', lane: i, color }, false);
+            if (back && max_items) await this.send({ type: 'set_lane_limit', lane: i, max: max_items }, false);
+          };
+      undoToast(t('Lane deleted'), undo ? () => void undo() : null, 'info', 6000);
+    };
+    if (!l.cards.length) {
+      void drop();
+      return;
+    }
+    Modal.confirm(
+      t('Delete the lane "{name}"?', { name: title }),
+      tn(
+        l.cards.length,
+        'Its {n} card goes to the Archive first, where you can restore it to another lane.',
+        'Its {n} cards go to the Archive first, where you can restore them to another lane.',
+      ),
+      t('Archive cards and delete lane'),
+      async () => {
+        Modal.close();
+        const nb = await this.send({ type: 'archive_lane_cards', lane: i }, false);
+        if (nb) await drop();
+      },
+    );
   }
 
   /** The board's own colour and icon (kept in the board's settings, so they travel with the file). */
@@ -1156,7 +1435,7 @@ export class KanbanView {
       actions: [
         { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
         {
-          label: t('Delete all cards'),
+          label: t('Clear all cards'),
           cls: 'danger',
           run: () => {
             Modal.close();
@@ -1314,9 +1593,10 @@ export class KanbanView {
   // ── dragging (mouse, pen and touch) ──────────────────────────────────────────────────────────
 
   private onPointerDown(e: PointerEvent): void {
+    this.lastPtr = e.pointerType;
     if (e.button !== 0 || this.drag) return;
     const target = e.target as HTMLElement;
-    if (target.closest('button,a,textarea,input,.kb-archive')) return;
+    if (target.closest('button,a,textarea,input,label,.kb-archive')) return;
     const card = target.closest<HTMLElement>('.kb-card');
     const head = card ? null : target.closest<HTMLElement>('.kb-lane-head');
     if (!card && !head) return;

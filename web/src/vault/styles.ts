@@ -672,6 +672,9 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
   background:var(--panel);border:1px solid var(--line-strong);border-radius:var(--r);box-shadow:none;overflow:hidden;
   animation:vxPop .14s var(--ease)}
 .vx-pop.vx-pop-ct .vx-pop-card{width:440px;max-height:min(520px,calc(100vh - 120px))}
+.vx-pop.vx-side .vx-pop-card{right:12px;bottom:12px;width:372px;max-height:none;animation:vxSideIn .18s var(--ease-out)}
+@keyframes vxSideIn{from{transform:translateX(16px);opacity:0}}
+[dir=rtl] .vx-pop.vx-side .vx-pop-card{right:auto;left:12px}
 .vx-pop-head{display:flex;align-items:center;gap:8px;padding:8px 8px 4px 16px;flex:none}
 .vx-pop-head b{flex:1;font-size:13px;font-weight:650}
 .vx-pop-body{overflow:auto;min-height:0;flex:1}
@@ -863,6 +866,19 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-menu-label{flex:1}
 .vx-menu-item kbd{font-size:10px;color:var(--muted)}
 .vx-menu-sep{height:1px;background:var(--line);margin:4px 6px}
+.vx-menu-sw{display:flex;flex-direction:column;gap:7px;padding:7px 10px 9px}
+.vx-menu-sw-l{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--fg)}
+.vx-menu-sw-l .vx-i,.vx-menu-sw-l svg{width:15px;height:15px;color:var(--muted)}
+.vx-menu-sw-row{display:flex;flex-wrap:wrap;gap:6px;padding-inline-start:25px}
+.vx-sw{width:22px;height:22px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,var(--fg) 14%,transparent);background:var(--c,transparent);cursor:pointer;
+  position:relative;transition:transform .12s}
+.vx-sw:hover{transform:scale(1.1)}
+.vx-sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.vx-sw[aria-checked=true],.vx-sw.more.on{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--fg)}
+.vx-sw.none{background:linear-gradient(135deg,transparent calc(50% - 1px),var(--danger) calc(50% - 1px),var(--danger) calc(50% + 1px),transparent calc(50% + 1px))}
+.vx-sw.more:not(.on){background:conic-gradient(#f87171,#fbbf24,#4ade80,#7dd3fc,#a5b4fc,#f0abfc,#f87171)}
+@media (max-width:760px){.vx-sw{width:30px;height:30px}.vx-menu-sw-row{gap:8px}}
+@media (prefers-reduced-motion:reduce){.vx-sw{transition:none}}
 .vx-menu-item.rich{align-items:center;gap:11px;min-height:48px;padding-top:7px;padding-bottom:7px}
 .vx-menu-tile{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:color-mix(in srgb,var(--fg) 6%,transparent)}
 .vx-menu-tile .vx-i{width:15px;height:15px;color:var(--text-2,var(--fg))}

@@ -427,6 +427,7 @@ function buildTabbar(openProfile: (anchor: HTMLElement) => void): void {
     );
     b.type = 'button';
     b.setAttribute('aria-label', t.label);
+    b.title = t.label;
     if (t.page) {
       b.dataset.page = t.page;
       b.onclick = () => {

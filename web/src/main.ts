@@ -1,5 +1,6 @@
 // Must stay the first import: snapshots the hooks.ts defaults before any package installs its own.
 import { startDueWatch } from './views/due-watch';
+import { initUpdateNotice } from './ui/update-notice';
 import { DEFAULT_REFRESH_TREE, DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import './global.css';
 import { initMnemoLauncher } from './assistant/launcher';
@@ -7,7 +8,7 @@ import { initPromo } from './assistant/promo';
 import { translateStatic } from './i18n';
 import { initKeepAlive } from './keepalive';
 import { renderAssistant } from './assistant/page';
-import { updateInfo, type UpdateInfo } from './version';
+import { updateInfo } from './version';
 import { apiGet } from './api';
 import {
   confirmDeleteFolder,
@@ -69,8 +70,7 @@ import { initPullRefresh } from './ui/pull-refresh';
 import { initToTop } from './ui/totop';
 import { initMapEnter } from './ui/map-enter';
 import { closeNotFound, isNotFoundOpen, showNotFound } from './ui/notfound';
-import { initToasts, notify, toast } from './toast';
-import { markUpdateNoticeSeen, updateNoticeSeen } from './storage';
+import { initToasts, toast } from './toast';
 import { installStyles } from './ui';
 import { watchUnread } from './assistant/unread';
 import { watchScrollbars } from './assistant/scrollbars';
@@ -96,17 +96,6 @@ async function reloadAll(): Promise<void> {
   await loadCore();
   refreshPage();
   toast(t('Data reloaded'), 'ok', 1600);
-}
-
-/** One warning toast per new release and device; a later sign-in stays quiet. */
-function announceUpdate(u: UpdateInfo): void {
-  if (!u.available || !u.latest || updateNoticeSeen() === u.latest) return;
-  markUpdateNoticeSeen(u.latest);
-  const url = u.url;
-  notify(t('Memora v{latest} is available. This server runs v{current}.', { latest: u.latest, current: u.current }), 'warn', 12000, {
-    label: t('What changed'),
-    run: () => void window.open(url, '_blank', 'noopener,noreferrer'),
-  });
 }
 
 let booted = false;
@@ -382,7 +371,8 @@ async function boot(): Promise<void> {
   if (!isNotFoundOpen()) paintTitle();
   splash.done();
   void maybeWelcome().then(() => maybeWhatsNew());
-  void pUpdate?.then(announceUpdate);
+  // A quiet heads-up about a newer release, at a calm moment (ui/update-notice.ts).
+  initUpdateNotice(pUpdate);
 
   RT.start();
   PWA.init();

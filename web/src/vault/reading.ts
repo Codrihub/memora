@@ -30,6 +30,7 @@ import { KANBAN_CSS } from '../views/kanban-styles';
 import { applyBoardLookRoot, applyBoardLookTo, boardPrefs, ensureBoardLook, PrefStore, type BoardLook } from '../views/board-look';
 import { I } from './icons';
 import { openPanel } from './panel';
+import { undoToast } from './ui';
 import { READING_CSS } from './reading-styles';
 
 // ── the note model ────────────────────────────────────────────────────────────────────────────
@@ -397,12 +398,12 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
       .join('')}</div></div>`;
   const toggle = (k: string, label: string): string =>
     `<button type="button" role="switch" class="rs-switch" data-k="${k}" data-fid="${k}" aria-checked="false"><span>${esc(label)}</span><i aria-hidden="true"></i></button>`;
-  const section = (s: Section): string =>
-    `<section class="rs-sec" aria-labelledby="rs-h-${s.id}"><div class="rs-sec-h"><h3 id="rs-h-${s.id}">${esc(s.title)}<i data-dot="${s.id}" hidden title="${attr(
+  const section = (s: Section, i: number): string =>
+    `<details class="rs-sec" data-sec="${s.id}"${isOpen(s.id, i) ? ' open' : ''}><summary class="rs-sec-h"><span class="rs-sec-t"><h3 id="rs-h-${s.id}">${esc(s.title)}<i data-dot="${s.id}" hidden title="${attr(
       t('Set for this one only'),
-    )}"></i></h3><button type="button" class="rs-reset" data-reset="${s.id}" data-fid="reset:${s.id}" aria-label="${attr(
+    )}"></i></h3><small class="rs-sum" data-sum="${s.id}"></small></span><button type="button" class="rs-reset" data-reset="${s.id}" data-fid="reset:${s.id}" aria-label="${attr(
       t('Reset {name}', { name: s.title }),
-    )}">${I.undo}<span>${t('Reset')}</span></button></div>${s.html}</section>`;
+    )}">${I.undo}<span>${t('Reset')}</span></button><span class="rs-chev" aria-hidden="true"></span></summary><div class="rs-sec-b">${s.html}</div></details>`;
 
   const noteSections = (): Section[] => [
     {
@@ -529,6 +530,74 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
 
   let sections: Section[] = [];
   const body = el('div', 'rs');
+  // Wider screens: a side panel beside the page.
+  const side = !window.matchMedia('(max-width: 760px)').matches;
+  // Only the tabs that matter here: a board page has board settings, a note has note settings
+  // (plus board settings when boards are embedded in it); with no page (a chat) both.
+  const area = anchor.closest('.vx-note-scroll') || document.querySelector('.vx-note-scroll[data-rpath]');
+  // Both tabs always (the global note and board looks); a board page opens on Boards.
+  const tabs: Tab[] = ['note', 'board'];
+  if (boardPath && !opts.board && !area?.querySelector('.vx-prose')) tab = 'board';
+  // Sections fold like an accordion: all closed at first, one open at a time, and the one opened
+  // last opens again next time.
+  const OPEN_LS = 'memora.reader.open.v2';
+  const lastOpen = ((): string => {
+    try {
+      return localStorage.getItem(OPEN_LS) || '';
+    } catch {
+      return '';
+    }
+  })();
+  let openNow = lastOpen;
+  const isOpen = (id: string, _i: number): boolean => id === openNow;
+  // Opening and closing glide (height and fade); the browser's own toggle still records the state.
+  const glide = (d: HTMLDetailsElement, open: boolean): void => {
+    const b = d.querySelector<HTMLElement>('.rs-sec-b');
+    if (!b || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      d.open = open;
+      return;
+    }
+    b.getAnimations().forEach((x) => x.cancel());
+    if (open) {
+      d.open = true;
+      const h = b.scrollHeight;
+      b.animate([{ height: '0px', opacity: 0 }, { height: h + 'px', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    } else {
+      const h = b.offsetHeight;
+      d.classList.add('closing');
+      const an = b.animate([{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }], { duration: 200, easing: 'cubic-bezier(.4,0,.2,1)' });
+      an.onfinish = () => {
+        d.classList.remove('closing');
+        d.open = false;
+      };
+    }
+  };
+  body.addEventListener('click', (e) => {
+    const sum = (e.target as HTMLElement).closest('summary.rs-sec-h');
+    if (!sum || (e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    const d = sum.parentElement as HTMLDetailsElement;
+    const open = !d.open || d.classList.contains('closing');
+    if (open) body.querySelectorAll<HTMLDetailsElement>('details.rs-sec[open]').forEach((x) => x !== d && glide(x, false));
+    glide(d, open);
+  });
+  body.addEventListener(
+    'toggle',
+    (e) => {
+      const d = e.target as HTMLDetailsElement;
+      if (!d.matches?.('details.rs-sec')) return;
+      if (d.open) {
+        openNow = d.dataset.sec!;
+        body.querySelectorAll<HTMLDetailsElement>('details.rs-sec[open]').forEach((x) => x !== d && (x.open = false));
+      } else if (openNow === d.dataset.sec) openNow = '';
+      try {
+        localStorage.setItem(OPEN_LS, openNow);
+      } catch {
+        /* storage blocked */
+      }
+    },
+    true,
+  );
 
   // The sticky head's height, for the body's scroll-padding: what Tab focuses stays in view below it.
   let topSeen = false;
@@ -548,15 +617,16 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
     sections = tab === 'note' ? noteSections() : boardSections();
     useChips();
     if (tab === 'board') useStyles('kanban-css', KANBAN_CSS);
+    const tabBtn = (k: Tab): string =>
+      `<button type="button" role="tab" id="rs-tab-${k}" data-tab="${k}" data-fid="tab:${k}" aria-controls="rs-panel" aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}">${
+        k === 'note' ? I.note : I.board
+      }<span>${k === 'note' ? t('Notes') : t('Boards')}</span></button>`;
     body.innerHTML = `<div class="rs-top">
-      <div class="rs-seg" role="tablist" aria-label="${attr(t('Settings for'))}">
-        <button type="button" role="tab" id="rs-tab-note" data-tab="note" data-fid="tab:note" aria-controls="rs-panel" aria-selected="${tab === 'note'}" tabindex="${tab === 'note' ? 0 : -1}">${I.note}<span>${t('Notes')}</span></button>
-        <button type="button" role="tab" id="rs-tab-board" data-tab="board" data-fid="tab:board" aria-controls="rs-panel" aria-selected="${tab === 'board'}" tabindex="${tab === 'board' ? 0 : -1}">${I.board}<span>${t('Boards')}</span></button>
-      </div>
-      ${tab === 'note' ? notePreview() : boardPreview()}
+      ${tabs.length > 1 ? `<div class="rs-seg" role="tablist" aria-label="${attr(t('Settings for'))}">${tabs.map(tabBtn).join('')}</div>` : ''}
       ${scopeHTML()}
+      ${tab === 'note' ? notePreview() : boardPreview()}
     </div>
-    <div class="rs-body" id="rs-panel" role="tabpanel" aria-labelledby="rs-tab-${tab}">${sections.map(section).join('')}</div>
+    <div class="rs-body" id="rs-panel"${tabs.length > 1 ? ` role="tabpanel" aria-labelledby="rs-tab-${tab}"` : ''}>${sections.map(section).join('')}</div>
     <div class="rs-foot"><span>${t('Saved in this browser')}</span><button type="button" class="rs-reset" data-reset="all" data-fid="reset:all">${I.undo}<span>${t('Reset all')}</span></button></div>`;
     if (tab === 'note') {
       wireColorPick(body, 'rsAccent', (v) => {
@@ -592,13 +662,45 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
       body.querySelector<HTMLButtonElement>('[data-step="-1"]')!.disabled = i === 0;
       body.querySelector<HTMLButtonElement>('[data-step="1"]')!.disabled = i === SIZES.length - 1;
     }
+    // Each section's head says what is set now, so a folded panel still shows every choice.
+    const SW: Record<string, string> = {
+      hyph: t('Hyphenate long words'),
+      done: t('Done cards'),
+      empty: t('Empty lanes'),
+      dates: t('Dates on cards'),
+      tags: t('Tags on cards'),
+      links: t('Linked notes on cards'),
+    };
+    const labelOf = (k: string, val: unknown): string => {
+      if (k === 'size') return `${val}px`;
+      if (k === 'tone') return L.tone[String(val)] || String(val);
+      if (k === 'accent') return val ? `${t('Accent colour')} ${val}` : '';
+      if (k in SW) return val ? SW[k]! : '';
+      const list = (L as unknown as Record<string, unknown>)[k];
+      if (Array.isArray(list))
+        for (const o of list as unknown[]) {
+          if (Array.isArray(o) && o[0] === val) return String(o[1]);
+          if (o && typeof o === 'object' && (o as Opt).v === String(val)) return (o as Opt).label;
+        }
+      return '';
+    };
+    for (const sec of sections) {
+      const el2 = body.querySelector<HTMLElement>(`[data-sum="${sec.id}"]`);
+      if (el2) {
+        // Only what differs from the defaults: a section left alone just says Default.
+        const defs = store().defaults as unknown as Record<string, unknown>;
+        const parts = sec.keys.filter((k) => v[k] !== defs[k]).map((k) => labelOf(k, v[k]) || (typeof v[k] === 'boolean' ? `${SW[k] || k}: ${t('Off')}` : '')).filter(Boolean);
+        el2.textContent = parts.join(' · ') || t('Default');
+        el2.classList.toggle('set', parts.length > 0);
+      }
+    }
     const s = store();
     for (const sec of sections) {
       body.querySelector<HTMLButtonElement>(`[data-reset="${sec.id}"]`)!.disabled = s.isClean(sp(), sec.keys);
       const dot = body.querySelector<HTMLElement>(`[data-dot="${sec.id}"]`);
       if (dot) dot.hidden = !path || s.isClean(path, sec.keys);
     }
-    body.querySelector<HTMLButtonElement>('[data-reset="all"]')!.disabled = s.isClean(sp());
+    body.querySelector<HTMLButtonElement>('[data-reset="all"]')!.disabled = notePrefs.allClean() && boardPrefs.allClean();
     const own = body.querySelector<HTMLElement>('.rs-own');
     if (own && path) {
       const has = !!s.override(path);
@@ -632,6 +734,8 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
 
   body.onclick = (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button');
+    // A button in a section's head (Reset) never folds the section.
+    if (b && b.closest('summary')) e.preventDefault();
     if (!b || (b as HTMLButtonElement).disabled || !body.contains(b)) return;
     const d = b.dataset;
     if (d.tab) {
@@ -641,8 +745,24 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
     } else if (d.scope) {
       scope[tab] = d.scope as Scope;
       render();
+    } else if (d.reset === 'all') {
+      // Reset all means all: notes and boards, the global choices and every note's or board's own.
+      const before = { note: notePrefs.snapshot(), board: boardPrefs.snapshot() };
+      notePrefs.resetEverything();
+      boardPrefs.resetEverything();
+      scope.note = scope.board = 'all';
+      refreshReading();
+      changed?.();
+      render();
+      undoToast(t('Reading settings are back to the defaults.'), () => {
+        notePrefs.restore(before.note);
+        boardPrefs.restore(before.board);
+        refreshReading();
+        changed?.();
+        if (body.isConnected) render();
+      });
     } else if (d.reset) {
-      const keys = d.reset === 'all' ? undefined : sections.find((s) => s.id === d.reset)?.keys;
+      const keys = sections.find((s) => s.id === d.reset)?.keys;
       store().reset(sp(), keys);
       refreshReading();
       changed?.();
@@ -695,7 +815,7 @@ export function openReadingPanel(anchor: HTMLElement, changed?: () => void, opts
   };
 
   render();
-  const shown = openPanel(anchor, opts.board ? t('Board view') : t('Reading settings'), body, 'vx-pop-rs');
+  const shown = openPanel(anchor, tab === 'board' ? t('Board view') : t('Reading settings'), body, 'vx-pop-rs', false, side);
   if (!shown.isConnected) return; // it was open: the click closed it
   // Keep Tab inside the panel while it is open.
   const card = shown.closest<HTMLElement>('.vx-pop-card');

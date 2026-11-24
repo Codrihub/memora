@@ -430,8 +430,6 @@ export function noteMenu(paths: string[], at: Anchor, rename?: () => void): void
             { label: t('Copy wikilink'), icon: I.link, run: () => copyWikilink(one) },
           ]
         : []),
-      { label: t('New note in this folder'), icon: I.newNote, run: () => nav.newNote(dirOf(paths[0])) },
-      { label: t('New board in this folder'), icon: I.board, run: () => nav.newBoard(dirOf(paths[0])) },
       { sep: true, label: '' },
       {
         label: paths.length > 1 ? t('Move {n} notes to Trash', { n: paths.length }) : t('Move to Trash'),

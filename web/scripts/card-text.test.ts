@@ -106,3 +106,12 @@ test('steps stay on their own lines, and the block id stays out of the form', ()
   assert.deepEqual(p4.fields.checklist, [{ text: 'a', done: false }]);
   assert.equal(writeCard(p4, { ...p4.fields, checklist: [{ text: 'a', done: true }] }), 'Card ^abc123\n- [x] a');
 });
+
+test('ticking one step changes only its box', async () => {
+  const { toggleStep } = await import('../src/views/card-text.ts');
+  const text = 'Plan the trip @{2026-12-01}\n\t- [ ] book\n\tnot a step\n\t- [x] pack\n\t- [ ] go';
+  assert.equal(toggleStep(text, 0, true), 'Plan the trip @{2026-12-01}\n\t- [x] book\n\tnot a step\n\t- [x] pack\n\t- [ ] go');
+  assert.equal(toggleStep(text, 1, false), 'Plan the trip @{2026-12-01}\n\t- [ ] book\n\tnot a step\n\t- [ ] pack\n\t- [ ] go');
+  assert.equal(toggleStep(text, 3, true), null);
+  assert.equal(toggleStep('- [ ] first line is not a step', 0, true), null);
+});

@@ -442,9 +442,12 @@ fn lanes_and_cards_with_fields_checklists_and_colors() {
     assert!(on_disk.contains(&format!(
         "- [ ] Ship the release [[Atlas]] #release @{{2026-12-01}} @@{{09:30}} ^{block}\n\t- [x] changelog\n\t- [ ] tag\n"
     )), "{on_disk}");
-    assert!(on_disk.contains(&format!(
-        "\"memora\":{{\"cards\":{{\"{block}\":\"#f59e0b\"}}"
-    )));
+    // Colours under Memora's own key (next to where archived cards came from).
+    assert!(on_disk.contains("\"memora\":{"), "{on_disk}");
+    assert!(
+        on_disk.contains(&format!("\"cards\":{{\"{block}\":\"#f59e0b\"}}")),
+        "{on_disk}"
+    );
 
     // update_card: fields over the current text; untouched parts stay.
     let v = ok(
@@ -807,9 +810,13 @@ fn agent_adds_and_moves_a_card() {
     assert!(e);
 
     let on_disk = std::fs::read_to_string(vault.join("Work/Board.md")).unwrap();
-    assert!(on_disk.ends_with(
-        "## Archive\n\n- [x] Review the plan @{2026-12-01}\n\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"basic\",\"lane-width\":300}\n```\n%%"
-    ), "{on_disk}");
+    assert!(
+        on_disk.contains("## Archive\n\n- [x] Review the plan @{2026-12-01}\n\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"basic\",\"lane-width\":300,\"memora\":{\"archived\":{"),
+        "{on_disk}"
+    );
+    // The archive says which lane the card left.
+    let read = ok(&srv, "kanban_get_board", json!({"path": "Work/Board.md"}));
+    assert!(read["archive"][0]["archived_from"].is_string(), "{read}");
     assert!(on_disk.starts_with(
         "---\n\nkanban-plugin: basic\n\n---\n\n## To do\n\n- [ ] Write the brief [[Atlas]] #docs\n"
     ));

@@ -1,7 +1,7 @@
 // Kanban board styles: one board in three densities (its own page, embedded in a note, in Mnemo's
 // chat), theme tokens only (light and dark follow), logical properties (RTL). Lanes sit side by side
 // and scroll sideways, with an edge fade on a side only while there is more that way; a narrow board
-// (a phone, a narrow chat) snaps one lane at a time and shows a row of lane dots.
+// (a phone, a narrow chat) snaps one lane at a time and shows the lane navigation in its bar.
 
 export const KANBAN_CSS = `
 /* A board's own page sits in the same frame as a note: the same gutters, paper padding and title
@@ -13,7 +13,14 @@ export const KANBAN_CSS = `
 .kb-host{min-width:0;margin-top:28px}
 .vx-page.kb-mode .kb-host{width:100cqi;margin-inline:calc(50% - 50cqi)}
 .vx-page.kb-mode .kb{--kb-start:max(calc(var(--vx-gut) + var(--vx-px)),calc((100cqi - var(--rw)) / 2))}
-.vx-page.kb-mode :is(.kb-bar,.kb-dots,.kb-archive,.kb-empty){margin-inline:var(--kb-start)}
+.vx-page.kb-mode :is(.kb-bar,.kb-archive,.kb-empty,.kb-foot){margin-inline:var(--kb-start)}
+.kb-foot{display:flex;justify-content:flex-end;margin:2px 0 0}
+.kb-arch-link{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 10px;border:0;border-radius:8px;background:none;color:var(--muted);
+  font:inherit;font-size:12.5px;cursor:pointer}
+.kb-arch-link:hover{color:var(--fg);background:var(--hover)}
+.kb-arch-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.kb-arch-link svg{width:14px;height:14px}
+@media (hover:none){.kb-arch-link{min-height:40px}}
 .vx-page.kb-mode .kb-lanes{padding-inline:var(--kb-start);scroll-padding-inline:var(--kb-start)}
 
 :where(.kb) svg{width:16px;height:16px}
@@ -22,10 +29,28 @@ export const KANBAN_CSS = `
 .kb-embed{--kb-gap:10px;--kb-lane-max:min(520px,70dvh)}
 .kb-chat{--kb-gap:8px;--kb-lane-max:min(380px,60dvh)}
 .kb-bar[hidden]{display:none}
-.kb-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px;min-height:34px}
+.kb-bar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin:0 0 12px;min-height:34px;min-width:0}
 .kb-embed .kb-bar,.kb-chat .kb-bar{margin-bottom:8px;min-height:30px}
 .kb-chat .kb-bar .vx-ct-btn,.kb-embed .kb-bar .vx-ct-btn{height:30px}
-.kb-stats{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-inline:4px}
+/* Lane navigation (top right): back, the lane in view, forward. Only while the lanes do not all fit. */
+.kb-nav{display:none;align-items:center;gap:2px;min-width:0;padding:2px;border:1px solid var(--line);border-radius:11px}
+.kb.kb-over .kb-nav{display:inline-flex}
+.kb-nav-b{width:30px;height:30px;border-radius:8px}
+.kb-nav-b:disabled{opacity:.35;cursor:default}
+.kb-nav-b svg{width:16px;height:16px}
+.kb-jump{display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:30px;padding:0 6px;border:0;border-radius:8px;background:none;
+  color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer}
+.kb-jump:hover,.kb-nav-b:not(:disabled):hover{background:var(--hover)}
+.kb-jump:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.kb-bar-add{flex:none;width:36px;height:36px;border:1px solid var(--line);border-radius:11px}
+.kb-bar-add svg{width:17px;height:17px}
+@container kb (max-width:560px){
+  .kb-nav-b{width:34px;height:34px}.kb-jump{height:34px;min-width:40px}.kb-bar-add{width:40px;height:40px}
+  .kb-stats{font-size:12px}
+  .kb.kb-over .kb-stats-d{display:none}
+}
+.kb-stats{display:inline-flex;align-items:center;gap:7px;min-width:0;overflow:hidden;white-space:nowrap;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-inline:4px}
+.kb-bar>.kb-mark,.kb-bar>.kb-nav,.kb-bar>.kb-bar-add,.kb-bar>.vx-ct-btn{flex:none}
 .kb-pill{font-size:11px;font-weight:650;line-height:18px;padding:0 6px;border-radius:9px;background:var(--surface-2);color:var(--text-2)}
 
 /* Lanes: one row that scrolls sideways on its own (the page never does). */
@@ -48,6 +73,9 @@ export const KANBAN_CSS = `
 .kb-chat .kb-lane-head,.kb-embed .kb-lane-head{padding-block:6px 4px}
 .kb-lane-title{flex:1 1 auto;min-width:0;margin:0;font-size:13.5px;font-weight:650;color:var(--fg);letter-spacing:.01em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:28px}
+.kb-tip{position:absolute;z-index:6;inset-inline:8px;top:calc(100% - 2px);padding:7px 10px;border-radius:10px;font-size:13px;font-weight:600;line-height:1.35;
+  color:var(--fg);background:var(--panel);border:1px solid var(--line-strong);white-space:normal;overflow-wrap:anywhere;pointer-events:none;animation:vxPop .12s ease-out}
+.kb-lane-head{position:relative}
 .kb-done-mark{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--accent-soft);color:var(--accent);flex:none}
 .kb-done-mark svg{width:11px;height:11px}
 .kb-count{font-size:11.5px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;background:var(--panel);
@@ -64,10 +92,13 @@ export const KANBAN_CSS = `
 .kb-add{display:flex;align-items:center;gap:7px;width:100%;height:34px;padding-inline:8px;border:0;border-radius:9px;background:none;
   color:var(--muted);font:inherit;font-size:13px;cursor:pointer;text-align:start;transition:background .15s,color .15s}
 .kb-add:hover{background:var(--hover);color:var(--fg)}
-.kb-add:focus-visible,.kb-add-lane:focus-visible,.kb-card:focus-visible,.kb-check:focus-visible,.kb-dot:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.kb-add-lane{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;height:44px;padding-inline:14px 16px;border:1.5px dashed var(--line-strong);
-  border-radius:14px;background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
-.kb-chat .kb-add-lane,.kb-embed .kb-add-lane{height:38px;border-radius:12px}
+.kb-add:focus-visible,.kb-add-lane:focus-visible,.kb-card:focus-visible,.kb-check:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Add lane at the end: an empty lane-sized card, so there is always a place to put the next lane. */
+.kb-add-lane{flex:0 0 var(--kb-lane-w);width:var(--kb-lane-w);max-width:calc(100cqi - 24px);align-self:stretch;min-height:150px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line-strong);border-radius:16px;background:none;color:var(--muted);
+  font:inherit;font-size:13.5px;font-weight:550;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.kb-add-lane svg{width:20px;height:20px}
+.kb-chat .kb-add-lane,.kb-embed .kb-add-lane{min-height:110px;border-radius:12px}
 .kb-add-lane:hover{background:var(--hover);color:var(--fg);border-color:var(--accent-line)}
 
 .kb-mark{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;flex:none;color:var(--board-c,var(--accent));
@@ -86,19 +117,11 @@ export const KANBAN_CSS = `
 /* Colours of cards and lanes come from the board look (web/src/views/board-look.ts). */
 /* A card's checklist: done of all, with a thin bar. */
 .kb-steps{position:absolute;inset-inline-end:34px;top:9px;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;pointer-events:none}
-.kb-steps i{display:block;width:28px;height:4px;border-radius:2px;overflow:hidden;background:var(--surface-2)}
-.kb-steps u{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.kb-steps i{display:block;width:28px;height:4px;border-radius:99px;overflow:hidden;background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.kb-steps u{display:block;height:100%;border-radius:inherit;background:color-mix(in srgb,var(--accent) 70%,transparent)}
 .kb-steps b{font-weight:600}
 .kb-card:has(.kb-steps) .kb-body>:first-child{padding-inline-end:58px}
 
-/* Lane dots: shown while the lanes do not all fit; the lane in view is the long one. */
-.kb-dots{display:none;justify-content:center;flex-wrap:wrap;gap:0;margin:-2px 0 4px}
-.kb.kb-over .kb-dots{display:flex}
-.kb-dot{display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
-.kb-dot i{display:block;width:6px;height:6px;border-radius:3px;background:var(--line-strong);transition:width .2s,background .2s}
-.kb-dot[aria-current=true] i{width:16px;background:var(--accent)}
-.kb-dot:hover i{background:var(--muted)}
-.kb-dot[aria-current=true]:hover i{background:var(--accent)}
 
 .kb-card{position:relative;display:flex;align-items:flex-start;gap:8px;padding:9px 6px 9px 10px;padding-inline:10px 6px;background:var(--surface-1);
   color:var(--fg);border:1px solid var(--line);border-radius:10px;cursor:grab;user-select:none;-webkit-user-select:none;
@@ -107,8 +130,11 @@ export const KANBAN_CSS = `
 .kb-card:hover{border-color:var(--line-strong)}
 .kb-card.done .kb-body{color:var(--muted)}
 .kb-card.done .kb-body>p:first-child{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
-.kb-card.late:not(.done){border-inline-start:3px solid var(--warn)}
-.kb-card.kb-armed{transform:scale(1.02);box-shadow:0 6px 20px rgba(0,0,0,.18)}
+/* Due: a stroke on the card's start edge, never an extra chip (late: warning; today: softer). The
+   board's own date colours set --due-s. The date chip itself stays neutral. */
+.kb-card.late:not(.done){border-inline-start:3px solid var(--due-s,var(--warn))}
+.kb-card.today:not(.done){border-inline-start:3px solid var(--due-s,color-mix(in srgb,var(--warn) 45%,var(--line)))}
+.kb-card.kb-armed{transform:scale(1.02);box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .kb-card.kb-flash{animation:kb-flash 1.6s ease-out}
 .kb-lane:focus{outline:none}
 .kb-lane:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -124,7 +150,11 @@ export const KANBAN_CSS = `
 .kb-body>*+*{margin-top:6px}
 .kb-body ul,.kb-body ol{padding-inline-start:18px}
 .kb-body li.kb-sub{list-style:none;margin-inline-start:-18px;display:flex;align-items:baseline;gap:6px}
-.kb-body li.kb-sub input{flex:none;margin:0;accent-color:var(--accent);transform:translateY(1px)}
+.kb-body li.kb-sub input{flex:none;margin:0;width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.kb-body li.kb-sub input:disabled{cursor:default}
+.kb-step-hit{flex:none;display:inline-grid;place-items:center;width:24px;height:22px;margin:-2px -4px -2px -5px;border-radius:6px;cursor:pointer;align-self:flex-start}
+.kb-step-hit:hover{background:var(--hover)}
+@media (hover:none){.kb-step-hit{width:34px;height:30px;margin:-6px -8px -6px -10px}}
 .kb-body li.kb-sub.done{color:var(--muted);text-decoration:line-through}
 .kb-body code{font-family:var(--mono);font-size:12px;background:var(--surface-2);border-radius:4px;padding:0 4px}
 .kb-body img{max-width:100%;border-radius:6px}
@@ -134,8 +164,6 @@ export const KANBAN_CSS = `
   border:1px solid transparent;border-radius:7px;background:var(--surface-2);color:var(--text-2);vertical-align:-5px;margin-block:1px;white-space:nowrap}
 @media (hover:none){.kb-chip{height:24px}}
 .kb-chip svg{width:12px;height:12px}
-.kb-chip.late{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
-.kb-chip.today{background:color-mix(in srgb,var(--warn) 8%,transparent);color:color-mix(in srgb,var(--warn) 70%,var(--fg))}
 .kb-more{width:26px;height:26px;margin-top:-3px;opacity:0;transition:opacity .15s}
 .kb-card:hover .kb-more,.kb-card:focus-within .kb-more,.kb-card:focus-visible .kb-more{opacity:1}
 @media (hover:none){.kb-more{opacity:.7}}
@@ -161,14 +189,14 @@ export const KANBAN_CSS = `
 .kb-src>*{visibility:hidden}
 .kb-lane.kb-src{opacity:.5}
 .kb-ghost{position:fixed;z-index:9000;pointer-events:none;margin:0;opacity:.96;transform-origin:30% 30%;
-  box-shadow:0 18px 40px rgba(0,0,0,.28),0 3px 10px rgba(0,0,0,.16);overflow:hidden;will-change:transform}
+  box-shadow:0 12px 28px rgba(0,0,0,.16),0 2px 6px rgba(0,0,0,.08);overflow:hidden;will-change:transform}
 .kb-ghost.kb-lane{overflow:hidden}
 body.kb-nosel{user-select:none;-webkit-user-select:none;cursor:grabbing}
 
 .kb-sk .kb-lane-head{cursor:default}
 .kb-sk-card{flex-direction:column;gap:8px;cursor:default;margin:0 8px 7px}
 
-@media (prefers-reduced-motion:reduce){.kb-card,.kb-lane,.kb-check,.kb-dot i{transition:none}.kb-card.kb-flash{animation:none}}
+@media (prefers-reduced-motion:reduce){.kb-card,.kb-lane,.kb-check{transition:none}.kb-card.kb-flash{animation:none}}
 
 /* A narrow board (a phone, a narrow chat or note): one lane per screen, snapping, bigger touch targets. */
 @container kb (max-width:560px){
@@ -179,7 +207,6 @@ body.kb-nosel{user-select:none;-webkit-user-select:none;cursor:grabbing}
   .kb-card{padding-block:10px}
   .kb-check{width:22px;height:22px}
   .kb-more{width:32px;height:32px}
-  .kb-dot{width:26px;height:28px}
   .kb-steps{inset-inline-end:42px;top:11px}
 }
 

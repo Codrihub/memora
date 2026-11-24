@@ -1,6 +1,6 @@
 // Boards in Mnemo's chat: a preview, not the board. A board a turn names (a mention in the question,
 // a link in the reply, a card Mnemo hands over, a kanban tool it used) shows as a card with its name,
-// folder, how much is done, its lanes as bars and a glimpse of the first cards in each lane. A tap
+// folder, how much is done (one calm progress line) and a glimpse of the first cards in each lane. A tap
 // (or Open board) opens the board itself. The preview follows changes as they happen.
 
 import { apiGet } from '../api';
@@ -84,11 +84,8 @@ function summaryOf(card: HTMLElement, b: BoardInfo | undefined): void {
   sub.textContent = [t('{done} of {total} done', { done: b.done, total: b.cards }), tn(b.lanes.length, '{n} lane', '{n} lanes'), folder ? folder.split('/').join(' / ') : '']
     .filter(Boolean)
     .join(' · ');
-  const lanes = b.lanes.slice(0, 10);
-  const max = Math.max(1, ...lanes.map((l) => l.cards));
-  bars.innerHTML = lanes
-    .map((l) => `<i title="${attr(`${l.title}: ${tn(l.cards, '{n} card', '{n} cards')}`)}" style="--h:${Math.round((l.cards / max) * 100)}%"></i>`)
-    .join('');
+  // One calm progress line (how much is done), not a bar per lane.
+  bars.innerHTML = `<i style="width:${b.cards ? Math.round((b.done / b.cards) * 100) : 0}%"></i>`;
 }
 
 /** The first lanes with their first card titles: a still glimpse, nothing to drag or tick. */
@@ -142,13 +139,9 @@ export function markNoteBoards(root: HTMLElement): void {
         c.querySelector('.mn-card-t b')?.insertAdjacentHTML('afterend', `<em class="mn-nb">${icon('kanban')}${tn(boards.length, '{n} board', '{n} boards')}</em>`);
         rows.push(`<details class="mn-nbd"><summary><span>${esc(t('Boards in this note'))}</span><em>${boards.length}</em></summary>${boards
           .map((b) => {
-            const max = Math.max(1, ...b.lanes.map((l) => l.cards));
             return `<button type="button" class="mn-nbr" data-board="${attr(b.path)}">${icon('kanban')}<span class="mn-nbr-t"><b dir="auto">${esc(b.title)}</b><small>${esc(
               t('{done} of {total} done', { done: b.done, total: b.cards }),
-            )}</small></span><span class="mn-kb-bars" aria-hidden="true">${b.lanes
-              .slice(0, 8)
-              .map((l) => `<i style="--h:${Math.round((l.cards / max) * 100)}%"></i>`)
-              .join('')}</span></button>`;
+            )}</small></span><span class="mn-kb-bars" aria-hidden="true"><i style="width:${b.cards ? Math.round((b.done / b.cards) * 100) : 0}%"></i></span></button>`;
           })
           .join('')}</details>`);
         // The fold belongs to its note card: both in one grid cell, at the card's width.

@@ -23,6 +23,8 @@ interface ModalOptions {
   body?: Node | string;
   actions?: ModalAction[];
   wide?: boolean;
+  /** A side sheet on wider screens (a bottom sheet on phones, as every dialog). */
+  side?: boolean;
   onOpen?: (body: HTMLElement) => void;
 }
 
@@ -70,7 +72,7 @@ export const Modal = {
     Modal.close(true);
     lastFocus = document.activeElement as HTMLElement | null;
     const host = $('#modalHost');
-    const box = el('div', 'modal' + (opts.wide ? ' wide' : ''));
+    const box = el('div', 'modal' + (opts.wide ? ' wide' : '') + (opts.side ? ' side' : ''));
     const titleId = 'modal-t-' + ++seq;
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
@@ -110,6 +112,7 @@ export const Modal = {
 
     host.innerHTML = '';
     host.appendChild(box);
+    host.classList.toggle('side', !!opts.side);
     host.classList.remove('hidden');
     prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -158,6 +161,7 @@ export const Modal = {
 
   close(silent = false): void {
     $('#modalHost').classList.add('hidden');
+    $('#modalHost').classList.remove('side');
     $('#modalHost').innerHTML = '';
     if (!keyHandler) return;
     document.removeEventListener('keydown', keyHandler, true);
