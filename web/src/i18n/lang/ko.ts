@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "넓은 화면에서는 사이드 패널, 하나씩 접히며 설정된 내용을 보여 주는 섹션, 더 여유로운 간격, 그리고 정말로 초기화되는 모두 초기화.",
   "A new bottom bar on phones": "휴대폰의 새 하단 바",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "깔끔하게 떠 있는 아이콘 바, 현재 페이지는 강조 색으로 표시돼요.",
+  "Small fixes": "작은 수정",
+  "Two small fixes for boards and Mnemo.": "보드와 Mnemo를 위한 작은 수정 두 가지.",
+  "A tidy lane list": "깔끔한 레인 목록",
+  "The lane list in the board pager marks the lane you are on with a small check.": "보드 페이지 넘김의 레인 목록에서 지금 있는 레인에 작은 체크 표시가 붙습니다.",
+  "Clean card titles in Mnemo": "Mnemo의 깔끔한 카드 제목",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Mnemo 채팅의 보드 미리보기가 날짜, 태그, 링크 괄호 없이 카드 제목만 보여 줍니다.",
 };
 export default lines;

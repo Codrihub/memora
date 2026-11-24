@@ -1019,7 +1019,7 @@ export class KanbanView {
         openMenu(
           all.map((l, i) => ({
             label: `${l.getAttribute('aria-label') || ''}  ·  ${l.querySelectorAll('.kb-card').length}`,
-            icon: i === this.curLane ? IC.check : IC.lane,
+            icon: i === this.curLane ? I.check : IC.lane,
             run: () => this.goLane(i),
           })),
           btn,

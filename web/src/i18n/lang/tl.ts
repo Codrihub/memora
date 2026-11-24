@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Side panel sa mas malalapad na screen, mga seksyong isa-isang nagtitiklop at nagpapakita ng naka-set, mas maluwag na espasyo, at I-reset lahat na talagang nagre-reset.",
   "A new bottom bar on phones": "Bagong bottom bar sa mga phone",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Malinis na lumulutang na bar ng mga icon, na ang kasalukuyang page ay nasa accent color.",
+  "Small fixes": "Maliliit na ayos",
+  "Two small fixes for boards and Mnemo.": "Dalawang maliit na ayos para sa mga board at Mnemo.",
+  "A tidy lane list": "Maayos na listahan ng lane",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Minamarkahan ng listahan ng lane sa pager ng board ang lane na kinaroroonan mo gamit ang maliit na tsek.",
+  "Clean card titles in Mnemo": "Malinis na pamagat ng card sa Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Ang mga preview ng board sa chat ng Mnemo ay nagpapakita ng payak na pamagat ng card, walang petsa, tag o bracket ng link.",
 };
 export default lines;

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-11-25
+
+Two small fixes for boards and Mnemo.
+
+### Fixed
+
+- The lane list in the board pager (tap **2/9**) marked the current lane with an
+  oversized check; it now uses the same small icon as the rest of the menu.
+- Board previews in Mnemo chat showed a card's raw first line, with dates, tags
+  and link brackets; they now show the plain card title.
+
 ## [3.2.1] - 2026-11-24
 
 A polish release for boards: menus that fit where you are, a tidier lane menu,

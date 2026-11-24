@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "แผงด้านข้างบนจอที่กว้างขึ้น ส่วนที่พับทีละส่วนและบอกว่าตั้งค่าอะไรไว้ ระยะห่างโปร่งขึ้น และรีเซ็ตทั้งหมดที่รีเซ็ตจริงๆ",
   "A new bottom bar on phones": "แถบด้านล่างใหม่บนมือถือ",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "แถบไอคอนลอยเรียบๆ โดยหน้าที่คุณอยู่จะเป็นสีเน้น",
+  "Small fixes": "การแก้ไขเล็กน้อย",
+  "Two small fixes for boards and Mnemo.": "การแก้ไขเล็กน้อยสองอย่างสำหรับบอร์ดและ Mnemo",
+  "A tidy lane list": "รายการเลนที่เป็นระเบียบ",
+  "The lane list in the board pager marks the lane you are on with a small check.": "รายการเลนในตัวเลื่อนหน้าของบอร์ดจะทำเครื่องหมายถูกเล็ก ๆ ที่เลนที่คุณอยู่",
+  "Clean card titles in Mnemo": "ชื่อการ์ดที่สะอาดใน Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "ตัวอย่างบอร์ดในแชต Mnemo แสดงชื่อการ์ดแบบเรียบ ๆ โดยไม่มีวันที่ แท็ก หรือวงเล็บของลิงก์",
 };
 export default lines;

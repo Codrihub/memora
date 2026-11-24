@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Oldalpanel szélesebb képernyőn, egyesével összecsukódó szakaszok, amelyek megmutatják a beállítottat, tágasabb térközök, és az Összes visszaállítása, ami tényleg visszaállít.",
   "A new bottom bar on phones": "Új alsó sáv telefonon",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Letisztult lebegő ikonsáv, ahol az aktuális oldal kiemelőszínben látszik.",
+  "Small fixes": "Apró javítások",
+  "Two small fixes for boards and Mnemo.": "Két apró javítás a táblákhoz és a Mnemóhoz.",
+  "A tidy lane list": "Rendezett oszloplista",
+  "The lane list in the board pager marks the lane you are on with a small check.": "A tábla lapozójának oszloplistája kis pipával jelöli az aktuális oszlopot.",
+  "Clean card titles in Mnemo": "Tiszta kártyacímek a Mnemóban",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "A táblák előnézete a Mnemo-csevegésben egyszerű kártyacímeket mutat, dátumok, címkék és linkzárójelek nélkül.",
 };
 export default lines;

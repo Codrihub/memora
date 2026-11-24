@@ -14,6 +14,7 @@ import { fadeScroll } from '../ui/scroll-fade';
 import { boardInfos, boardRefsHTML, type BoardInfo } from '../views/board-card';
 import type { KbBoard } from '../views/kanban';
 import { mutationInfo } from '../vault/store';
+import { parseCard } from '../views/card-text';
 
 const dirOf = (p: string): string => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 
@@ -88,6 +89,13 @@ function summaryOf(card: HTMLElement, b: BoardInfo | undefined): void {
   bars.innerHTML = `<i style="width:${b.cards ? Math.round((b.done / b.cards) * 100) : 0}%"></i>`;
 }
 
+/** A card's first line as plain words: tags, dates and the brackets of links taken out. */
+function peekTitle(text: string): string {
+  const f = parseCard(text).fields;
+  const words = f.text.split('\n')[0]!.replace(/\s+/g, ' ').trim();
+  return words || (f.links[0] || '').split('|').pop()!.split('/').pop() || '';
+}
+
 /** The first lanes with their first card titles: a still glimpse, nothing to drag or tick. */
 function peekOf(card: HTMLElement, b: KbBoard): void {
   const box = card.querySelector<HTMLElement>('.mn-kb-peek');
@@ -99,7 +107,7 @@ function peekOf(card: HTMLElement, b: KbBoard): void {
       (l) =>
         `<div class="mn-kb-pl"><span class="mn-kb-plh" dir="auto">${esc(l.title)}<em>${l.cards.length}</em></span>${l.cards
           .slice(0, 2)
-          .map((c) => `<span class="mn-kb-pc${c.checked ? ' done' : ''}" dir="auto">${esc(c.title || c.text.split('\n')[0])}</span>`)
+          .map((c) => `<span class="mn-kb-pc${c.checked ? ' done' : ''}" dir="auto">${esc(peekTitle(c.text) || c.title || '')}</span>`)
           .join('')}${l.cards.length > 2 ? `<span class="mn-kb-pm">${esc(t('+{n} more', { n: l.cards.length - 2 }))}</span>` : ''}</div>`,
     )
     .join('');

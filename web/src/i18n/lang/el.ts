@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Πλαϊνό πάνελ σε μεγαλύτερες οθόνες, ενότητες που διπλώνουν μία-μία και δείχνουν τι έχει οριστεί, πιο άνετες αποστάσεις και Επαναφορά όλων που πραγματικά επαναφέρει.",
   "A new bottom bar on phones": "Νέα κάτω μπάρα στα κινητά",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Μια καθαρή αιωρούμενη μπάρα εικονιδίων, με τη σελίδα που βρίσκεσαι στο χρώμα έμφασης.",
+  "Small fixes": "Μικρές διορθώσεις",
+  "Two small fixes for boards and Mnemo.": "Δύο μικρές διορθώσεις για πίνακες και Mnemo.",
+  "A tidy lane list": "Μια τακτοποιημένη λίστα στηλών",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Η λίστα στηλών στον πλοηγό του πίνακα σημειώνει τη στήλη όπου βρίσκεστε με ένα μικρό τικ.",
+  "Clean card titles in Mnemo": "Καθαροί τίτλοι καρτών στο Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Οι προεπισκοπήσεις πινάκων στη συνομιλία του Mnemo δείχνουν απλούς τίτλους καρτών, χωρίς ημερομηνίες, ετικέτες ή αγκύλες συνδέσμων.",
 };
 export default lines;

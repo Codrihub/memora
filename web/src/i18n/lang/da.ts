@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Et sidepanel på bredere skærme, sektioner der folder sammen én ad gangen og viser, hvad der er sat, mere luftig afstand, og Nulstil alt, der virkelig nulstiller.",
   "A new bottom bar on phones": "En ny bundbjælke på telefoner",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "En ren, flydende bjælke med ikoner, hvor den side, du er på, har accentfarven.",
+  "Small fixes": "Små rettelser",
+  "Two small fixes for boards and Mnemo.": "To små rettelser til tavler og Mnemo.",
+  "A tidy lane list": "En pæn liste over baner",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Listen over baner i tavlens bladring markerer den bane, du er på, med et lille flueben.",
+  "Clean card titles in Mnemo": "Rene korttitler i Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Tavleforhåndsvisninger i Mnemo-chatten viser rene korttitler uden datoer, tags eller linkparenteser.",
 };
 export default lines;

@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Un panou lateral pe ecrane mai late, secțiuni care se pliază pe rând și arată ce e setat, spațiere mai aerisită și Resetează tot, care chiar resetează.",
   "A new bottom bar on phones": "O nouă bară jos pe telefoane",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "O bară plutitoare curată de pictograme, cu pagina pe care ești în culoarea de accent.",
+  "Small fixes": "Mici corecturi",
+  "Two small fixes for boards and Mnemo.": "Două mici corecturi pentru panouri și Mnemo.",
+  "A tidy lane list": "O listă de coloane ordonată",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Lista de coloane din paginatorul panoului marchează coloana în care ești cu o mică bifă.",
+  "Clean card titles in Mnemo": "Titluri de carduri curate în Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Previzualizările panourilor din chatul Mnemo arată titluri simple de carduri, fără date, etichete sau paranteze de linkuri.",
 };
 export default lines;

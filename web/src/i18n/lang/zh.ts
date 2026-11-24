@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "宽屏上有侧边面板，各部分一次折叠一个并显示已设置的内容，间距更宽松，而且全部重置真的会重置。",
   "A new bottom bar on phones": "手机上全新的底部栏",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "简洁的悬浮图标栏，当前所在页面以强调色显示。",
+  "Small fixes": "小修复",
+  "Two small fixes for boards and Mnemo.": "看板和 Mnemo 的两项小修复。",
+  "A tidy lane list": "整洁的列清单",
+  "The lane list in the board pager marks the lane you are on with a small check.": "看板翻页器中的列清单会用小对勾标出你当前所在的列。",
+  "Clean card titles in Mnemo": "Mnemo 中干净的卡片标题",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Mnemo 聊天中的看板预览只显示卡片标题，不含日期、标签或链接括号。",
 };
 export default lines;

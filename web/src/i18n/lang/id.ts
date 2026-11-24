@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Panel samping di layar lebar, bagian yang melipat satu per satu dan menampilkan apa yang sudah diatur, jarak lebih lega, dan Reset semua yang benar-benar mereset.",
   "A new bottom bar on phones": "Bilah bawah baru di ponsel",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Bilah ikon melayang yang bersih, dengan halaman yang sedang dibuka berwarna aksen.",
+  "Small fixes": "Perbaikan kecil",
+  "Two small fixes for boards and Mnemo.": "Dua perbaikan kecil untuk papan dan Mnemo.",
+  "A tidy lane list": "Daftar lane yang rapi",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Daftar lane di penggeser papan menandai lane yang sedang dibuka dengan centang kecil.",
+  "Clean card titles in Mnemo": "Judul kartu bersih di Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Pratinjau papan di obrolan Mnemo menampilkan judul kartu polos, tanpa tanggal, tag, atau kurung tautan.",
 };
 export default lines;

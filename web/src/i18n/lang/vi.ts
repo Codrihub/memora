@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Bảng bên trên màn hình rộng, các mục gập lại từng cái một và cho thấy những gì đã đặt, khoảng cách thoáng hơn, và Đặt lại tất cả thật sự đặt lại.",
   "A new bottom bar on phones": "Thanh dưới mới trên điện thoại",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Một thanh biểu tượng nổi gọn gàng, trang bạn đang xem được tô màu nhấn.",
+  "Small fixes": "Sửa lỗi nhỏ",
+  "Two small fixes for boards and Mnemo.": "Hai sửa lỗi nhỏ cho bảng và Mnemo.",
+  "A tidy lane list": "Danh sách cột gọn gàng",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Danh sách cột trong bộ chuyển trang của bảng đánh dấu cột bạn đang xem bằng một dấu tích nhỏ.",
+  "Clean card titles in Mnemo": "Tiêu đề thẻ gọn gàng trong Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Bản xem trước bảng trong khung chat Mnemo hiển thị tiêu đề thẻ thuần, không có ngày, thẻ gắn hay dấu ngoặc của liên kết.",
 };
 export default lines;

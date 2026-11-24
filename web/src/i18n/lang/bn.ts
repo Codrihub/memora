@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "বড় স্ক্রিনে সাইড প্যানেল, একবারে একটি করে ভাঁজ হওয়া সেকশন যা কী সেট আছে দেখায়, আরও খোলামেলা ফাঁকা জায়গা, আর সব রিসেট সত্যিই রিসেট করে।",
   "A new bottom bar on phones": "ফোনে নতুন নিচের বার",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "আইকনের পরিচ্ছন্ন ভাসমান বার, যেখানে আপনি যে পেজে আছেন তা অ্যাকসেন্ট রঙে দেখায়।",
+  "Small fixes": "ছোট সংশোধন",
+  "Two small fixes for boards and Mnemo.": "বোর্ড আর Mnemo-র জন্য দুটি ছোট সংশোধন।",
+  "A tidy lane list": "গোছানো লেন তালিকা",
+  "The lane list in the board pager marks the lane you are on with a small check.": "বোর্ডের পেজারের লেন তালিকায় আপনি যে লেনে আছেন সেটি ছোট টিক চিহ্নে দেখায়।",
+  "Clean card titles in Mnemo": "Mnemo-তে পরিষ্কার কার্ড শিরোনাম",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Mnemo চ্যাটে বোর্ডের প্রিভিউ এখন তারিখ, ট্যাগ বা লিংকের বন্ধনী ছাড়া সাধারণ কার্ড শিরোনাম দেখায়।",
 };
 export default lines;

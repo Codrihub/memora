@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "חלונית צד במסכים רחבים יותר, מקטעים שנסגרים אחד אחד ומראים מה הוגדר, מרווחים נדיבים יותר, ו‎אפס הכול שבאמת מאפס.",
   "A new bottom bar on phones": "סרגל תחתון חדש בטלפונים",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "סרגל סמלים צף ונקי, עם הדף שבו אתם נמצאים בצבע ההדגשה.",
+  "Small fixes": "תיקונים קטנים",
+  "Two small fixes for boards and Mnemo.": "שני תיקונים קטנים ללוחות ול‑Mnemo.",
+  "A tidy lane list": "רשימת עמודות מסודרת",
+  "The lane list in the board pager marks the lane you are on with a small check.": "רשימת העמודות בדפדפן הלוח מסמנת את העמודה שבה אתם נמצאים בסימון קטן.",
+  "Clean card titles in Mnemo": "כותרות כרטיסים נקיות ב‑Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "תצוגות מקדימות של לוחות בצ׳אט של Mnemo מציגות כותרות כרטיסים פשוטות, בלי תאריכים, תגיות או סוגריים של קישורים.",
 };
 export default lines;

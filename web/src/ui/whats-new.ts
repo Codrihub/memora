@@ -28,6 +28,20 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.2.2',
+    title: t('Small fixes'),
+    lead: t('Two small fixes for boards and Mnemo.'),
+    groups: [
+      {
+        kind: 'better',
+        items: [
+          { icon: 'check', title: t('A tidy lane list'), text: t('The lane list in the board pager marks the lane you are on with a small check.') },
+          { icon: 'kanban', title: t('Clean card titles in Mnemo'), text: t('Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.2.1',
     title: t('Calmer boards'),
     lead: t('Menus that fit where you are, an archive you can search, softer progress and due dates, and steps you can tick on the card.'),

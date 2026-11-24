@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Бічна панель на широких екранах, розділи, що згортаються по одному й показують, що задано, вільніші відступи та Скинути все, яке справді скидає.",
   "A new bottom bar on phones": "Нова нижня панель на телефонах",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Охайна плаваюча панель значків, де поточна сторінка виділена акцентним кольором.",
+  "Small fixes": "Невеликі виправлення",
+  "Two small fixes for boards and Mnemo.": "Два невеликі виправлення для дошок і Mnemo.",
+  "A tidy lane list": "Охайний список колонок",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Список колонок у перемикачі дошки позначає поточну колонку маленькою позначкою.",
+  "Clean card titles in Mnemo": "Чисті назви карток у Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Попередні перегляди дошок у чаті Mnemo показують прості назви карток — без дат, тегів і дужок посилань.",
 };
 export default lines;

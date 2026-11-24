@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Geniş ekranlarda yan panel, tek tek katlanan ve neyin ayarlı olduğunu gösteren bölümler, daha ferah boşluklar ve gerçekten sıfırlayan Tümünü sıfırla.",
   "A new bottom bar on phones": "Telefonlarda yeni alt çubuk",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Bulunduğunuz sayfanın vurgu renginde göründüğü, temiz, yüzen bir simge çubuğu.",
+  "Small fixes": "Küçük düzeltmeler",
+  "Two small fixes for boards and Mnemo.": "Panolar ve Mnemo için iki küçük düzeltme.",
+  "A tidy lane list": "Düzenli bir sütun listesi",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Pano sayfalayıcısındaki sütun listesi bulunduğunuz sütunu küçük bir onay işaretiyle gösterir.",
+  "Clean card titles in Mnemo": "Mnemo’da temiz kart başlıkları",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Mnemo sohbetindeki pano önizlemeleri tarih, etiket ya da bağlantı köşeli parantezleri olmadan sade kart başlıkları gösterir.",
 };
 export default lines;

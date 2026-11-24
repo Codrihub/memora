@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Sivupaneeli leveämmillä näytöillä, osiot jotka taittuvat yksi kerrallaan ja näyttävät mikä on asetettu, väljemmät välit ja Nollaa kaikki, joka oikeasti nollaa.",
   "A new bottom bar on phones": "Uusi alapalkki puhelimissa",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Siisti kelluva kuvakepalkki, jossa nykyinen sivu näkyy korostusvärillä.",
+  "Small fixes": "Pieniä korjauksia",
+  "Two small fixes for boards and Mnemo.": "Kaksi pientä korjausta tauluihin ja Mnemoon.",
+  "A tidy lane list": "Siisti sarakelista",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Taulun selaimen sarakelista merkitsee nykyisen sarakkeen pienellä valintamerkillä.",
+  "Clean card titles in Mnemo": "Siistit korttien otsikot Mnemossa",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Taulujen esikatselut Mnemo-keskustelussa näyttävät pelkät korttien otsikot ilman päivämääriä, tunnisteita tai linkkien hakasulkeita.",
 };
 export default lines;

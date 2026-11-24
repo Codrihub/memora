@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "لوحة جانبية على الشاشات الأوسع، وأقسام تنطوي واحداً تلو الآخر وتعرض ما تم ضبطه، ومسافات أرحب، وإعادة ضبط الكل تعيد الضبط فعلاً.",
   "A new bottom bar on phones": "شريط سفلي جديد على الهواتف",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "شريط أيقونات عائم أنيق، والصفحة التي أنت فيها بلون التمييز.",
+  "Small fixes": "إصلاحات صغيرة",
+  "Two small fixes for boards and Mnemo.": "إصلاحان صغيران للّوحات وMnemo.",
+  "A tidy lane list": "قائمة مسارات مرتبة",
+  "The lane list in the board pager marks the lane you are on with a small check.": "تُعلِّم قائمة المسارات في متصفّح اللوحة المسارَ الحالي بعلامة صغيرة.",
+  "Clean card titles in Mnemo": "عناوين بطاقات نظيفة في Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "تعرض معاينات اللوحات في دردشة Mnemo عناوين البطاقات كنص عادي، بلا تواريخ أو وسوم أو أقواس روابط.",
 };
 export default lines;

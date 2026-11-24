@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "Boční panel na širších obrazovkách, sekce, které se skládají po jedné a ukazují, co je nastaveno, vzdušnější rozestupy a Obnovit vše, které opravdu obnoví.",
   "A new bottom bar on phones": "Nový spodní panel na telefonech",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "Čistý plovoucí panel ikon, kde je stránka, na které jste, v barvě zvýraznění.",
+  "Small fixes": "Drobné opravy",
+  "Two small fixes for boards and Mnemo.": "Dvě drobné opravy pro nástěnky a Mnemo.",
+  "A tidy lane list": "Úhledný seznam sloupců",
+  "The lane list in the board pager marks the lane you are on with a small check.": "Seznam sloupců v přepínači nástěnky označí sloupec, ve kterém jste, malou fajfkou.",
+  "Clean card titles in Mnemo": "Čisté názvy karet v Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "Náhledy nástěnek v chatu Mnemo ukazují prosté názvy karet, bez dat, štítků a závorek odkazů.",
 };
 export default lines;

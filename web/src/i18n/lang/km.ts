@@ -4554,5 +4554,11 @@ const lines: Record<string, string> = {
   "A side panel on wider screens, sections that fold one at a time and show what is set, roomier spacing, and Reset all that really resets.": "ផ្ទាំងចំហៀងលើអេក្រង់ធំជាង ផ្នែកដែលបត់ម្តងមួយៗ ហើយបង្ហាញអ្វីដែលបានកំណត់ គម្លាតទូលាយជាង និងកំណត់ទាំងអស់ឡើងវិញដែលកំណត់ឡើងវិញពិតមែន។",
   "A new bottom bar on phones": "របារខាងក្រោមថ្មីលើទូរសព្ទ",
   "A clean floating bar of icons, with the page you are on in the accent colour.": "របាររូបតំណាងអណ្តែតស្អាត ដោយទំព័រដែលអ្នកកំពុងនៅមានពណ៌សង្កត់ធ្ងន់។",
+  "Small fixes": "ការកែតម្រូវតូចៗ",
+  "Two small fixes for boards and Mnemo.": "ការកែតម្រូវតូចៗពីរសម្រាប់ផ្ទាំង និង Mnemo។",
+  "A tidy lane list": "បញ្ជីជួរដែលមានរបៀប",
+  "The lane list in the board pager marks the lane you are on with a small check.": "បញ្ជីជួរនៅក្នុងឧបករណ៍ប្ដូរទំព័ររបស់ផ្ទាំង សម្គាល់ជួរដែលអ្នកកំពុងនៅដោយសញ្ញាធីកតូចមួយ។",
+  "Clean card titles in Mnemo": "ចំណងជើងកាតស្អាតក្នុង Mnemo",
+  "Board previews in Mnemo chat show plain card titles, without dates, tags or link brackets.": "ការមើលជាមុននៃផ្ទាំងក្នុងការជជែក Mnemo បង្ហាញចំណងជើងកាតធម្មតា ដោយគ្មានកាលបរិច្ឆេទ ស្លាក ឬវង់ក្រចករបស់តំណ។",
 };
 export default lines;
