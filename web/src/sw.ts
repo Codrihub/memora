@@ -125,6 +125,27 @@ async function fromBuild(req: Request): Promise<Response> {
 }
 
 // Navigations show the offline page only after the network fails twice.
+// A due-date reminder: bring an open window forward on its board, or open one there.
+sw.addEventListener('notificationclick', ((event: SWEvent & { notification: { close(): void; data?: { path?: string; url?: string } } }) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const clients = sw.clients as unknown as {
+    matchAll(o: { type: string }): Promise<{ focus(): Promise<unknown>; postMessage(m: unknown): void }[]>;
+    openWindow(url: string): Promise<unknown>;
+  };
+  event.waitUntil(
+    (async () => {
+      const wins = await clients.matchAll({ type: 'window' });
+      if (wins.length) {
+        await wins[0].focus();
+        if (data.path) wins[0].postMessage({ type: 'OPEN_NOTE', path: data.path });
+        return;
+      }
+      await clients.openWindow(data.url || '/');
+    })(),
+  );
+}) as never);
+
 sw.addEventListener('fetch', ((event: SWEvent) => {
   const req = event.request;
   if (req.method !== 'GET') return;

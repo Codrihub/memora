@@ -28,6 +28,32 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.2.0',
+    title: t('Boards that keep you on time'),
+    lead: t('See what is due across every board, sort and filter your boards, and work a board from the keyboard, with Mnemo keeping track too.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'alert', title: t('Due, on Overview'), text: t('Cards that are overdue, due today or due this week, from every board, each with its board and lane. Open a card on its board or tick it off right there.') },
+          { icon: 'bell', title: t('Reminders, if you want them'), text: t('Turn on due date reminders in Settings: one notification when a card falls due and one a day for what is overdue. The Boards item counts what is late.') },
+          { icon: 'more', title: t('A menu on every board'), text: t('On the Boards page each board has a ⋯ menu to open, rename, move, duplicate, colour or trash it. Right-click or a long press opens it too.') },
+          { icon: 'kanban', title: t('Sort and filter boards'), text: t('Sort by last change, name, progress or next due date, and filter by folder, overdue cards or done. Your choice stays on this device.') },
+          { icon: 'command', title: t('Boards from the keyboard'), text: t('Arrows move between cards and lanes, Enter edits, Space ticks, Alt with the arrows moves a card, N adds one and ? lists the keys.') },
+          { icon: 'mnemo', title: t('Mnemo knows what is due'), text: t('Ask Mnemo what is overdue across your boards; it can tick cards off or move them for you, and agents get the same over MCP.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'alert', title: t('Overdue at a glance'), text: t('Past due dates show in a warning tint and today’s in a softer one, and the Boards page counts what is overdue. A board’s own date colours win.') },
+          { icon: 'trash', title: t('Undo after Move to Trash'), text: t('Trash a board or a note from the Boards page, the board itself or the note lists, then bring it back with Undo in the toast.') },
+          { icon: 'check', title: t('Checked with Obsidian'), text: t('Board colours and card ids that Memora keeps in the file are checked to survive a save in Obsidian Kanban.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.1.0',
     title: t('Boards for your tasks'),
     lead: t('Kanban boards that you and your agents work on together, notes that read better on every screen, and tidier menus.'),

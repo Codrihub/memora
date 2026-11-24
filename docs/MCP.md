@@ -12,7 +12,7 @@ catalog.
 | Auth | API key in `Authorization: Bearer <key>` or `X-API-Key: <key>`, or an OAuth 2.1 access token |
 | Discovery card | `GET /.well-known/mcp.json` (public) |
 | Readable catalog | `GET /tools` (HTML page, public) |
-| Catalog size | 86 tools, plus 5 admin tools for keys with the `admin` scope |
+| Catalog size | 87 tools, plus 5 admin tools for keys with the `admin` scope |
 
 `initialize` answers with the protocol version the client asks for when it is
 one of the three above, and with `2025-06-18` otherwise.
@@ -50,7 +50,7 @@ servers can use a bridge such as `mcp-remote` (see below).
 
 ### With an API key
 
-Create a key in the web UI (Keys page), with `memora-cli` (`/keys`), or with
+Create a key in the web UI (**Agents**, then **New agent**), with `memora-cli` (`/keys`), or with
 `POST /api/keys`. The raw key (`memora_live_...`) is shown once. By default a key gets
 the scopes `mcp`, `read` and `write` and may call every tool. See
 [Tool switches and per-key permissions](contracts/tools-permissions.md) to
@@ -143,7 +143,7 @@ The flow:
 
 The access token is a regular Memora API key named after the client. It starts
 with the default scopes (`mcp`, `read`, `write`) and every tool, and it shows up
-on the Keys page like any other key, so you can restrict, disable or delete it
+on the Agents page like any other agent, so you can restrict, disable or delete it
 there. The access token has no expiry. A `refresh_token` grant replaces it with
 a fresh one (the old token stops working at once) and rotates the refresh token.
 Disabling or deleting the key ends the connection.
@@ -471,6 +471,7 @@ the web app shows every embedded board live in the note.
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
 | `kanban_list_boards` | R | `folder` (string; includes subfolders, `Root` = top level) | Boards the caller may see, most recently changed first: `{count, boards:[{path, title, lanes:[{title, cards}], cards, done, archived, version, mtime}]}`. |
+| `kanban_due` | R | `range` (`overdue`, `today`, `upcoming` or `all`, default all), `days` (integer, default 7, at most 366), `today` (`YYYY-MM-DD`, default the server's local day), `folder` (string; includes subfolders) | Open cards with a due date across the boards the caller may see: `{today, days, counts:{overdue, today, upcoming}, overdue, due_today, upcoming}`, each card `{board, board_title, lane, lane_index, card, title, date, block}` sorted by date. A card's due date is its earliest date; done and archived cards are left out. Tick one off with `kanban_update_card` (`checked: true`) or move it with `kanban_move_card`, using `board` as `path` and `card`. |
 | `kanban_get_board` | R | `path` (string, required; `.md` optional, or a note name) | `{path, version, lanes:[{index, title, max_items, color, complete, cards}], archive, counts:{lanes, cards, done, archived}, style:{color, icon}, tag_colors:{tag:{color, background}}, settings}`. A card is `{id, text, title, checked, task, tags, links, dates, times, block, color, checklist:[{text, done}], fields:{text, links, tags, date, time}}`; `fields.text` is the free text (without the pieces, the checklist and the block id). `settings` is the whole settings object. |
 | `kanban_add_card` | W | `path`, `lane`, `text` (strings, required), `position` (integer from 0, default the bottom), `checked` (boolean), `links`, `tags` (arrays of strings), `date` (`YYYY-MM-DD`), `time` (`HH:mm`), `checklist` (array of `{text, done}`), `color` (string), `version` (string) | Adds `- [ ] text` (more lines indented under it) with the fields. Returns the board with `card` (the new id), `changed` and the new `version`. |
 | `kanban_move_card` | W | `path`, `card`, `lane` (strings, required), `position` (integer from 0, default the bottom), `version` | Moves the card into the lane (the same lane to reorder). Into a `complete` lane checks it, out of one unchecks it. Returns the board and `card`. |
@@ -501,7 +502,7 @@ exists there, otherwise a note.
 
 Every tool call is published to the web UI's realtime activity stream as an
 `ai_activity` start and end pair, named after the API key (or the signed-in
-user), with the note paths involved. Calls are also counted per key: the Keys
+user), with the note paths involved. Calls are also counted per key: the Agents
 page and `GET /api/keys` show each key's `uses`, `last_ip`, and the tools it has
 called recently. `initialize` registers the connection under the key's name
 (`GET /api/aliases`). `set_my_name` changes the alias shown in the activity

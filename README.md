@@ -49,13 +49,15 @@ Screenshots use a demo vault.
   `[[wikilinks]]`. Edit it with any tool; nothing is locked in a database.
 - **Git history.** Changes are committed, so any revision can be listed, diffed
   and restored (`get_history`, `diff`, `restore_memory`).
-- **MCP for agents.** 86 tools for notes, folders, search, tags, graph traversal,
+- **MCP for agents.** 87 tools for notes, folders, search, tags, graph traversal,
   history, locks, activity, pins, Kanban boards and import/export, plus admin
   tools, over the streamable HTTP transport.
 - **Kanban boards.** A note in the Obsidian Kanban format opens as a board:
   drag cards and lanes with a mouse or a finger, edit a card in a form (linked
   notes, due date, tags, lane) that writes plain Obsidian Kanban text, while
-  agents and Mnemo add and move cards over MCP. The Boards page lists them all, with their progress;
+  agents and Mnemo add and move cards over MCP. The Boards page lists them all, with their progress,
+  sorted and filtered as you like; Overview shows what is due across every board, with optional
+  due date reminders; a board works from the keyboard too;
   a note embeds as many boards as it likes (`![[Board]]`, live in place), Add
   board in the editor makes one and embeds it, and Turn into board makes a
   list note a board. In the Mnemo chat a board it names shows as a preview that opens the board. Changes show live,
@@ -84,9 +86,12 @@ Screenshots use a demo vault.
 - **Per-agent control.** Scopes (`mcp`, `read`, `write`, `admin`), per-key tool
   lists, server-wide tool switches, and privacy rules that hide notes, folders
   or pictures from chosen agents, Mnemo included.
-- **Web UI.** Brain and graph views, a canvas, the vault editor with nine reading
-  colours, fonts and sizes, tags, live agent activity, keys, tools, access
-  rules and settings. Installable as a PWA.
+- **Web UI.** Overview, notes, boards, tags, and brain, graph and canvas views;
+  the vault editor with reading settings (sixteen page colours, nine fonts,
+  size, spacing and width, for every note or one note), live agent activity,
+  agents and keys, tools, access rules and settings. The same pages on every
+  screen: a sidebar on desktops and tablets, a bottom bar with More on phones.
+  Installable as a PWA.
 - **Safe first run.** An unclaimed instance cannot be taken over by whoever
   finds the port: the operator console opens a short setup window and you
   finish in the browser.
@@ -322,8 +327,8 @@ versions without `memora-cli uninstall` (before 1.3.2), see
 [Uninstall by hand](docs/INSTALL.md#uninstall-by-hand-versions-before-132) and
 [Troubleshooting](docs/INSTALL.md#troubleshooting).
 
-The owner can also **shut the server down from the browser**: Settings, Server,
-Shut down. Every browser and agent is disconnected until it is started again on
+The owner can also **shut the server down from the browser**: Settings, Shut
+down. Every browser and agent is disconnected until it is started again on
 the server. When a supervisor restarts it on its own (systemd `Restart=always`,
 Docker `--restart unless-stopped`), the confirmation says so and shows the stop
 command to use instead.

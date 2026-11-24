@@ -1,4 +1,5 @@
 // Must stay the first import: snapshots the hooks.ts defaults before any package installs its own.
+import { startDueWatch } from './views/due-watch';
 import { DEFAULT_REFRESH_TREE, DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import './global.css';
 import { initMnemoLauncher } from './assistant/launcher';
@@ -389,6 +390,7 @@ async function boot(): Promise<void> {
   initPromo();
   initKeepAlive();
   initStorageBanner();
+  startDueWatch();
 }
 
 function start(): void {

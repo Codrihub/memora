@@ -76,6 +76,7 @@ const TOOLS: &[&str] = &[
     "stale_detection",
     "digest",
     "kanban_list_boards",
+    "kanban_due",
     "kanban_get_board",
     "kanban_add_card",
     "kanban_move_card",

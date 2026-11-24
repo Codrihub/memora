@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-24
+
+Boards you can run from anywhere: what is due across every board on Overview,
+on the Boards nav item and in optional reminders; a menu, sort and filter on
+the Boards page; a board you can drive from the keyboard; and Mnemo and agents
+that know what is due. Obsidian Kanban compatibility is now checked against the
+plugin's source.
+
+### Added
+
+- Overview has a **Due** section: open cards across every board that are
+  overdue, due today or due in the next 7 days, each with its board, lane and
+  date. A click opens the board at that card; the round box ticks it off right
+  there, with Undo. It stays hidden while nothing is due.
+- The **Boards** nav item shows how many cards are overdue.
+- **Due date reminders** (Settings, Notifications), off by default: while
+  Memora is open or installed, one browser notification when a card falls due
+  and one a day while cards are overdue. The browser asks for permission when
+  you turn them on; they follow the pop-up switch and never repeat for the same
+  card and day.
+- Boards page: every board card has a ⋯ menu with Open, Rename, Move to…,
+  Duplicate, Color and icon… and Move to Trash; right-click on desktop and a long
+  press on touch screens open it too, F2 renames and Delete trashes from the
+  keyboard. Cards show the board's own colour and icon and how many cards are
+  overdue.
+- Boards page: sort by last updated, name, progress or next due date, and
+  filter by folder or by boards with overdue cards, not done or done; the choice
+  is kept on the device and the search box works with it.
+- Board keyboard: the arrow keys move between cards and lanes (an empty lane
+  takes the focus itself), Enter opens the card form, Space ticks, Alt/Option
+  with the arrows moves the card and a screen reader hears where it went, N adds
+  a card to the focused lane, Delete archives with Undo and ? lists the keys.
+  Help & shortcuts lists them too.
+- Due dates at a glance: on an open card a past date shows in a warning tint and
+  today's date in a softer one. A board's own date colours (Obsidian Kanban's
+  `date-colors`) are followed when it sets them, in the plugin's order.
+- MCP `kanban_due` (Kanban read permission) and `GET /api/kanban/due`: open
+  cards with a due date across boards, as overdue, due today and upcoming (a
+  range of days), each with its board, lane, card id and date, so Mnemo and
+  agents can answer "what is overdue?" and tick off or move those cards with
+  the existing tools. `kanban_list_boards` also returns each board's `style`,
+  the `due` dates of its open cards and its `date_colors`.
+
+### Changed
+
+- Moving a board or a note to the Trash from the Boards page, the board itself
+  or the note lists shows a toast with Undo, and the Boards page and lists
+  update at once after a delete, a restore or a rename.
+- A card that shares its block id with another (Obsidian's Duplicate card
+  copies it) gets an id of its own before Memora gives it a colour, so the
+  colour stays on that card.
+- Help & shortcuts lists the Alt 1-9 pages in the sidebar's order.
+
+### Verified
+
+- What Memora keeps in a board file survives a save from Obsidian Kanban: the
+  plugin parses the whole settings JSON and writes the whole object back, so
+  the `memora` key with lane, card and board colours stays, and it keeps a
+  card's ` ^blockid` at the end of the card's first line. A round-trip test
+  covers a save and a card dragged to another lane.
+
 ## [3.1.0] - 2026-11-24
 
 Kanban boards that people and agents work on together, in the Obsidian Kanban

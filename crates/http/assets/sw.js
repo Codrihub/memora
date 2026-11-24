@@ -1,6 +1,6 @@
 (() => {
-  const BUILD = "memora-build:3c3e6cb4ed8b".slice("memora-build:".length);
-  const APP_JS = "/app.js?v=c2efd1aa9566";
+  const BUILD = "memora-build:cabc958c857f".slice("memora-build:".length);
+  const APP_JS = "/app.js?v=e85b4deaf893";
   const VERSION = BUILD;
   const SHELL = "memora-" + BUILD;
   const sw = self;
@@ -87,6 +87,22 @@
     if (res.ok) await cache.put(req, res.clone()).catch(() => null);
     return res;
   }
+  sw.addEventListener("notificationclick", ((event) => {
+    event.notification.close();
+    const data = event.notification.data || {};
+    const clients = sw.clients;
+    event.waitUntil(
+      (async () => {
+        const wins = await clients.matchAll({ type: "window" });
+        if (wins.length) {
+          await wins[0].focus();
+          if (data.path) wins[0].postMessage({ type: "OPEN_NOTE", path: data.path });
+          return;
+        }
+        await clients.openWindow(data.url || "/");
+      })()
+    );
+  }));
   sw.addEventListener("fetch", ((event) => {
     const req = event.request;
     if (req.method !== "GET") return;

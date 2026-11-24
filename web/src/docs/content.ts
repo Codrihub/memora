@@ -157,7 +157,7 @@ function getStarted(c: PageCtx): string {
     ) +
     `<ul>
       <li><b>Agents</b> read and write the vault over the Model Context Protocol (MCP), each with its own API key or an OAuth approval.</li>
-      <li><b>You</b> browse, edit and govern it here: the brain and graph views, the node editor, live activity, keys, tool switches and access rules.</li>
+      <li><b>You</b> browse, edit and govern it here: notes and Kanban boards, the brain and graph views, Mnemo (the built-in notes agent), live activity, agents and keys, tool switches and access rules.</li>
       <li><b>One process</b> serves the web UI, the HTTP API, MCP and realtime updates on a single port, with server state in one SQLite file.</li>
     </ul>` +
     c.h2('First run') +
@@ -196,7 +196,7 @@ curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/instal
       [
         'Connect an agent',
         p(
-          `Open the ${connectLink('connect wizard')} (Agents & API keys → Connect), pick the app and copy its config. Then paste the ${docLink(
+          `Open ${connectLink('New agent')} (Agents → New agent), pick the app and copy its config. Then paste the ${docLink(
             'agent-instructions',
             'agent instructions',
           )} so the agent knows when to recall and when to remember.`,
@@ -208,10 +208,19 @@ curl -fsSL https://raw.githubusercontent.com/Codrihub/memora/main/scripts/instal
       'Setup window',
       p(`If a setup window expires unused, the instance locks until you run ${code('memora-cli setup')} or ${code('memora-cli unlock')} on the server.`),
     ) +
+    c.h2('Find your way around') +
+    `<ul>
+      <li><b>Sidebar</b> (desktops and tablets): <b>Workspace</b> (Overview, Notes, Boards, Tags, Brain) and <b>Agents</b> (Mnemo, Activity, Agents), each group folding like an accordion. Under them the <b>Library</b> holds your pins, a filter and the folder tree; its heading stays at the top while you scroll. <b>Trash</b> and <b>Settings</b> sit in the footer.</li>
+      <li><b>The menu under your name</b>: the theme, ${appLink('tools', 'Tools')} and ${appLink('access', 'Access rules')}, help (Documentation, Help &amp; shortcuts, What's new) and sign out.</li>
+      <li><b>Phones</b>: the bottom bar has Overview, Notes, Brain, Activity and <b>More</b>, a sheet with every other page in the same groups.</li>
+      <li><b>New note</b> and <b>New board</b> sit at the top of the sidebar; Overview and the folder view have one <b>New</b> button, and ${keys('N')} and ${keys('B')} work in the open folder. ${docLink('shortcuts', 'Keyboard shortcuts')} lists every key.</li>
+    </ul>` +
     c.h2('Where to next') +
     cards([
       ['agent-instructions', 'Agent instructions', 'The recommended prompt and where to paste it.'],
       ['connect', 'Connect an agent', 'MCP URL, keys and client configs.'],
+      ['mnemo', 'Mnemo', 'The notes agent built into Memora.'],
+      ['kanban', 'Kanban boards', 'Boards for you and your agents, in the Obsidian Kanban format.'],
       ['tool-reference', 'Tool reference', 'Every MCP tool this server offers.'],
       ['configuration', 'Configuration', 'Every setting and where it lives.'],
       ['deployment', 'Deployment', 'TLS, reverse proxies and hardening.'],
@@ -354,7 +363,7 @@ function connect(c: PageCtx): string {
     ) +
     c.h2('Steps') +
     steps([
-      ['Open Agents & API keys', p(`Open the ${connectLink('connect wizard')} on Agents & API keys.`)],
+      ['Open Agents & API keys', p(`Open ${connectLink('New agent')} on Agents & API keys (Agents in the sidebar).`)],
       ['Pick the app', p('Claude, ChatGPT, Claude Code, Cursor, VS Code, Codex and others each get ready-made steps.')],
       ['Create the key and copy the config', p('The raw key is shown once. Give each agent its own key so you can see, limit and revoke it on its own.')],
       ['Add the instructions', p(`Paste the ${docLink('agent-instructions', 'agent instructions')} into the client.`)],
@@ -408,6 +417,7 @@ function shortcuts(c: PageCtx): string {
       [keys('/'), 'Open search'],
       [keys('?'), 'Help & shortcuts'],
       [keys('['), 'Collapse or expand the sidebar'],
+      [keys(mod, 'J'), 'Open or leave Mnemo'],
       [keys('Esc'), 'Close a dialog, menu or panel'],
     ]) +
     c.h2('Pages') +
@@ -428,7 +438,26 @@ function shortcuts(c: PageCtx): string {
       [keys('P'), 'Pin or unpin the note'],
       [keys('M'), 'Move the note'],
       [keys('F2'), 'Rename the note'],
+      [keys('F'), 'Hide or show the toolbar (Esc also brings it back)'],
       [keys('Delete'), 'Move the note to the Trash (Undo brings it back)'],
+    ]) +
+    c.h2('On a board') +
+    p('Click a card or tab to it first.') +
+    rows([
+      [keys('←') + keys('→') + keys('↑') + keys('↓'), 'Move between cards and lanes'],
+      [keys('Enter'), 'Open the card form'],
+      [keys('Space'), 'Mark the card as done or not done'],
+      [keys(alt, '←') + keys(alt, '→'), 'Move the card to the next lane'],
+      [keys(alt, '↑') + keys(alt, '↓'), 'Move the card up or down'],
+      [keys('N'), 'Add a card to this lane'],
+      [keys('Delete'), 'Archive the card (with Undo)'],
+      [keys('?'), 'Show these shortcuts'],
+    ]) +
+    c.h2('Boards page') +
+    rows([
+      [keys('F2'), 'Rename the focused board'],
+      [keys('Delete'), 'Move the focused board to the Trash (with Undo)'],
+      [keys('Shift', 'F10'), 'Open the board card menu'],
     ]) +
     c.h2('Editor') +
     rows([

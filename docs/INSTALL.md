@@ -419,8 +419,7 @@ thing:
 | npm, source | runs the server in the background, with `memora.pid`, `memora.log` and `stop.token` in the state folder; `stop` asks it to end over a local, token-protected request and waits, `stop --force` kills it | run `memora` and keep it open; Ctrl+C stops it |
 | Docker | prints the host commands (a container cannot stop itself) | `docker start / stop / restart memora` |
 
-From the browser, the owner can shut the server down in Settings, Server, Shut
-down: the server answers, then stops gracefully and exits with status 0, the
+From the browser, the owner can shut the server down in Settings, Shut down: the server answers, then stops gracefully and exits with status 0, the
 same as Ctrl+C or `systemctl stop`. A supervisor that restarts a cleanly exited
 process starts it again (systemd `Restart=always`, Docker
 `--restart unless-stopped`); the installer's unit uses `Restart=on-failure`, so

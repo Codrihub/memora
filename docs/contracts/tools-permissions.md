@@ -6,8 +6,10 @@ call. Two controls combine:
 - **Global tool switches** turn a tool off for every API key on the server.
 - **Per-key permissions** (scopes and a tool list) limit what one key may do.
 
-They are managed in the web UI, with `memora-cli` (`/tools` and `/keys`), over
-the HTTP API, and with the MCP admin tools. All of them write the same state
+They are managed in the web UI (global switches on **Tools**, in the menu under
+your name; a key's scopes and tools on its agent page, **Access** tab), with
+`memora-cli` (`/tools` and `/keys`), over the HTTP API, and with the MCP admin
+tools. All of them write the same state
 database (`state/memora.db`, see [../DATABASE.md](../DATABASE.md)). Tool
 switches and per-key tool lists from older installs (`state/tools.json` and the
 `tools` field of keys in `gateway.json`) are imported into the database once.
@@ -15,10 +17,10 @@ switches and per-key tool lists from older installs (`state/tools.json` and the
 ## Tool catalog
 
 The switchable catalog is `memora_mcp::catalog()`: every tool with its `name`,
-`category`, `description`, when to use it, and input schema (86 tools; see
+`category`, `description`, when to use it, and input schema (87 tools; see
 [../MCP.md](../MCP.md#tools)). The Kanban tools come in four categories with
 one switch group each: `kanban` (read boards: `kanban_list_boards`,
-`kanban_get_board`), `kanban_cards` (`kanban_add_card`, `kanban_move_card`,
+`kanban_due`, `kanban_get_board`), `kanban_cards` (`kanban_add_card`, `kanban_move_card`,
 `kanban_update_card`, `kanban_card`, `kanban_lane`), `kanban_boards`
 (`kanban_board`) and `kanban_embed` (`kanban_embed`); only the read tools
 work without the `write` scope. At startup the server mirrors the catalog into

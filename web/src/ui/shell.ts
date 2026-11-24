@@ -70,6 +70,10 @@ export const SHELL_CSS = `
 .nav-item.active .ni-badge{color:#cbd5e1}
 @media (prefers-reduced-motion:reduce){.nav-item .ni-badge::before{animation:none}}
 .nav-item .ni-badge.on~.ni-kbd{display:none}
+.ni-tile{position:relative}
+.ni-due{position:absolute;top:-7px;inset-inline-end:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;box-sizing:border-box;display:grid;place-items:center;
+  font:700 10px/1 var(--font);font-variant-numeric:tabular-nums;color:#fff;background:var(--warn,#d97706);box-shadow:0 0 0 2px var(--side-bg,var(--bg))}
+.ni-due[hidden]{display:none}
 
 .side-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;padding-bottom:12px}
 .nav{display:flex;flex-direction:column;gap:2px;padding:0 12px}
@@ -263,6 +267,9 @@ export const SHELL_CSS = `
 .pm-keys{display:flex;gap:3px;flex:none;opacity:.8}
 .pm-new{flex:none;padding:2px 7px;border-radius:999px;font-size:10.5px;font-weight:650;line-height:1.3;color:#fff;background:linear-gradient(135deg,#14b8a6,#4f46e5)}
 .pm-keys kbd{height:18px;min-width:18px;padding:0 4px;font-size:10px}
+.pm-due{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;box-sizing:border-box;display:inline-grid;place-items:center;
+  font:700 10.5px/1 var(--font);font-variant-numeric:tabular-nums;color:#fff;background:var(--warn,#d97706)}
+.pm-due[hidden]{display:none}
 .pm-live{display:inline-flex;align-items:center;gap:5px;flex:none;font-size:12px;font-weight:600;color:var(--accent)}
 .pm-live i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pm-live 1.6s ease-in-out infinite}
 @keyframes pm-live{50%{opacity:.35}}
@@ -533,6 +540,7 @@ export const SHELL_CSS = `
 .guide-about .guide-btns{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
 .guide b{color:var(--fg);font-weight:650}
 .guide code{font-family:var(--mono);font-size:12px;padding:1px 5px;border-radius:5px;background:var(--surface-2);color:var(--accent-3)}
+.guide-h{margin:18px 0 10px;font-size:13px;font-weight:650;color:var(--fg)}
 .guide-keys{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:center;font-size:13px;color:var(--text-2);
   padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .guide-keys > span:nth-child(odd){display:flex;gap:4px}

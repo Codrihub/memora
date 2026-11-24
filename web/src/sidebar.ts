@@ -14,6 +14,7 @@ import { isPinned, pinnedItems, togglePin, unpin } from './vault/store';
 import { colorOfFolder, folderNames, noteTitle, state, type Page } from './state';
 import { DEFAULT_RENDER_TREE } from './ui/hook-snapshot';
 import { icon } from './ui/icons';
+import { repaintDueBadge } from './views/due-watch';
 import { fadeScroll } from './ui/scroll-fade';
 import type { NoteRef } from './types';
 import { t, tn } from './i18n';
@@ -61,6 +62,7 @@ function buildNav(): void {
     paint();
     nav.appendChild(box);
   }
+  repaintDueBadge();
 }
 
 function navButton(p: Page): HTMLElement {
@@ -69,7 +71,7 @@ function navButton(p: Page): HTMLElement {
   const b = el(
     'button',
     'nav-item',
-    `<span class="ni-tile">${icon(m.icon)}</span><span class="ni-label">${esc(m.label)}</span>${
+    `<span class="ni-tile">${icon(m.icon)}${p === 'boards' ? '<span class="ni-due" data-due-badge hidden></span>' : ''}</span><span class="ni-label">${esc(m.label)}</span>${
       p === 'logs' ? '<span class="ni-badge" data-live-badge></span>' : ''
     }${n <= 9 ? `<span class="ni-kbd" aria-hidden="true">Alt ${n}</span>` : ''}`,
   );

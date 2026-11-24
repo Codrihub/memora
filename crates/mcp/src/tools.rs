@@ -471,9 +471,17 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "kanban_list_boards",
             "kanban",
-            "Kanban boards in the vault: notes whose frontmatter has `kanban-plugin` (the Obsidian Kanban format). Each is {path, title, lanes:[{title, cards}], cards, done, archived, version, mtime, embedded_in (notes that put it in with ![[...]]), linked_from (notes that only link to it)}, most recently changed first. One note is one board. To start a board use kanban_board action create (or convert an existing list note). Several boards in one note: make one board note per board, then embed each in the note with kanban_embed (a `![[Board name]]` line); the note shows every embedded board live, to work on in place.",
+            "Kanban boards in the vault: notes whose frontmatter has `kanban-plugin` (the Obsidian Kanban format). Each is {path, title, lanes:[{title, cards}], cards, done, archived, version, mtime, style:{color, icon}, due (the due date YYYY-MM-DD of every open card that has one: compare with today to find what is overdue), date_colors (the board's Obsidian date-colors rules, or null), embedded_in (notes that put it in with ![[...]]), linked_from (notes that only link to it)}, most recently changed first. One note is one board. To start a board use kanban_board action create (or convert an existing list note). Several boards in one note: make one board note per board, then embed each in the note with kanban_embed (a `![[Board name]]` line); the note shows every embedded board live, to work on in place.",
             "To find the boards before reading or changing one, and when asked for a board, or for several boards in one note.",
             json!({"folder":{"type":"string","description":"Only boards in this folder and its subfolders ('Root' = top level)"}}),
+            &[],
+        ),
+        spec(
+            "kanban_due",
+            "kanban",
+            "Open cards with a due date across every board: {today, days, counts:{overdue, today, upcoming}, overdue, due_today, upcoming}. Each card is {board (path), board_title, lane, lane_index, card (the id the other kanban tools take), title, date (YYYY-MM-DD), block}. A card's due date is its earliest date; done and archived cards are left out. `upcoming` covers the `days` after today (default 7). Tick a card off with kanban_update_card {path: board, card, checked: true}, or move it with kanban_move_card.",
+            "When asked what is overdue, due today or due soon, across boards or in a folder, before reading each board.",
+            json!({"range":{"type":"string","enum":["overdue","today","upcoming","all"],"description":"Only one list (default all)"},"days":{"type":"integer","description":"How many days after today count as upcoming (default 7, at most 366)"},"today":{"type":"string","description":"Today as YYYY-MM-DD in the user's time zone (default: the server's local day)"},"folder":{"type":"string","description":"Only boards in this folder and its subfolders"}}),
             &[],
         ),
         spec(
@@ -1008,6 +1016,14 @@ pub fn call_extra(
                 let boards = store.kanban_list_impl(opt("folder").as_deref())?;
                 json!({"count": boards.len(), "boards": boards})
             }
+            "kanban_due" => store.kanban_due_impl(
+                opt("today").as_deref(),
+                args.get("days")
+                    .and_then(|v| v.as_u64())
+                    .map(|d| d.min(366) as u32),
+                opt("range").as_deref(),
+                opt("folder").as_deref(),
+            )?,
             "kanban_get_board" => store.kanban_get_impl(&s("path"), false)?,
             "kanban_add_card" | "kanban_move_card" | "kanban_update_card" | "kanban_card"
             | "kanban_lane" => {

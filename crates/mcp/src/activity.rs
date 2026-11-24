@@ -62,6 +62,7 @@ const READ_ONLY: &[&str] = &[
     "validate_memory",
     "list_pins",
     "kanban_list_boards",
+    "kanban_due",
     "kanban_get_board",
     "admin_list_tools",
     "privacy_list",
@@ -95,6 +96,7 @@ const NO_RESULT_PATHS: &[&str] = &[
     "export_memory",
     "list_pins",
     "kanban_list_boards",
+    "kanban_due",
     "admin_list_tools",
     "admin_set_tool",
 ];

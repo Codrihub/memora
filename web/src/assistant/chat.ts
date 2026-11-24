@@ -69,6 +69,7 @@ const TOOL_WORDS: Record<string, [string, boolean]> = {
   list_pins: ['Listed pins', false],
   list_images: ['Listed images', false],
   kanban_list_boards: ['Looked at boards', false],
+  kanban_due: ['Checked what is due', false],
   kanban_get_board: ['Read a board', false],
   kanban_add_card: ['Added a card', true],
   kanban_move_card: ['Moved a card', true],

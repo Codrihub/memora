@@ -7,8 +7,9 @@ change can be undone from History. Mnemo has no web access, no shell, and cannot
 anything for good, empty the Trash, delete folders, import or export, read keys or change
 settings.
 
-Open it from the sidebar, with <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>J</kbd>, from the
-floating button, or with **Ask Mnemo** on a note or folder. The console has it too
+Open it from the sidebar (on phones, from **More** in the bottom bar), with
+<kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>J</kbd>, from the floating button (hide or show it
+from the menu under your name), or with **Ask** on a note (**Ask Mnemo** on a folder). The console has it too
 (`memora-cli`, then `/mnemo`).
 
 ## Set up
@@ -66,7 +67,8 @@ The mic and Listen show only once their model is set.
   delete cards with linked notes, due dates, tags and checklists; and put boards into
   notes. Four switches in **What Mnemo can use** (Boards: read, cards and lanes, create
   and manage, in notes) decide which of that it may do, and Ask first, Auto and Read
-  only apply as for notes.
+  only apply as for notes. Ask "what is overdue across my boards?" and Mnemo lists those
+  cards (`kanban_due`) with their boards, and can tick them off or move them for you.
 - **@mnemo in a note.** Write `@mnemo: <request>` in a note and Mnemo does it, with the
   note as context.
 - **Skills.** Reusable instructions kept as notes in the folder `Skills` (one note per
@@ -154,14 +156,14 @@ learned in a fleeting chat.
 ## Storage and pictures
 
 Notes, images and chats each warn at 90% and 99% of their room, in the app and in the
-results tools return to agents. **Settings → Storage** shows every image and the note that
-uses it.
+results tools return to agents. **Settings → Storage** shows how full each one is and sets
+their limits; **Settings → Images** shows every image and the note that uses it.
 
 ## Languages
 
 The whole interface comes in many languages: pick one in **Settings → Appearance →
 Language** (per device; Auto follows the browser), and set the language new devices start
-in, with the server's name, in **Settings → Server** or during setup. Mnemo writes its
+in, with the server's name, in **Settings → Server details** or during setup. Mnemo writes its
 suggestions in the language you write to it.
 
 ## Reference

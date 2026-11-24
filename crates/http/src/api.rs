@@ -934,6 +934,29 @@ async fn h_api_kanban_boards(State(st): State<AppState>, req: Request) -> Respon
     }
 }
 
+/// `GET /api/kanban/due?today=&days=&range=&folder=` -> open cards with a due date across
+/// boards, as MCP `kanban_due`. The web app sends its own `today`, so "overdue" follows the
+/// reader's time zone.
+async fn h_api_kanban_due(State(st): State<AppState>, req: Request) -> Response {
+    let uri = req.uri().clone();
+    let q = |k: &str| super::query_value(&uri, k);
+    let (today, range, folder) = (q("today"), q("range"), q("folder"));
+    let days = q("days").and_then(|d| d.parse::<u32>().ok());
+    let key = req.extensions().get::<ApiKeyCaller>().cloned();
+    let read = crate::blocking(move || {
+        crate::snapshot_as(&st, key.as_ref()).kanban_due_impl(
+            today.as_deref(),
+            days,
+            range.as_deref(),
+            folder.as_deref(),
+        )
+    });
+    match read.await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => mem_err(e),
+    }
+}
+
 /// `POST /api/kanban` `{path, version, op:{type, ...}}` -> the board after the edit, with
 /// `card` and `changed`. The edit is a normal note save (history, `node_updated` for
 /// other browsers). A stale `version` answers 409 `{error, board}` with the current board.
@@ -3018,6 +3041,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/save", post(h_api_save))
         .route("/api/kanban", get(h_api_kanban).post(h_api_kanban_edit))
         .route("/api/kanban/boards", get(h_api_kanban_boards))
+        .route("/api/kanban/due", get(h_api_kanban_due))
         .route("/api/create", post(h_api_create))
         .route("/api/rename", post(h_api_rename))
         .route("/api/move", post(h_api_move))

@@ -9,7 +9,9 @@ import { Modal } from '../modal';
 import { I } from './icons';
 import { nav } from './nav';
 import { hooks } from '../hooks';
+import { apiGet } from '../api';
 import {
+  createNote,
   deleteFolder,
   moveNotes,
   moveFolderContents,
@@ -138,6 +140,20 @@ export async function deleteNotesToTrash(paths: string[], after?: () => void, re
     await reload();
     if (reopen && back.length === 1 && back[0]) nav.openNote(back[0]);
   });
+}
+
+/** A copy of a board next to it ("Name copy"); `open` opens the copy, else a toast says where it is. */
+export async function duplicateBoard(path: string, open = true): Promise<string | null> {
+  try {
+    const d = await apiGet<{ content?: string }>('/api/note?path=' + encodeURIComponent(path));
+    const p = await createNote(dirOf(path), t('{name} copy', { name: noteTitle(path) }), d.content || '');
+    if (p && open) nav.openNote(p);
+    else if (p) undoToast(t('Duplicated as "{name}"', { name: noteTitle(p) }), null, 'info', 4000);
+    return p;
+  } catch (e) {
+    undoToast(t('Could not create the note: {error}', { error: (e as Error).message }), null, 'err');
+    return null;
+  }
 }
 
 const FD_CSS = `

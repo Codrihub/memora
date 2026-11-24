@@ -11,6 +11,7 @@ import { openWhatsNew } from '../ui/whats-new';
 import { Modal } from '../modal';
 import { RT } from '../realtime';
 import { clearTagIndex, saveToastPrefs, saveUI, toastPrefs, ui } from '../storage';
+import { remindersOn, setReminders } from './due-watch';
 import { state, type Page } from '../state';
 import { clearPins, pinnedItems } from '../vault/store';
 import { renderTree } from '../sidebar';
@@ -967,7 +968,15 @@ export async function renderSettings(): Promise<void> {
           title: t('Each agent'),
           sub: t('Turn off the pop-ups of a single agent.'),
           cls: 'st-keys-row',
-        }),
+        }) +
+        card(
+          row(
+            `<span id="sDueL">${t('Due date reminders')}</span>`,
+            t('A browser notification when a card on a board falls due, and once a day when cards are overdue, while Memora is open or installed. Off by default; the browser asks for permission when you turn it on. Kept in this browser.'),
+            switchHTML('sDue', remindersOn(), t('Due date reminders'), ' aria-labelledby="sDueL"'),
+            { ctl: 'end', cls: 'inl sw' },
+          ),
+        ),
     )}
 
     ${section(
@@ -1789,6 +1798,16 @@ export async function renderSettings(): Promise<void> {
       b.setAttribute('aria-checked', String(!toastPrefs.muted.includes(b.dataset.key || '')));
     });
   };
+  const dSw = host.querySelector<HTMLButtonElement>('#sDue');
+  if (dSw)
+    dSw.onclick = async () => {
+      const want = dSw.getAttribute('aria-checked') !== 'true';
+      dSw.disabled = true;
+      const on = await setReminders(want);
+      dSw.disabled = false;
+      dSw.setAttribute('aria-checked', String(on));
+      if (on === want) toast(on ? t('Due date reminders are on') : t('Due date reminders are off'), 'ok', 1800);
+    };
   tSw.onclick = () => {
     toastPrefs.off = tSw.getAttribute('aria-checked') === 'true';
     tSw.setAttribute('aria-checked', String(!toastPrefs.off));

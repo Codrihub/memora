@@ -286,6 +286,7 @@ function done(it: ActivityItem): string {
 function readLine(it: ActivityItem, n: string, lbl: string): string {
   const a = it.action;
   if (a === 'kanban_list_boards') return t('looked at your boards');
+  if (a === 'kanban_due') return t('checked what is due on your boards');
   if (a === 'kanban_get_board') return it.paths[0] ? t('read the board {note}', { note: n }) : t('read a board');
   const where = lbl && !/\.md$/i.test(lbl) && lbl.length < 80 ? em(folderName(lbl)) : '';
   if (a === 'read_memory') return n ? t('read {note}', { note: n }) : t('read a note');

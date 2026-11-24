@@ -326,6 +326,7 @@ export const BOARD_LOOK_CSS = `
 .kb .kb-card{--kbl-late:color-mix(in srgb,var(--danger) calc(var(--kbl-wd,0) * 100%),var(--warn))}
 .kb .kb-card.late:not(.done):not(.kb-ghost){background-image:linear-gradient(color-mix(in srgb,var(--kbl-c) 7%,transparent),color-mix(in srgb,var(--kbl-c) 7%,transparent))}
 .kb .kb-card .kb-chip.late{background:color-mix(in srgb,var(--kbl-late) 16%,transparent);color:var(--kbl-late)}
+.kb .kb-card .kb-chip.today{background:color-mix(in srgb,var(--kbl-late) 8%,transparent);color:color-mix(in srgb,var(--kbl-late) 70%,var(--fg))}
 .kb .kb-card[data-due=soon]{--kbl-due:var(--warn)}
 .kb .kb-card[data-due=later]{--kbl-due:var(--ok)}
 .kb .kb-lane{--kbl-lc:color-mix(in srgb,var(--lane-c,transparent) calc(var(--kbl-wl,1) * 100%),transparent)}

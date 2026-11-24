@@ -1,5 +1,6 @@
 // Overview: greeting, KPIs, "Your AIs today", "Needs you", notes, agents, live activity, recent changes and technical details.
 
+import { mountDueSection } from './due-section';
 import { openTimeline } from './logs';
 import { apiGet } from '../api';
 import { on } from '../bus';
@@ -422,6 +423,7 @@ export async function renderHome(): Promise<void> {
           <div class="ov-ticks" aria-hidden="true"><span>${t('12 am')}</span><span>${t('6 am')}</span><span>${t('12 pm')}</span><span>${t('6 pm')}</span><span>${t('12 am')}</span></div></div>
           <div class="ov-today-side"><div class="ov-card-h"><h2>${t('Latest')}</h2><span class="grow"></span></div><div class="ov-list" id="ovToday">${rowsSkeleton(3)}</div></div></section>
       </div>
+      <div id="ovDue" hidden></div>
       <div class="ov-grid">
         <section class="ov-card ov-vault" aria-labelledby="ovVaultT"><div class="ov-card-h"><h2 id="ovVaultT">${t('Your notes')}</h2><span class="grow"></span>
           ${open('ovNodes', t('Open Notes'))}</div><div class="ov-card-b" id="ovVault"><div class="ov-sk-block"></div></div></section>
@@ -438,6 +440,7 @@ export async function renderHome(): Promise<void> {
           <div class="ov-sys" id="ovHealth"></div><div class="ov-tech-more" id="ovTechMore"></div></details>
       </div>
     </div>`;
+    mountDueSection($('#ovDue'));
     $('#ovBrain').onclick = () => hooks.go('brain');
     $('#ovNew').onclick = (e) => openNewMenu(e.currentTarget as HTMLElement, '');
     $('#ovNodes').onclick = () => hooks.go('vault');

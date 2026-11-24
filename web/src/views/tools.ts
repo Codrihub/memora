@@ -44,7 +44,7 @@ const RISKS: Record<ToolRisk, { label: string; desc: string }> = {
 /** The "Can delete" tier: tools that remove notes or folders, or can overwrite text in many notes. */
 const HIGH = new Set(['delete_memory', 'soft_delete', 'bulk_delete', 'bulk_replace', 'import_memory', 'delete_folder', 'move_folder_contents', 'kanban_board']);
 const READ_RE =
-  /^(get|list|read|search|find|query|export)_|^(kanban_get_board|kanban_list_boards|link_stats|broken_links|diff|presence|healthcheck|folder_stats|stale_detection|validate_memory|follow_ups|suggest_links|digest)$/;
+  /^(get|list|read|search|find|query|export)_|^(kanban_get_board|kanban_list_boards|kanban_due|link_stats|broken_links|diff|presence|healthcheck|folder_stats|stale_detection|validate_memory|follow_ups|suggest_links|digest)$/;
 
 /** What a tool can do to the vault, from its name. */
 export function toolRisk(t: { name: string }): ToolRisk {

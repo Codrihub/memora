@@ -1,5 +1,7 @@
 // Account chip, account panel, quick guide and the profile menu.
 
+import { boardKeysHTML } from './views/kanban';
+import { repaintDueBadge } from './views/due-watch';
 import { openWhatsNew } from './ui/whats-new';
 import { openPromo } from './assistant/promo';
 import { apiGet, apiPost } from './api';
@@ -9,7 +11,7 @@ import { PWA } from './pwa';
 import { activeAgents } from './realtime';
 import { icon } from './ui/icons';
 import { state, type Page } from './state';
-import { PAGE_META } from './router';
+import { PAGE_META, PAGES } from './router';
 import { NAV_GROUPS, SIDEBAR_FOOT, SIDEBAR_GROUPS, TAB_PAGES } from './ui/nav-model';
 import { Modal } from './modal';
 import { BRAND_DESC, BRAND_MOTTO, BRAND_NAME, BRAND_ONCE, markSvg } from './brand';
@@ -158,10 +160,12 @@ export function openGuide(): void {
           <span><kbd>${mod}</kbd><kbd>K</kbd></span><span>${t('Search notes, jump to pages, run actions')}</span>
           <span><kbd>/</kbd></span><span>${t('Open search from anywhere')}</span>
           <span><kbd>&gt;</kbd></span><span>${t('In search: actions only (new note, theme ...)')}</span>
-          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>${t('Overview, Brain, Notes, Graph, Canvas, Tags, Activity, Agents, Tools')}</span>
+          <span><kbd>Alt</kbd><kbd>1-9</kbd></span><span>${t('Overview, Notes, Boards, Tags, Brain, Graph, Canvas, Activity, Agents')}</span>
           <span><kbd>[</kbd></span><span>${t('Collapse or expand the sidebar')}</span>
           <span><kbd>?</kbd></span><span>${t('Open this help')}</span>
         </div>
+        <h3 class="guide-h">${t('On a board')}</h3>
+        <div class="guide-keys">${boardKeysHTML()}</div>
         <p>${t('The {connected} dot in the top bar shows Memora is reachable, and how many agents are working right now. Click it for details.', { connected: `<b>${t('Connected')}</b>` })}</p>
         <p>${t('The sidebar lists your pages; settings, tools, access rules and help are in the menu under your name.')}</p>
         <p>${t('Search understands {code} to narrow by tag.', { code: '<code>tag:name</code>' })}</p>
@@ -272,15 +276,10 @@ export function openProfileMenu(anchor: HTMLElement): void {
     const extra =
       p === 'assistant'
         ? '<span class="pm-new">AI</span>'
-        : p === 'logs'
-          ? live
-            ? `<span class="pm-live"><i></i>${t('{n} live', { n: live })}</span>`
-            : keys(7)
-          : p === 'keys'
-            ? keys(8)
-            : p === 'tools'
-              ? keys(9)
-              : '';
+        : p === 'logs' && live
+          ? `<span class="pm-live"><i></i>${t('{n} live', { n: live })}</span>`
+          : (p === 'boards' ? '<span class="pm-due" data-due-badge hidden></span>' : '') +
+            (PAGES.indexOf(p) >= 0 && PAGES.indexOf(p) < 9 ? keys(PAGES.indexOf(p) + 1) : '');
     return item(p, label, m.icon, extra);
   };
   // Phones: this sheet is the tab bar's More, so it holds every page the bar has no room for, in the
@@ -335,6 +334,7 @@ export function openProfileMenu(anchor: HTMLElement): void {
     sync();
     slot.replaceWith(seg);
   }
+  repaintDueBadge();
   $('.pm-close', menu).onclick = () => closeProfileMenu(true);
   $$('.pm-item', menu).forEach((b) => {
     const on = !!b.dataset.page && b.dataset.page === state.page;

@@ -1008,12 +1008,27 @@ impl Board {
         let raw = raw.clone();
         match color {
             Some(c) => {
+                // Obsidian's "Duplicate card" copies the block id: a colour for one of two cards
+                // that share an id would paint both, so that card gets an id of its own first.
+                let shared = |b: &str| {
+                    self.lanes
+                        .iter()
+                        .flat_map(|l| l.segs.iter())
+                        .filter(|s| matches!(s, Seg::Card(r) if block_id(r).as_deref() == Some(b)))
+                        .count()
+                        > 1
+                };
                 let id = match block_id(&raw) {
-                    Some(b) => b,
-                    None => {
+                    Some(b) if !shared(&b) => b,
+                    old => {
                         let seed = self.id_at(li, si).unwrap_or_default();
                         let b = self.new_block_id(&seed);
-                        self.lanes[li].segs[si] = Seg::Card(add_block_id(&raw, &b));
+                        let bare = if old.is_some() {
+                            strip_block_id(&raw)
+                        } else {
+                            raw.clone()
+                        };
+                        self.lanes[li].segs[si] = Seg::Card(add_block_id(&bare, &b));
                         b
                     }
                 };
@@ -2440,7 +2455,9 @@ impl MemoryStore {
     }
 
     /// Every board in the vault (or in `folder` and its subfolders): `{path, title,
-    /// lanes:[{title, cards}], cards, done, archived, mtime}`, most recently changed first.
+    /// lanes:[{title, cards}], cards, done, archived, style, due, date_colors, mtime}`, most
+    /// recently changed first. `due` holds the due date (`YYYY-MM-DD`) of every open card that
+    /// has one, so a reader can count what is overdue in its own time zone.
     pub fn kanban_list_impl(&self, folder: Option<&str>) -> MResult<Vec<Value>> {
         let folder = folder.map(str::trim).filter(|f| !f.is_empty());
         let files = self.walk();
@@ -2466,6 +2483,9 @@ impl MemoryStore {
             let j = b.to_json(None);
             let (embedded_in, linked_from) = self.board_refs(rel, &files, &metas);
             out.push(json!({
+                "style": j["style"],
+                "due": open_due_dates(&j),
+                "date_colors": j["settings"].get("date-colors").cloned().unwrap_or(Value::Null),
                 "path": rel,
                 "embedded_in": embedded_in,
                 "linked_from": linked_from,
@@ -2483,6 +2503,117 @@ impl MemoryStore {
             y.partial_cmp(&x).unwrap_or(std::cmp::Ordering::Equal)
         });
         Ok(out)
+    }
+
+    /// Open cards with a due date across every board (or those in `folder`): `{today, days,
+    /// overdue, due_today, upcoming, counts}`. Each card is `{board, board_title, lane,
+    /// lane_index, card, title, date, block}`; `card` is the id the other kanban tools take.
+    /// The due date is a card's earliest `YYYY-MM-DD` date; done and archived cards are left
+    /// out. `today` (`YYYY-MM-DD`, the server's local day when absent) splits past from
+    /// coming; `upcoming` covers the `days` after today (default 7, at most 366). `range`
+    /// keeps one list: `overdue`, `today` or `upcoming` (default all three).
+    pub fn kanban_due_impl(
+        &self,
+        today: Option<&str>,
+        days: Option<u32>,
+        range: Option<&str>,
+        folder: Option<&str>,
+    ) -> MResult<Value> {
+        let today = match today.map(str::trim).filter(|t| !t.is_empty()) {
+            Some(t) if is_iso_day(t) => t[..10].to_string(),
+            Some(t) => return err(format!("today must be a date as YYYY-MM-DD, not '{t}'")),
+            None => chrono::Local::now().format("%Y-%m-%d").to_string(),
+        };
+        let days = days.unwrap_or(7).min(366);
+        let range = range
+            .map(str::trim)
+            .filter(|r| !r.is_empty() && *r != "all");
+        if let Some(r) = range {
+            if !["overdue", "today", "upcoming"].contains(&r) {
+                return err("range is overdue, today, upcoming or all");
+            }
+        }
+        let end = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
+            .map(|d| {
+                (d + chrono::Duration::days(i64::from(days)))
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
+            .map_err(|_| MemoryErr(format!("today must be a real date, not '{today}'")))?;
+        let folder = folder.map(str::trim).filter(|f| !f.is_empty());
+        let files = self.walk();
+        let metas = self.scan(&files);
+        let (mut overdue, mut now, mut upcoming) = (Vec::new(), Vec::new(), Vec::new());
+        for ((rel, _name, fp), meta) in files.iter().zip(&metas) {
+            if meta.fm.get(BOARD_KEY).is_none() || folder.is_some_and(|f| !in_folder(rel, f)) {
+                continue;
+            }
+            let Some(content) = self.read_raw(fp) else {
+                continue;
+            };
+            if !is_board(&content) {
+                continue;
+            }
+            let j = Board::parse(&content).to_json(None);
+            let title = meta.title.clone().unwrap_or_else(|| Self::base_name(rel));
+            for lane in j["lanes"].as_array().into_iter().flatten() {
+                for c in lane["cards"].as_array().into_iter().flatten() {
+                    if c["checked"] == json!(true) {
+                        continue;
+                    }
+                    let Some(date) = c["dates"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|d| d.as_str())
+                        .filter(|d| is_iso_day(d))
+                        .map(|d| d[..10].to_string())
+                        .min()
+                    else {
+                        continue;
+                    };
+                    let item = json!({
+                        "board": rel, "board_title": title, "lane": lane["title"],
+                        "lane_index": lane["index"], "card": c["id"],
+                        "title": without_dates(c["title"].as_str().unwrap_or_default()),
+                        "date": date, "block": c["block"],
+                    });
+                    if date < today {
+                        overdue.push(item);
+                    } else if date == today {
+                        now.push(item);
+                    } else if date <= end {
+                        upcoming.push(item);
+                    }
+                }
+            }
+        }
+        let by_date = |v: &mut Vec<Value>| {
+            v.sort_by(|a, b| {
+                (a["date"].as_str(), a["board"].as_str())
+                    .cmp(&(b["date"].as_str(), b["board"].as_str()))
+            })
+        };
+        for v in [&mut overdue, &mut now, &mut upcoming] {
+            by_date(v);
+        }
+        let keep = |name: &str, v: Vec<Value>| {
+            if range.is_none_or(|r| r == name) {
+                v
+            } else {
+                Vec::new()
+            }
+        };
+        let (overdue, now, upcoming) = (
+            keep("overdue", overdue),
+            keep("today", now),
+            keep("upcoming", upcoming),
+        );
+        Ok(json!({
+            "today": today, "days": days,
+            "counts": {"overdue": overdue.len(), "today": now.len(), "upcoming": upcoming.len()},
+            "overdue": overdue, "due_today": now, "upcoming": upcoming,
+        }))
     }
 
     /// One board: `{path, version, lanes, archive, counts, settings}`; each card has
@@ -2763,6 +2894,48 @@ impl MemoryStore {
             "changed": changed, "removed": removed}),
         )
     }
+}
+
+/// The due date (the earliest `YYYY-MM-DD` date) of each open card on a board's JSON; done
+/// cards and the archive are left out.
+fn open_due_dates(board: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for lane in board["lanes"].as_array().into_iter().flatten() {
+        for c in lane["cards"].as_array().into_iter().flatten() {
+            if c["checked"] == json!(true) {
+                continue;
+            }
+            let due = c["dates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|d| d.as_str())
+                .filter(|d| is_iso_day(d))
+                .map(|d| d[..10].to_string())
+                .min();
+            out.extend(due);
+        }
+    }
+    out
+}
+
+/// A card title without its date and time chips (`@{...}`, `@@{...}`, `@[[...]]`) and its block
+/// id, for lists that show the date on its own.
+fn without_dates(title: &str) -> String {
+    let t = static_re!(r"@@?\{[^}\n]*\}|@\[\[[^\]\n]*\]\]|\s\^[A-Za-z0-9-]+\s*$")
+        .replace_all(title, "");
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_iso_day(d: &str) -> bool {
+    let b = d.as_bytes();
+    b.len() >= 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..10]
+            .iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -3290,6 +3463,86 @@ mod tests {
     }
 
     #[test]
+    fn due_dates_of_open_cards_only() {
+        let b = Board::parse(
+            "---\nkanban-plugin: board\n---\n\n## To do\n\n- [ ] Late @{2020-01-02} @{2020-01-05}\n- [ ] No date\n- [x] Done @{2019-01-01}\n\n## Later\n\n- [ ] Next @{2099-03-04} @@{10:00}\n- [ ] Odd @{tomorrow}\n",
+        );
+        assert_eq!(
+            open_due_dates(&b.to_json(None)),
+            vec!["2020-01-02", "2099-03-04"]
+        );
+        assert!(
+            is_iso_day("2026-11-24T10:00") && !is_iso_day("2026-1-2") && !is_iso_day("tomorrow")
+        );
+    }
+
+    #[test]
+    fn due_cards_across_boards() {
+        let d = std::env::temp_dir().join(format!("memora-kanban-due-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("Work")).unwrap();
+        fs::write(
+            d.join("Work/A.md"),
+            "---\nkanban-plugin: basic\n---\n\n## To do\n\n- [ ] Late @{2026-11-20}\n- [ ] Now @{2026-11-24} ^q1w2e3\n- [x] Done late @{2026-11-01}\n\n## Later\n\n- [ ] Soon @{2026-11-30}\n- [ ] Far @{2027-02-01}\n- [ ] Undated\n",
+        )
+        .unwrap();
+        fs::write(
+            d.join("B.md"),
+            "---\nkanban-plugin: basic\n---\n\n## X\n\n- [ ] Also late @{2026-11-02}\n",
+        )
+        .unwrap();
+        let store = MemoryStore::new(&d);
+        let v = store
+            .kanban_due_impl(Some("2026-11-24"), None, None, None)
+            .unwrap();
+        let titles = |k: &str| {
+            v[k].as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["title"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles("overdue"), ["Also late", "Late"]);
+        assert_eq!(titles("due_today"), ["Now"]);
+        assert_eq!(titles("upcoming"), ["Soon"]);
+        assert_eq!(
+            v["counts"],
+            json!({"overdue": 2, "today": 1, "upcoming": 1})
+        );
+        let now = &v["due_today"][0];
+        assert_eq!(
+            (
+                now["board"].as_str(),
+                now["lane"].as_str(),
+                now["lane_index"].as_u64(),
+                now["block"].as_str()
+            ),
+            (Some("Work/A.md"), Some("To do"), Some(0), Some("q1w2e3"))
+        );
+        assert!(!now["card"].as_str().unwrap().is_empty());
+        // A wider range, one list, one folder.
+        let wide = store
+            .kanban_due_impl(Some("2026-11-24"), Some(90), Some("upcoming"), None)
+            .unwrap();
+        assert_eq!(
+            wide["counts"],
+            json!({"overdue": 0, "today": 0, "upcoming": 2})
+        );
+        let work = store
+            .kanban_due_impl(Some("2026-11-24"), None, Some("overdue"), Some("Work"))
+            .unwrap();
+        assert_eq!(work["counts"]["overdue"], 1);
+        assert!(store
+            .kanban_due_impl(Some("24/11/2026"), None, None, None)
+            .is_err());
+        assert!(store
+            .kanban_due_impl(Some("2026-11-24"), None, Some("soon"), None)
+            .is_err());
+        assert!(store.kanban_due_impl(None, None, None, None).is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn store_applies_ops_with_a_version_check() {
         let d = std::env::temp_dir().join(format!("memora-kanban-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
@@ -3352,6 +3605,108 @@ mod tests {
         let out = b.render();
         let i = out.find("%% kanban:settings").unwrap();
         out[i..].to_string()
+    }
+
+    /// What Obsidian Kanban (mgmeyers/obsidian-kanban) does when it saves a board:
+    /// `settingsToCodeblock` writes `JSON.stringify(board.data.settings)`, the whole parsed
+    /// object (src/parsers/common.ts), and each card's block id is cut from the end of its
+    /// first line (`removeBlockId`, `/\s+\^([a-zA-Z0-9-]+)$/`) and put back there on write
+    /// (`addBlockId`, src/parsers/helpers/parser.ts). `moved` drags a card to the next lane.
+    fn obsidian_save(md: &str, moved: Option<&str>) -> String {
+        let at = md.find("%% kanban:settings").unwrap();
+        let (body, tail) = md.split_at(at);
+        let json = &tail[tail.find('{').unwrap()..=tail.rfind('}').unwrap()];
+        let settings: Value = serde_json::from_str(json).unwrap();
+        let id_re = regex::Regex::new(r"\s+\^([a-zA-Z0-9-]+)$").unwrap();
+        let mut lines: Vec<String> = body
+            .lines()
+            .map(
+                |l| match id_re.captures(l).filter(|_| l.starts_with("- [")) {
+                    Some(c) => format!("{} ^{}", id_re.replace(l, ""), &c[1]),
+                    None => l.to_string(),
+                },
+            )
+            .collect();
+        if let Some(card) = moved {
+            let from = lines.iter().position(|l| l.contains(card)).unwrap();
+            let line = lines.remove(from);
+            let next = lines[from..]
+                .iter()
+                .position(|l| l.starts_with("## "))
+                .unwrap()
+                + from;
+            lines.insert(next + 2, line);
+        }
+        format!(
+            "{}\n%% kanban:settings\n```\n{}\n```\n%%",
+            lines.join("\n"),
+            serde_json::to_string(&settings).unwrap()
+        )
+    }
+
+    #[test]
+    fn colours_and_block_ids_survive_an_obsidian_save() {
+        let mut b = board();
+        let card = |b: &Board, li: usize, ci: usize| json_of(b)["lanes"][li]["cards"][ci].clone();
+        let first = card(&b, 0, 0)["id"].as_str().unwrap().to_string();
+        b.apply(&op(
+            json!({"type": "set_card_color", "card": first, "color": "#22c55e"}),
+        ))
+        .unwrap();
+        b.apply(&op(
+            json!({"type": "set_lane_color", "lane": "Backlog", "color": "#f59e0b"}),
+        ))
+        .unwrap();
+        b.apply(&op(
+            json!({"type": "set_board_style", "color": "#3b82f6", "icon": "star"}),
+        ))
+        .unwrap();
+        let block = card(&b, 0, 0)["block"].as_str().unwrap().to_string();
+        assert!(block.len() == 6 && block.bytes().all(|c| c.is_ascii_alphanumeric()));
+        // A save from Obsidian, then one that drags the coloured card into the next lane.
+        let saved = obsidian_save(&b.render(), None);
+        let again = Board::parse(&saved);
+        assert_eq!(card(&again, 0, 0)["color"], "#22c55e");
+        assert_eq!(json_of(&again)["lanes"][0]["color"], "#f59e0b");
+        assert_eq!(
+            json_of(&again)["style"],
+            json!({"color": "#3b82f6", "icon": "star"})
+        );
+        assert!(saved.contains("\"unknown-future-key\":[1,2]"));
+        let dragged = Board::parse(&obsidian_save(&saved, Some(&format!("^{block}"))));
+        let moved = card(&dragged, 1, 0);
+        assert_eq!(
+            (moved["block"].as_str(), moved["color"].as_str()),
+            (Some(block.as_str()), Some("#22c55e"))
+        );
+        assert_eq!(
+            json_of(&dragged)["counts"]["cards"],
+            json_of(&b)["counts"]["cards"]
+        );
+    }
+
+    #[test]
+    fn a_shared_block_id_gets_its_own_before_a_colour() {
+        // Obsidian's Duplicate card copies the block id.
+        let md = "---\nkanban-plugin: basic\n---\n\n## A\n\n- [ ] one ^abc123\n- [ ] one ^abc123\n- [ ] two ^zz9\n";
+        let mut b = Board::parse(md);
+        let id = |b: &Board, i: usize| json_of(b)["lanes"][0]["cards"][i].clone();
+        let second = id(&b, 1)["id"].as_str().unwrap().to_string();
+        b.apply(&op(
+            json!({"type": "set_card_color", "card": second, "color": "#ef4444"}),
+        ))
+        .unwrap();
+        assert_eq!(id(&b, 0)["block"], "abc123");
+        assert_eq!(id(&b, 0)["color"], Value::Null);
+        assert_ne!(id(&b, 1)["block"], "abc123");
+        assert_eq!(id(&b, 1)["color"], "#ef4444");
+        // A card that owns its id keeps it.
+        let third = id(&b, 2)["id"].as_str().unwrap().to_string();
+        b.apply(&op(
+            json!({"type": "set_card_color", "card": third, "color": "#ef4444"}),
+        ))
+        .unwrap();
+        assert_eq!(id(&b, 2)["block"], "zz9");
     }
 
     #[test]

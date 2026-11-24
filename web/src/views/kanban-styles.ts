@@ -110,6 +110,8 @@ export const KANBAN_CSS = `
 .kb-card.late:not(.done){border-inline-start:3px solid var(--warn)}
 .kb-card.kb-armed{transform:scale(1.02);box-shadow:0 6px 20px rgba(0,0,0,.18)}
 .kb-card.kb-flash{animation:kb-flash 1.6s ease-out}
+.kb-lane:focus{outline:none}
+.kb-lane:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 @keyframes kb-flash{0%{box-shadow:0 0 0 3px var(--accent-line);border-color:var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
 .kb-check{flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-top:1px;border-radius:5px;padding:0;
   border:1.5px solid var(--line-strong);background:var(--panel);color:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
@@ -133,6 +135,7 @@ export const KANBAN_CSS = `
 @media (hover:none){.kb-chip{height:24px}}
 .kb-chip svg{width:12px;height:12px}
 .kb-chip.late{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.kb-chip.today{background:color-mix(in srgb,var(--warn) 8%,transparent);color:color-mix(in srgb,var(--warn) 70%,var(--fg))}
 .kb-more{width:26px;height:26px;margin-top:-3px;opacity:0;transition:opacity .15s}
 .kb-card:hover .kb-more,.kb-card:focus-within .kb-more,.kb-card:focus-visible .kb-more{opacity:1}
 @media (hover:none){.kb-more{opacity:.7}}

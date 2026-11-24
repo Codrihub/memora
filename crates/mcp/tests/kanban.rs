@@ -51,6 +51,7 @@ fn ok(srv: &McpServer, name: &str, args: Value) -> Value {
 /// The four kanban categories: one permission switch each in the tools UI.
 const KANBAN_TOOLS: &[(&str, &str)] = &[
     ("kanban_list_boards", "kanban"),
+    ("kanban_due", "kanban"),
     ("kanban_get_board", "kanban"),
     ("kanban_add_card", "kanban_cards"),
     ("kanban_move_card", "kanban_cards"),
@@ -631,6 +632,13 @@ fn private_boards_and_locked_notes_are_refused() {
     };
     let r = rpc_as(&srv, &me, "kanban_list_boards", json!({}));
     assert!(!text(&r).contains("Secret"), "{r}");
+    let r = rpc_as(
+        &srv,
+        &me,
+        "kanban_due",
+        json!({"today": "2000-01-01", "days": 366}),
+    );
+    assert!(!text(&r).contains("Secret"), "{r}");
     for (t, args) in [
         ("kanban_get_board", json!({"path": "Secret/Hidden"})),
         (
@@ -739,6 +747,22 @@ fn agent_adds_and_moves_a_card() {
         "kanban_add_card",
         json!({"path": "Work/Board.md", "lane": "to do", "text": "Review the plan @{2026-12-01}", "version": v0}),
     );
+    // The card is due: kanban_due finds it with its board, lane and id.
+    let due = ok(
+        &srv,
+        "kanban_due",
+        json!({"today": "2026-11-28", "range": "upcoming"}),
+    );
+    assert_eq!(
+        due["counts"],
+        json!({"overdue": 0, "today": 0, "upcoming": 1}),
+        "{due}"
+    );
+    assert_eq!(due["upcoming"][0]["board"], "Work/Board.md");
+    assert_eq!(due["upcoming"][0]["lane"], "To do");
+    assert_eq!(due["upcoming"][0]["date"], "2026-12-01");
+    let late = ok(&srv, "kanban_due", json!({"today": "2026-12-05"}));
+    assert_eq!(late["counts"]["overdue"], 1, "{late}");
     let card = added["card"].as_str().unwrap().to_string();
     assert_eq!(added["lanes"][0]["cards"][1]["id"], json!(card));
     let v1 = added["version"].as_str().unwrap().to_string();

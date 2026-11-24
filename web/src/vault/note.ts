@@ -9,7 +9,7 @@ import { t, tn } from '../i18n';
 import { allNotes, isBoard as isBoardPath, noteTitle, state } from '../state';
 import type { NoteDoc } from '../types';
 import { I } from './icons';
-import { askMoveNotes, copyPath, copyWikilink, deleteNotesToTrash, pinToggle } from './menus';
+import { askMoveNotes, copyPath, copyWikilink, deleteNotesToTrash, duplicateBoard, pinToggle } from './menus';
 import { nav } from './nav';
 import { createNote, onRelocate, relocating, reload, renameNote, saveNote } from './ops';
 import { contentsBody, contentsOpen, markHead, openContentsSheet, setContentsOpen, type ContentsData } from './contents';
@@ -724,13 +724,7 @@ function moreMenu(path: string, at: HTMLElement, board: boolean): void {
             {
               label: t('Duplicate board'),
               icon: I.copy,
-              run: () =>
-                void apiGet<FullNote>('/api/note?path=' + encodeURIComponent(path))
-                  .then((d) => createNote(dirOf(path), t('{name} copy', { name: noteTitle(path) }), d.content || ''))
-                  .then((p) => {
-                    if (p) nav.openNote(p);
-                  })
-                  .catch((e: Error) => undoToast(t('Could not create the note: {error}', { error: e.message }), null, 'err')),
+              run: () => void duplicateBoard(path),
             },
             { label: t('Embed in a note…'), icon: I.link, run: () => void pickNote({ title: t('Embed in a note'), boards: false, exclude: [path] }).then((n) => {
                 if (n) void embedInto(n, path);

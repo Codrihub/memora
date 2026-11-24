@@ -14,7 +14,7 @@ import { icon } from '../ui/icons';
 const shown = (x: Element): boolean => x.getClientRects().length > 0;
 
 /** A board's icon: one of ours, or what an agent set (an emoji, say) as text. */
-function boardIcon(n: string): string {
+export function boardIcon(n: string): string {
   return BOARD_ICONS.includes(n) ? icon(n) : `<span class="kb-emo">${esc(n)}</span>`;
 }
 
@@ -29,6 +29,7 @@ import { inlineEdit, openMenu, undoToast, type MenuItem } from '../vault/ui';
 import { openCardForm } from './card-form';
 import type { CardSettings } from './card-text';
 import { KANBAN_CSS } from './kanban-styles';
+import { dateColorFor, dayOf, dueState } from './due';
 import { applyBoardLookTo, boardPrefs, ensureBoardLook, KBL_VARS } from './board-look';
 
 export interface KbCard {
@@ -120,7 +121,7 @@ try {
 }
 
 /** A plain check mark and an archive box for the cards. */
-const IC = {
+export const IC = {
   dot: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/></svg>',
   limit: '<svg class="vx-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M4 12h10M4 17h6"/><path d="M18 5v14"/></svg>',
   check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -161,6 +162,53 @@ function fmtDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+/** Say `msg` to screen readers (a polite live region shared by every board). */
+function announce(msg: string): void {
+  let live = document.getElementById('kbLive');
+  if (!live) {
+    live = el('div', 'sr-only');
+    live.id = 'kbLive';
+    live.setAttribute('aria-live', 'polite');
+    live.setAttribute('role', 'status');
+    document.body.appendChild(live);
+  }
+  live.textContent = '';
+  const box = live;
+  requestAnimationFrame(() => (box.textContent = msg));
+}
+
+/** The keys a board answers to, as listed in Help & shortcuts too. */
+export function boardKeyRows(): [string[], string][] {
+  return [
+    [['←', '→', '↑', '↓'], t('Move between cards and lanes')],
+    [['Enter'], t('Open the card form')],
+    [['Space'], t('Mark the card as done or not done')],
+    [[altKey(), '←', '→'], t('Move the card to the next lane')],
+    [[altKey(), '↑', '↓'], t('Move the card up or down')],
+    [['N'], t('Add a card to this lane')],
+    [['Delete'], t('Archive the card (with Undo)')],
+    [['?'], t('Show these shortcuts')],
+  ];
+}
+
+function altKey(): string {
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌥' : 'Alt';
+}
+
+export function boardKeysHTML(): string {
+  return boardKeyRows()
+    .map(([keys, what]) => `<span>${keys.map((k) => `<kbd>${esc(k)}</kbd>`).join('')}</span><span>${esc(what)}</span>`)
+    .join('');
+}
+
+function boardKeysHelp(): void {
+  Modal.open({
+    title: t('Board shortcuts'),
+    body: `<p class="panel-sub" style="margin:0 0 12px">${esc(t('Click a card or tab to it first.'))}</p><div class="guide-keys kb-keys">${boardKeysHTML()}</div>`,
+    actions: [{ label: t('Got it'), cls: 'primary', run: () => Modal.close() }],
+  });
 }
 
 /** One board on the page. Reused while the same note stays open, so redraws keep scroll and state. */
@@ -268,6 +316,28 @@ export class KanbanView {
     this.board = b;
     this.version = b.version;
     this.render();
+    this.takeReveal();
+  }
+
+  /** A card asked for from elsewhere (Overview's Due list, a reminder): scroll to it, focus it and
+   *  flash it once. Found by id, or by its block id when its text changed since. */
+  takeReveal(): void {
+    const r = reveal;
+    const b = this.board;
+    if (!r || r.path !== this.path || !b || this.density !== 'page') return;
+    reveal = null;
+    const all = b.lanes.flatMap((l) => l.cards);
+    const c = all.find((x) => x.id === r.id) || (r.block ? all.find((x) => x.block === r.block) : undefined);
+    if (!c) return;
+    requestAnimationFrame(() => {
+      const card = this.el.querySelector<HTMLElement>(`.kb-card[data-id="${CSS.escape(c.id)}"]`);
+      if (!card) return;
+      card.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      card.focus({ preventScroll: true });
+      card.classList.remove('kb-flash');
+      void card.offsetWidth;
+      card.classList.add('kb-flash');
+    });
   }
 
   /** Draw again after typing or dragging ended, if the note changed meanwhile. */
@@ -406,7 +476,7 @@ export class KanbanView {
     const n = l.cards.length;
     const over = l.max_items > 0 && n > l.max_items;
     const count = l.max_items > 0 ? `${n}/${l.max_items}` : String(n);
-    return `<section class="kb-lane${l.complete ? ' complete' : ''}${l.color ? ' tinted' : ''}${l.index === this.keepLane ? ' kb-keep' : ''}" data-lane="${l.index}" role="listitem" aria-label="${attr(l.title)}"${
+    return `<section class="kb-lane${l.complete ? ' complete' : ''}${l.color ? ' tinted' : ''}${l.index === this.keepLane ? ' kb-keep' : ''}" data-lane="${l.index}" role="listitem" tabindex="-1" aria-label="${attr(l.title)}"${
       l.color ? ` style="--lane-c:${attr(l.color)}"` : ''
     }>
       <header class="kb-lane-head" title="${attr(t('Drag to move the lane. Double click the name to rename it.'))}">
@@ -433,15 +503,15 @@ export class KanbanView {
     // first tag's colour and how close its date is.
     const soon = new Date();
     soon.setDate(soon.getDate() + 3);
-    const dueState = !due || c.checked ? '' : due < today() ? 'late' : due <= `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}` ? 'soon' : 'later';
-    const late = dueState === 'late';
+    const dueTag = !due || c.checked ? '' : due < today() ? 'late' : due <= `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-${String(soon.getDate()).padStart(2, '0')}` ? 'soon' : 'later';
+    const late = dueTag === 'late';
     const tag = c.tags[0];
     const tagC = tag ? this.board?.tag_colors?.[tag]?.color || hashColor(tag) : '';
     const vars = [c.color ? `--card-c:${c.color}` : '', tagC ? `--tag-c:${tagC}` : ''].filter(Boolean).join(';');
     const steps = c.checklist || [];
     const stepsDone = steps.filter((x) => x.done).length;
     return `<article class="kb-card${c.checked ? ' done' : ''}${flash ? ' kb-flash' : ''}${late ? ' late' : ''}${c.color ? ' colored' : ''}" data-id="${attr(c.id)}" tabindex="0" role="listitem"
-        aria-label="${attr(c.title || c.text)}"${dueState ? ` data-due="${dueState}"` : ''}${vars ? ` style="${attr(vars)}"` : ''}>
+        aria-label="${attr(c.title || c.text)}"${dueTag ? ` data-due="${dueTag}"` : ''}${vars ? ` style="${attr(vars)}"` : ''}>
       ${
         steps.length && !archived
           ? `<span class="kb-steps" title="${attr(t('{done} of {total} done', { done: stepsDone, total: steps.length }))}"><i><u style="width:${Math.round(
@@ -497,8 +567,17 @@ export class KanbanView {
             frag.append(time);
           } else if (m[2] != null) {
             const d = m[2];
-            const late = /^\d{4}-\d{2}-\d{2}/.test(d) && d.slice(0, 10) < today();
-            const chip = el('time', 'kb-chip kb-date' + (late ? ' late' : ''), `${IC.cal}<span>${esc(fmtDate(d))}</span>`);
+            // Past: a warning tint; today: a softer one; done cards: neither. The board's own date
+            // colours (Obsidian Kanban's date-colors) win when they are set.
+            const day = dayOf(d);
+            const rule = day ? dateColorFor(day, this.board?.settings?.['date-colors']) : null;
+            const st = day && !rule && !body.closest('.kb-card.done') ? dueState(day) : '';
+            const chip = el('time', 'kb-chip kb-date' + (st === 'late' ? ' late' : st === 'today' ? ' today' : ''), `${IC.cal}<span>${esc(fmtDate(d))}</span>`);
+            if (rule) {
+              chip.classList.add('dc');
+              if (rule.color) chip.style.color = rule.color;
+              if (rule.background) chip.style.background = rule.background;
+            }
             chip.setAttribute('datetime', d);
             chip.title = d;
             frag.append(chip);
@@ -776,35 +855,81 @@ export class KanbanView {
     }
     // Delete on the board never reaches the note pane (which would trash the whole note).
     if (e.key === 'Delete' || e.key === 'Backspace') e.stopPropagation();
+    if (e.ctrlKey || e.metaKey) return;
+    const rtl = getComputedStyle(this.el).direction === 'rtl';
+    const fwd = (k: string): number => ((k === 'ArrowRight') !== rtl ? 1 : -1);
+    const cardsIn = (lane: number): HTMLElement[] => [...(this.laneEl(lane)?.querySelectorAll<HTMLElement>('.kb-card') || [])].filter(shown);
+    if (e.key === '?' && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      boardKeysHelp();
+      return;
+    }
+    // A lane has focus (reached with the arrows): move between lanes, into its cards, or add one.
+    if (target.classList.contains('kb-lane') && !e.altKey && this.board) {
+      const lane = Number(target.dataset.lane);
+      const handled = ((): boolean => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const to = lane + fwd(e.key);
+          if (to < 0 || to >= this.board!.lanes.length) return true;
+          (cardsIn(to)[0] || this.laneEl(to))?.focus();
+          return true;
+        }
+        if (e.key === 'ArrowDown') {
+          cardsIn(lane)[0]?.focus();
+          return true;
+        }
+        if (e.key === 'n' || e.key === 'N') {
+          this.cardForm(null, lane);
+          return true;
+        }
+        return false;
+      })();
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
     const card = target.classList.contains('kb-card') ? target : null;
-    if (!card || card.closest('.kb-archive') || e.ctrlKey || e.metaKey) return;
+    if (!card || card.closest('.kb-archive')) return;
     const id = card.dataset.id || '';
     const f = this.cardOf(id);
     if (!f || !f.lane) return;
-    const rtl = getComputedStyle(this.el).direction === 'rtl';
     const lane = f.lane.index;
+    const lanes = this.board!.lanes;
     const handled = ((): boolean => {
       if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        const step = (e.key === 'ArrowRight') !== rtl ? 1 : -1;
-        const to = lane + step;
-        if (to >= 0 && to < this.board!.lanes.length) void this.send({ type: 'move_card', card: id, lane: to, position: Math.min(f.pos, this.board!.lanes[to].cards.length) });
+        const to = lane + fwd(e.key);
+        if (to >= 0 && to < lanes.length) {
+          const pos = Math.min(f.pos, lanes[to].cards.length);
+          void this.send({ type: 'move_card', card: id, lane: to, position: pos });
+          announce(t('Moved to {lane}, {pos} of {n}', { lane: lanes[to].title, pos: pos + 1, n: lanes[to].cards.length + 1 }));
+        }
         return true;
       }
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         const pos = f.pos + (e.key === 'ArrowDown' ? 1 : -1);
-        if (pos >= 0 && pos < f.lane!.cards.length) void this.send({ type: 'move_card', card: id, lane, position: pos });
+        if (pos >= 0 && pos < f.lane!.cards.length) {
+          void this.send({ type: 'move_card', card: id, lane, position: pos });
+          announce(t('Moved to {lane}, {pos} of {n}', { lane: f.lane!.title, pos: pos + 1, n: f.lane!.cards.length }));
+        }
         return true;
       }
       if (e.altKey) return false;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        const cards = [...this.el.querySelectorAll<HTMLElement>(`.kb-lane[data-lane="${lane}"] .kb-card`)].filter(shown);
-        cards[cards.indexOf(card) + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+        const cards = cardsIn(lane);
+        const i = cards.indexOf(card) + (e.key === 'ArrowDown' ? 1 : -1);
+        // Up from the first card reaches its lane.
+        (i < 0 ? this.laneEl(lane) : cards[i])?.focus();
         return true;
       }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        const to = lane + ((e.key === 'ArrowRight') !== rtl ? 1 : -1);
-        const cards = [...(this.laneEl(to)?.querySelectorAll<HTMLElement>('.kb-card') || [])].filter(shown);
-        if (cards && cards.length) cards[Math.min(f.pos, cards.length - 1)].focus();
+        const to = lane + fwd(e.key);
+        if (to < 0 || to >= lanes.length) return true;
+        const cards = cardsIn(to);
+        // An empty lane takes the focus itself.
+        (cards.length ? cards[Math.min(f.pos, cards.length - 1)] : this.laneEl(to))?.focus();
         return true;
       }
       if (e.key === 'Enter' || e.key === 'e' || e.key === 'E' || e.key === 'F2') {
@@ -813,11 +938,23 @@ export class KanbanView {
       }
       if (e.key === ' ' || e.key === 'x' || e.key === 'X') {
         void this.send({ type: 'update_card', card: id, checked: !f.card.checked });
+        announce(f.card.checked ? t('Marked as not done') : t('Marked as done'));
+        return true;
+      }
+      if (e.key === 'n' || e.key === 'N') {
+        this.cardForm(null, lane);
         return true;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        void this.send({ type: 'archive_card', card: id });
-        toast(t('Card archived'), 'info', 2400);
+        // Focus moves on to a neighbour before the card leaves.
+        const cards = cardsIn(lane);
+        const next = cards[cards.indexOf(card) + 1] || cards[cards.indexOf(card) - 1] || this.laneEl(lane);
+        const text = f.card.text;
+        void this.send({ type: 'archive_card', card: id }).then((nb) => {
+          const a = nb?.archive.find((c) => c.text === text);
+          undoToast(t('Card archived'), a ? () => void this.send({ type: 'restore_card', card: a.id, lane }) : null, 'info', 6000);
+        });
+        requestAnimationFrame(() => (next && next.isConnected ? next : this.laneEl(lane))?.focus());
         return true;
       }
       return false;
@@ -945,42 +1082,7 @@ export class KanbanView {
   editStyle(): void {
     const b = this.board;
     if (!b) return;
-    const cur = b.style || {};
-    let pick = cur.icon || 'kanban';
-    let start = '';
-    const grid = BOARD_ICONS.map(
-      (n) => `<button type="button" class="kb-ico-o" role="radio" aria-checked="${n === pick}" data-ico="${n}" aria-label="${attr(n)}">${icon(n)}</button>`,
-    ).join('');
-    Modal.open({
-      title: t('Board color and icon'),
-      body: `<div class="kb-style"><span class="cf-k">${t('Color')}</span>${colorPickHTML('kbBoardC', cur.color || '', { none: true })}
-        <span class="cf-k">${t('Icon')}</span><div class="kb-ico-g" role="radiogroup" aria-label="${attr(t('Icon'))}">${grid}</div></div>`,
-      actions: [
-        { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
-        {
-          label: t('Save'),
-          cls: 'primary',
-          run: (body) => {
-            const color = body.querySelector<HTMLElement>('#kbBoardC')?.dataset.value || '';
-            Modal.close();
-            const op: KbOp = { type: 'set_board_style' };
-            if (color !== start) op.color = color || null;
-            if (pick !== (cur.icon || 'kanban')) op.icon = pick === 'kanban' ? null : pick;
-            if ('color' in op || 'icon' in op) void this.send(op, false);
-          },
-        },
-      ],
-      onOpen: (body) => {
-        wireColorPick(body, 'kbBoardC');
-        start = body.querySelector<HTMLElement>('#kbBoardC')?.dataset.value || '';
-        body.querySelectorAll<HTMLElement>('.kb-ico-o').forEach((o) => {
-          o.onclick = () => {
-            pick = o.dataset.ico || 'kanban';
-            body.querySelectorAll<HTMLElement>('.kb-ico-o').forEach((x) => x.setAttribute('aria-checked', String(x === o)));
-          };
-        });
-      },
-    });
+    boardStyleDialog(b.style || {}, (op) => void this.send(op, false));
   }
 
   /** A small dialog with the colour picker; `done` gets "#rrggbb", or "" for no colour. */
@@ -1459,6 +1561,76 @@ export function mountBoard(hostEl: HTMLElement, path: string, host: KanbanHost):
   hostEl.appendChild(current.el);
   void current.load();
   return current;
+}
+
+/** The colour and icon dialog of a board; `save` gets an op with what changed (nothing changed: no call). */
+function boardStyleDialog(cur: { color?: string | null; icon?: string | null }, save: (op: KbOp) => void): void {
+  let pick = cur.icon || 'kanban';
+  let start = '';
+  const grid = BOARD_ICONS.map(
+    (n) => `<button type="button" class="kb-ico-o" role="radio" aria-checked="${n === pick}" data-ico="${n}" aria-label="${attr(n)}">${icon(n)}</button>`,
+  ).join('');
+  useStyles('kanban-css', KANBAN_CSS);
+  Modal.open({
+    title: t('Board color and icon'),
+    body: `<div class="kb-style"><span class="cf-k">${t('Color')}</span>${colorPickHTML('kbBoardC', cur.color || '', { none: true })}
+      <span class="cf-k">${t('Icon')}</span><div class="kb-ico-g" role="radiogroup" aria-label="${attr(t('Icon'))}">${grid}</div></div>`,
+    actions: [
+      { label: t('Cancel'), cls: 'ghost', run: () => Modal.close() },
+      {
+        label: t('Save'),
+        cls: 'primary',
+        run: (body) => {
+          const color = body.querySelector<HTMLElement>('#kbBoardC')?.dataset.value || '';
+          Modal.close();
+          const op: KbOp = { type: 'set_board_style' };
+          if (color !== start) op.color = color || null;
+          if (pick !== (cur.icon || 'kanban')) op.icon = pick === 'kanban' ? null : pick;
+          if ('color' in op || 'icon' in op) save(op);
+        },
+      },
+    ],
+    onOpen: (body) => {
+      wireColorPick(body, 'kbBoardC');
+      start = body.querySelector<HTMLElement>('#kbBoardC')?.dataset.value || '';
+      body.querySelectorAll<HTMLElement>('.kb-ico-o').forEach((o) => {
+        o.onclick = () => {
+          pick = o.dataset.ico || 'kanban';
+          body.querySelectorAll<HTMLElement>('.kb-ico-o').forEach((x) => x.setAttribute('aria-checked', String(x === o)));
+        };
+      });
+    },
+  });
+}
+
+/** Colour and icon of a board from outside it (the Boards page): the open board when it is on the
+ *  page, else read and written straight on the server. */
+export async function editBoardStyle(path: string): Promise<void> {
+  const open = boardFor(path);
+  if (open) {
+    open.editStyle();
+    return;
+  }
+  let b: KbBoard;
+  try {
+    b = await apiGet<KbBoard>('/api/kanban?path=' + encodeURIComponent(path));
+  } catch (e) {
+    undoToast(t('Could not load the board: {error}', { error: (e as Error).message }), null, 'err');
+    return;
+  }
+  boardStyleDialog(b.style || {}, (op) =>
+    void apiPost<KbBoard>('/api/kanban', { path, version: b.version, op }).catch((e: Error) =>
+      undoToast(t('Could not save the board: {error}', { error: e.message }), null, 'err'),
+    ),
+  );
+}
+
+let reveal: { path: string; id: string; block?: string | null } | null = null;
+
+/** Open the board at one card: the board page scrolls to it once it is drawn (now, if it is open). */
+export function revealCard(path: string, id: string, block?: string | null): void {
+  reveal = { path, id, block };
+  boardFor(path)?.takeReveal();
 }
 
 /** The board shown for `path`, if it is on the page. */
