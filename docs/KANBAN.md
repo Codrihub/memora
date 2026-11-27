@@ -95,6 +95,11 @@ Sort the page by last change, name, progress or next due date, and filter it
 by folder or to boards with overdue cards, not done or done; the choice is kept
 on the device and works with the search box.
 
+The cards adapt to any width: the title has its own space beside the ⋯ menu
+(two lines at most), lane names show only where they fit (a leading number such
+as "0 · " is dropped, the full name shows on hover), a board with many lanes
+folds the rest into "+N lanes", and the footer wraps instead of cutting words.
+
 ### New board
 
 **New board** sits everywhere **New note** does: the top of the sidebar, the
@@ -110,9 +115,14 @@ the tree, the note lists, pins and search.
 
 A board note always opens as a board in the Notes page, in the same page frame
 as a note (the title in the same place), and you edit it right on the board.
-The lanes run the full width of the page, the first one in line with the
-title. Its toolbar keeps **History**, **Ask** (Mnemo), **Aa** (Board view, see
-below), hiding the toolbar (F; Esc or F brings it back) and the ⋯ menu;
+It opens in the **full board view**, like a kanban app: the board takes the
+whole content area, lanes grow with their cards and the page itself scrolls (no
+scroll boxes inside lanes), only the lane row scrolls sideways, and the board
+bar stays at the top. A button in the board bar switches to the **compact
+view** (lanes in line with the title, a tall lane scrolling its cards) and
+back; the choice is remembered per device. Boards embedded in notes always
+use the compact view. Its toolbar keeps **History**, **Ask** (Mnemo), **Aa**
+(Board view, see below), hiding the toolbar (F; Esc or F brings it back) and the ⋯ menu;
 **Contents** and **Edit** of other notes are not there. For the raw Markdown,
 **Edit Markdown source** in the ⋯ menu opens the editor; **Save** or **Close**
 go back to the board.
@@ -180,9 +190,9 @@ go back to the board.
   the lane and place it went to), N adds a card to the focused lane, Delete
   archives with Undo and ? lists these keys. Help & shortcuts lists them too.
 
-Lanes scroll sideways and a tall lane scrolls its cards, with no scrollbars: a
-soft fade at an edge shows there is more that way. On a narrow board (a phone, a narrow chat) the board shows one
-lane at a time and snaps from lane to lane; the lane pager in the board's bar
+Lanes scroll sideways (and, in the compact view, a tall lane scrolls its
+cards), with no scrollbars: a soft fade at an edge shows there is more that
+way. On a narrow board (a phone, a narrow chat) the board shows one lane at a time and snaps from lane to lane; the lane pager in the board's bar
 jumps to any lane. On cards, links, tags, mentions (`@name`), dates and
 `- [ ]` steps show as small chips and boxes; a link or tag opens on a click.
 
@@ -222,8 +232,9 @@ When a turn names a board (you mention it with `@` or `[[`, Mnemo links it in
 its reply or hands it over as a card, or a kanban tool works on it), the board
 shows under the reply as a board preview: its name and folder, how many cards
 are done (one thin progress line), and the first cards of each lane. It is a preview
-to read, kept up to date as agents change the board; tap it
-to open the board itself and work on it there.
+to read, kept up to date as agents change the board. Each lane folds open and
+closed, the whole preview folds, and **Open board** opens
+the board itself to work on it there.
 
 In Mnemo's replies boards and notes look different: a link to a board carries
 the board icon, and board chips and cards a violet accent of their own, while a

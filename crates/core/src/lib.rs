@@ -93,6 +93,7 @@ pub struct GraphNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+/// A resolved link, by vault-relative note path (node `path`, not `id`: names repeat).
 pub struct GraphLink {
     pub source: String,
     pub target: String,
@@ -415,17 +416,16 @@ impl MemoryStore {
         }
     }
 
-    /// Strip `{{...}}` and code spans, then collect wikilink targets.
+    /// Wikilink targets outside code and `{{...}}` placeholders (see
+    /// [`crate::vault::link_scan_mask`]), the ones link rewriting updates.
     pub fn link_targets(&self, content: &str) -> Vec<String> {
-        let c = re_placeholder().replace_all(content, "");
-        let c = re_code_span().replace_all(&c, "");
+        let masked = crate::vault::link_scan_mask(content);
         re_wikilink()
-            .captures_iter(&c)
-            .map(|cap| {
-                cap.get(1)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default()
-            })
+            .captures_iter(&masked)
+            .filter_map(|cap| cap.get(1))
+            // Part of the link was masked: it is no link.
+            .filter(|m| content[m.range()] == masked[m.range()])
+            .map(|m| m.as_str().to_string())
             // `![[photo.png]]` embeds an image; it is not a link to a note.
             .filter(|t| crate::vault::image_mime(t.trim()).is_none())
             .collect()
@@ -451,29 +451,24 @@ impl MemoryStore {
         metas: &[Arc<NoteMeta>],
     ) -> LinkIndex {
         let mut idx = LinkIndex::default();
-        let mut lower: HashMap<String, String> = HashMap::new();
         for (rel, name, _) in files {
-            idx.names.insert(name.clone(), rel.clone());
-            lower
-                .entry(name.to_lowercase())
-                .or_insert_with(|| name.clone());
+            idx.paths.insert(rel.clone(), name.clone());
         }
-        for ((_, name, _), meta) in files.iter().zip(metas) {
-            idx.out.entry(name.clone()).or_default();
+        // The resolver the renderer opens links with: a path-qualified target must
+        // match that path, a bare name prefers the linking note's own folder.
+        let resolver = crate::vault::LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
+        for ((rel, _, _), meta) in files.iter().zip(metas) {
+            idx.out.entry(rel.clone()).or_default();
+            let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
             for raw in &meta.targets {
-                let tgt = Self::norm_target(raw);
-                if tgt.is_empty() {
+                let target = raw.split('#').next().unwrap_or("").trim();
+                if Self::norm_target(target).is_empty() {
                     continue;
                 }
-                let hit = if idx.names.contains_key(&tgt) {
-                    Some(tgt.clone())
-                } else {
-                    lower.get(&tgt.to_lowercase()).cloned()
-                };
-                match hit {
-                    Some(t) if t == *name => {}
+                match resolver.resolve(target, dir) {
+                    Some(t) if t == *rel => {}
                     Some(t) => {
-                        for k in [name, &t] {
+                        for k in [rel, &t] {
                             if !idx.first_seen.contains_key(k) {
                                 idx.first_seen.insert(k.clone(), idx.first_seen.len());
                             }
@@ -481,11 +476,14 @@ impl MemoryStore {
                         idx.incoming
                             .entry(t.clone())
                             .or_default()
-                            .insert(name.clone());
-                        idx.out.entry(name.clone()).or_default().insert(t);
+                            .insert(rel.clone());
+                        idx.out.entry(rel.clone()).or_default().insert(t);
                     }
                     None => {
-                        idx.broken.entry(name.clone()).or_default().insert(tgt);
+                        idx.broken
+                            .entry(rel.clone())
+                            .or_default()
+                            .insert(Self::norm_target(target));
                     }
                 }
             }
@@ -571,7 +569,7 @@ impl MemoryStore {
                 path: rel.clone(),
                 folder: folder_of(rel),
                 color: DEFAULT_COLOR.to_string(),
-                degree: idx.degree(name),
+                degree: idx.degree(rel),
                 tags: meta.tags.clone(),
             })
             .collect();
@@ -591,7 +589,8 @@ impl MemoryStore {
     /// Wikilinks that point at a note that does not exist.
     pub fn broken_links(&self, only: Option<&str>) -> Vec<BrokenLink> {
         let files = self.walk();
-        let names: BTreeSet<String> = files.iter().map(|(_, n, _)| n.to_lowercase()).collect();
+        // Resolved like the renderer and the link index resolve them.
+        let resolver = crate::vault::LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
         let mut out = Vec::new();
         for (rel, name, fp) in &files {
             if let Some(o) = only {
@@ -608,13 +607,16 @@ impl MemoryStore {
                     continue;
                 }
                 seen.insert(key.clone());
-                if !names.contains(&key) {
-                    out.push(BrokenLink {
-                        source: name.clone(),
-                        source_path: rel.clone(),
-                        target: tgt,
-                    });
+                let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                let target = raw.split('#').next().unwrap_or("").trim();
+                if target.is_empty() || resolver.resolve(target, dir).is_some() {
+                    continue;
                 }
+                out.push(BrokenLink {
+                    source: name.clone(),
+                    source_path: rel.clone(),
+                    target: tgt,
+                });
             }
         }
         out
@@ -769,34 +771,44 @@ pub(crate) struct NoteMeta {
 }
 
 /// Wikilinks between notes, as every graph tool counts them: a `[[target]]` resolving
-/// (by name, exact case first) to another note, once per pair and direction. Unresolved
-/// targets are `broken`; degree = distinct notes linked to or from.
+/// (like the renderer opens it: a path-qualified target by path, a bare name from the
+/// linking note's folder first) to another note, once per pair and direction. Notes are
+/// keyed by vault-relative path, so same-named notes in different folders stay apart.
+/// Unresolved targets are `broken`; degree = distinct notes linked to or from.
 #[derive(Debug, Default)]
 pub struct LinkIndex {
-    /// Note name -> relative path (the last one walked when names repeat).
-    pub names: BTreeMap<String, String>,
-    /// Note name -> names of the notes it links to.
+    /// Relative path -> note name.
+    pub paths: BTreeMap<String, String>,
+    /// Relative path -> paths of the notes it links to.
     pub out: BTreeMap<String, BTreeSet<String>>,
-    /// Note name -> names of the notes linking to it.
+    /// Relative path -> paths of the notes linking to it.
     pub incoming: BTreeMap<String, BTreeSet<String>>,
-    /// Note name -> link targets that resolve to no note.
+    /// Relative path -> link targets (names) that resolve to no note.
     pub broken: BTreeMap<String, BTreeSet<String>>,
     /// Order in which notes first took part in a link while walking (tie-breaks).
     pub first_seen: BTreeMap<String, usize>,
 }
 
 impl LinkIndex {
-    /// Distinct notes linked to or from `name`.
-    pub fn neighbors(&self, name: &str) -> BTreeSet<String> {
-        let mut s = self.out.get(name).cloned().unwrap_or_default();
-        if let Some(i) = self.incoming.get(name) {
+    /// Distinct notes (paths) linked to or from the note at `rel`.
+    pub fn neighbors(&self, rel: &str) -> BTreeSet<String> {
+        let mut s = self.out.get(rel).cloned().unwrap_or_default();
+        if let Some(i) = self.incoming.get(rel) {
             s.extend(i.iter().cloned());
         }
         s
     }
 
-    pub fn degree(&self, name: &str) -> usize {
-        self.neighbors(name).len()
+    pub fn degree(&self, rel: &str) -> usize {
+        self.neighbors(rel).len()
+    }
+
+    /// The note name of `rel` (its file stem when unknown).
+    pub fn name_of(&self, rel: &str) -> String {
+        self.paths.get(rel).cloned().unwrap_or_else(|| {
+            let base = rel.rsplit('/').next().unwrap_or(rel);
+            base.strip_suffix(".md").unwrap_or(base).to_string()
+        })
     }
 
     /// Total number of links.
@@ -1858,12 +1870,94 @@ mod resource_tests {
             })
             .collect();
         links.sort();
-        assert_eq!(links, ["A->B", "B->A", "F->A"]);
+        assert_eq!(links, ["A.md->B.md", "B.md->A.md", "F.md->A.md"]);
         let g = s.get_subgraph_impl("A.md", 1, 2).unwrap();
         assert_eq!(g["nodes"].as_array().unwrap().len(), 2);
         assert_eq!(g["truncated"], true);
         let g = s.get_subgraph_impl("A", 1, 0).unwrap();
         assert!(g["nodes"].as_array().unwrap().is_empty());
+        fs::remove_dir_all(&d).ok();
+    }
+
+    /// Issue #54: same-named notes in different folders are separate graph nodes;
+    /// bare links resolve like the renderer opens them, qualified links exactly.
+    #[test]
+    fn same_named_notes_stay_apart_in_the_graph() {
+        let d = tmp_vault("dupnames");
+        for f in ["A", "B", "C"] {
+            fs::create_dir_all(d.join(f)).unwrap();
+        }
+        fs::write(d.join("A/Index.md"), "[[Alpha]]").unwrap();
+        fs::write(d.join("B/Index.md"), "[[Beta]]").unwrap();
+        fs::write(d.join("C/Note.md"), "[[A/Index]]").unwrap();
+        fs::write(d.join("Alpha.md"), "a").unwrap();
+        fs::write(d.join("Beta.md"), "b").unwrap();
+        let s = MemoryStore::new(&d);
+        let b = s.link_stats_impl("B/Index.md").unwrap();
+        assert_eq!(b["links_to_paths"], serde_json::json!(["Beta.md"]), "{b}");
+        assert_eq!(b["incoming"], 0, "{b}");
+        let a = s.link_stats_impl("A/Index.md").unwrap();
+        assert_eq!(a["links_to_paths"], serde_json::json!(["Alpha.md"]), "{a}");
+        assert_eq!(
+            a["linked_from_paths"],
+            serde_json::json!(["C/Note.md"]),
+            "{a}"
+        );
+        assert_eq!(a["linked_from"], serde_json::json!(["Note"]), "{a}");
+        assert_eq!(a["degree"], 2);
+        // Backlinks in the note view agree.
+        let back = |p: &str| s.read_note_impl(p).unwrap()["backlinks"].clone();
+        assert_eq!(back("B/Index.md"), serde_json::json!([]));
+        assert_eq!(
+            back("A/Index.md"),
+            serde_json::json!([{"path": "C/Note.md", "name": "Note"}])
+        );
+        // Both notes are nodes; edges are by path.
+        let g = s.graph();
+        let idx: Vec<&str> = g
+            .nodes
+            .iter()
+            .filter(|n| n.id == "Index")
+            .map(|n| n.path.as_str())
+            .collect();
+        assert_eq!(idx.len(), 2, "{idx:?}");
+        let deg = |p: &str| g.nodes.iter().find(|n| n.path == p).unwrap().degree;
+        assert_eq!((deg("A/Index.md"), deg("B/Index.md")), (2, 1));
+        assert!(g.links.contains(&GraphLink {
+            source: "C/Note.md".into(),
+            target: "A/Index.md".into()
+        }));
+        assert!(!g.links.iter().any(|l| l.target == "B/Index.md"));
+        // Navigation tools.
+        let n = s.get_neighbors_impl("B/Index.md", 2).unwrap();
+        assert_eq!(n.len(), 1, "{n:?}");
+        assert_eq!(n[0]["path"], "Beta.md");
+        let p = s.find_path_impl("C/Note.md", "Alpha").unwrap();
+        assert_eq!(p["hops"], 2, "{p}");
+        assert_eq!(p["path"][1]["path"], "A/Index.md");
+        assert_eq!(
+            s.find_path_impl("C/Note.md", "Beta").unwrap()["found"],
+            false
+        );
+        let hubs = s.get_hubs_impl(1);
+        assert_eq!(hubs[0]["path"], "A/Index.md");
+        let sub = s.get_subgraph_impl("B/Index.md", 2, 60).unwrap();
+        assert_eq!(sub["nodes"].as_array().unwrap().len(), 2, "{sub}");
+        assert!(s.get_isolated_impl().is_empty());
+        // A bare `[[Index]]` prefers the linking note's own folder.
+        fs::write(d.join("B/Other.md"), "[[Index]]").unwrap();
+        let b = s.link_stats_impl("B/Index.md").unwrap();
+        assert_eq!(
+            b["linked_from_paths"],
+            serde_json::json!(["B/Other.md"]),
+            "{b}"
+        );
+        let a = s.link_stats_impl("A/Index.md").unwrap();
+        assert_eq!(
+            a["linked_from_paths"],
+            serde_json::json!(["C/Note.md"]),
+            "{a}"
+        );
         fs::remove_dir_all(&d).ok();
     }
 

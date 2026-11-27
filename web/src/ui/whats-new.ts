@@ -28,6 +28,31 @@ interface Release {
 /** Newest first. */
 const RELEASES: Release[] = [
   {
+    version: '3.3.0',
+    title: t('Boards in full and chats that branch'),
+    lead: t('A full board view, clearer board cards, chat versions when you edit or regenerate, and a link graph that keeps same-named notes apart.'),
+    groups: [
+      {
+        kind: 'new',
+        items: [
+          { icon: 'kanban', title: t('Full board view'), text: t('A board opens across the whole page like a kanban app: long lanes, no scroll boxes inside, and a switch back to the compact view.') },
+          { icon: 'edit', title: t('Edit and regenerate, with versions'), text: t('Edit a message you sent or regenerate a reply; each try is kept as a version you can flip through with ‹ 1/2 ›.') },
+          { icon: 'check', title: t('Answers show what they reply to'), text: t('When you answer a question from Mnemo, your message shows the question it answers.') },
+        ],
+      },
+      {
+        kind: 'better',
+        items: [
+          { icon: 'kanban', title: t('Clearer board cards'), text: t('Board cards adapt to any width: titles never run into the menu, lane names only where they fit, and a footer that wraps.') },
+          { icon: 'book', title: t('Board previews in Mnemo fold'), text: t('Open or close each lane in a board preview, fold the whole preview, or jump straight to the board.') },
+          { icon: 'sidebar', title: t('Mnemo fits better'), text: t('A wider chat list, a pin on every model to make it the default (listed first), and thinking levels that match the model.') },
+          { icon: 'graph', title: t('Same-named notes stay apart'), text: t('Backlinks, the graph and link tools now tell notes with the same name in different folders apart.') },
+          { icon: 'brain', title: t('Find a note in the brain'), text: t('Notes and boards have a Show in brain button, and a selected note stays selected when you switch between Brain, Graph and Canvas.') },
+        ],
+      },
+    ],
+  },
+  {
     version: '3.2.2',
     title: t('Small fixes'),
     lead: t('Two small fixes for boards and Mnemo.'),

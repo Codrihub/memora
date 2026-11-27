@@ -4,6 +4,7 @@ import { apiGet } from '../api';
 import { on, type AgentActivity } from '../bus';
 import { attr, esc, useStyles } from '../dom';
 import { hooks } from '../hooks';
+import { mapFocus, setMapFocus } from '../router';
 import { state, noteTitle } from '../state';
 import type { GraphLink, GraphNode, WsEvent } from '../types';
 import { regionColor } from './palette';
@@ -96,6 +97,8 @@ export class BrainController {
   private prefs = loadPrefs();
   private hidden = new Set<string>();
   private selected = -1;
+  /** The map's shared selection to show once the notes are in (Graph, Canvas, Show in brain). */
+  private wantFocus: string | null = mapFocus();
   private reduced: boolean;
   private refreshTimer = 0;
   private loading: Promise<void> | null = null;
@@ -551,6 +554,13 @@ export class BrainController {
       if (i !== undefined) this.select(i, false);
       else this.select(-1);
     }
+    if (this.wantFocus) {
+      const i = this.index.get(norm(this.wantFocus));
+      if (i !== undefined && !this.hidden.has(notes[i].folder)) {
+        this.wantFocus = null;
+        this.select(i, true);
+      }
+    }
     for (const p of this.pendingFlare.splice(0)) {
       const i = this.index.get(norm(p));
       if (i !== undefined) this.scene.flareNote(i, 1);
@@ -648,6 +658,7 @@ export class BrainController {
   private select(i: number, focus = false): void {
     this.selected = i;
     this.scene?.select(i);
+    if (!this.destroyed) setMapFocus(i >= 0 ? this.notes[i]?.path || null : null);
     if (i < 0 || !this.notes[i]) {
       if (this.card.path && !this.card.path.endsWith('/')) this.card.close();
       return;
@@ -656,7 +667,7 @@ export class BrainController {
     this.chrome.close();
     const n = this.notes[i];
     this.card.showNote(n.path, n.name, n.folder, this.regions.get(n.folder)?.color || '#888', n.tags);
-    if (focus && this.scene) this.scene.focus(this.scene.positionOf(i), 1.15);
+    if (focus && this.scene) this.scene.focus(this.scene.targetOf(i), 1.15);
   }
 
   private openFolder(name: string): void {
@@ -665,6 +676,7 @@ export class BrainController {
     if (this.selected >= 0) {
       this.selected = -1;
       this.scene?.select(-1);
+      setMapFocus(null);
     }
     this.chrome.close();
     this.card.showFolder(name, this.regions.get(name)!.color, this.regions.get(name)!.count);
@@ -707,6 +719,7 @@ export class BrainController {
           this.selected = -1;
           this.scene?.select(-1);
         }
+        setMapFocus(null);
       },
     });
   }

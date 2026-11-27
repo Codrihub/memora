@@ -284,7 +284,7 @@ copied in the web app (Copy path in a note or folder menu) works as is as the
 | `save_memory` | W | `path` (string, required), `content` (string, required) | Replaces the whole note. |
 | `patch_memory` | W | `path` (string, required), `ops` (array, required) | Partial edits. Each op is an object: `{op:"append", text}`, `{op:"prepend", text}`, `{op:"replace", find, with}`, `{op:"set_field", field, value}`, `{op:"add_tag", tag}`, `{op:"remove_tag", tag}`. |
 | `delete_memory` | W | `path` (string, required), `permanent` (boolean, default false) | Moves a note to the Trash (`.Trash`), remembering where it came from and who deleted it: `{ok, path, trashed, to}`. `list_trash` shows it and `restore_trash` brings it back. `permanent: true` deletes it for good instead (`{ok, path, permanent}`) and is refused for keys without the `admin` scope. With version history on, every earlier version is erased from the history as well (every name the note had, its trash record and the commit messages naming it; other notes keep their versions but their revision ids change), so no one, agents included, can read it again. |
-| `move_memory` | W | `path` (string, required), `folder` (string, required; relative to the vault, `Root` for the top level) | Moves a note into another folder. Wikilinks resolve by note name, so they keep working. |
+| `move_memory` | W | `path` (string, required), `folder` (string, required; relative to the vault, `Root` for the top level) | Moves a note into another folder. Wikilinks are rewritten where needed so each still names the note it named before (same-named notes included). |
 | `rename_memory` | W | `path` (string, required), `new_name` (string, required) | Renames a note in its folder. |
 | `upload_image` | W | `path` (string, required: the note the image belongs to), `name` (string, required, e.g. `diagram.png`), `data` (string, required: base64 or a `data:image/...;base64,` URL), `alt` (string), `append` (boolean, default false) | Stores a PNG, JPEG, WebP or GIF in the note's own folder (checked by content; the upload limit in Settings, Images applies, 5 MB by default). Identical bytes reuse the existing file; a taken name gets `-1`, `-2` ...: `{ok, path, name, bytes, url, markdown}`. Show it in the note with the returned `markdown` line, `![alt](path:name.png)`; `append: true` adds that line to the end of the note. The image then moves, goes to the Trash, is restored and is deleted with its note. |
 | `list_images` | R | `folder` (string; `Root` or empty for the top level) or `path` (a note) | The images of one folder (not its sub folders), each with `used_in` (the notes and sections that show it); with `path`, the images that note shows and every image of its folder. |
@@ -335,14 +335,22 @@ copied in the web app (Copy path in a note or folder menu) works as is as the
 
 | Tool | | Arguments | Purpose |
 |---|---|---|---|
-| `get_graph` | R | none | Whole graph: `{nodes: [{id, path, folder, color, degree, tags, mtime}], links: [{source, target}]}`. |
+| `get_graph` | R | none | Whole graph: `{nodes: [{id, path, folder, color, degree, tags, mtime}], links: [{source, target}]}`. Links name notes by `path` (a node's `id` is still the note name, which can repeat across folders). |
 | `get_neighbors` | R | `path` (string, required), `depth` (integer, default 1) | Notes within N hops. |
 | `get_subgraph` | R | `path` (string, required), `depth` (integer, default 1), `max_nodes` (integer, default 60) | Subgraph around one note. |
 | `find_path` | R | `source` (string, required), `target` (string, required) | Shortest wikilink path between two notes. |
 | `get_hubs` | R | `limit` (integer, default 10) | Most connected notes. |
 | `get_isolated` | R | none | Notes with no links in or out. |
-| `link_stats` | R | `path` (string, required) | Outgoing, incoming and unresolved links of one note. |
+| `link_stats` | R | `path` (string, required) | Outgoing, incoming and unresolved links of one note. `links_to` / `linked_from` list note names; `links_to_paths` / `linked_from_paths` list the same notes by path, so same-named notes stay apart. |
 | `broken_links` | R | none | Wikilinks pointing at notes that do not exist. |
+
+The graph is keyed by note path, so notes with the same name in different
+folders (several `Index.md`, say) are separate nodes for backlinks, `link_stats`,
+`get_hubs`, `get_neighbors`, `get_subgraph`, `find_path` and `get_isolated`.
+Links resolve the way opening them does: a path-qualified link
+(`[[Projects/Index]]`) must match that path; a bare `[[Index]]` prefers the
+linking note's own folder, then the shallowest path, then the first
+alphabetically.
 
 ### Versioning (`version`)
 

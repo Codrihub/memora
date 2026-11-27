@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { useStyles } from '../dom';
-import { onNavigate } from '../router';
+import { mapFocus, onNavigate } from '../router';
 import type { Page } from '../state';
 import { enterCanvas } from '../views/canvas';
 import { enterGraph } from '../views/graph';
@@ -47,6 +47,8 @@ export function initMapEnter(): void {
     const host = document.getElementById(id);
     if (!host) return;
     if (page === 'brain') {
+      // A selected note flies the camera to itself; fitting would undo that.
+      if (mapFocus()) return;
       void wait(350).then(() => host.querySelector<HTMLElement>('[data-z=fit]')?.click());
       return;
     }

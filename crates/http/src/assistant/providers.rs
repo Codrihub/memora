@@ -146,6 +146,79 @@ pub fn may_think(kind: &str, style: &str, model: &str) -> bool {
     can_think(kind, style, model) || takes_effort(model) || thinks(model)
 }
 
+/// Every thinking level the chat knows, in order: what a model gets when nothing narrower is known.
+pub const THINK_LEVELS: &[&str] = &["auto", "off", "low", "medium", "high"];
+
+/// The thinking levels a model takes, from what its maker documents (model lists say whether a
+/// model reasons, not which levels it takes, so this goes by the model's name, behind any router
+/// prefix). `None` = nothing narrower is known: every level, as before.
+///
+/// - Claude 3.7 and later: thinking on or off, with a budget (every level).
+/// - OpenAI reasoning models (o1, o3, o4, gpt-5) and gpt-oss: `reasoning_effort` low, medium,
+///   high; their thinking cannot be switched off.
+/// - Gemini 2.5 / 3 Pro: a thinking budget that cannot be zero (no off); Flash can.
+/// - Grok 3 mini: `reasoning_effort` low or high only; Grok 4 always reasons, no control.
+/// - DeepSeek R1 / reasoner, QwQ, Magistral, Sonar Reasoning, Phi-4 reasoning: always think,
+///   with no level to pick.
+pub fn think_levels(kind: &str, style: &str, model: &str) -> Option<&'static [&'static str]> {
+    let m = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    let m = m.split(':').next().unwrap_or(&m);
+    if kind == "anthropic" || style == "messages" || m.starts_with("claude") {
+        return None;
+    }
+    const NO_OFF: &[&str] = &["auto", "low", "medium", "high"];
+    const FIXED: &[&str] = &["auto"];
+    if m.starts_with("gpt-oss") || reasoning_model(m) {
+        return Some(NO_OFF);
+    }
+    if m.starts_with("gemini-2.5-pro") || (m.starts_with("gemini-3") && m.contains("pro")) {
+        return Some(NO_OFF);
+    }
+    if m.starts_with("grok-3-mini") {
+        return Some(&["auto", "low", "high"]);
+    }
+    if m.starts_with("grok-4") && !m.contains("fast") {
+        return Some(FIXED);
+    }
+    let fixed = [
+        "deepseek-r1",
+        "deepseek-reasoner",
+        "qwq",
+        "magistral",
+        "sonar-reasoning",
+        "phi-4-reasoning",
+    ];
+    if fixed.iter().any(|k| m.starts_with(k)) || m.ends_with("-r1") {
+        return Some(FIXED);
+    }
+    None
+}
+
+/// The owner's thinking level fitted to what the model takes: a level it lacks becomes the
+/// nearest one it has (off falls back to the model's own default).
+pub fn fit_level(kind: &str, style: &str, model: &str, level: &str) -> String {
+    let Some(ok) = think_levels(kind, style, model) else {
+        return level.to_string();
+    };
+    if ok.contains(&level) {
+        return level.to_string();
+    }
+    let near: &[&str] = match level {
+        "medium" => &["high", "low"],
+        "low" => &["medium", "high"],
+        "high" => &["medium", "low"],
+        _ => &[],
+    };
+    near.iter()
+        .find(|l| ok.contains(l))
+        .map_or("auto", |l| l)
+        .to_string()
+}
+
 /// What streams out of a reply: its text, and the model's thinking where it shows it.
 pub enum Stream<'a> {
     Text(&'a str),
@@ -1312,6 +1385,30 @@ fn anthropic_once(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn think_levels_follow_the_model() {
+        assert_eq!(
+            think_levels("anthropic", "messages", "claude-sonnet-4-5"),
+            None
+        );
+        assert_eq!(think_levels("custom", "", "llama3"), None);
+        assert_eq!(
+            think_levels("openai", "", "o3-mini"),
+            Some(&["auto", "low", "medium", "high"][..])
+        );
+        assert_eq!(
+            think_levels("custom", "", "deepseek/deepseek-r1"),
+            Some(&["auto"][..])
+        );
+        assert_eq!(
+            think_levels("custom", "", "x-ai/grok-3-mini"),
+            Some(&["auto", "low", "high"][..])
+        );
+        assert_eq!(fit_level("openai", "", "o3", "off"), "auto");
+        assert_eq!(fit_level("custom", "", "grok-3-mini", "medium"), "high");
+        assert_eq!(fit_level("custom", "", "llama3", "off"), "off");
+    }
 
     #[test]
     fn router_aliases_get_a_thinking_level_until_refused() {

@@ -72,6 +72,7 @@ function readGraph(g: GraphReply): LinkGraph {
   for (const n of g.nodes || []) {
     if (!n.path) continue;
     byId.set(n.id || n.path, n.path);
+    byId.set(n.path, n.path); // links name notes by path (names repeat across folders)
     if (n.color) lg.color.set(n.path, n.color);
     lg.degree.set(n.path, n.degree || 0);
   }

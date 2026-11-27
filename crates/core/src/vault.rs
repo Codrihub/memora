@@ -17,6 +17,8 @@ use walkdir::WalkDir;
 
 mod images;
 mod purge;
+#[cfg(test)]
+mod relink_tests;
 pub use images::{decode_base64, image_max_bytes, set_image_max_bytes, DEFAULT_IMAGE_MAX};
 
 /// A regex compiled once per call site (the renderer runs per line; compiling its
@@ -290,6 +292,20 @@ fn renamed_note(asked: &str, got: &str) -> Option<String> {
             "'{asked}' was saved as '{got}' (spaces become _; characters other than \
              letters, digits, _ and - are dropped)"
         )
+    })
+}
+
+/// Whether the folder of `p` already holds an entry named like it, compared without
+/// case as [`MemoryStore::ensure_free`] compares; `except` (the entry being renamed)
+/// does not count. A case twin (`Index.md` beside `INDEX.md`) would make every link
+/// to either ambiguous.
+fn name_taken(p: &Path, except: Option<&Path>) -> bool {
+    let (Some(dir), Some(name)) = (p.parent(), p.file_name()) else {
+        return p.exists();
+    };
+    let want = name.to_string_lossy().to_lowercase();
+    fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+        e.file_name().to_string_lossy().to_lowercase() == want && Some(e.path().as_path()) != except
     })
 }
 
@@ -1755,11 +1771,18 @@ fn replace_groups_ok(pat: &Regex, replace: &str) -> MResult<()> {
 
 /// The note among `rels` (vault-relative `.md` paths) that `[[target]]`, written in
 /// a note of folder `from_dir`, points at (see [`MemoryStore::resolve_wikilink_from`]).
+/// A leading `/` anchors a bare name at the root: `[[/Index]]` resolves as if written
+/// in a root note, so it names the root `Index.md` even beside another `Index.md`.
 fn pick_wikilink<I, S>(rels: I, target: &str, from_dir: &str) -> Option<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    let from_dir = if target.trim().starts_with('/') {
+        ""
+    } else {
+        from_dir
+    };
     let t = target.trim().trim_start_matches('/');
     let t = t.strip_suffix(".md").unwrap_or(t).to_lowercase();
     let name = t.rsplit('/').next().unwrap_or(&t).to_string();
@@ -1798,10 +1821,10 @@ where
 }
 
 /// Note paths grouped by lowercase name, to resolve many wikilinks quickly.
-struct LinkIndex(HashMap<String, Vec<String>>);
+pub(crate) struct LinkIndex(HashMap<String, Vec<String>>);
 
 impl LinkIndex {
-    fn new<I: IntoIterator<Item = String>>(rels: I) -> Self {
+    pub(crate) fn new<I: IntoIterator<Item = String>>(rels: I) -> Self {
         let mut m: HashMap<String, Vec<String>> = HashMap::new();
         for rel in rels {
             let low = rel.to_lowercase();
@@ -1812,7 +1835,7 @@ impl LinkIndex {
         Self(m)
     }
 
-    fn resolve(&self, target: &str, from_dir: &str) -> Option<String> {
+    pub(crate) fn resolve(&self, target: &str, from_dir: &str) -> Option<String> {
         let t = target.trim().trim_start_matches('/');
         let t = t.strip_suffix(".md").unwrap_or(t).to_lowercase();
         let name = t.rsplit('/').next().unwrap_or(&t);
@@ -1820,20 +1843,45 @@ impl LinkIndex {
     }
 }
 
+/// `content` with every place a wikilink does not count blanked to spaces (same byte
+/// offsets, newlines kept): fenced code blocks, `{{...}}` placeholders and inline
+/// code spans, as the renderer shows them.
+pub(crate) fn link_scan_mask(content: &str) -> String {
+    fn blank(b: &mut [u8], r: std::ops::Range<usize>) {
+        for x in &mut b[r] {
+            if *x != b'\n' {
+                *x = b' ';
+            }
+        }
+    }
+    // Every blanked range starts and ends on an ASCII byte or a line edge, so the
+    // bytes stay valid UTF-8.
+    let text = |b: Vec<u8>| String::from_utf8(b).unwrap_or_else(|_| content.to_string());
+    let mut b = content.as_bytes().to_vec();
+    for r in fence_ranges(content) {
+        blank(&mut b, r);
+    }
+    let s = text(b);
+    let ranges: Vec<_> = crate::re_placeholder()
+        .find_iter(&s)
+        .map(|m| m.range())
+        .collect();
+    let mut b = s.into_bytes();
+    for r in ranges {
+        blank(&mut b, r);
+    }
+    for r in code_span_ranges(&b) {
+        blank(&mut b, r);
+    }
+    text(b)
+}
+
 /// `content` with the target of every wikilink replaced by what `f` returns for it
 /// (`None` keeps it); aliases, `\|` escapes and brackets stay as they are. Links in
-/// `{{...}}` placeholders and code spans are skipped, as
+/// code and `{{...}}` placeholders (see [`link_scan_mask`]) are skipped, as
 /// [`MemoryStore::link_targets`] skips them. `None` when nothing changed.
 fn rewrite_links_in(content: &str, mut f: impl FnMut(&str) -> Option<String>) -> Option<String> {
-    let blank = |s: &str, re: &Regex| {
-        let mut out = s.to_string();
-        for m in re.find_iter(s) {
-            out.replace_range(m.range(), &" ".repeat(m.len()));
-        }
-        out
-    };
-    let masked = blank(content, crate::re_placeholder());
-    let masked = blank(&masked, crate::re_code_span());
+    let masked = link_scan_mask(content);
     let mut out = String::with_capacity(content.len());
     let mut last = 0;
     for cap in re_wikilink().captures_iter(&masked) {
@@ -1881,9 +1929,16 @@ fn relinked_target(
     }
     let stem = want.strip_suffix(".md").unwrap_or(&want);
     let base = stem.rsplit('/').next().unwrap_or(stem);
-    let bare_ok = !target.trim_start_matches('/').contains('/')
-        && new.resolve(base, new_dir).as_deref() == Some(want.as_str());
-    let mut out = if bare_ok { base } else { stem }.to_string();
+    let bare_resolves = new.resolve(base, new_dir).as_deref() == Some(want.as_str());
+    let at_root = stem == base;
+    let mut out = if bare_resolves && (at_root || !target.trim_start_matches('/').contains('/')) {
+        base.to_string()
+    } else if at_root {
+        // A root note shadowed by a same-named note nearer the link.
+        format!("/{base}")
+    } else {
+        stem.to_string()
+    };
     if target.to_lowercase().ends_with(".md") {
         out.push_str(".md");
     }
@@ -2349,18 +2404,18 @@ impl MemoryStore {
 // ---------------------------------------------------------------------------
 
 impl MemoryStore {
-    /// `(names -> rel path, undirected adjacency)` over resolved links (see
-    /// [`crate::LinkIndex`]); notes without links have no entry.
+    /// `(rel path -> note name, undirected adjacency by rel path)` over resolved
+    /// links (see [`crate::LinkIndex`]); notes without links have no entry.
     pub fn adjacency(&self) -> (BTreeMap<String, String>, BTreeMap<String, BTreeSet<String>>) {
         let idx = self.link_index();
         let mut adj: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for n in idx.names.keys() {
+        for n in idx.paths.keys() {
             let nb = idx.neighbors(n);
             if !nb.is_empty() {
                 adj.insert(n.clone(), nb);
             }
         }
-        (idx.names, adj)
+        (idx.paths, adj)
     }
 
     /// The note a tool argument names, as `(note name, relative path)`: a vault path
@@ -2429,8 +2484,8 @@ impl MemoryStore {
         rel.ends_with(".md") && !rel.split('/').any(|s| s.starts_with('.'))
     }
 
-    /// Breadth-first walk over undirected links: `(name, hops)`, the start first,
-    /// nearer notes before farther ones.
+    /// Breadth-first walk over undirected links: `(rel path, hops)`, the start
+    /// first, nearer notes before farther ones.
     fn bfs(idx: &crate::LinkIndex, start: &str, depth: usize) -> Vec<(String, usize)> {
         let mut seen: BTreeSet<String> = BTreeSet::new();
         seen.insert(start.to_string());
@@ -2453,31 +2508,28 @@ impl MemoryStore {
 
     pub fn get_neighbors_impl(&self, path: &str, depth: usize) -> MResult<Vec<Value>> {
         let idx = self.link_index();
-        let (start, _) = self.note_of(path)?;
+        let (_, start) = self.note_of(path)?;
         Ok(Self::bfs(&idx, &start, depth)
             .into_iter()
             .skip(1)
-            .map(|(nm, hops)| {
-                let rel = idx.names[&nm].clone();
-                json!({"name": nm, "path": rel, "folder": folder_of(&rel), "hops": hops})
+            .map(|(rel, hops)| {
+                json!({"name": idx.name_of(&rel), "path": rel, "folder": folder_of(&rel), "hops": hops})
             })
             .collect())
     }
 
     /// The notes within `depth` hops of `path` (nearest first, the note itself
     /// included), at most `max_nodes` of them, with every link between them in its
-    /// real direction (a two-way link is two edges).
+    /// real direction (a two-way link is two edges). Links name notes by path.
     pub fn get_subgraph_impl(&self, path: &str, depth: usize, max_nodes: usize) -> MResult<Value> {
         let idx = self.link_index();
-        let (start, _) = self.note_of(path)?;
+        let (_, start) = self.note_of(path)?;
         let order = Self::bfs(&idx, &start, depth);
         let truncated = order.len() > max_nodes;
         let keep: BTreeSet<String> = order.into_iter().take(max_nodes).map(|x| x.0).collect();
         let nodes: Vec<Value> = keep
             .iter()
-            .map(|n| {
-                json!({"name": n, "path": idx.names.get(n), "folder": idx.names.get(n).map(|p| folder_of(p))})
-            })
+            .map(|rel| json!({"name": idx.name_of(rel), "path": rel, "folder": folder_of(rel)}))
             .collect();
         let mut links = Vec::new();
         for a in &keep {
@@ -2492,10 +2544,10 @@ impl MemoryStore {
 
     pub fn find_path_impl(&self, src: &str, dst: &str) -> MResult<Value> {
         let idx = self.link_index();
-        let (a, _) = self
+        let (_, a) = self
             .note_of(src)
             .map_err(|e| MemoryErr(format!("source {}", e.0)))?;
-        let (b, _) = self
+        let (_, b) = self
             .note_of(dst)
             .map_err(|e| MemoryErr(format!("target {}", e.0)))?;
         let mut prev: HashMap<String, Option<String>> = HashMap::new();
@@ -2527,7 +2579,7 @@ impl MemoryStore {
         chain.reverse();
         let path: Vec<Value> = chain
             .iter()
-            .map(|n| json!({"name": n, "path": idx.names.get(n)}))
+            .map(|rel| json!({"name": idx.name_of(rel), "path": rel}))
             .collect();
         Ok(json!({"found": true, "hops": chain.len() - 1, "path": path}))
     }
@@ -2537,7 +2589,7 @@ impl MemoryStore {
     pub fn get_hubs_impl(&self, limit: usize) -> Vec<Value> {
         let idx = self.link_index();
         let mut ranked: Vec<(&String, usize)> = idx
-            .names
+            .paths
             .keys()
             .map(|n| (n, idx.degree(n)))
             .filter(|x| x.1 > 0)
@@ -2556,41 +2608,45 @@ impl MemoryStore {
         ranked
             .into_iter()
             .take(limit)
-            .map(|(n, d)| {
-                json!({"name": n, "path": idx.names.get(n),
-                       "folder": idx.names.get(n).map(|p| folder_of(p)), "degree": d})
+            .map(|(rel, d)| {
+                json!({"name": idx.name_of(rel), "path": rel,
+                       "folder": folder_of(rel), "degree": d})
             })
             .collect()
     }
 
     pub fn get_isolated_impl(&self) -> Vec<Value> {
         let idx = self.link_index();
-        idx.names
+        idx.paths
             .iter()
-            .filter(|(n, _)| idx.degree(n) == 0)
-            .map(|(n, rel)| json!({"name": n, "path": rel, "folder": folder_of(rel)}))
+            .filter(|(rel, _)| idx.degree(rel) == 0)
+            .map(|(rel, n)| json!({"name": n, "path": rel, "folder": folder_of(rel)}))
             .collect()
     }
 
     /// Links of one note (see [`crate::LinkIndex`]): the notes it links to, the
-    /// notes linking to it, and its link targets that resolve to no note.
+    /// notes linking to it (by name, and by path in `*_paths`: names repeat across
+    /// folders), and its link targets that resolve to no note.
     pub fn link_stats_impl(&self, path: &str) -> MResult<Value> {
         let idx = self.link_index();
         let (name, rel) = self.note_of(path)?;
-        let names = |m: &BTreeMap<String, BTreeSet<String>>| -> Vec<String> {
-            m.get(&name)
+        let paths = |m: &BTreeMap<String, BTreeSet<String>>| -> Vec<String> {
+            m.get(&rel)
                 .map(|s| s.iter().cloned().collect())
                 .unwrap_or_default()
         };
-        let (out, inc, broken) = (names(&idx.out), names(&idx.incoming), names(&idx.broken));
+        let (out, inc, broken) = (paths(&idx.out), paths(&idx.incoming), paths(&idx.broken));
+        let names = |v: &[String]| -> Vec<String> { v.iter().map(|p| idx.name_of(p)).collect() };
         Ok(json!({
             "path": rel,
             "name": name,
-            "degree": idx.degree(&name),
+            "degree": idx.degree(&rel),
             "outgoing": out.len(),
             "incoming": inc.len(),
-            "links_to": out,
-            "linked_from": inc,
+            "links_to": names(&out),
+            "linked_from": names(&inc),
+            "links_to_paths": out,
+            "linked_from_paths": inc,
             "unresolved": broken,
         }))
     }
@@ -2865,19 +2921,21 @@ impl MemoryStore {
         let files = self.walk();
         let (html, tags, fm) = self.render_in(path, &content, &files);
         let name = Self::base_name(path);
-        let name_l = name.to_lowercase();
-        // A note links here when a wikilink target (minus folder, `.md` and
-        // `#heading`) names it; `[[Plan]]` is not a backlink of `Plan-B`.
-        let names_me = |t: &String| {
-            let t = Self::norm_target(t);
-            t.split('#').next().unwrap_or("").trim().to_lowercase() == name_l
-        };
+        // A note links here when one of its wikilinks (minus `#heading`) resolves to
+        // this note the way the renderer opens it: `[[Plan]]` is not a backlink of
+        // `Plan-B`, and `[[Index]]` in `B/` is not a backlink of `A/Index.md`.
+        let resolver = LinkIndex::new(files.iter().map(|(rel, _, _)| rel.clone()));
         let mut backlinks = Vec::new();
         let metas = self.scan(&files);
         for ((rel2, name2, _), meta) in files.iter().zip(&metas) {
             if rel2 == path {
                 continue;
             }
+            let dir2 = rel2.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            let names_me = |t: &String| {
+                let t = t.split('#').next().unwrap_or("").trim();
+                !t.is_empty() && resolver.resolve(t, dir2).is_some_and(|r| r == path)
+            };
             if meta.targets.iter().any(names_me) {
                 backlinks.push(json!({"path": rel2, "name": name2}));
             }
@@ -3168,6 +3226,42 @@ impl MemoryStore {
         if moves.iter().all(|(a, b)| a == b) {
             return 0;
         }
+        self.relink(before, moves)
+    }
+
+    /// The vault's note paths before `rel` is created, when another note already has
+    /// its name (so the new note could capture bare links); `None` otherwise.
+    fn paths_before_new(&self, rel: &str) -> Option<Vec<String>> {
+        let stem = |p: &str| {
+            let low = p.to_lowercase();
+            let s = low.strip_suffix(".md").unwrap_or(&low).to_string();
+            s.rsplit('/').next().unwrap_or(&s).to_string()
+        };
+        let name = stem(rel);
+        let before = self.all_note_paths();
+        before.iter().any(|p| stem(p) == name).then_some(before)
+    }
+
+    /// After a note was created beside same-named ones (`before` from
+    /// [`MemoryStore::paths_before_new`]): rewrite the bare links the new note would
+    /// capture so each still names the note it named before (`[[Index]]` in `C/` that
+    /// meant the root `Index.md` becomes `[[/Index]]` when `C/Index.md` appears).
+    /// Returns how many visible notes changed.
+    fn keep_links_after_create(&self, before: Option<Vec<String>>) -> usize {
+        let Some(before) = before else {
+            return 0;
+        };
+        let n = self.relink(&before, &HashMap::new());
+        if n > 0 {
+            let _ = self.reindex();
+        }
+        n
+    }
+
+    /// The rewrite behind [`MemoryStore::rewrite_moved_links`]; notes that did not
+    /// exist before (and were not moved) are left as they are.
+    fn relink(&self, before: &[String], moves: &HashMap<String, String>) -> usize {
+        let existed: HashSet<&str> = before.iter().map(String::as_str).collect();
         let old = LinkIndex::new(before.iter().cloned());
         let after = self.walk_all();
         let new = LinkIndex::new(after.iter().map(|(rel, _, _)| rel.clone()));
@@ -3177,6 +3271,9 @@ impl MemoryStore {
             .collect();
         let mut changed = 0;
         for (rel, _, fp) in &after {
+            if !existed.contains(rel.as_str()) && !back.contains_key(rel.as_str()) {
+                continue;
+            }
             let Some(content) = self.read_raw(fp) else {
                 continue;
             };
@@ -3215,8 +3312,10 @@ impl MemoryStore {
         if let Some(parent) = ap.parent() {
             fs::create_dir_all(parent).ok();
         }
+        let before = self.paths_before_new(&rel);
         fs::write(&ap, body).map_err(|e| MemoryErr(e.to_string()))?;
         self.refresh_notes(&[&ap]);
+        self.keep_links_after_create(before);
         self.git_commit(&format!("create: {rel}"));
         Ok(rel)
     }
@@ -3379,9 +3478,11 @@ impl MemoryStore {
             .map_err(|e| MemoryErr(format!("could not create folder {path}: {e}")))?;
         let index = self.resolve(&format!("{path}/Index.md"))?;
         let title = path.rsplit('/').next().unwrap_or(&path).replace('_', " ");
+        let before = self.paths_before_new(&format!("{path}/Index.md"));
         fs::write(&index, format!("# {title}\n\n"))
             .map_err(|e| MemoryErr(format!("could not write {path}/Index.md: {e}")))?;
         let _ = self.reindex();
+        self.keep_links_after_create(before);
         self.git_commit(&format!("folder: {path}"));
         Ok(out)
     }
@@ -3428,7 +3529,7 @@ impl MemoryStore {
         if !self.subtree_visible(&sdir) {
             return err(PROTECTED_INSIDE);
         }
-        if ddir.exists() {
+        if name_taken(&ddir, Some(&sdir)) {
             return err(format!("already exists: {dest}"));
         }
         let mut created = false;
@@ -3620,7 +3721,7 @@ impl MemoryStore {
                 _ => (name.clone(), String::new()),
             };
             let mut i = 1;
-            while to.exists() {
+            while name_taken(&to, None) {
                 to = ddir.join(format!("{stem}-{i}{ext}"));
                 i += 1;
             }
@@ -3767,10 +3868,13 @@ impl MemoryStore {
         for rel in notes {
             let mut rest = rel[prefix.len()..].to_string();
             // A sub folder named like the deleted one (`A/A/x.md`, `A` deleted, moving
-            // to A's parent) would land back inside it: it becomes `A-1`.
+            // to A's parent) would land back inside it: it becomes `A-1`. Compared
+            // without case, as case-insensitive file systems (macOS, Windows) see it.
             if parent == parent_folder(&folder) {
-                if let Some(tail) = rest.strip_prefix(&format!("{base}/")) {
-                    rest = format!("{base}-1/{tail}");
+                if let Some((first, tail)) = rest.split_once('/') {
+                    if first.to_lowercase() == base.to_lowercase() {
+                        rest = format!("{base}-1/{tail}");
+                    }
                 }
             }
             let up = if parent.is_empty() {
@@ -3781,7 +3885,7 @@ impl MemoryStore {
             let stem = up.strip_suffix(".md").unwrap_or(&up).to_string();
             let mut dap = self.resolve(&up)?;
             let mut i = 1;
-            while dap.exists() {
+            while name_taken(&dap, None) {
                 dap = self.resolve(&format!("{stem}-{i}.md"))?;
                 i += 1;
             }

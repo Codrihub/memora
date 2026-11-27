@@ -57,43 +57,61 @@ const CSS = `
 .bd-search .vx-i{width:16px;height:16px;flex:none}
 .bd-search input{flex:1;min-width:0;height:100%;border:0;background:none;color:var(--fg);font:inherit;font-size:14px;outline:none;padding:0}
 .bd-search input:focus-visible{outline:none;box-shadow:none}
-.bd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
-.bd-card{position:relative;display:flex;flex-direction:column;gap:12px;text-align:start;padding:16px;border-radius:14px;border:1px solid var(--line);
-  background:var(--surface-1);color:var(--fg);font:inherit;cursor:pointer;min-width:0;transition:border-color .15s,box-shadow .15s,transform .15s;
+.bd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:16px;align-items:stretch}
+.bd-card{position:relative;display:flex;flex-direction:column;gap:14px;text-align:start;padding:16px 16px 14px;border-radius:14px;border:1px solid var(--line);
+  background:var(--surface-1);color:var(--fg);font:inherit;cursor:pointer;min-width:0;container:bdc/inline-size;transition:border-color .15s;
   -webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-.bd-card:hover{border-color:var(--line-strong);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.bd-card:hover{border-color:var(--line-strong)}
 .bd-card:has(.bd-open:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
-.bd-open{all:unset;display:block;min-width:0;cursor:pointer}
+.bd-open{all:unset;display:block;min-width:0;max-width:100%;cursor:pointer}
 .bd-open::after{content:"";position:absolute;inset:0;border-radius:inherit}
 .bd-open:focus-visible{outline:none}
+/* Title, folder and ⋯ sit in their own grid columns: a long name wraps (two lines at most) and never runs under the button. */
+.bd-top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px;min-width:0}
 .bd-more{position:relative;z-index:1;flex:none;margin:-6px -8px 0 0;width:34px;height:34px;color:var(--muted)}
 [dir=rtl] .bd-more{margin:-6px 0 0 -8px}
 .bd-more:hover,.bd-more[aria-expanded=true]{color:var(--fg)}
 @media (hover:none){.bd-more{width:40px;height:40px;margin-top:-9px}}
-.bd-late{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:600;
-  background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn);font-variant-numeric:tabular-nums}
-.bd-late svg{width:12px;height:12px}
-.bd-top{display:flex;align-items:flex-start;gap:10px;min-width:0}
-.bd-ico{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:10px;color:var(--fc,var(--accent));
+.bd-ico{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:10px;color:var(--fc,var(--accent));
   background:color-mix(in srgb,var(--fc,var(--accent)) 13%,transparent)}
 .bd-ico .vx-i,.bd-ico svg{width:18px;height:18px}
 .bd-ico .kb-emo{font-size:17px;line-height:1}
-.bd-name{flex:1;min-width:0}
-.bd-name b{display:block;font-size:15px;font-weight:650;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bd-name small{display:block;margin-top:2px;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bd-lanes{display:flex;align-items:flex-end;gap:5px;height:46px;padding:0 2px}
-.bd-lane{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:4px}
-.bd-bar{position:relative;height:30px;border-bottom:1px solid var(--line)}
-.bd-bar::after{content:"";position:absolute;inset:auto 0 0 0;height:max(3px,var(--h,0%));border-radius:4px 4px 1px 1px;
-  background:color-mix(in srgb,var(--fc,var(--accent)) 52%,var(--surface-1))}
-.bd-lane span{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
-.bd-prog{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--text-2);font-variant-numeric:tabular-nums}
-.bd-meter{flex:1;height:4px;background:linear-gradient(transparent 1.5px,var(--line) 1.5px,var(--line) 2.5px,transparent 2.5px)}
-.bd-meter i{display:block;height:100%;border-radius:99px;background:color-mix(in srgb,var(--fc,var(--accent)) 60%,var(--surface-1))}
-.bd-foot{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);flex-wrap:nowrap;min-width:0;overflow:hidden}
-.bd-foot>span{flex:none;white-space:nowrap}.bd-foot>span:last-child{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.bd-foot>span+span::before{content:"·";margin-inline-end:8px}
-.bd-foot>.bd-late+span::before,.bd-foot>.bd-late::before{content:none}
+.bd-name{min-width:0;padding-top:1px}
+.bd-name b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;font-size:15px;font-weight:650;line-height:1.3;
+  overflow-wrap:break-word;word-break:normal;hyphens:manual}
+.bd-name small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Lanes: flat bars on one baseline. Counts show while they fit; lane names only where each bar has room for a word
+   (else they live in the bar's tooltip), so a name is never cut to a stub. */
+.bd-lanes{display:flex;align-items:stretch;gap:6px;min-width:0;padding:0 1px}
+.bd-lane{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:5px}
+.bd-bar{position:relative;height:36px;border-bottom:1px solid var(--line-strong,var(--line))}
+.bd-bar::after{content:"";position:absolute;inset:auto 0 0 0;height:max(2px,var(--h,0%));border-radius:3px 3px 0 0;
+  background:color-mix(in srgb,var(--fc,var(--accent)) 58%,var(--surface-1))}
+.bd-bar.zero::after{background:var(--line)}
+.bd-ln{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0;text-align:center;line-height:1.25}
+.bd-ln em{font-style:normal;font-size:11px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bd-lt{display:none;max-width:100%;font-size:10.5px;color:var(--muted);overflow:hidden;
+  -webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:break-word;word-break:normal}
+.bd-lanes[data-n="1"] .bd-lt,.bd-lanes[data-n="2"] .bd-lt,.bd-lanes[data-n="3"] .bd-lt{display:-webkit-box}
+@container bdc (min-width:250px){.bd-lanes[data-n="4"] .bd-lt{display:-webkit-box}}
+@container bdc (min-width:320px){.bd-lanes[data-n="5"] .bd-lt{display:-webkit-box}}
+@container bdc (min-width:390px){.bd-lanes[data-n="6"] .bd-lt{display:-webkit-box}}
+@container bdc (min-width:470px){.bd-lanes:is([data-n="7"],[data-n="8"]) .bd-lt{display:-webkit-box}}
+.bd-lanes.many .bd-ln em{display:none}
+@container bdc (min-width:380px){.bd-lanes.many .bd-ln em{display:inline}}
+.bd-lanes.many{gap:4px}
+.bd-prog{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:0}
+.bd-prog>span:last-child{flex:none;white-space:nowrap}
+.bd-meter{flex:1;min-width:40px;height:4px;border-bottom:1px solid var(--line);box-sizing:content-box;display:flex;align-items:stretch}
+.bd-meter i{display:block;height:100%;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--fc,var(--accent)) 62%,var(--surface-1))}
+/* Footer: whole phrases that wrap to a new line as a unit, never cut mid-word. */
+.bd-foot{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-top:auto;font-size:12px;color:var(--muted);min-width:0;font-variant-numeric:tabular-nums}
+.bd-foot>span{white-space:nowrap;max-width:100%}
+.bd-foot>.bd-when{white-space:normal}
+.bd-late{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:600;
+  background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn);font-variant-numeric:tabular-nums}
+.bd-late svg{width:12px;height:12px}
+@container bdc (max-width:300px){.bd-bar{height:30px}}
 .bd-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:56px 20px;border:1.5px dashed var(--line-strong);border-radius:18px;margin-top:22px}
 .bd-empty .bd-tile{width:56px;height:56px}
 .bd-empty h2{margin:6px 0 0;font-size:18px;font-weight:650}
@@ -108,7 +126,7 @@ const CSS = `
   .bd-sels{flex:1 1 100%;margin:0}
   .bd-sel{flex:1 1 0;min-width:0;max-width:none;height:44px}
   .bd-search input{font-size:16px}
-  .bd-grid{grid-template-columns:minmax(0,1fr);gap:10px}
+  .bd-grid{gap:12px}
 }
 @media (prefers-reduced-motion:reduce){.bd-card{transition:none}}
 `;
@@ -346,19 +364,38 @@ function paint(): void {
   }
 }
 
+/** A lane name as a label: a leading order number ("0 · ", "1. ", "2 - ") is dropped; the full name stays in the tooltip. */
+const laneLabel = (title: string): string => title.replace(/^\s*\d+\s*[·.:)\-–—|]\s*/, '').trim() || title;
+
+/** Up to 12 lane bars; more lanes than that fold into one last "+N lanes" bar so bars keep a usable width. */
+function laneBarsHTML(b: BoardInfo): string {
+  if (!b.lanes.length) return '';
+  const CAP = 12;
+  let lanes = b.lanes.map((l) => ({ title: l.title, label: laneLabel(l.title), cards: l.cards }));
+  if (lanes.length > CAP) {
+    const rest = lanes.slice(CAP - 1);
+    lanes = [
+      ...lanes.slice(0, CAP - 1),
+      { title: rest.map((l) => l.title).join(', '), label: tn(rest.length, '+{n} lane', '+{n} lanes'), cards: rest.reduce((n, l) => n + l.cards, 0) },
+    ];
+  }
+  const max = Math.max(1, ...lanes.map((l) => l.cards));
+  const n = lanes.length;
+  return `<div class="bd-lanes${n > 8 ? ' many' : ''}" data-n="${n}" aria-hidden="true">${lanes
+    .map(
+      (l) =>
+        `<div class="bd-lane" title="${attr(`${l.title}: ${tn(l.cards, '{n} card', '{n} cards')}`)}"><div class="bd-bar${l.cards ? '' : ' zero'}" style="--h:${Math.round(
+          (l.cards / max) * 100,
+        )}%"></div><span class="bd-ln"><em>${l.cards}</em><span class="bd-lt" dir="auto">${esc(l.label)}</span></span></div>`,
+    )
+    .join('')}</div>`;
+}
+
 function cardHTML(b: BoardInfo): string {
   const folder = b.path.includes('/') ? b.path.slice(0, b.path.lastIndexOf('/')) : '';
-  const max = Math.max(1, ...b.lanes.map((l) => l.cards));
-  const lanes = b.lanes.slice(0, 8);
+  const folderLabel = folder ? folder.split('/').join(' / ') : ROOT_LABEL;
   const pct = b.cards ? Math.round((b.done / b.cards) * 100) : 0;
-  const laneBars = lanes.length
-    ? `<div class="bd-lanes" aria-hidden="true">${lanes
-        .map(
-          (l) =>
-            `<div class="bd-lane" title="${attr(`${l.title}: ${tn(l.cards, '{n} card', '{n} cards')}`)}"><div class="bd-bar" style="--h:${Math.round((l.cards / max) * 100)}%"></div><span>${esc(l.title)}</span></div>`,
-        )
-        .join('')}</div>`
-    : '';
+  const laneBars = laneBarsHTML(b);
   const color = b.style?.color || colorOfFolder(folder);
   const late = dueCounts(b.due).late;
   // The board's own date colour for its oldest overdue date, when it sets one.
@@ -374,13 +411,13 @@ function cardHTML(b: BoardInfo): string {
   return `<article class="bd-card" role="listitem" data-path="${attr(b.path)}" style="--fc:${attr(color)}">
     <span class="bd-top"><span class="bd-ico" aria-hidden="true">${b.style?.icon ? boardIcon(b.style.icon) : I.board}</span><span class="bd-name"><button type="button" class="bd-open" data-open="${attr(
       b.path,
-    )}" aria-label="${attr(label)}"><b dir="auto">${esc(b.title)}</b></button><small>${esc(folder ? folder.split('/').join(' / ') : ROOT_LABEL)}</small></span>
+    )}" aria-label="${attr(label)}" title="${attr(b.title)}"><b dir="auto">${esc(b.title)}</b></button><small title="${attr(folderLabel)}">${esc(folderLabel)}</small></span>
       <button type="button" class="vx-icon-btn bd-more" data-more aria-haspopup="menu" aria-expanded="false" aria-label="${attr(t('Board actions'))}" title="${attr(
         t('Board actions'),
       )}">${I.more}</button></span>
     ${laneBars}
     <span class="bd-prog"><span class="bd-meter"><i style="width:${pct}%"></i></span><span>${t('{done} of {total} done', { done: b.done, total: b.cards })}</span></span>
-    <span class="bd-foot">${lateChip}<span>${tn(b.lanes.length, '{n} lane', '{n} lanes')}</span><span>${tn(b.cards, '{n} card', '{n} cards')}</span><span title="${attr(
+    <span class="bd-foot">${lateChip}<span>${tn(b.lanes.length, '{n} lane', '{n} lanes')}</span><span>${tn(b.cards, '{n} card', '{n} cards')}</span><span class="bd-when" title="${attr(
       fmtTs(b.mtime),
     )}">${t('Changed {when}', { when: relTs(b.mtime) })}</span></span>
   </article>`;

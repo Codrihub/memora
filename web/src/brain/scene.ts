@@ -963,6 +963,11 @@ export class BrainScene {
     return [this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]];
   }
 
+  /** Where a note settles (its point may still be flying in on the first load). */
+  targetOf(i: number): Vec3 {
+    return [this.tgt[i * 3], this.tgt[i * 3 + 1], this.tgt[i * 3 + 2]];
+  }
+
   focus(p: Vec3, dist: number): void {
     const target = new Vector3(p[0], p[1], p[2]);
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();

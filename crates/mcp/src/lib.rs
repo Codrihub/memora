@@ -327,7 +327,7 @@ pub fn base_catalog() -> Vec<ToolSpec> {
         ToolSpec {
             name: "get_graph",
             category: "graph",
-            description: "The whole memory graph: nodes (notes) and resolved wikilink edges (source -> target, once per pair and direction, no self-links). A node's `degree` = number of distinct other notes linked to or from it.",
+            description: "The whole memory graph: nodes (notes) and resolved wikilink edges (source -> target note paths, once per pair and direction, no self-links). A node's `degree` = number of distinct other notes linked to or from it.",
             when: "To understand how notes relate to each other.",
             input_schema: obj(j!({}), &[]),
         },
@@ -1342,7 +1342,7 @@ impl McpServer {
                     "memory://schema" => json!({
                         "note": {"path":"string","name":"string","folder":"string","content":"markdown","tags":["string"],"frontmatter":"object"},
                         "folder": {"name":"string","count":"integer","color":"hex","icon":"emoji"},
-                        "graph": {"nodes":["GraphNode"],"links":[{"source":"note name","target":"note name"}]},
+                        "graph": {"nodes":["GraphNode"],"links":[{"source":"note path","target":"note path"}]},
                         "activity": {"ts":"unix","actor":"alias","tool":"string","action":"string","path":"string"}
                     })
                     .to_string(),
@@ -1862,7 +1862,9 @@ so keep your alias consistent to make your activity trace easy to read.
 
 ## Rules
 - Do not overwrite someone else's note without a reason.
-- Wikilinks `[[Note Name]]` resolve by note name, not path, so they survive moves.
+- A bare wikilink `[[Note Name]]` picks the note of that name in the linking note's own
+  folder first, then the shallowest path; write `[[Folder/Note Name]]` (or `[[/Note Name]]`
+  for the root) when several notes share the name. Renames and moves rewrite links for you.
 - After creating a note, mention its path in your answer.
 
 ## Useful tools

@@ -33,6 +33,23 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-ub{max-width:min(82%,620px);padding:10px 15px;border-radius:20px 20px 6px 20px;white-space:pre-wrap;overflow-wrap:anywhere;
   font-size:var(--mn-fs,14.5px);line-height:1.55;color:var(--fg);background:color-mix(in srgb,var(--accent) 13%,var(--surface-1,var(--panel)));
   border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+.mn-ub-re{display:flex;align-items:center;gap:6px;margin:-2px -5px 7px;padding:5px 9px;border-radius:12px 12px 4px 12px;
+  border-left:3px solid color-mix(in srgb,var(--accent) 60%,transparent);background:color-mix(in srgb,var(--accent) 9%,var(--surface-1,var(--panel)));
+  font-size:12.5px;line-height:1.35;color:var(--text-2,var(--muted));white-space:normal}
+.mn-ub-re>svg{flex:none;width:13px;height:13px;transform:scaleX(-1);opacity:.75}
+.mn-ub-re>span{min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.mn-br{display:inline-flex;align-items:center;gap:0;margin-right:4px;font-size:11.5px;color:var(--text-3,var(--muted));font-variant-numeric:tabular-nums}
+.mn-br .mn-ibtn{width:24px;height:24px}
+.mn-br .mn-ibtn:disabled{opacity:.35;cursor:default}
+.mn-br-n{min-width:26px;text-align:center}
+.mn-u.has-br .mn-u-act{opacity:1;transform:none;pointer-events:auto}
+.mn-u.has-br .mn-u-act .mn-u-btns{opacity:0;transition:opacity .15s}
+.mn-u.has-br:hover .mn-u-btns,.mn-u.has-br:focus-within .mn-u-btns,.mn-u.has-br.show-act .mn-u-btns{opacity:1}
+.mn-br-row{display:flex;margin:-4px 0 2px -6px}
+.mn-u-edit{display:flex;flex-direction:column;gap:8px;width:min(82%,620px)}
+.mn-u-edit textarea{width:100%;min-height:72px;resize:vertical;padding:10px 14px;border-radius:16px;font:inherit;font-size:var(--mn-fs,14.5px);line-height:1.55;
+  color:var(--fg);background:var(--surface-1,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);outline:none}
+.mn-u-edit-b{display:flex;justify-content:flex-end;gap:6px}
 .mn-u-act{display:flex;align-items:center;justify-content:flex-end;gap:2px;height:28px;margin:-2px -4px 0 0;opacity:0;transform:translateY(-3px);
   transition:opacity .15s,transform .18s var(--ease-out,ease-out);pointer-events:none}
 .mn-u:hover .mn-u-act,.mn-u:focus-within .mn-u-act,.mn-u.show-act .mn-u-act{opacity:1;transform:none;pointer-events:auto}
@@ -235,9 +252,9 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .mn-chat.compact.fleeting{border-radius:14px}
 .mn-chat.fleeting .mn-comp-box{background:#14171c}
 .mn-chat.fleeting .mn-send{background:linear-gradient(135deg,#5eead4,#22d3ee);color:#06201d}
-/* Phones: the fleeting room is the whole screen (a full-bleed sheet under the page's compact
-   header), not a framed box inside it, so no width is spent on a frame twice. */
-@media (max-width:760px){.mnp.fleeting .mnp-chat{padding:0}.mnp .mn-chat.fleeting{border:0;border-radius:0;box-shadow:none}}
+/* Phones: the fleeting room keeps its rounded frame with a slim gutter, so it still reads as
+   a room of its own. */
+@media (max-width:760px){.mnp.fleeting .mnp-chat{padding:6px 8px 8px}.mnp .mn-chat.fleeting{border-radius:12px;box-shadow:none}}
 .mnp .mn-chat.fleeting.cw-narrow{--mn-gut:14px}
 .mn-incog{display:grid;place-items:center;margin-bottom:14px;color:var(--fl-ink)}
 .mn-incog .i{width:44px;height:44px;stroke-width:1.4}
@@ -397,9 +414,10 @@ export const MNEMO_CSS = `${TEXT_SIZE_CSS}${ART_CSS}
 .ui-sel-pop.mn-model-pop .ui-sel-o .tx b{font-size:13.5px}
 .ui-sel-pop.mn-model-pop .ui-sel-o .tx small{font-size:11.5px}
 .ui-sel-pop.mn-model-pop .ui-sel-ck{display:none}
-/* The pin per model: faint until the row is hovered; the default's is a filled pin with a
-   Default badge. The trigger repeats the filled pin after the default's name. */
-.ui-sel-pop.mn-model-pop .ui-sel-tr{opacity:0;transition:opacity .15s,background .15s,color .15s}
+/* The pin per model: always there (faint at rest, clearer on the hovered row) as a one-click
+   "make this the default"; the default's is a filled pin with a Default badge. The trigger
+   repeats the filled pin after the default's name. */
+.ui-sel-pop.mn-model-pop .ui-sel-tr{opacity:.32;transition:opacity .15s,background .15s,color .15s}
 .ui-sel-pop.mn-model-pop .ui-sel-o:is(:hover,.on) .ui-sel-tr,.ui-sel-pop.mn-model-pop .ui-sel-tr:focus-visible{opacity:.7}
 .ui-sel-pop.mn-model-pop .ui-sel-tr:hover{opacity:1}
 @media (hover:none){.ui-sel-pop.mn-model-pop .ui-sel-tr{opacity:.45}}

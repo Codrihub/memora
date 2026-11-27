@@ -1135,7 +1135,7 @@ export class ChatView {
         if (this.log.querySelector(`.mn-u[data-mid="${ev.message.id}"]`)) break;
         if (!this.messages.some((m) => m.id === ev.message.id)) this.messages.push(ev.message);
         this.log.querySelector('.mn-hello')?.remove();
-        const ub = this.userBubble(ev.message.content, ev.message.created_at, (ev.message.meta?.attach as A.Attach[] | undefined) || []);
+        const ub = this.userBubble(ev.message.content, ev.message.created_at, (ev.message.meta?.attach as A.Attach[] | undefined) || [], askQuestionOf(this.messages, ev.message));
         ub.dataset.mid = String(ev.message.id);
         this.log.append(ub);
         this.log.querySelectorAll<HTMLElement>('.mn-ask:not(.done)').forEach(skipAsk);
@@ -1202,7 +1202,9 @@ export class ChatView {
       if (this.session?.id !== sid || this.busy) return;
       const lastU = r.running ? [...r.messages].reverse().find((m) => m.role === 'user')?.id || 0 : 0;
       const msgs = lastU ? r.messages.filter((m) => m.id <= lastU) : r.messages;
-      const same = msgs.length === this.messages.length && msgs[msgs.length - 1]?.id === this.messages[this.messages.length - 1]?.id;
+      // Versions count too: an edit or a regenerate brings its switcher with the stored chat.
+      const brs = (l: A.Message[]): string => l.map((m) => (m.branch ? `${m.id}:${m.branch.index}/${m.branch.ids.length}` : '')).join();
+      const same = msgs.length === this.messages.length && msgs[msgs.length - 1]?.id === this.messages[this.messages.length - 1]?.id && brs(msgs) === brs(this.messages);
       this.session = r.session;
       this.setQueue(r.queue);
       this.setPlan(r.plan || []);
@@ -1524,7 +1526,7 @@ export class ChatView {
     this.rail.style.setProperty('--rwin', this.railWin + 'px');
     this.rail.innerHTML = `<div class="mn-rwin"><div class="mn-rtrack">${us
       .map((u, i) => {
-        const txt = (u.querySelector('.mn-ub')?.textContent || '').trim();
+        const txt = ((u.querySelector('.mn-ub-t') || u.querySelector('.mn-ub'))?.textContent || '').trim();
         const w = 8 + Math.min(14, Math.round(Math.sqrt(txt.length) * 1.4));
         return `<button type="button" class="mn-rb" data-at="${i}" style="--w:${w}px" aria-label="${attr(txt.slice(0, 80) || t('Message'))}" tabindex="-1"><i></i></button>`;
       })
@@ -1579,7 +1581,7 @@ export class ChatView {
       const b = bars()[i];
       if (!lab || !b) return;
       const u = this.users()[i];
-      const txt = (u?.querySelector('.mn-ub')?.textContent || '').trim();
+      const txt = ((u?.querySelector('.mn-ub-t') || u?.querySelector('.mn-ub'))?.textContent || '').trim();
       lab.innerHTML = `<b>${i + 1}/${bars().length}</b>${esc(txt.slice(0, 90) || t('Message'))}`;
       const r = b.getBoundingClientRect();
       lab.style.top = r.top + r.height / 2 - this.rail.getBoundingClientRect().top + 'px';
@@ -2009,13 +2011,17 @@ export class ChatView {
       this.pinBtn.hidden = true;
       return;
     }
+    // The pinned default model always comes first, under its own heading.
+    const defKey = s.prefs.default_model || '';
+    const defIdx = list.findIndex((m) => A.modelKey(m) === defKey);
+    if (defIdx > 0) list.unshift(...list.splice(defIdx, 1));
     const opts: SelectOption[] = list.map((m) => ({
       value: A.modelKey(m),
       label: m.label || m.model_id,
       // The pinned default wears its own badge; with none set, the model new chats fall back to
       // says Default in its line.
       hint: [!s.prefs.default_model && A.modelKey(m) === A.fallbackModel(s) ? t('Default') : '', A.providerLabel(s, m.provider_id), m.context_window ? t('{n} context', { n: A.fmtTokens(m.context_window) }) : ''].filter(Boolean).join(' · '),
-      group: m.pinned ? t('Pinned') : A.providerLabel(s, m.provider_id),
+      group: A.modelKey(m) === defKey ? t('Default') : m.pinned ? t('Pinned') : A.providerLabel(s, m.provider_id),
       lead: m.pinned
         ? `<span class="mn-star">${icon('star')}</span>`
         : `<span class="mn-pdot" data-p="${attr(A.providerOf(s, m.provider_id)?.kind || '')}"></span>`,
@@ -2166,14 +2172,20 @@ export class ChatView {
     if (!slot || !s) return;
     const key = this.model || this.select?.value || A.fallbackModel(s);
     const m = s.models.find((x) => A.modelKey(x) === key);
-    if (!m?.thinks) {
+    // A model that always thinks with no level to pick (only Auto) gets no chip either.
+    if (!m?.thinks || (m.think_levels?.length === 1 && m.think_levels[0] === 'auto')) {
       this.thinkSel?.close();
       this.thinkSel = null;
       slot.innerHTML = '';
       return;
     }
-    const level = (s.prefs.thinking || 'auto') as A.ThinkLevel;
-    const opts: SelectOption[] = THINK_LEVELS.map((l) => ({ value: l.v, label: l.label, hint: l.hint }));
+    // Only the levels this model takes (all of them when nothing narrower is known); a saved
+    // level it lacks shows as Auto here, and the server sends the nearest one it takes.
+    const known = m.think_levels?.length ? THINK_LEVELS.filter((l) => m.think_levels!.includes(l.v)) : [];
+    const levels = known.length ? known : THINK_LEVELS;
+    const saved = (s.prefs.thinking || 'auto') as A.ThinkLevel;
+    const level: A.ThinkLevel = levels.some((l) => l.v === saved) ? saved : 'auto';
+    const opts: SelectOption[] = levels.map((l) => ({ value: l.v, label: l.label, hint: l.hint }));
     const tip = (v: string): void => {
       if (!this.thinkSel) return;
       const lbl = THINK_LEVELS.find((l) => l.v === v)?.label ?? v;
@@ -2489,8 +2501,9 @@ export class ChatView {
       if (m.role === 'user') {
         finishTurn();
         turn = null;
-        const ub = this.userBubble(m.content, m.created_at, (m.meta?.attach as A.Attach[] | undefined) || []);
+        const ub = this.userBubble(m.content, m.created_at, (m.meta?.attach as A.Attach[] | undefined) || [], askQuestionOf(this.messages, m), m.branch);
         ub.dataset.mid = String(m.id);
+        if (m.branch) ub.classList.add('has-br');
         lastUser = m.id;
         this.log.append(ub);
         continue;
@@ -2507,6 +2520,8 @@ export class ChatView {
         this.log.append(turn);
       }
       const body = turn.querySelector<HTMLElement>('.mn-tb')!;
+      // A regenerated answer: the switcher between its versions leads the reply.
+      if (m.branch && !body.childElementCount) body.append(el('div', 'mn-br-row', branchHTML(m.branch)));
       if (m.role === 'assistant') {
         const meta = m.meta || {};
         // Another model took over: a divider says which (inside the reply when it changed
@@ -2741,8 +2756,8 @@ export class ChatView {
     return d;
   }
 
-  private userBubble(text: string, ts?: number, att: A.Attach[] = []): HTMLElement {
-    const b = el('div', 'mn-u');
+  private userBubble(text: string, ts?: number, att: A.Attach[] = [], reply = '', branch?: A.Message['branch']): HTMLElement {
+    const b = el('div', 'mn-u' + (reply ? ' is-reply' : ''));
     // What came with the message, in the order it was attached: pictures as tiles (tap for
     // the full view), notes and folders as chips; one row that slides left and right.
     const chips = att.length
@@ -2761,11 +2776,15 @@ export class ChatView {
         )}</div>`
       : '';
     // Under the bubble, along its right edge: when it was sent, then copy and try again.
-    b.innerHTML = `${chips}<div class="mn-ub">${esc(text)}</div><div class="mn-u-act">${
+    // An answer to a question card carries a compact quote of the question it answers.
+    const re = reply
+      ? `<span class="mn-ub-re" title="${attr(t('Reply to: {question}', { question: reply }))}">${icon('enter')}<span>${esc(reply)}</span></span>`
+      : '';
+    b.innerHTML = `${chips}<div class="mn-ub">${re}<span class="mn-ub-t">${esc(text)}</span></div><div class="mn-u-act">${
       ts ? `<time title="${attr(new Date(ts * 1000).toLocaleString())}">${esc(relTs(ts))}</time>` : ''
-    }<span class="mn-u-btns"><button type="button" class="mn-ibtn" data-copy-u title="${t('Copy the message')}" aria-label="${t('Copy the message')}">${icon(
+    }${branchHTML(branch)}<span class="mn-u-btns"><button type="button" class="mn-ibtn" data-copy-u title="${t('Copy the message')}" aria-label="${t('Copy the message')}">${icon(
       'copy',
-    )}</button><button type="button" class="mn-ibtn" data-retry title="${t('Try again: send this message again')}" aria-label="${t('Try again')}">${icon('refresh')}</button></span></div>`;
+    )}</button><button type="button" class="mn-ibtn" data-edit-u title="${t('Edit the message')}" aria-label="${t('Edit the message')}">${icon('edit')}</button><button type="button" class="mn-ibtn" data-retry title="${t('Try again: send this message again')}" aria-label="${t('Try again')}">${icon('refresh')}</button></span></div>`;
     return b;
   }
 
@@ -3152,6 +3171,20 @@ export class ChatView {
       u.classList.toggle('show-act', on);
       return;
     }
+    // Flip between versions of a message or an answer (the server keeps which one is shown).
+    const br = tg.closest<HTMLElement>('[data-br-to]');
+    if (br) {
+      const to = Number(br.dataset.brTo || 0);
+      if (to && !this.busy && this.session) void this.switchTo(this.session.id, to);
+      return;
+    }
+    // Edit a message of yours: the new version forks the chat there.
+    const ed = tg.closest<HTMLElement>('[data-edit-u]');
+    if (ed) {
+      const u = ed.closest<HTMLElement>('.mn-u');
+      if (u && !this.busy) this.editBubble(u);
+      return;
+    }
     const again = tg.closest<HTMLElement>('[data-regen],[data-retry]');
     if (again) {
       const own = again.closest<HTMLElement>('.mn-u');
@@ -3163,7 +3196,8 @@ export class ChatView {
     }
     const copyU = tg.closest<HTMLElement>('[data-copy-u]');
     if (copyU) {
-      const text = copyU.closest('.mn-u')?.querySelector('.mn-ub')?.textContent || '';
+      const u = copyU.closest('.mn-u');
+      const text = (u?.querySelector('.mn-ub-t') || u?.querySelector('.mn-ub'))?.textContent || '';
       void navigator.clipboard?.writeText(text).then(
         () => toast(t('Message copied'), 'ok'),
         () => toast(t('Could not copy'), 'err'),
@@ -3322,7 +3356,8 @@ export class ChatView {
     this.input.value = '';
     this.grow();
     this.log.querySelector('.mn-hello')?.remove();
-    this.log.append(this.userBubble(text, undefined, att));
+    const asked = answer ? this.log.querySelector<HTMLElement>(`.mn-ask[data-ask="${CSS.escape(answer.to)}"] .mn-ask-q`)?.textContent || askQuestion(this.messages, answer.to) : '';
+    this.log.append(this.userBubble(text, undefined, att, asked));
     this.paintRail();
     requestAnimationFrame(() => this.log.querySelectorAll<HTMLElement>('.mn-u:last-of-type .mn-car, .mn-car:not([data-wired])').forEach(syncCarousel));
     const sid0 = this.session!.id;
@@ -3347,24 +3382,73 @@ export class ChatView {
     });
   }
 
+  /** Show another version at one point of the chat, then the chat as the server has it. */
+  private async switchTo(sid: string, to: number): Promise<void> {
+    try {
+      await A.switchBranch(sid, to);
+      await this.refresh(sid);
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    }
+  }
+
+  /** Edit one of the owner's sent messages in place; Send forks the chat there. */
+  private editBubble(u: HTMLElement): void {
+    const uid = Number(u.dataset.mid || 0);
+    const bub = u.querySelector<HTMLElement>('.mn-ub');
+    if (!uid || !bub || u.querySelector('.mn-u-edit')) return;
+    const old = (u.querySelector('.mn-ub-t') || bub).textContent || '';
+    const f = el('form', 'mn-u-edit');
+    f.innerHTML = `<textarea rows="3" aria-label="${attr(t('Edit the message'))}"></textarea><div class="mn-u-edit-b"><button type="button" class="btn ghost sm" data-edit-cancel>${t(
+      'Cancel',
+    )}</button><button type="submit" class="btn primary sm">${t('Send')}</button></div>`;
+    const ta = f.querySelector('textarea')!;
+    ta.value = old;
+    bub.hidden = true;
+    bub.after(f);
+    ta.focus();
+    const close = (): void => {
+      f.remove();
+      bub.hidden = false;
+    };
+    f.querySelector('[data-edit-cancel]')!.addEventListener('click', close);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+      else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        f.requestSubmit();
+      }
+    });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = ta.value.trim();
+      if (!text || text === old.trim()) return close();
+      void this.edit(uid, text);
+    });
+  }
+
+  /** Send `text` as a new version of the owner's message `uid` (what followed it stays on
+   *  the older version). */
+  private async edit(uid: number, text: string): Promise<void> {
+    if (this.busy || !this.session || !uid) return;
+    const ub = this.log.querySelector<HTMLElement>(`.mn-u[data-mid="${uid}"]`);
+    if (!ub) return;
+    while (ub.nextSibling) ub.nextSibling.remove();
+    ub.replaceWith(this.userBubble(text));
+    this.messages = this.messages.filter((m) => m.id < uid);
+    this.setBusy(true);
+    const sid = this.session.id;
+    this.paintRail();
+    await this.stream((signal, on) => A.streamEdit(sid, uid, text, this.model || undefined, signal, on));
+    // The new message's id and the switcher come with the stored chat.
+    if (this.session?.id === sid) void this.refresh(sid);
+  }
+
   /** Run the turn of the owner's message `uid` again: Regenerate on a reply, Try again on a
-   *  message or an error. Later turns are replaced (the owner confirms that first). */
+   *  message or an error. The old answer stays as a version beside the new one. */
   private async rerun(uid: number): Promise<void> {
     if (this.busy || !this.session || !uid) return;
-    const later = this.messages.some((m) => m.role === 'user' && m.id > uid);
-    if (later) {
-      const go = await new Promise<boolean>((done) => {
-        Modal.open({
-          title: t('Run this message again?'),
-          body: `<p>${t('The messages that came after it in this chat are replaced by the new reply.')}</p>`,
-          actions: [
-            { label: t('Cancel'), cls: 'ghost', run: () => (Modal.close(), done(false)) },
-            { label: t('Run again'), cls: 'primary', run: () => (Modal.close(), done(true)) },
-          ],
-        });
-      });
-      if (!go) return;
-    }
+    // What came after stays on the chat as the previous version (the switcher flips back).
     const ub = this.log.querySelector<HTMLElement>(`.mn-u[data-mid="${uid}"]`);
     if (!ub) {
       toast(t('Open the chat again to run that message again'), 'warn');
@@ -3376,6 +3460,8 @@ export class ChatView {
     const sid = this.session.id;
     this.paintRail();
     await this.stream((signal, on) => A.streamRerun(sid, uid, this.model || undefined, signal, on), uid);
+    // The switcher between the answers comes with the stored chat.
+    if (this.session?.id === sid) void this.refresh(sid);
   }
 
   /** Stream one reply into a new turn (the composer is already busy). */
@@ -3904,6 +3990,34 @@ function answerTo(messages: A.Message[], id: string): string | false | null {
   if (m) return (m.meta?.answer as A.Answer).other ? '' : m.content;
   const at = messages.findIndex((x) => x.role === 'assistant' && (x.tool_calls || []).some((c) => c.id === id));
   return at >= 0 && messages.slice(at + 1).some((x) => x.role === 'user') ? false : null;
+}
+
+/** The "‹ 1/2 ›" switcher between the versions at one point of the chat ('' with none). */
+function branchHTML(b: A.Message['branch']): string {
+  if (!b || b.ids.length < 2) return '';
+  const prev = b.ids[b.index - 1];
+  const next = b.ids[b.index + 1];
+  return `<span class="mn-br" role="group" aria-label="${attr(t('Versions'))}"><button type="button" class="mn-ibtn" data-br-to="${prev || ''}" title="${attr(t('Previous version'))}" aria-label="${attr(t('Previous version'))}"${
+    prev ? '' : ' disabled'
+  }>${icon('chev-left')}</button><span class="mn-br-n">${b.index + 1}/${b.ids.length}</span><button type="button" class="mn-ibtn" data-br-to="${next || ''}" title="${attr(t('Next version'))}" aria-label="${attr(t('Next version'))}"${
+    next ? '' : ' disabled'
+  }>${icon('chev-right')}</button></span>`;
+}
+
+/** The question asked by the ask_owner call `id` in the stored chat ('' when not found). */
+function askQuestion(messages: A.Message[], id: string): string {
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    const c = (m.tool_calls || []).find((x) => x.id === id && x.name === ASK);
+    if (c) return ts(askOf(c.arguments)?.question || '');
+  }
+  return '';
+}
+
+/** The question a stored message of the owner answers ('' when it answers none). */
+function askQuestionOf(messages: A.Message[], m: A.Message): string {
+  const to = (m.meta?.answer as A.Answer | undefined)?.to;
+  return m.role === 'user' && to ? askQuestion(messages, to) : '';
 }
 
 /** Mark an open question card skipped. */

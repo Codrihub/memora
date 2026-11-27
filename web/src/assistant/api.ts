@@ -34,6 +34,8 @@ export interface Model {
   fetched: boolean;
   /** The model can think: the chat offers a thinking level. */
   thinks?: boolean;
+  /** The thinking levels this model takes, where known; absent = every level. */
+  think_levels?: ThinkLevel[];
 }
 
 /** How hard models think: the model's own default, off, or a level. */
@@ -153,6 +155,9 @@ export interface Message {
   tool_name: string | null;
   meta: Record<string, unknown> | null;
   created_at: number;
+  /** Set on the first message of one of several versions (an edited prompt or a regenerated
+   *  answer): which version is shown and the first message of every version, oldest first. */
+  branch?: { index: number; ids: number[] };
 }
 
 /** A note or folder attached to a message. */
@@ -504,6 +509,16 @@ export function streamChat(
   return streamPost(`/api/assistant/sessions/${encodeURIComponent(id)}/chat`, body, signal, onEvent);
 }
 
+/** Send an edited version of the owner's message `editOf`: the chat forks there and the new
+ *  message starts a version beside the old one; the reply streams as with `streamChat`. */
+export function streamEdit(id: string, editOf: number, text: string, model: string | undefined, signal: AbortSignal, onEvent: (e: ChatEvent) => void): Promise<void> {
+  return streamPost(`/api/assistant/sessions/${encodeURIComponent(id)}/chat`, { ...chatBody(text, model, []), edit: editOf }, signal, onEvent);
+}
+
+/** Show another version at one point of a chat (`messageId`: the version's first message). */
+export const switchBranch = (id: string, messageId: number): Promise<{ messages: Message[] }> =>
+  apiPost(`/api/assistant/sessions/${encodeURIComponent(id)}/branch`, { message_id: messageId });
+
 /** Address of a chat as a Markdown file (`GET` downloads it). */
 export const exportUrl = (id: string): string => `/api/assistant/sessions/${encodeURIComponent(id)}/export`;
 
@@ -522,7 +537,7 @@ export async function streamLive(id: string, signal: AbortSignal, onEvent: (e: C
   return true;
 }
 
-/** Run the turn of the owner's message `messageId` again (what came after it is replaced). */
+/** Run the turn of the owner's message `messageId` again (the old answer stays as a version). */
 export function streamRerun(id: string, messageId: number, model: string | undefined, signal: AbortSignal, onEvent: (e: ChatEvent) => void): Promise<void> {
   return streamPost(`/api/assistant/sessions/${encodeURIComponent(id)}/rerun`, { message_id: messageId, ...(model ? { model } : {}) }, signal, onEvent);
 }

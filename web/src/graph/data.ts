@@ -146,7 +146,9 @@ export class GraphModel {
     const pairs = new Set<string>();
     this.refs = [];
     for (const raw of g.links || []) {
-      const l = { source: this.byName.get(raw.source) || raw.source, target: this.byName.get(raw.target) || raw.target };
+      // Links name notes by path (older servers: by note name).
+      const pick = (k: string): string => (this.all.has(k) ? k : this.byName.get(k) || k);
+      const l = { source: pick(raw.source), target: pick(raw.target) };
       if (l.source === l.target || !this.all.has(l.source) || !this.all.has(l.target)) continue;
       if (!this.outgoing.has(l.source)) this.outgoing.set(l.source, new Set());
       if (!this.incoming.has(l.target)) this.incoming.set(l.target, new Set());

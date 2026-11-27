@@ -117,6 +117,25 @@ export function isBoardNote(fm: Record<string, unknown> | null | undefined): boo
   return !!fm && Object.prototype.hasOwnProperty.call(fm, 'kanban-plugin');
 }
 
+/** A board's own page opens in full board mode (the whole width, lanes as long as their cards, the
+ *  page scrolls) unless this device chose the compact layout. Embedded and chat boards are compact. */
+const FULL_KEY = 'memora.kanban.full';
+function fullPref(): boolean {
+  try {
+    return localStorage.getItem(FULL_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+function setFullPref(on: boolean): void {
+  try {
+    if (on) localStorage.removeItem(FULL_KEY);
+    else localStorage.setItem(FULL_KEY, '0');
+  } catch {
+    /* private mode */
+  }
+}
+
 // Boards once had a per-device "show as text" switch; drop what it left behind.
 try {
   localStorage.removeItem('memora.kanban.text');
@@ -274,6 +293,7 @@ export class KanbanView {
     useChips();
     ensureBoardLook();
     this.el = el('div', `kb kb-${density}`);
+    if (density === 'page' && fullPref()) this.el.classList.add('kb-full');
     // The board's own "this board only" look wins over the note or chat around it.
     this.el.dataset.kbpath = path;
     applyBoardLookTo(this.el, boardPrefs.override(path));
@@ -496,6 +516,21 @@ export class KanbanView {
 
   // ── drawing ──────────────────────────────────────────────────────────────────────────────────
 
+  /** Full board mode: the board's own page only, lanes grow with their cards and the page scrolls. */
+  get full(): boolean {
+    return this.density === 'page' && this.el.classList.contains('kb-full');
+  }
+
+  /** Switch between full board mode and the compact layout (remembered on this device). */
+  toggleFull(): void {
+    if (this.density !== 'page') return;
+    const on = !this.full;
+    setFullPref(on);
+    this.el.classList.toggle('kb-full', on);
+    this.render();
+    this.el.querySelector<HTMLElement>('[data-act=board-full]')?.focus({ preventScroll: true });
+  }
+
   private laneWidth(): number {
     const w = Number(this.board?.settings?.['lane-width']);
     if (this.density === 'chat') return 236;
@@ -538,7 +573,15 @@ export class KanbanView {
     // A bar with nothing in it is not drawn (no stray line above the lanes).
     const canAdd = this.density !== 'chat';
     const many = b.lanes.length > 1;
-    const barEmpty = !stats && !(st.color || st.icon) && !(b.lanes.length && canAdd) && !many;
+    const page = this.density === 'page';
+    const full = this.full;
+    const barEmpty = !page && !stats && !(st.color || st.icon) && !(b.lanes.length && canAdd) && !many;
+    // The board page's layout switch: full board mode (default) or the compact layout.
+    const fullBtn = page
+      ? `<button type="button" class="vx-icon-btn kb-bar-full" data-act="board-full" aria-pressed="${full}" aria-label="${attr(t('Full board view'))}" title="${attr(
+          full ? t('Compact board view') : t('Full board view'),
+        )}">${icon('expand')}</button>`
+      : '';
     // Lane navigation in the bar (shown while the lanes do not all fit): back, the lane in view (a
     // list of all lanes to jump to), forward. The same on every device; no dots to aim at.
     const laneNav = many
@@ -553,6 +596,7 @@ export class KanbanView {
         <span class="kb-stats">${stats}</span><span class="vx-grow"></span>
         ${canAdd ? `<button type="button" class="vx-icon-btn kb-bar-add" data-act="add-lane" aria-label="${attr(t('Add lane'))}" title="${attr(t('Add lane'))}">${I.plus}</button>` : ''}
         ${laneNav}
+        ${fullBtn}
       </div>
       ${empty}
       <div class="kb-scroll"><div class="kb-lanes" role="list" aria-label="${attr(t('Lanes'))}">${lanes}${
@@ -577,7 +621,8 @@ export class KanbanView {
       lanesEl.addEventListener(
         'wheel',
         (e) => {
-          if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || lanesEl.scrollWidth <= lanesEl.clientWidth) return;
+          // In full board mode a plain wheel scrolls the page (lanes go sideways with shift or a trackpad).
+          if (this.full || e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || lanesEl.scrollWidth <= lanesEl.clientWidth) return;
           const list = (e.target as HTMLElement).closest<HTMLElement>('.kb-cards');
           if (list && list.scrollHeight > list.clientHeight + 1) {
             const atEnd = e.deltaY > 0 ? list.scrollTop + list.clientHeight >= list.scrollHeight - 1 : list.scrollTop <= 0;
@@ -1045,6 +1090,9 @@ export class KanbanView {
         break;
       case 'archive':
         this.openArchive();
+        break;
+      case 'board-full':
+        this.toggleFull();
         break;
       case 'restore':
         void this.send({ type: 'restore_card', card: id, lane: 0 });

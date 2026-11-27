@@ -32,7 +32,7 @@ pub fn extra_specs() -> Vec<ToolSpec> {
         spec(
             "get_subgraph",
             "graph",
-            "Subgraph around one note: the notes within `depth` hops (nearest first, the note itself included), at most `max_nodes` of them (`truncated` says whether more were in reach), and every link between them as a directed edge source -> target (a two-way link is two edges).",
+            "Subgraph around one note: the notes within `depth` hops (nearest first, the note itself included), at most `max_nodes` of them (`truncated` says whether more were in reach), and every link between them as a directed edge source -> target by note path (a two-way link is two edges).",
             "To see local context without pulling the whole graph.",
             json!({"path":{"type":"string","description":"Note path ('Folder/Note.md', .md optional) or note name"},"depth":{"type":"integer","default":1,"minimum":0},"max_nodes":{"type":"integer","default":60,"minimum":1}}),
             &["path"],

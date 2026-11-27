@@ -18,15 +18,19 @@ from the menu under your name), or with **Ask** on a note (**Ask Mnemo** on a fo
    OpenAI-compatible server (OpenRouter, a local Ollama or LM Studio, a router of your
    own). The key is sealed on your server and never sent back to the browser.
 2. Fetch its models (or **Add model** in the Models header to add one by its id), pin
-   the ones you use and pick a **default model**. In a chat, the model list marks the
-   default with a pin and a **Default** badge; tap another model's pin to make it the
-   default for new chats.
+   the ones you use and pick a **default model**. In a chat, every model in the picker
+   has a pin: the default's is filled, carries a **Default** badge and is listed first;
+   tap another model's pin to make it the default for new chats.
 3. Optionally line up **fallback models** (their own card, **Add** in its header): when
    a reply's model fails after its retries, the next one carries on and the chat says so.
 
 Models that can think get a **Think** button under the message box, beside Agents and
 the context meter (Auto, Off, Low, Medium, High). It is one setting for every chat and can
-be set before the first message.
+be set before the first message. The levels follow what the model's family supports:
+OpenAI reasoning models and Gemini Pro have no Off, Grok 3 mini takes Low or High, and
+models that always think (DeepSeek R1, QwQ and the like) offer Auto only; a level a model
+lacks becomes the nearest one it has. Claude and models Memora does not recognise keep
+every level.
 
 ### Models for each job
 
@@ -55,10 +59,15 @@ The mic and Listen show only once their model is set.
 - **Long chats.** Only the latest questions go on the page at first; earlier ones come in
   as you scroll up (or with **Show earlier questions**), jump to them on the timeline, or
   open a search hit there.
+- **Edit and regenerate.** Edit a message you sent, or regenerate a reply, and the
+  earlier try is kept as a version. A ‹ 1/2 › switcher beside it flips between versions,
+  on every device; the model only sees the version on screen. When you answer one of
+  Mnemo's questions, your message quotes the question it replies to.
 - **Boards in the chat.** A Kanban board you mention, Mnemo links or hands over, or a
   kanban tool works on shows under the reply as a board preview: how many cards are done,
   its lanes and their first cards, kept up to date while Mnemo and other agents change the
-  board. Tap it to open the board itself. In replies a board looks
+  board. Lanes fold open and closed, the whole preview folds, and **Open board** opens
+  the board itself. In replies a board looks
   different from a note: a board icon and a violet accent. Ask for several boards in one
   note and Mnemo makes a board note per board and embeds each (`![[Board]]`).
 - **Boards, all of it.** Mnemo can do on a board everything you can: create, turn a note
@@ -84,7 +93,8 @@ The mic and Listen show only once their model is set.
   change.
 - **Resizable panes.** On a desktop, drag the edge of the chat list or of the side panel
   (Agents, In this chat) to change its width, like the page preview. Each keeps a
-  minimum, a double-click resets it, and the width is remembered on the device.
+  minimum (340 px for the chat list), a double-click resets it, and the width is
+  remembered on the device.
 
 ## Ask first, Auto or Read only
 

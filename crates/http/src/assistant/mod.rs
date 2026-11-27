@@ -189,6 +189,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/assistant/sessions/{id}/compact", post(h_compact))
         .route("/api/assistant/search", get(h_search))
         .route("/api/assistant/sessions/{id}/rerun", post(h_rerun))
+        .route("/api/assistant/sessions/{id}/branch", post(h_branch))
         .route("/api/assistant/sessions/{id}/live", get(h_live))
         .route("/api/assistant/sessions/{id}/stop", post(h_stop))
         .route(
@@ -570,6 +571,14 @@ fn state_json(store: &Store) -> Value {
                 );
             let mut v = serde_json::to_value(&m).unwrap_or(Value::Null);
             v["thinks"] = json!(thinks);
+            // The levels it takes, where known; otherwise the chat offers every level.
+            if let Some(l) = providers::think_levels(
+                p.map_or("", |p| p.kind.as_str()),
+                p.map_or("", |p| p.api_style.as_str()),
+                &m.model_id,
+            ) {
+                v["think_levels"] = json!(l);
+            }
             v
         })
         .collect();
@@ -3872,6 +3881,25 @@ fn prepare_turn(
         meta.get_or_insert_with(|| json!({}))["skill"] =
             json!({"name": sk.name, "path": sk.path, "text": clip(&body, 20_000)});
     }
+    // An edited prompt (`edit`: one of the owner's messages on the shown branch): the chat
+    // forks there and this message starts a new version beside it.
+    if let Some(e) = b.get("edit").and_then(Value::as_i64) {
+        let own = store
+            .messages(id)
+            .unwrap_or_default()
+            .iter()
+            .any(|m| m.id == e && m.role == "user");
+        if !own {
+            return Err(badr(
+                "edit must be one of the owner's messages in this chat",
+            ));
+        }
+        store
+            .fork_at(id, e)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        // Other devices show the branch the chat now follows.
+        live::notify(id, &json!({"type": "reload"}));
+    }
     // The chat's first message carries the system prompt it will keep for its whole life.
     if store.messages(id).map(|m| m.is_empty()).unwrap_or(false) {
         let extra = prefs
@@ -3929,6 +3957,10 @@ fn prepare_turn(
             now,
         )
         .map_err(|_| {
+            // An edit that could not be stored: the branch it forked comes back.
+            if store.unfork(id).unwrap_or(false) {
+                live::notify(id, &json!({"type": "reload"}));
+            }
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "could not store the message".to_string(),
@@ -4061,6 +4093,11 @@ fn begin_run(st: &AppState, store: &'static Store, id: &str, p: Prepared, on_beh
             if cut || epoch(&id2) != Some(ep) {
                 return;
             }
+            // A regenerate that ended without writing anything (stopped, empty, failed before
+            // a word): the old answer comes back instead of waiting for the next message.
+            if store.unfork(&id2).unwrap_or(false) {
+                live::notify(&id2, &json!({"type": "reload"}));
+            }
             live::notify(&id2, &json!({"type": "idle", "outcome": out.word()}));
             let Some(q) = live::queue_next(&id2, out == Outcome::Failed, true) else {
                 break;
@@ -4106,6 +4143,11 @@ fn interrupt(st: &AppState, store: &'static Store, id: &str, who: String, start:
             },
             memora_state::now(),
         );
+    }
+    // Cut before its first word: a regenerate's fork is taken back (the old answer shows
+    // again) so a steer or the next message does not become a version of it.
+    if store.unfork(id).unwrap_or(false) {
+        live::notify(id, &json!({"type": "reload"}));
     }
     live::notify(id, &json!({"type": "idle", "outcome": "stopped"}));
     match live::queue_next(id, false, true) {
@@ -4371,6 +4413,51 @@ async fn h_watch(key: Option<Extension<ApiKeyCaller>>, UrlPath(id): UrlPath<Stri
     live::watch(&id)
 }
 
+/// `POST /api/assistant/sessions/{id}/branch` `{message_id}`: show another version at one
+/// point of the chat (the first message of that version). The chat's active path changes
+/// server-side, so the model, live sync and later turns follow it. Returns the messages.
+async fn h_branch(
+    State(st): State<AppState>,
+    key: Option<Extension<ApiKeyCaller>>,
+    headers: HeaderMap,
+    UrlPath(id): UrlPath<String>,
+    Json(b): Json<Value>,
+) -> Response {
+    if let Some(r) = browser_only(&key) {
+        return r;
+    }
+    if !csrf_ok(&headers) {
+        return csrf_fail();
+    }
+    let store = match store(&st) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    if store.session(&id).ok().flatten().is_none() {
+        return fail(StatusCode::NOT_FOUND, "chat not found");
+    }
+    let Some(target) = b.get("message_id").and_then(Value::as_i64) else {
+        return bad("message_id is required");
+    };
+    if !claim(&id) {
+        return fail(
+            StatusCode::CONFLICT,
+            "Mnemo is still answering in this chat",
+        );
+    }
+    let r = store.switch_branch(&id, target);
+    unclaim(&id);
+    match r {
+        Ok(changed) => {
+            if changed {
+                live::notify(&id, &json!({"type": "reload"}));
+            }
+            Json(json!({"messages": store.messages(&id).unwrap_or_default()})).into_response()
+        }
+        Err(e) => bad(&e),
+    }
+}
+
 /// `POST /api/assistant/sessions/{id}/rerun` `{message_id, model?}`: run the turn of one of
 /// the owner's messages again. Everything after that message goes (replies, later turns),
 /// then the reply streams like `/chat`.
@@ -4436,9 +4523,12 @@ async fn h_rerun(
             "Mnemo is still answering in this chat",
         );
     }
-    if let Err(e) = store.delete_after(&id, user.id) {
-        unclaim(&id);
-        return fail(StatusCode::INTERNAL_SERVER_ERROR, &e);
+    // The old answer is kept as a version beside the new one (branch switcher), not deleted.
+    if let Some(next) = msgs.iter().find(|x| x.id > user.id) {
+        if let Err(e) = store.fork_at(&id, next.id) {
+            unclaim(&id);
+            return fail(StatusCode::INTERNAL_SERVER_ERROR, &e);
+        }
     }
     if let Some(a) = &asked {
         let _ = store.update_session(&id, None, Some(a), None, None);
@@ -4881,6 +4971,8 @@ fn run_agent(
         .and_then(Value::as_str)
         .unwrap_or("auto")
         .to_string();
+    // A level this model does not take becomes the nearest one it does.
+    let level = providers::fit_level(&ep.kind, &ep.style, &model, &level);
     let mut opts = Options {
         temperature: prefs.get("temperature").and_then(Value::as_f64),
         max_output: Some(stp.max_out),
@@ -5507,6 +5599,7 @@ mod tests {
             tool_name: None,
             meta: None,
             created_at: at,
+            branch: None,
         };
         let msgs = vec![
             msg("user", "```html\n<title>Not mine</title>\n```", 1),
@@ -5567,6 +5660,7 @@ mod tests {
             tool_name: None,
             meta: None,
             created_at: 0,
+            branch: None,
         }
     }
 

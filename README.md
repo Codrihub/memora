@@ -46,26 +46,30 @@ Screenshots use a demo vault.
 ## Features
 
 - **Markdown you own.** Every note is a `.md` file with optional frontmatter and
-  `[[wikilinks]]`. Edit it with any tool; nothing is locked in a database.
+  `[[wikilinks]]` (the graph keeps same-named notes in different folders apart).
+  Edit it with any tool; nothing is locked in a database.
 - **Git history.** Changes are committed, so any revision can be listed, diffed
   and restored (`get_history`, `diff`, `restore_memory`).
 - **MCP for agents.** 87 tools for notes, folders, search, tags, graph traversal,
   history, locks, activity, pins, Kanban boards and import/export, plus admin
   tools, over the streamable HTTP transport.
-- **Kanban boards.** A note in the Obsidian Kanban format opens as a board:
+- **Kanban boards.** A note in the Obsidian Kanban format opens as a board,
+  across the whole page like a kanban app (or compact, per device):
   drag cards and lanes with a mouse or a finger, edit a card in a form (linked
   notes, due date, tags, lane) that writes plain Obsidian Kanban text, while
   agents and Mnemo add and move cards over MCP. The Boards page lists them all, with their progress,
   sorted and filtered as you like; Overview shows what is due across every board, with optional
   due date reminders; a board works from the keyboard too;
   a note embeds as many boards as it likes (`![[Board]]`, live in place), Add
-  board in the editor makes one and embeds it. In the Mnemo chat a board it names shows as a preview that opens the board. Changes show live,
+  board in the editor makes one and embeds it. In the Mnemo chat a board it names
+  shows as a foldable preview with **Open board**. Changes show live,
   land in the note's history, and touch only the lines they change, so the
   board still opens the same in Obsidian.
 - **Mnemo, a built-in notes agent.** Chat with your notes in the browser or the
   console using your own OpenAI, Anthropic or OpenAI-compatible API key. Mnemo
   finds, writes, tags, links, moves and tidies notes with Memora's own tools,
-  shows every step, and has no web, shell or delete-for-good access. It can
+  shows every step, keeps versions when you edit a message or regenerate a
+  reply, and has no web, shell or delete-for-good access. It can
   answer with a chart or diagram: a file card that opens a sandboxed preview
   beside the chat. It can hand tasks to sub-agents that work at the same time
   (or in the background) and manage them by id: message, stop, finish or remove
@@ -85,7 +89,9 @@ Screenshots use a demo vault.
 - **Per-agent control.** Scopes (`mcp`, `read`, `write`, `admin`), per-key tool
   lists, server-wide tool switches, and privacy rules that hide notes, folders
   or pictures from chosen agents, Mnemo included.
-- **Web UI.** Overview, notes, boards, tags, and brain, graph and canvas views;
+- **Web UI.** Overview, notes, boards, tags, and brain, graph and canvas views
+  (a note or board opens in the brain with **Show in brain**, and a selected note
+  stays selected across the three, in the address too);
   the vault editor with reading settings (sixteen page colours, nine fonts,
   size, spacing and width, for every note or one note), live agent activity,
   agents and keys, tools, access rules and settings. The same pages on every

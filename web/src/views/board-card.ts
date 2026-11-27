@@ -58,17 +58,16 @@ const CSS = `
   background:color-mix(in srgb,var(--fc,var(--accent)) 13%,transparent)}
 .kbc-ico .vx-i{width:20px;height:20px}
 .kbc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
-.kbc-name{display:flex;align-items:baseline;gap:8px;min-width:0}
-.kbc-name b{font-size:15px;font-weight:650;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kbc-name small{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-.kbc-lanes{display:flex;align-items:flex-end;gap:4px;height:22px}
-.kbc-lanes{align-items:stretch}
-.kbc-lanes i{position:relative;flex:1 1 0;min-width:0;border-bottom:1px solid var(--line)}
+.kbc-name{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;min-width:0}
+.kbc-name b{flex:0 1 auto;min-width:0;font-size:15px;font-weight:650;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:break-word}
+.kbc-name small{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.kbc-lanes{display:flex;align-items:stretch;gap:4px;height:22px}
+.kbc-lanes i{position:relative;flex:1 1 0;min-width:0;border-bottom:1px solid var(--line-strong,var(--line))}
 .kbc-lanes i::after{content:"";position:absolute;inset:auto 0 0 0;height:max(3px,var(--h,0%));border-radius:3px 3px 1px 1px;
   background:color-mix(in srgb,var(--fc,var(--accent)) 52%,var(--surface-1))}
-.kbc-meter{height:4px;background:linear-gradient(transparent 1.5px,var(--line) 1.5px,var(--line) 2.5px,transparent 2.5px)}
-.kbc-meter i{display:block;height:100%;border-radius:99px;background:color-mix(in srgb,var(--fc,var(--accent)) 60%,var(--surface-1))}
-.kbc-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbc-meter{height:4px;border-bottom:1px solid var(--line)}
+.kbc-meter i{display:block;height:100%;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--fc,var(--accent)) 60%,var(--surface-1))}
+.kbc-sub{font-size:12px;color:var(--muted);overflow-wrap:break-word}
 .kbc-open{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px}
 .kbc.wait .kbc-lanes i,.kbc.wait .kbc-meter{opacity:.45}
 @container kbc (max-width:340px){.kbc-lanes{display:none}}
@@ -78,7 +77,7 @@ const CSS = `
 .kbe-h{display:flex;align-items:center;gap:10px;margin:0 0 10px;min-width:0}
 .kbe-h .kbc-ico{width:32px;height:32px;border-radius:9px}
 .kbe-h .kbc-ico .vx-i{width:17px;height:17px}
-.kbe-h b{flex:1;min-width:0;font-size:15px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.kbe-h b{flex:1;min-width:0;font-size:15px;font-weight:650;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:break-word;color:var(--fg)}
 .kbe .kb-lanes,.kbe .kb-bar{padding-inline:2px}
 /* The note's reading styles stop at an embedded board: it looks as on its own page. */
 .vx-prose .kbe{font-family:var(--font);letter-spacing:normal;word-spacing:normal;line-height:1.5;font-feature-settings:normal}
@@ -148,7 +147,7 @@ function cardHTML(path: string, b: BoardInfo | null): string {
   const done = b ? t('{done} of {total} done', { done: b.done, total: b.cards }) : '';
   const sub = b ? `${tn(b.lanes.length, '{n} lane', '{n} lanes')} · ${folder ? folder.split('/').join(' / ') : ROOT_LABEL}` : t('Board');
   return `<span class="kbc-ico" aria-hidden="true">${BOARD_ICON}</span>
-    <span class="kbc-main"><span class="kbc-name"><b dir="auto">${esc(name)}</b><small>${done}</small></span>
+    <span class="kbc-main"><span class="kbc-name"><b dir="auto" title="${attr(name)}">${esc(name)}</b><small>${done}</small></span>
       ${
         lanes.length
           ? `<span class="kbc-lanes" aria-hidden="true">${lanes

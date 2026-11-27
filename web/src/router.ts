@@ -89,8 +89,34 @@ function navPageOf(page: Page): Page {
 }
 
 function brainMode(loc: Location): Page {
-  const m = new URLSearchParams(loc.search).get('mode');
+  const q = new URLSearchParams(loc.search);
+  const m = q.get('mode');
+  const note = q.get('note');
+  mapNote = note ? safeNodePath(note) : null;
   return m === 'graph' || m === 'canvas' ? m : 'brain';
+}
+
+/** The note selected on the map (Brain, Graph and Canvas share it), kept in the address as
+ *  `?note=<path>` so switching between them, a reload or a link keeps it selected. */
+let mapNote: string | null = null;
+
+const isMapPage = (p: Page): boolean => p === 'brain' || p === 'graph' || p === 'canvas';
+
+export function mapFocus(): string | null {
+  return mapNote;
+}
+
+/** Select a note on every map (`null` clears it); updates the address while a map is open. */
+export function setMapFocus(path: string | null): void {
+  const next = path ? safeNodePath(path) : null;
+  if (next === mapNote) return;
+  mapNote = next;
+  if (!isMapPage(state.page)) return;
+  try {
+    history.replaceState(history.state, '', urlFor(state.page));
+  } catch {
+    /* sandboxed frames can refuse history writes */
+  }
 }
 
 /** The key id of an /activity/<id> address, for the Activity page to open (it clears it). */
@@ -308,6 +334,10 @@ function urlFor(page: Page): string {
     const to = routeKeys;
     routeKeys = null;
     return to;
+  }
+  if (isMapPage(page) && mapNote) {
+    const base = PAGE_META[page].path;
+    return base + (base.includes('?') ? '&' : '?') + 'note=' + encodeURIComponent(mapNote);
   }
   return page === 'vault' && state.note ? nodeUrl(state.note) : PAGE_META[page].path;
 }

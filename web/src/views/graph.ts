@@ -1,6 +1,7 @@
 // Graph view: mounts ../graph/* and wires the router's stop.
 
 import { GraphApp } from '../graph/app';
+import { mapFocus } from '../router';
 import { state } from '../state';
 import { setFlightTarget } from '../ui/agent-flight';
 
@@ -8,6 +9,7 @@ let app: GraphApp | null = null;
 
 /** Entering Graph (ui/map-enter.ts): zoom to fit the whole graph. */
 export function enterGraph(): void {
+  if (app?.focusPath(mapFocus())) return;
   app?.fitAll(500);
 }
 
@@ -29,4 +31,6 @@ export async function renderGraph(): Promise<void> {
   const current = app;
   state.graph.stop = () => current.suspend();
   current.show();
+  // Already open (a refresh): follow a selection another map made.
+  if (!mapFocus()) current.focusPath(null);
 }

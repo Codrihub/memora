@@ -17,7 +17,7 @@ import { closePanel } from './panel';
 import { applyReading, openReadingPanel } from './reading';
 import { baseName, dirOf, folderColor, initials, isPinned, mutationInfo, ROOT_LABEL, touched } from './store';
 import { inlineEdit, openMenu, undoToast } from './ui';
-import { nodeUrl, replaceHistory, setLeaveGuard } from '../router';
+import { nodeUrl, replaceHistory, setLeaveGuard, setMapFocus } from '../router';
 import { clearDraft, moveDraft, readDraft, saveDraft } from './drafts';
 import { skBlock } from '../ui/skeleton';
 import { IMAGE_ACCEPT, takePendingImage, uploadImage } from './images';
@@ -256,6 +256,7 @@ function draw(): void {
               ? ''
               : `<button class="vx-ct-btn" type="button" data-contents aria-label="${attr(t('Contents'))}" title="${attr(t('Contents: outline and links'))}">${I.toc}<span>${t('Contents')}</span></button>`
           }
+    <button class="vx-ct-btn vx-brain-btn" type="button" data-brain aria-label="${attr(t('Show in brain'))}" title="${attr(t('Show in brain: find this note on the map'))}">${I.brain}<span>${t('Brain')}</span></button>
     <button class="vx-ct-btn vx-hist-btn" type="button" data-hist aria-label="${attr(t('Version history'))}" title="${attr(t('Version history: see and restore earlier versions'))}">${I.history}<span>${t('History')}</span></button>
     <button class="vx-ct-btn vx-mn-btn" type="button" data-mnemo aria-label="${attr(t('Ask Mnemo about this note'))}" title="${attr(t('Ask Mnemo about this note'))}">${I.mnemo}<span>${t('Ask')}</span></button>
     ${
@@ -483,6 +484,8 @@ function draw(): void {
       ctBtn.focus();
     };
   }
+  const bBtn = bar.querySelector<HTMLElement>('[data-brain]');
+  if (bBtn) bBtn.onclick = () => showInBrain(path);
   const mBtn = bar.querySelector<HTMLElement>('[data-mnemo]');
   if (mBtn) mBtn.onclick = () => hooks.askMnemo('note:' + path);
   // Version history opens as a dialog on every width (a bottom sheet on phones).
@@ -712,6 +715,14 @@ function watchToc(scroller: HTMLElement, heads: HTMLElement[], pane: HTMLElement
   };
 }
 
+/** Open the Brain with this note selected; Graph and Canvas keep the selection too. */
+function showInBrain(path: string): void {
+  void flushEditor().then(() => {
+    setMapFocus(path);
+    hooks.go('brain');
+  });
+}
+
 function moreMenu(path: string, at: HTMLElement, board: boolean): void {
   const pinned = isPinned('note', path);
   const reading = !state.editing && !hist.v;
@@ -749,6 +760,7 @@ function moreMenu(path: string, at: HTMLElement, board: boolean): void {
       { label: t('Privacy…'), icon: LOCK_ICON, run: () => void openPrivacy('node', path) },
       { label: t('Version history'), icon: I.history, run: () => void showHistory() },
       { label: t('Ask Mnemo about this note'), icon: I.mnemo, run: () => hooks.askMnemo('note:' + path) },
+      { label: t('Show in brain'), icon: I.brain, run: () => showInBrain(path) },
       { sep: true, label: '' },
       {
         label: t('Copy link'),

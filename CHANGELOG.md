@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-27
+
+A full board view, clearer board cards, chat versions when you edit or
+regenerate, and a link graph that keeps same-named notes apart.
+
+### Added
+
+- **Full board view:** a board page opens across the whole content area like a
+  kanban app. Lanes grow with their cards and the page scrolls (no scroll boxes
+  inside lanes); only the lane row scrolls sideways. The board bar stays at the
+  top. A button in the board bar switches back to the compact view (remembered
+  per device). Boards embedded in notes stay compact.
+- **Edit and regenerate with versions:** edit a message you sent, or regenerate
+  a reply, and the earlier try is kept as a version. A ‹ 1/2 › switcher flips
+  between versions; the model only sees the version on screen. Existing chats
+  are one version; the chat database gains nullable columns only.
+- Answers to a Mnemo question show the question they reply to inside your
+  message.
+- **Show in brain:** a note or board page has a **Show in brain** button (in
+  the ⋯ menu on phones) that opens the Brain with that note selected. The
+  selected note is shared by Brain, Graph and Canvas: switching between them
+  keeps it selected, and the address carries it (`/brain?mode=graph&note=…`),
+  so a reload or a link opens it again.
+
+### Changed
+
+- Board cards on the Boards page adapt to any width: the title has its own
+  space next to the ⋯ menu (two lines at most), lane names show only where they
+  fit (numbers like "0 · " dropped, the full name on hover), boards with many
+  lanes fold the rest into "+N lanes", and the footer wraps instead of cutting
+  words.
+- Board previews in Mnemo chat: lanes fold open and closed, the whole preview
+  folds, an **Open board** button, and "in N notes" no longer slides off on
+  phones.
+- Mnemo: a wider chat list (minimum 340 px), a pin on every model in the picker
+  to make it the default (the default is listed first), and thinking levels that
+  match what the model supports (unknown models keep every level).
+
+### Fixed
+
+- Notes with the same name in different folders (such as `Index.md`) were one
+  node in the link graph, so backlinks, `link_stats`, `get_hubs`,
+  `get_neighbors`, `get_subgraph`, `find_path` and `get_isolated` mixed them
+  up. The graph is keyed by path now, and links resolve with the same rules as
+  opening them (#54). `/api/graph` and `get_graph` links name notes by path.
+- Creating a note beside same-named ones (including the `Index.md` a new
+  folder gets) no longer captures bare links that named another note: those
+  links are rewritten to keep their target, as moves and renames already did.
+- A link to a root note that a same-named note nearer the link would shadow is
+  written `[[/Index]]`; a leading `/` on a bare name now means the vault root.
+- Links inside `~~~` fences, longer backtick fences and fences in list items are
+  no longer rewritten on a move or counted in the graph.
+- Deleting a folder or moving its contents no longer makes case twins such as
+  `Index.md` beside `INDEX.md`, and a folder can no longer be renamed or moved
+  next to a folder that differs only in case.
+
 ## [3.2.2] - 2026-11-25
 
 Two small fixes for boards and Mnemo.

@@ -3513,8 +3513,14 @@ mod tests {
         assert_eq!(me_row["embedded_in"], json!([]));
         // The link index (graph, link tools) has no self edges.
         let idx = store.link_index();
-        assert!(!idx.out.get("Self").is_some_and(|o| o.contains("Self")));
-        assert!(!idx.out.get("Note").is_some_and(|o| o.contains("Note")));
+        assert!(!idx
+            .out
+            .get("Work/Self.md")
+            .is_some_and(|o| o.contains("Work/Self.md")));
+        assert!(!idx
+            .out
+            .get("Work/Note.md")
+            .is_some_and(|o| o.contains("Work/Note.md")));
         let _ = fs::remove_dir_all(&d);
     }
 

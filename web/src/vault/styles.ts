@@ -421,6 +421,8 @@ body.vx-pdrag .vx-row:hover:not(.vx-drop-into):not(.vx-drop-near):not(.vx-drop-n
 .vx-ct-btn:hover{background:var(--hover);color:var(--fg)}
 .vx-ct-btn:is([aria-pressed=true],[aria-expanded=true]){background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
 .vx-ct-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* Phones: Show in brain moves to the More menu so the bar keeps its room. */
+@container vxnote (max-width:520px){.vx-brain-btn{display:none}}
 .vx-rbar .vx-icon-btn{width:34px;height:34px;border-radius:9px}
 .vx-rbar .vx-icon-btn[aria-expanded=true]{background:var(--press);color:var(--fg)}
 .vx-rgroup{display:flex;align-items:center;gap:2px;flex:none}

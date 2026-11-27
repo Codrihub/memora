@@ -1538,7 +1538,8 @@ const GRIP_LS: Record<Grip, string> = { side: 'mn-w-side', ag: 'mn-w-agents', ar
 const GRIP_VAR: Record<Grip, string> = { side: '--sw-u', ag: '--aw-ag', art: '--aw-art' };
 const GRIP_CLS: Record<Grip, string> = { side: 'sw-set', ag: 'aw-ag', art: 'aw-art' };
 /** Each pane's narrowest and widest; the chat between them keeps at least CHAT_ROOM. */
-const GRIP_MIN: Record<Grip, number> = { side: 260, ag: 320, art: 260 };
+/** The chat list's minimum counts its 52px rail: the list itself keeps about 250px. */
+const GRIP_MIN: Record<Grip, number> = { side: 340, ag: 320, art: 260 };
 const GRIP_MAX: Record<Grip, number> = { side: 520, ag: 760, art: 560 };
 const CHAT_ROOM = 440;
 
@@ -2015,7 +2016,7 @@ button.mnp-g:hover{color:var(--fg)}
 /* ===== Chat list, 2.2: an icon rail for actions, then the chats (pinned tiles, rows that read
    like conversations: a coloured tile, the title and its time, a line of the last message). ===== */
 .mnp{--sw:328px}
-@media (max-width:900px){.mnp{--sw:300px}}
+@media (max-width:900px){.mnp{--sw:340px}}
 .mnp.side-closed{--sw:0px}
 .mnp-side{--side-bg:var(--surface-0,var(--bg));display:grid;grid-template-columns:52px minmax(0,1fr);background:var(--side-bg)}
 .mnp-rail{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 0 10px;border-right:1px solid var(--line);
@@ -2087,6 +2088,7 @@ button.mnp-g:hover{color:var(--fg)}
 .mnp-panel .mnp-row.on{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 .mnp-panel .mnp-row-t{gap:2px}
 .mnp-row-l1,.mnp-row-l2{display:flex;align-items:center;gap:8px;min-width:0}
+.mnp-row-ts{flex:none;white-space:nowrap}
 .mnp-row-l1 b{flex:1;min-width:0;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-l2 small{flex:1;min-width:0;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mnp-row-l2 small em{font-style:normal;color:var(--text-2,var(--fg))}
@@ -2118,8 +2120,8 @@ button.mnp-g:hover{color:var(--fg)}
 /* ===== Chat list, 3.0: a roomier list on desktop; a drawer over the chat on tablets and a whole
    screen on phones, each with its own header (title, New chat, Close). Every row shows its ⋯
    (faint until pointed at, always there on touch), its time and its unread count. ===== */
-.mnp{--sw:360px}
-@media (min-width:1440px){.mnp{--sw:384px}}
+.mnp{--sw:392px}
+@media (min-width:1440px){.mnp{--sw:412px}}
 .mnp-ph{gap:6px;min-height:58px;padding-block:12px 8px;padding-inline:16px 10px}
 .mnp-ph b{font-size:18px}
 .mnp-sidex{display:none;place-items:center;flex:none;width:36px;height:36px;padding:0;border:0;border-radius:10px;background:none;color:var(--text-2,var(--fg));cursor:pointer;transition:background .15s,color .15s}

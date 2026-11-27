@@ -122,6 +122,19 @@ pub struct Message {
     pub tool_name: Option<String>,
     pub meta: Option<Value>,
     pub created_at: i64,
+    /// Set on a message that starts one of several versions (an edited prompt, a regenerated
+    /// answer): which version is shown and the first message of every version, in order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<Branch>,
+}
+
+/// The versions at one point of a chat (see [`Message::branch`]).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Branch {
+    /// 0-based position of the shown version in `ids`.
+    pub index: usize,
+    /// The first message of each version, oldest first.
+    pub ids: Vec<i64>,
 }
 
 /// One result of [`Store::search`].
@@ -199,9 +212,41 @@ impl Store {
         )
         .map_err(db_err)?;
         conn.execute_batch(DDL).map_err(db_err)?;
+        Self::migrate_branches(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Additive migration for chat branches: nullable columns only, so a chat from before is
+    /// one linear branch. `messages.branch_root` = the first message of the original version
+    /// a later version stands beside; `messages.parked` = NULL on the chat's active path, else
+    /// the first message of the version the row was put away with; `sessions.fork_from` = the
+    /// version start that was put away by a pending fork (the next owner or reply message
+    /// becomes a sibling of it; see `fork_at` and `unfork`).
+    fn migrate_branches(conn: &Connection) -> Result<()> {
+        let has = |table: &str, col: &str| -> Result<bool> {
+            let mut st = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .map_err(db_err)?;
+            let names = st
+                .query_map([], |r| r.get::<_, String>(1))
+                .map_err(db_err)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(db_err)?;
+            Ok(names.iter().any(|n| n == col))
+        };
+        for (table, col) in [
+            ("messages", "branch_root"),
+            ("messages", "parked"),
+            ("sessions", "fork_from"),
+        ] {
+            if !has(table, col)? {
+                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} INTEGER"))
+                    .map_err(db_err)?;
+            }
+        }
+        Ok(())
     }
 
     fn c(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -455,7 +500,7 @@ impl Store {
         let mut st = c
             .prepare(
                 "SELECT s.id,s.title,s.scope,s.model,s.pinned,s.created_at,s.updated_at,
-                   (SELECT COUNT(*) FROM messages m WHERE m.session_id=s.id AND m.role!='tool')
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id=s.id AND m.role!='tool' AND m.parked IS NULL)
                  FROM sessions s ORDER BY s.pinned DESC, s.updated_at DESC",
             )
             .map_err(db_err)?;
@@ -484,7 +529,7 @@ impl Store {
             .prepare(
                 "SELECT m.session_id, m.role, substr(m.content, 1, 240) FROM messages m
                  JOIN (SELECT session_id, MAX(id) AS id FROM messages
-                       WHERE role IN ('user','assistant') AND content != ''
+                       WHERE role IN ('user','assistant') AND content != '' AND parked IS NULL
                          AND (meta IS NULL OR meta NOT LIKE '%\"compact\":true%')
                        GROUP BY session_id) last ON last.id = m.id",
             )
@@ -626,12 +671,15 @@ impl Store {
             > 0)
     }
 
+    /// The chat's active path, oldest first (versions put away on other branches are left
+    /// out, so everything built on it — model context, compaction, live sync — follows the
+    /// branch on screen).
     pub fn messages(&self, session: &str) -> Result<Vec<Message>> {
         let c = self.c();
         let mut st = c
             .prepare(
                 "SELECT id,session_id,role,content,tool_calls,tool_call_id,tool_name,meta,created_at FROM messages
-                 WHERE session_id=?1 ORDER BY id",
+                 WHERE session_id=?1 AND parked IS NULL ORDER BY id",
             )
             .map_err(db_err)?;
         let rows = st
@@ -648,10 +696,154 @@ impl Store {
                     tool_name: r.get(6)?,
                     meta: meta.and_then(|s| serde_json::from_str(&s).ok()),
                     created_at: r.get(8)?,
+                    branch: None,
                 })
             })
             .map_err(db_err)?;
-        rows.collect::<std::result::Result<_, _>>().map_err(db_err)
+        let mut out: Vec<Message> = rows
+            .collect::<std::result::Result<_, _>>()
+            .map_err(db_err)?;
+        drop(st);
+        // Every version group of the chat: root -> its version starts, oldest first.
+        let mut st = c
+            .prepare(
+                "SELECT branch_root, id FROM messages WHERE session_id=?1 AND branch_root IS NOT NULL ORDER BY id",
+            )
+            .map_err(db_err)?;
+        let mut groups: std::collections::HashMap<i64, Vec<i64>> = Default::default();
+        for row in st
+            .query_map([session], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })
+            .map_err(db_err)?
+        {
+            let (root, id) = row.map_err(db_err)?;
+            groups.entry(root).or_insert_with(|| vec![root]).push(id);
+        }
+        if groups.is_empty() {
+            return Ok(out);
+        }
+        let root_of: std::collections::HashMap<i64, i64> = groups
+            .iter()
+            .flat_map(|(root, ids)| ids.iter().map(move |id| (*id, *root)))
+            .collect();
+        for m in &mut out {
+            if let Some(ids) = root_of.get(&m.id).and_then(|r| groups.get(r)) {
+                m.branch = Some(Branch {
+                    index: ids.iter().position(|x| *x == m.id).unwrap_or(0),
+                    ids: ids.clone(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Start a new version at message `head` (on the active path): the path from `head` on is
+    /// put away, and the next owner or reply message appended to the chat (not a tool result
+    /// or a compaction summary) starts the new version beside it. A turn that ends with no
+    /// such message calls [`Store::unfork`]. Returns how many messages were put away.
+    pub fn fork_at(&self, session: &str, head: i64) -> Result<usize> {
+        let c = self.c();
+        let on = c
+            .query_row(
+                "SELECT 1 FROM messages WHERE session_id=?1 AND id=?2 AND parked IS NULL",
+                params![session, head],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(db_err)?;
+        if on.is_none() {
+            return Err("that message is not on the chat's shown branch".into());
+        }
+        let n = c
+            .execute(
+                "UPDATE messages SET parked=?2 WHERE session_id=?1 AND parked IS NULL AND id>=?2",
+                params![session, head],
+            )
+            .map_err(db_err)?;
+        c.execute(
+            "UPDATE sessions SET fork_from=?2 WHERE id=?1",
+            params![session, head],
+        )
+        .map_err(db_err)?;
+        Ok(n)
+    }
+
+    /// Take back a pending fork that no message used (a regenerate stopped before its first
+    /// word, an edit that could not be stored): what was put away comes back as it was.
+    /// False when no fork was pending.
+    pub fn unfork(&self, session: &str) -> Result<bool> {
+        let c = self.c();
+        let head: Option<i64> = c
+            .query_row(
+                "SELECT fork_from FROM sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db_err)?
+            .flatten();
+        let Some(head) = head else {
+            return Ok(false);
+        };
+        c.execute(
+            "UPDATE messages SET parked=NULL WHERE session_id=?1 AND parked=?2",
+            params![session, head],
+        )
+        .map_err(db_err)?;
+        c.execute("UPDATE sessions SET fork_from=NULL WHERE id=?1", [session])
+            .map_err(db_err)?;
+        Ok(true)
+    }
+
+    /// Show another version: `target` is the first message of one of the versions at a
+    /// point of the chat's active path. The shown version (with all that followed it) is
+    /// put away and the target's comes back. False when the target is already shown.
+    pub fn switch_branch(&self, session: &str, target: i64) -> Result<bool> {
+        let c = self.c();
+        let row: Option<(Option<i64>, Option<i64>)> = c
+            .query_row(
+                "SELECT branch_root, parked FROM messages WHERE session_id=?1 AND id=?2",
+                params![session, target],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(db_err)?;
+        let Some((root, parked)) = row else {
+            return Err("message not found in this chat".into());
+        };
+        if parked.is_none() {
+            return Ok(false);
+        }
+        if parked != Some(target) {
+            return Err("that version is not reachable from the shown branch".into());
+        }
+        let root = root.unwrap_or(target);
+        // The version of this group shown now.
+        let shown: Option<i64> = c
+            .query_row(
+                "SELECT id FROM messages WHERE session_id=?1 AND parked IS NULL AND (id=?2 OR branch_root=?2)",
+                params![session, root],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db_err)?;
+        let Some(shown) = shown else {
+            return Err("that version is not reachable from the shown branch".into());
+        };
+        c.execute(
+            "UPDATE messages SET parked=?2 WHERE session_id=?1 AND parked IS NULL AND id>=?2",
+            params![session, shown],
+        )
+        .map_err(db_err)?;
+        c.execute(
+            "UPDATE messages SET parked=NULL WHERE session_id=?1 AND parked=?2",
+            params![session, target],
+        )
+        .map_err(db_err)?;
+        c.execute("UPDATE sessions SET fork_from=NULL WHERE id=?1", [session])
+            .map_err(db_err)?;
+        Ok(true)
     }
 
     /// Search every chat: messages from the owner and Mnemo whose text, or whose chat's
@@ -687,7 +879,7 @@ impl Store {
         let sql = format!(
             "SELECT m.id, s.id, s.title, s.scope, m.role, m.content, m.created_at FROM messages m
              JOIN sessions s ON s.id = m.session_id
-             WHERE m.role IN ('user','assistant') AND m.content <> '' AND ({both})
+             WHERE m.role IN ('user','assistant') AND m.content <> '' AND m.parked IS NULL AND ({both})
              ORDER BY m.id DESC LIMIT {limit}"
         );
         let args: Vec<&dyn rusqlite::ToSql> =
@@ -738,11 +930,12 @@ impl Store {
         Ok(out)
     }
 
-    /// Drop every message of a chat after message `id` (to run a turn again).
+    /// Drop every message of the chat's shown branch after message `id` (to run a turn
+    /// again); versions put away on other branches stay.
     pub fn delete_after(&self, session: &str, id: i64) -> Result<usize> {
         self.c()
             .execute(
-                "DELETE FROM messages WHERE session_id=?1 AND id>?2",
+                "DELETE FROM messages WHERE session_id=?1 AND id>?2 AND parked IS NULL",
                 params![session, id],
             )
             .map_err(db_err)
@@ -750,9 +943,40 @@ impl Store {
 
     pub fn append(&self, session: &str, m: &NewMessage, now: i64) -> Result<i64> {
         let c = self.c();
+        // A pending fork (see `fork_at`): an owner or reply message starts the new version;
+        // tool results and compaction summaries leave the fork for the message that does.
+        let starts = matches!(m.role.as_str(), "user" | "assistant")
+            && !m
+                .meta
+                .as_ref()
+                .is_some_and(|x| x.get("compact") == Some(&Value::Bool(true)));
+        let head: Option<i64> = if starts {
+            c.query_row(
+                "SELECT fork_from FROM sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db_err)?
+            .flatten()
+        } else {
+            None
+        };
+        // The new version joins the group of the version it replaces.
+        let fork: Option<i64> = match head {
+            Some(h) => c
+                .query_row(
+                    "SELECT COALESCE(branch_root, id) FROM messages WHERE session_id=?1 AND id=?2",
+                    params![session, h],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(db_err)?,
+            None => None,
+        };
         c.execute(
-            "INSERT INTO messages (session_id,role,content,tool_calls,tool_call_id,tool_name,meta,created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO messages (session_id,role,content,tool_calls,tool_call_id,tool_name,meta,created_at,branch_root)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 session,
                 m.role,
@@ -761,16 +985,18 @@ impl Store {
                 m.tool_call_id,
                 m.tool_name,
                 m.meta.as_ref().map(Value::to_string),
-                now
+                now,
+                fork
             ],
         )
         .map_err(db_err)?;
+        let id = c.last_insert_rowid();
         c.execute(
-            "UPDATE sessions SET updated_at=?2 WHERE id=?1",
-            params![session, now],
+            "UPDATE sessions SET updated_at=?2, fork_from=CASE WHEN ?3 THEN NULL ELSE fork_from END WHERE id=?1",
+            params![session, now, head.is_some()],
         )
         .map_err(db_err)?;
-        Ok(c.last_insert_rowid())
+        Ok(id)
     }
 }
 
@@ -778,6 +1004,155 @@ impl Store {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn edits_and_regenerations_branch_and_switch_on_the_active_path() {
+        let s = Store::open_memory().unwrap();
+        s.create_session("c", "Chat", "global", "", 1).unwrap();
+        let m = |role: &str, text: &str| NewMessage {
+            role: role.into(),
+            content: text.into(),
+            ..Default::default()
+        };
+        let texts = |s: &Store| -> Vec<String> {
+            s.messages("c")
+                .unwrap()
+                .into_iter()
+                .map(|x| x.content)
+                .collect()
+        };
+        let u1 = s.append("c", &m("user", "q1"), 1).unwrap();
+        let a1 = s.append("c", &m("assistant", "a1"), 2).unwrap();
+        let u2 = s.append("c", &m("user", "q2"), 3).unwrap();
+        s.append("c", &m("assistant", "a2"), 4).unwrap();
+        // A linear chat has no versions.
+        assert!(s.messages("c").unwrap().iter().all(|x| x.branch.is_none()));
+        // Edit q2: the tail is put away, the new prompt is a sibling.
+        assert_eq!(s.fork_at("c", u2).unwrap(), 2);
+        assert_eq!(texts(&s), ["q1", "a1"]);
+        let u2b = s.append("c", &m("user", "q2 edited"), 5).unwrap();
+        s.append("c", &m("assistant", "a2b"), 6).unwrap();
+        assert_eq!(texts(&s), ["q1", "a1", "q2 edited", "a2b"]);
+        let msgs = s.messages("c").unwrap();
+        assert_eq!(
+            msgs[2].branch,
+            Some(Branch {
+                index: 1,
+                ids: vec![u2, u2b]
+            })
+        );
+        // Regenerate a1 (nested point before the edit): everything after it goes away.
+        s.fork_at("c", a1).unwrap();
+        let a1b = s.append("c", &m("assistant", "a1b"), 7).unwrap();
+        assert_eq!(texts(&s), ["q1", "a1b"]);
+        assert_eq!(
+            s.messages("c").unwrap()[1].branch.as_ref().unwrap().ids,
+            vec![a1, a1b]
+        );
+        // Back to a1: its own continuation (with the edited q2 shown) comes back.
+        assert!(s.switch_branch("c", a1).unwrap());
+        assert_eq!(texts(&s), ["q1", "a1", "q2 edited", "a2b"]);
+        // Flip the inner switcher back to the original q2.
+        assert!(s.switch_branch("c", u2).unwrap());
+        assert_eq!(texts(&s), ["q1", "a1", "q2", "a2"]);
+        assert!(!s.switch_branch("c", u2).unwrap());
+        // A version not reachable from the shown path is refused.
+        assert!(s.switch_branch("c", a1b + 100).is_err());
+        // New turns continue the shown branch.
+        s.append("c", &m("user", "q3"), 8).unwrap();
+        assert_eq!(texts(&s), ["q1", "a1", "q2", "a2", "q3"]);
+        assert_eq!(s.messages("c").unwrap()[0].id, u1);
+        // Previews and counts follow the shown branch.
+        assert_eq!(s.previews().unwrap()["c"].1, "q3");
+        assert_eq!(s.sessions().unwrap()[0].messages, 5);
+    }
+
+    #[test]
+    fn a_fork_waits_for_a_reply_and_can_be_taken_back() {
+        let s = Store::open_memory().unwrap();
+        s.create_session("c", "Chat", "global", "", 1).unwrap();
+        let m = |role: &str, text: &str, meta: Option<Value>| NewMessage {
+            role: role.into(),
+            content: text.into(),
+            meta,
+            ..Default::default()
+        };
+        let texts = |s: &Store| -> Vec<String> {
+            s.messages("c")
+                .unwrap()
+                .into_iter()
+                .map(|x| x.content)
+                .collect()
+        };
+        s.append("c", &m("user", "q1", None), 1).unwrap();
+        let a1 = s.append("c", &m("assistant", "a1", None), 2).unwrap();
+        s.append("c", &m("tool", "t1", None), 3).unwrap();
+        // Regenerate, then Stop before the first word: nothing was appended, the fork is
+        // taken back and the old answer is shown again.
+        s.fork_at("c", a1).unwrap();
+        assert_eq!(texts(&s), ["q1"]);
+        assert!(s.unfork("c").unwrap());
+        assert!(!s.unfork("c").unwrap());
+        assert_eq!(texts(&s), ["q1", "a1", "t1"]);
+        // The next message is a plain new turn, not a version of a1.
+        s.append("c", &m("user", "q2", None), 4).unwrap();
+        assert!(s.messages("c").unwrap().iter().all(|x| x.branch.is_none()));
+        // A regenerate that compacts first: the summary and tool results leave the fork to
+        // the first reply message.
+        let a2 = s.append("c", &m("assistant", "a2", None), 5).unwrap();
+        s.fork_at("c", a2).unwrap();
+        s.append(
+            "c",
+            &m("assistant", "summary", Some(json!({"compact": true}))),
+            6,
+        )
+        .unwrap();
+        s.append("c", &m("tool", "t2", None), 7).unwrap();
+        let a2b = s.append("c", &m("assistant", "a2b", None), 8).unwrap();
+        let msgs = s.messages("c").unwrap();
+        let shown = msgs.iter().find(|x| x.id == a2b).unwrap();
+        assert_eq!(
+            shown.branch,
+            Some(Branch {
+                index: 1,
+                ids: vec![a2, a2b]
+            })
+        );
+        assert!(msgs
+            .iter()
+            .filter(|x| x.id != a2b)
+            .all(|x| x.branch.is_none()));
+        // The fork was used: nothing to take back.
+        assert!(!s.unfork("c").unwrap());
+        // Regenerating the new version again joins the same group.
+        s.fork_at("c", a2b).unwrap();
+        let a2c = s.append("c", &m("assistant", "a2c", None), 9).unwrap();
+        let ids = s
+            .messages("c")
+            .unwrap()
+            .last()
+            .unwrap()
+            .branch
+            .clone()
+            .unwrap()
+            .ids;
+        assert_eq!(ids, vec![a2, a2b, a2c]);
+    }
+
+    #[test]
+    fn branch_columns_are_added_to_an_old_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(DDL).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sessions (id,title,created_at,updated_at) VALUES ('o','Old',1,1);
+             INSERT INTO messages (session_id,role,content,created_at) VALUES ('o','user','hi',1);",
+        )
+        .unwrap();
+        let s = Store::init(conn).unwrap();
+        assert_eq!(s.messages("o").unwrap().len(), 1);
+        // Running the migration again is harmless.
+        Store::migrate_branches(&s.c()).unwrap();
+    }
 
     #[test]
     fn chats_follow_their_note_and_are_found_by_it() {

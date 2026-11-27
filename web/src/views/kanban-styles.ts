@@ -218,4 +218,29 @@ body.kb-nosel{user-select:none;-webkit-user-select:none;cursor:grabbing}
   .vx-page.kb-mode .kb-lane{max-height:calc(100dvh - 210px)}
 }
 
+
+/* Full board mode (a board's own page, the default): the board takes the whole width of the pane,
+   its first lane and the title lined up with the page gutter, not the reading column. Lanes sit side
+   by side and grow as long as their cards: nothing inside scrolls up and down, the page does. Only
+   the lane row scrolls sideways when the lanes do not all fit. No box around the board: its
+   background runs edge to edge. The bar stays at the top while the page scrolls. */
+.vx-page.kb-mode:has(.kb-full) .vx-paper{max-width:none}
+.vx-page.kb-mode .kb.kb-full{--kb-start:calc(var(--vx-gut) + var(--vx-px))}
+.vx-page .kb.kb-full .kb-lanes{border-radius:0;min-height:max(240px,calc(100dvh - 300px))}
+.vx-page .kb.kb-full .kb-lane{max-height:none}
+.vx-page .kb.kb-full .kb-cards{overflow:visible;-webkit-mask-image:none;mask-image:none}
+.vx-page.kb-mode .kb.kb-full>.kb-bar{position:sticky;top:0;z-index:5;margin:0 0 8px;padding:8px var(--kb-start);background:var(--bg)}
+/* A card or lane brought into view (keys, a reveal) is never left under the bar. */
+.vx-page .kb.kb-full :is(.kb-card,.kb-lane){scroll-margin-top:64px}
+.vx-note-scroll[data-rtone] .kb.kb-full>.kb-bar{background:color-mix(in srgb,var(--bg) 96%,var(--fg))}
+.kb-bar-full{flex:none;width:36px;height:36px;border:1px solid var(--line);border-radius:11px}
+.kb-bar-full svg{width:16px;height:16px}
+.kb-bar-full[aria-pressed=true]{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+.kb-bar-full:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.kb-bar>.kb-bar-full{flex:none}
+@container kb (max-width:560px){.kb-bar-full{width:40px;height:40px}}
+/* Phones: one lane per screen still, snapping sideways; the lanes keep their full length. */
+@container vxnote (max-width:760px){
+  .vx-page.kb-mode .kb.kb-full .kb-lane{max-height:none}
+}
 `;

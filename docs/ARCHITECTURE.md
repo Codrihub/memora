@@ -262,7 +262,9 @@ suggestion) and stored in the `settings` table.
 
 - One `.md` file per note. Frontmatter and inline `#tags` are both supported.
 - Wikilinks use `[[Note Name]]` and resolve by name, so moving or renaming a
-  note does not break links.
+  note does not break links. A bare name prefers the linking note's own folder,
+  then the shallowest path; `[[Folder/Note]]` matches that path. The graph is
+  keyed by path, so same-named notes in different folders stay apart.
 - `.git/` is the vault history. Changes commit automatically.
 - `.events.jsonl` is the append-only event log.
 - `.folders.json` stores folder color, icon, and description.

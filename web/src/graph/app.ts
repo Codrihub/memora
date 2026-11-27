@@ -1,6 +1,7 @@
 // One instance lives for the page session; suspend() drops frames and listeners, positions stay.
 
 import { apiGet } from '../api';
+import { mapFocus, setMapFocus } from '../router';
 import { on } from '../bus';
 import { esc } from '../dom';
 import { agentColor } from '../control/agents';
@@ -120,7 +121,9 @@ export class GraphApp {
       this.refreshSoon(150);
       if (back) {
         this.userMoved = false;
-        window.setTimeout(() => this.fitAll(500), 60);
+        window.setTimeout(() => {
+          if (!this.focusPath(mapFocus())) this.fitAll(500);
+        }, 60);
       }
     }
     this.dirty = true;
@@ -222,7 +225,10 @@ export class GraphApp {
         const warm = Math.min(220, Math.floor(400000 / Math.max(200, this.nodes.length)));
         for (let i = 0; i < warm && this.sim.alpha > 0.12; i++) this.sim.tick();
         this.fitAll(0);
-        window.setTimeout(() => !this.userMoved && this.fitAll(900), 1600);
+        // The note selected on another map: select it here too, again once the layout settles.
+        const want = mapFocus();
+        if (this.focusPath(want)) window.setTimeout(() => this.selected?.path === want && this.focusPath(want), 1600);
+        else window.setTimeout(() => !this.userMoved && this.fitAll(900), 1600);
       } else if (added.length || removed.length) {
         this.sim.reheat(0.35);
       }
@@ -911,8 +917,22 @@ export class GraphApp {
     else if ((e.key === 'p' || e.key === 'P') && this.selected) this.togglePin(this.selected);
   }
 
+  /** Select the note the maps share (Brain, Canvas, Show in brain); false when it is not
+   *  shown here. `null` clears the selection. */
+  focusPath(path: string | null): boolean {
+    if (!path) {
+      if (this.selected?.kind === 'note') this.closeCard();
+      return false;
+    }
+    const n = this.nodeAt(path);
+    if (!n || n.kind !== 'note' || !this.nbr.has(n)) return false;
+    this.select(n, true);
+    return true;
+  }
+
   select(n: GNode, center: boolean): void {
     this.selected = n;
+    setMapFocus(n.kind === 'note' ? n.path : null);
     this.chrome.close();
     this.paintCard(n);
     if (center) {
@@ -929,6 +949,7 @@ export class GraphApp {
     this.card.close();
     if (!this.selected) return;
     this.selected = null;
+    setMapFocus(null);
     this.updateFocus();
   }
 
@@ -1013,6 +1034,7 @@ export class GraphApp {
       closed: () => {
         if (!this.selected) return;
         this.selected = null;
+        setMapFocus(null);
         this.updateFocus();
       },
     });

@@ -1,6 +1,7 @@
 // Cards and frames are DOM on two world layers; wikilink wires are painted on a canvas between them.
 
 import { apiGet } from '../api';
+import { mapFocus, setMapFocus } from '../router';
 import { on, type AgentActivity } from '../bus';
 import { esc } from '../dom';
 import { noteName, relTs } from '../format';
@@ -463,8 +464,9 @@ export class Board {
     const count = new Map<string, number>();
     const seen = new Set<string>();
     for (const l of g.links || []) {
-      const a = this.cards.get(byName.get(l.source) || '');
-      const b = this.cards.get(byName.get(l.target) || '');
+      // Links name notes by path; older servers sent note names.
+      const a = this.cards.get(this.cards.has(l.source) ? l.source : byName.get(l.source) || '');
+      const b = this.cards.get(this.cards.has(l.target) ? l.target : byName.get(l.target) || '');
       if (!a || !b || a === b) continue;
       const k = a.path + '\n' + b.path;
       if (seen.has(k)) continue;
@@ -1079,6 +1081,23 @@ export class Board {
     }
     for (const p of paths) this.sel.add(p);
     this.paintSelection();
+    // One selected card is the note the maps share (Brain, Graph); none clears it.
+    if (this.sel.size === 1) setMapFocus(Array.from(this.sel)[0]);
+    else if (!this.sel.size && !this.selFrames.size) setMapFocus(null);
+  }
+
+  /** Select and show the note the maps share; false when it has no visible card here. */
+  focusPath(path: string | null): boolean {
+    if (!this.ready) return false;
+    if (!path) {
+      if (this.sel.size === 1) this.select([]);
+      return false;
+    }
+    const c = this.cards.get(path);
+    if (!c || this.hiddenFrames.has(c.folder)) return false;
+    this.select([path]);
+    this.reveal(c, true);
+    return true;
   }
 
   private paintSelection(): void {
@@ -2070,7 +2089,7 @@ export class Board {
       packFrames(Array.from(this.frames.values()), b ? b.x : 0, b ? b.y : 0);
     });
     await new Promise((r) => setTimeout(r, 420));
-    this.fitTo(this.allBounds());
+    if (!this.focusPath(mapFocus())) this.fitTo(this.allBounds());
   }
 
   private tidy(frames: Frame[] | null, packAll: boolean): void {
